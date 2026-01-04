@@ -1,0 +1,46 @@
+{
+  "project_info": {
+    "project_number": "624521405165",
+    "project_id": "saloonf-ba359",
+    "storage_bucket": "saloonf-ba359.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:624521405165:android:1677551f7c46cfcd8262e4",
+        "android_client_info": {
+          "package_name": "com.example.flutter_application_1"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "624521405165-hqkuschmogjibcpivdudcqnr7vlfi31d.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBY5U3XRktxs1WAZmvXZsoOg02ghUUFfKI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "624521405165-hqkuschmogjibcpivdudcqnr7vlfi31d.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "624521405165-jh9c2a5bja9h8imm04j10pih75b2ps7h.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.flutterApplication1"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
