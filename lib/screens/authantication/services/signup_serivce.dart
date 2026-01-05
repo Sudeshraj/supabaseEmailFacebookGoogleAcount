@@ -13,40 +13,49 @@ class SaveUser {
   // REGISTER NEW USER WITH ROLE (FULL FLOW)
 
   Future<void> registerUser(
-    BuildContext context, {   
+    BuildContext context, {
     required String email,
     required String password,
-    }) async {
+  }) async {
     LoadingOverlay.show(context, message: "Creating your account...");
 
     try {
       final res = await supabase.auth.signUp(
-      email: email,
-      password: password,     
-       // emailRedirectTo: 'https://myapp.com/verify-email' // live
-      emailRedirectTo: kIsWeb
-          ? 'https://myapp.com/verify-email'
-          : 'myapp://verify-email',
-    );
-
-    final user = res.user;
-    if (user == null) {
-      throw Exception("Registration failed.");
-    }
-
-      // 3️⃣ Save locally
-      await SessionManagerto.saveEmailAndPassword(
         email: email,
         password: password,
+        // emailRedirectTo: 'https://myapp.com/verify-email' // live
+        emailRedirectTo: kIsWeb
+            ? '${Uri.base.origin}/verify-email'
+            : 'myapp://verify-email',
       );
-      
 
-      LoadingOverlay.hide();
+      final user = res.user;
+      if (user != null && user.identities != null && user.identities!.isEmpty) {
+        // 🔴 Already existing user
 
-      if (!context.mounted) return;
+        if (!context.mounted) return;
 
-      // 4️⃣ Navigate (GoRouter-safe)
-      context.go('/verify-email');
+        await showCustomAlert(
+          context,
+          title: "Account already exists",
+          message: 'Account already exists. Please log in.',
+          isError: true,
+        );
+      } else {
+        // 🟢 New user
+        // 3️⃣ Save locally
+        await SessionManagerto.saveEmailAndPassword(
+          email: email,
+          password: password,
+        );
+
+        LoadingOverlay.hide();
+
+        if (!context.mounted) return;
+
+        // 4️⃣ Navigate (GoRouter-safe)
+        context.go('/verify-email');
+      }
     }
     // 🔁 Existing account → login flow
     on AuthException catch (e) {
@@ -73,7 +82,4 @@ class SaveUser {
       );
     }
   }
-
-
-
 }

@@ -12,7 +12,7 @@ class SplashScreen extends StatefulWidget {
 }
 
 class _SplashScreenState extends State<SplashScreen> {
-  final _supabase = Supabase.instance.client;
+  final supabase = Supabase.instance.client;
 
   @override
   void initState() {
@@ -28,34 +28,31 @@ class _SplashScreenState extends State<SplashScreen> {
     await Future.delayed(const Duration(milliseconds: 300));
     if (!mounted) return;
 
-    // 1️⃣ Check LOCAL profiles first (KEY REQUIREMENT)
-    final hasLocalProfile = await SessionManager.hasProfile();
-    if (!mounted) return;
-
-    if (hasLocalProfile) {
-      context.go('/continue');
-      return;
-    }
-
     // 2️⃣ Wait for deep-link session restore
     await SessionManager.waitForSession();
     if (!mounted) return;
 
-    final session = _supabase.auth.currentSession;
-    final user = _supabase.auth.currentUser;
-
-    print(session);
-    print(user);
+    final session = supabase.auth.currentSession;
+    final user = supabase.auth.currentUser;
 
     // 3️⃣ No session → login
     if (session == null || user == null) {
-      context.go('/login');
-      return;
+      // 1️⃣ Check LOCAL profiles first (KEY REQUIREMENT)
+      final hasLocalProfile = await SessionManager.hasProfile();
+      if (!mounted) return;
+
+      if (hasLocalProfile) {
+        context.go('/continue');
+        return;
+      } else {
+        context.go('/login');
+        return;
+      }
     }
 
     // 4️⃣ Refresh session safely
     try {
-      await _supabase.auth.refreshSession();
+      await supabase.auth.refreshSession();
     } catch (_) {
       if (!mounted) return;
       context.go('/login');
@@ -70,35 +67,49 @@ class _SplashScreenState extends State<SplashScreen> {
       return;
     }
 
-    // 6️⃣ Resolve role
-    String? role = await SessionManager.getUserRole();
-    if (!mounted) return;
+    final userId = user.id;
+    final profile = await supabase
+        .from('profiles')
+        .select()
+        .eq('id', userId)
+        .maybeSingle();
 
-    if (role == null) {
-      final res = await _supabase
-          .from('profiles')
-          .select('role, roles')
-          .eq('id', user.id)
-          .maybeSingle();
+    if (profile == null) {
+      // ❌ profile එක නැහැ
+      if (!mounted) return;
+      context.push('/reg');
+    } else {
+      // ✅ profile එක තියෙනවා
+      // 6️⃣ Resolve role
+      String? role = await SessionManager.getUserRole();
+      if (!mounted) return;
+
+      if (role == null) {
+        final res = await supabase
+            .from('profiles')
+            .select('role, roles')
+            .eq('id', user.id)
+            .maybeSingle();
+
+        if (!mounted) return;
+
+        role = AuthGate.pickRole(res?['role'] ?? res?['roles']);
+        await SessionManager.saveUserRole(role);
+      }
 
       if (!mounted) return;
 
-      role = AuthGate.pickRole(res?['role'] ?? res?['roles']);
-      await SessionManager.saveUserRole(role);
-    }
-
-    if (!mounted) return;
-
-    // 7️⃣ Final navigation
-    switch (role) {
-      case 'business':
-        context.go('/owner');
-        break;
-      case 'employee':
-        context.go('/employee');
-        break;
-      default:
-        context.go('/customer');
+      // 7️⃣ Final navigation
+      switch (role) {
+        case 'business':
+          context.go('/owner');
+          break;
+        case 'employee':
+          context.go('/employee');
+          break;
+        default:
+          context.go('/customer');
+      }
     }
   }
 
@@ -120,10 +131,7 @@ class _SplashScreenState extends State<SplashScreen> {
 
             SizedBox(height: 16),
 
-            Text(
-              'LOADING',
-              style: TextStyle(fontSize: 14, color: Colors.grey),
-            ),
+            Text('LOADING', style: TextStyle(fontSize: 14, color: Colors.grey)),
           ],
         ),
       ),

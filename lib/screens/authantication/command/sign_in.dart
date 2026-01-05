@@ -115,130 +115,189 @@ class _SignInScreenState extends State<SignInScreen>
 
       final user = response.user;
       if (user == null) throw Exception("Login failed. Please try again.");
+      final safeEmail = user.email ?? '';
+      final userId = user.id;
+      final profile = await supabase
+          .from('profiles')
+          .select()
+          .eq('id', userId)
+          .maybeSingle();
 
       // 🔹 Check Email Verification
       if (user.emailConfirmedAt == null) {
         if (!mounted) return;
-        final safeEmail = user.email ?? '';
-        final userId = user.id;
 
         // Fetch profile from Supabase
-        final profile = await supabase
-            .from('profiles')
-            .select()
-            .eq('id', userId)
-            .maybeSingle();
 
-        final displayName = profile?['name'] ?? "Unknown User";
-        final photoUrl = profile?['photo'] ?? "";
-        final roles = (profile?['roles'] as List?)?.cast<String>() ?? [];
+        if (profile == null) {
+          // ❌ profile එක නැහැ
+          final displayName = profile?['name'] ?? "Unknown User";
+          final photoUrl = "";
 
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (_) => NotYouScreen(
-              email: safeEmail,
-              name: displayName,
-              photoUrl: photoUrl,
-              roles: roles,
-              buttonText: "Not You?",
-              page: 'splash',
-              // ================== NOT YOU ==================
-              onNotYou: () async {
-                final nav = navigatorKey.currentState;
-                if (nav == null) return;
-                final dialogCtx = nav.overlay!.context;
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (_) => NotYouScreen(
+                email: safeEmail,
+                name: displayName,
+                photoUrl: photoUrl,
+                roles: [],
+                buttonText: "Not You?",
+                page: 'splash',
+                // ================== NOT YOU ==================
+                onNotYou: () async {
+                  final nav = navigatorKey.currentState;
+                  if (nav == null) return;
+                  final dialogCtx = nav.overlay!.context;
 
-                await showCustomAlert(
-                  dialogCtx,
-                  title: "Delete Account?",
-                  message: "Are you sure you want to delete this profile?",
-                  isError: true,
-                  buttonText: "Delete",
-                  onOk: () async {
-                    try {
-                      await supabase.auth.admin.deleteUser(userId);
-                      nav.pushReplacement(
-                        MaterialPageRoute(
-                          builder: (_) => const RegistrationFlow(),
-                        ),
-                      );
-                    } catch (e) {
-                      messengerKey.currentState?.showSnackBar(
-                        const SnackBar(
-                          content: Text("Delete failed. Try again."),
-                        ),
-                      );
-                    }
-                  },
-                  onClose: () {
-                    supabase.auth.signOut();
-                  },
-                );
-              },
-              // ================== CONTINUE ==================
-              onContinue: () async {
-                final nav = navigatorKey.currentState;
-                if (nav == null) return;
-                nav.pushReplacement(
-                  MaterialPageRoute(builder: (_) => EmailVerifyChecker()),
-                );
-              },
+                  await showCustomAlert(
+                    dialogCtx,
+                    title: "Delete Account?",
+                    message: "Are you sure you want to delete this profile?",
+                    isError: true,
+                    buttonText: "Delete",
+                    onOk: () async {
+                      try {
+                        await supabase.auth.admin.deleteUser(userId);
+                        nav.pushReplacement(
+                          MaterialPageRoute(
+                            builder: (_) => const RegistrationFlow(),
+                          ),
+                        );
+                      } catch (e) {
+                        messengerKey.currentState?.showSnackBar(
+                          const SnackBar(
+                            content: Text("Delete failed. Try again."),
+                          ),
+                        );
+                      }
+                    },
+                    onClose: () {
+                      supabase.auth.signOut();
+                    },
+                  );
+                },
+                // ================== CONTINUE ==================
+                onContinue: () async {
+                  context.go('/verify-email');
+                },
+              ),
             ),
-          ),
-        );
+          );
+        } else {
+          // ✅ profile එක තියෙනවා
+          final displayName = profile['name'] ?? "Unknown User";
+          final photoUrl = profile['photo'] ?? "";
+          final roles = (profile['roles'] as List?)?.cast<String>() ?? [];
+
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (_) => NotYouScreen(
+                email: safeEmail,
+                name: displayName,
+                photoUrl: photoUrl,
+                roles: roles,
+                buttonText: "Not You?",
+                page: 'splash',
+                // ================== NOT YOU ==================
+                onNotYou: () async {
+                  final nav = navigatorKey.currentState;
+                  if (nav == null) return;
+                  final dialogCtx = nav.overlay!.context;
+
+                  await showCustomAlert(
+                    dialogCtx,
+                    title: "Delete Account?",
+                    message: "Are you sure you want to delete this profile?",
+                    isError: true,
+                    buttonText: "Delete",
+                    onOk: () async {
+                      try {
+                        await supabase.auth.admin.deleteUser(userId);
+                        nav.pushReplacement(
+                          MaterialPageRoute(
+                            builder: (_) => const RegistrationFlow(),
+                          ),
+                        );
+                      } catch (e) {
+                        messengerKey.currentState?.showSnackBar(
+                          const SnackBar(
+                            content: Text("Delete failed. Try again."),
+                          ),
+                        );
+                      }
+                    },
+                    onClose: () {
+                      supabase.auth.signOut();
+                    },
+                  );
+                },
+                // ================== CONTINUE ==================
+                onContinue: () async {
+                  final nav = navigatorKey.currentState;
+                  if (nav == null) return;
+                  nav.pushReplacement(
+                    MaterialPageRoute(builder: (_) => EmailVerifyChecker()),
+                  );
+                },
+              ),
+            ),
+          );
+        }
+
         setState(() => _loading = false);
         return;
       }
 
+      print(profile);
       // 🔹 Fetch verified profile
-      final profile = await supabase
-          .from('profiles')
-          .select()
-          .eq('id', user.id)
-          .maybeSingle();
-
-      String savedName =
-          profile?['name'] ?? user.userMetadata?['full_name'] ?? user.email!;
-      String savedPhoto = profile?['photo'] ?? "";
-      List<String> savedRoles =
-          (profile?['roles'] as List?)?.cast<String>() ?? [];
-
-      if (savedRoles.isEmpty) savedRoles = ["customer"];
-
-      // 🔹 Save locally (secure)
-      await SessionManager.saveProfile(
-        email: user.email!,
-        name: savedName,
-        password: _passwordController.text.trim(),
-        roles: savedRoles,
-        photo: savedPhoto,
-      );
-
-      // 🔹 Redirect to proper dashboard
-      final redirectRole = savedRoles.first;
-      if (!mounted) return;
-
-      if (redirectRole == "customer") {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const CustomerHome()),
-        );
-      } else if (redirectRole == "business") {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const OwnerDashboard()),
-        );
-      } else if (redirectRole == "employee") {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const EmployeeDashboard()),
-        );
+      if (profile == null) {
+        if (!mounted) return;
+        context.push('/reg');
       } else {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const CustomerHome()),
+        String savedName =
+            profile['name'] ?? user.userMetadata?['full_name'] ?? user.email!;
+        String savedPhoto = profile['photo'] ?? "";
+        List<String> savedRoles =
+            (profile['roles'] as List?)?.cast<String>() ?? [];
+
+        if (savedRoles.isEmpty) savedRoles = ["customer"];
+
+        // 🔹 Save locally (secure)
+        await SessionManager.saveProfile(
+          email: user.email!,
+          name: savedName,
+          password: _passwordController.text.trim(),
+          roles: savedRoles,
+          photo: savedPhoto,
         );
+
+        // 🔹 Redirect to proper dashboard
+        final redirectRole = savedRoles.first;
+        if (!mounted) return;
+
+        if (redirectRole == "customer") {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => const CustomerHome()),
+          );
+        } else if (redirectRole == "business") {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => const OwnerDashboard()),
+          );
+        } else if (redirectRole == "employee") {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => const EmployeeDashboard()),
+          );
+        } else {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => const CustomerHome()),
+          );
+        }
       }
     } on AuthException catch (e) {
       if (!mounted) return;

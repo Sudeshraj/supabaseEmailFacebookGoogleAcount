@@ -35,28 +35,8 @@ class _EmailVerifyCheckerState extends State<EmailVerifyChecker>
     super.initState();
     _setupAnimation();  
     _restoreCooldown(); 
-    _listenAuthChanges(); // ✅ GoRouter-safe auth listener
-  }
-
-  // ------------------------------------------------------------
-  // AUTH LISTENER (DEEPLINK / WEB / MOBILE SAFE)
-  // ------------------------------------------------------------
-void _listenAuthChanges() {
-  _authSub = supabase.auth.onAuthStateChange.listen((data) {
-    final session = data.session;
-    final user = session?.user;
-
-    if (session != null &&
-        user != null &&
-        user.emailConfirmedAt != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        context.go('/splash');
-      });
-    }
-  });
-}
-
+   
+  } 
 
   // ------------------------------------------------------------
   // ANIMATION
@@ -79,6 +59,7 @@ void _listenAuthChanges() {
 
     _controller.forward();
   }
+  
 
 
   // ------------------------------------------------------------
@@ -108,6 +89,7 @@ void _listenAuthChanges() {
     if (user?.email != null) return user!.email;
 
     final local = await SessionManager.getLastUser();
+    print(local?['email']);
     if (local != null && local['email'] != null) {
       return local['email'];
     }
