@@ -33,10 +33,9 @@ class _EmailVerifyCheckerState extends State<EmailVerifyChecker>
   @override
   void initState() {
     super.initState();
-    _setupAnimation();  
-    _restoreCooldown(); 
-   
-  } 
+    _setupAnimation();
+    _restoreCooldown();
+  }
 
   // ------------------------------------------------------------
   // ANIMATION
@@ -44,23 +43,18 @@ class _EmailVerifyCheckerState extends State<EmailVerifyChecker>
   void _setupAnimation() {
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 600),
+      duration: const Duration(milliseconds: 700),
     );
 
-    _scaleAnim = CurvedAnimation(
-      parent: _controller,
-      curve: Curves.elasticOut,
-    );
+    _fadeAnim = CurvedAnimation(parent: _controller, curve: Curves.easeIn);
 
-    _fadeAnim = CurvedAnimation(
-      parent: _controller,
-      curve: Curves.easeIn,
-    );
+    _scaleAnim = Tween<double>(
+      begin: 0.9,
+      end: 1.0,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutBack));
 
     _controller.forward();
   }
-  
-
 
   // ------------------------------------------------------------
   // RESTORE COOLDOWN
@@ -89,7 +83,6 @@ class _EmailVerifyCheckerState extends State<EmailVerifyChecker>
     if (user?.email != null) return user!.email;
 
     final local = await SessionManager.getLastUser();
-    print(local?['email']);
     if (local != null && local['email'] != null) {
       return local['email'];
     }
@@ -130,10 +123,9 @@ class _EmailVerifyCheckerState extends State<EmailVerifyChecker>
 
     final email = await _resolveEmail();
     if (email == null) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Session expired. Please login again."),
-        ),
+        const SnackBar(content: Text("Session expired. Please login again.")),
       );
       return;
     }
@@ -142,24 +134,24 @@ class _EmailVerifyCheckerState extends State<EmailVerifyChecker>
     final now = DateTime.now().millisecondsSinceEpoch;
 
     try {
-      await supabase.auth.resend(
-        type: OtpType.signup,
-        email: email,
-      );
+      await supabase.auth.resend(type: OtpType.signup, email: email);
 
       await prefs.setInt('lastVerificationSent', now);
       startCooldown(30);
     } catch (e) {
       await prefs.setInt('lastVerificationSent', now);
       startCooldown(30);
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("waiting... for resend verification.")),
+        const SnackBar(
+          content: Text("Please wait before resending verification."),
+        ),
       );
     }
   }
 
   // ------------------------------------------------------------
-  // LOGOUT (GoRouter)
+  // LOGOUT
   // ------------------------------------------------------------
   Future<void> logout() async {
     await supabase.auth.signOut();
@@ -167,115 +159,131 @@ class _EmailVerifyCheckerState extends State<EmailVerifyChecker>
     context.go('/splash');
   }
 
-  double _cardWidth(BuildContext ctx) {
-    final w = MediaQuery.of(ctx).size.width;
-    if (w > 900) return 720;
-    if (w > 600) return 520;
-    return w - 40;
-  }
-
   // ------------------------------------------------------------
   // UI
   // ------------------------------------------------------------
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final bg = const Color(0xFF0F1820);
+    final size = MediaQuery.of(context).size;
+    final bool isWeb = size.width > 700;
+    final double maxWidth = isWeb ? 480 : double.infinity;
 
     return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFFEEF3FF), Color(0xFFDDE7FF)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-        ),
-        child: SafeArea(
-          child: Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(20),
-              child: ScaleTransition(
-                scale: _scaleAnim,
-                child: FadeTransition(
-                  opacity: _fadeAnim,
-                  child: Container(
-                    width: _cardWidth(context),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 24, vertical: 32),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(28),
-                      boxShadow: const [
-                        BoxShadow(
-                          color: Color(0x22000000),
-                          blurRadius: 30,
-                          offset: Offset(0, 14),
+      backgroundColor: bg,
+      body: SafeArea(
+        child: Center(
+          child: FadeTransition(
+            opacity: _fadeAnim,
+            child: ScaleTransition(
+              scale: _scaleAnim,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: maxWidth),
+                child: Container(
+                  height: size.height - 40,
+                  margin: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 20,
+                  ),
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.03),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Colors.white12),
+                  ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      // 🔙 Back Button (SignIn style)
+                      Align(
+                        alignment: Alignment.topLeft,
+                        child: IconButton(
+                          icon: const Icon(
+                            Icons.arrow_back_ios_new_rounded,
+                            color: Colors.white,
+                            size: 22,
+                          ),
+                          onPressed: () {
+                            context.go('/signin');
+                          },
                         ),
-                      ],
-                    ),
-                    child: Column(
-                      children: [
-                        const Icon(Icons.mark_email_read_rounded,
-                            size: 80, color: Colors.deepPurple),
-                        const SizedBox(height: 24),
-                        Text(
-                          "Verify your email",
-                          style: theme.textTheme.headlineSmall
-                              ?.copyWith(fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 12),
-                        const Text(
-                          "We’ve sent a verification link to your email.\n"
-                          "Open it to continue.",
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 26),
-                        Row(
+                      ),
+
+                      Expanded(
+                        child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
-                          children: const [
-                            SizedBox(
-                              width: 18,
-                              height: 18,
-                              child:
-                                  CircularProgressIndicator(strokeWidth: 2),
+                          children: [
+                            const Icon(
+                              Icons.mark_email_read_rounded,
+                              size: 70,
+                              color: Color(0xFF1877F3),
                             ),
-                            SizedBox(width: 12),
-                            Text("Waiting for verification…"),
+                            const SizedBox(height: 24),
+                            const Text(
+                              "Verify your email",
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            const Text(
+                              "We’ve sent a verification link to your email.\nOpen it to continue.",
+                              textAlign: TextAlign.center,
+                              style: TextStyle(color: Colors.white70),
+                            ),
+                            const SizedBox(height: 24),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: const [
+                                SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                                SizedBox(width: 12),
+                                Text(
+                                  "Waiting for verification…",
+                                  style: TextStyle(color: Colors.white70),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 30),
+
+                            _primaryButton(
+                              text: canResend
+                                  ? "Resend Verification Email"
+                                  : "Wait $remainingSeconds s",
+                              icon: Icons.refresh,
+                              enabled: canResend,
+                              onPressed: canResend ? resendVerification : null,
+                            ),
+                            const SizedBox(height: 12),
+
+                            _outlineButton(
+                              text: "Open Email App",
+                              icon: Icons.open_in_new,
+                              onPressed: () => openEmailApp(
+                                context,
+                                supabase.auth.currentUser?.email,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+
+                            _outlineButton(
+                              text: "Verify Later",
+                              icon: Icons.logout,
+                              color: Colors.redAccent,
+                              onPressed: logout,
+                            ),
                           ],
                         ),
-                        const SizedBox(height: 30),
-
-                        PrimaryOutlineButton(
-                          text: canResend
-                              ? "Resend Verification Email"
-                              : "Wait $remainingSeconds s",
-                          onPressed:
-                              canResend ? resendVerification : null,
-                          color: const Color(0xFF1E88E5),
-                          icon: Icons.refresh,
-                          disabled: !canResend,
-                        ),
-                        const SizedBox(height: 14),
-
-                        PrimaryOutlineButton(
-                          text: "Open Email App",
-                          onPressed: () => openEmailApp(
-                            context,
-                            supabase.auth.currentUser?.email,
-                          ),
-                          color: const Color(0xFF6A1B9A),
-                          icon: Icons.open_in_new,
-                        ),
-                        const SizedBox(height: 14),
-
-                        PrimaryOutlineButton(
-                          text: "Verify Later",
-                          onPressed: logout,
-                          color: Colors.redAccent,
-                          icon: Icons.logout,
-                        ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -286,60 +294,69 @@ class _EmailVerifyCheckerState extends State<EmailVerifyChecker>
     );
   }
 
-  @override
-  void dispose() {
-    resendTimer?.cancel();
-    _authSub?.cancel(); // ✅ important
-    _controller.dispose();
-    super.dispose();
-  }
-}
-
-// ------------------------------------------------------------
-// REUSABLE BUTTON
-// ------------------------------------------------------------
-class PrimaryOutlineButton extends StatelessWidget {
-  final String text;
-  final VoidCallback? onPressed;
-  final Color color;
-  final IconData icon;
-  final bool disabled;
-
-  const PrimaryOutlineButton({
-    super.key,
-    required this.text,
-    required this.onPressed,
-    required this.color,
-    required this.icon,
-    this.disabled = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
+  // ------------------------------------------------------------
+  // BUTTONS
+  // ------------------------------------------------------------
+  Widget _primaryButton({
+    required String text,
+    required IconData icon,
+    required VoidCallback? onPressed,
+    bool enabled = true,
+  }) {
     return SizedBox(
       width: double.infinity,
-      child: Opacity(
-        opacity: disabled ? 0.55 : 1,
-        child: OutlinedButton.icon(
-          icon: Icon(icon, color: color),
-          label: Text(
-            text,
-            style: TextStyle(
-              color: color,
-              fontWeight: FontWeight.w600,
-            ),
+      child: ElevatedButton.icon(
+        icon: Icon(icon),
+        onPressed: enabled ? onPressed : null,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: const Color(0xFF1877F3),
+          disabledBackgroundColor: Colors.white12,
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
           ),
-          onPressed: onPressed,
-          style: OutlinedButton.styleFrom(
-            backgroundColor: color.withValues(alpha: 0.12),
-            side: BorderSide(color: color),
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(26),
-            ),
-          ),
+        ),
+        label: Text(
+          text,
+          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
         ),
       ),
     );
+  }
+
+  Widget _outlineButton({
+    required String text,
+    required IconData icon,
+    required VoidCallback onPressed,
+    Color color = const Color(0xFF1877F3),
+  }) {
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        icon: Icon(icon, color: color),
+        onPressed: onPressed,
+        style: OutlinedButton.styleFrom(
+          side: BorderSide(color: color),
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+          ),
+          backgroundColor: color.withValues(alpha: 0.1),
+        ),
+        label: Text(
+          text,
+          style: TextStyle(color: color, fontWeight: FontWeight.bold),
+        ),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    resendTimer?.cancel();
+    _authSub?.cancel();
+    _controller.dispose();
+    super.dispose();
   }
 }
