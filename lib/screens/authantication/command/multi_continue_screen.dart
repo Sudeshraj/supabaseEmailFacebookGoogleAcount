@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/main.dart';
+import 'package:flutter_application_1/screens/authantication/services/singup_session.dart';
 import 'package:flutter_application_1/screens/commands/alertBox/notyou.dart';
 import 'package:flutter_application_1/screens/commands/alertBox/show_custom_alert.dart';
 import '../services/session_manager.dart';
@@ -37,48 +38,108 @@ class _ContinueScreenState extends State<ContinueScreen> {
     setState(() => _loading = true);
 
     User? user = supabase.auth.currentUser;
+    final userId = user?.id;
 
     // Step 1: if not logged in yet, sign in
     if (user == null) {
-      final savedPass = await SessionManager.getPassword(
-        profile['email'],
-        profile['role'],
-      );
+      final savedPass = await SessionManagerto.getPassword(profile['email']);
       if (savedPass != null) {
         try {
           final res = await supabase.auth.signInWithPassword(
             email: profile['email'],
             password: savedPass,
           );
-          user = res.user;
+
+          final userId = res.user?.id;
+
+          final profileOne = await supabase
+              .from('profiles')
+              .select()
+              .eq('id', userId!)
+              .maybeSingle();
+
+          if (profileOne == null) {
+            if (!mounted) return;
+            context.go('/reg');
+            return;
+          } else {
+            // Step 2: check email verification
+            final emailVerified = user?.emailConfirmedAt != null;
+            if (!emailVerified) {
+              setState(() => _loading = false);
+              await _showVerificationDialog(profile);
+              return;
+            }
+
+            // Step 3: verified → redirect based on role
+            final role = profileOne['role'];
+            await SessionManager.saveUserRole(role);
+
+            if (!mounted)return; //mounted true unoth false venava return venne naha,idiriyta code eka run ve. false unoth true vela return karanava evita code eka stop venava
+            switch (role) {
+              case "customer":
+                context.go('/customer');
+                break;
+              case "business":
+                context.go('/owner');
+                break;
+              case "employee":
+                context.go('/employee');
+                break;
+              default:
+                context.go('/customer');
+            }
+          }
         } on AuthException catch (e) {
-          final msg = e.message.toLowerCase();
+          switch (e.code) {
+            case 'invalid_login_credentials':
+              if (!mounted) return;
+              await showCustomAlert(
+                context,
+                title: "Login Failed",
+                message: "Your email or password is incorrect.",
+                isError: true,
+              );
+              break;
 
-          // EMAIL NOT VERIFIED
-          if (msg.contains("email not confirmed")) {
-            setState(() => _loading = false);
-            await _showVerificationDialog(profile);
-            return;
-          }
-          if (!mounted) return;
-          // INVALID LOGIN
-          if (msg.contains("invalid login credentials")) {
-            await showCustomAlert(
-              context,
-              title: "Login Failed",
-              message: "Your email or password is incorrect.",
-              isError: true,
-            );
-            setState(() => _loading = false);
-            return;
+            case 'email_not_confirmed':
+              if (!mounted) return;
+              await _showVerificationDialog(profile);
+              // context.go('/verify-email');
+              break;
+
+            case 'too_many_requests':
+              if (!mounted) return;
+
+              await showCustomAlert(
+                context,
+                title: "Too Many Attempts ⏳",
+                message:
+                    "You’ve tried too many times. Please wait a few minutes before trying again.",
+                isError: true,
+              );
+              break;
+
+            case 'user_banned':
+              if (!mounted) return;
+              await showCustomAlert(
+                context,
+                title: "Login Error ❌",
+                message: e.message,
+                isError: true,
+              );
+              break;
+
+            default:
+              if (!mounted) return;
+              await showCustomAlert(
+                context,
+                title: "Login Error ❌",
+                message: e.message,
+                isError: true,
+              );
           }
 
-          await showCustomAlert(
-            context,
-            title: "Auth Error",
-            message: e.message,
-            isError: true,
-          );
           setState(() => _loading = false);
           return;
         } catch (e) {
@@ -100,31 +161,43 @@ class _ContinueScreenState extends State<ContinueScreen> {
       return;
     }
 
-    // Step 2: check email verification
-    final emailVerified = user.emailConfirmedAt != null;
-    if (!emailVerified) {
-      setState(() => _loading = false);
-      await _showVerificationDialog(profile);
+    final profileOne = await supabase
+        .from('profiles')
+        .select()
+        .eq('id', userId!)
+        .maybeSingle();
+
+    if (profileOne == null) {
+      if (!mounted) return;
+      context.go('/reg');
       return;
-    }
+    } else {
+      // Step 2: check email verification
+      final emailVerified = user.emailConfirmedAt != null;
+      if (!emailVerified) {
+        setState(() => _loading = false);
+        await _showVerificationDialog(profile);
+        return;
+      }
 
-    // Step 3: verified → redirect based on role
-    final role = profile['role'];
-    await SessionManager.saveUserRole(role);
+      // Step 3: verified → redirect based on role
+      final role = profileOne['role'];
+      await SessionManager.saveUserRole(role);
 
-    if (!mounted) return; //mounted true unoth false venava return venne naha,idiriyta code eka run ve. false unoth true vela return karanava evita code eka stop venava
-    switch (role) {
-      case "customer":
-        context.go('/customer');
-        break;
-      case "business":
-        context.go('/owner');
-        break;
-      case "employee":
-        context.go('/employee');
-        break;
-      default:
-        context.go('/customer');
+      if (!mounted)return; //mounted true unoth false venava return venne naha,idiriyta code eka run ve. false unoth true vela return karanava evita code eka stop venava
+      switch (role) {
+        case "customer":
+          context.go('/customer');
+          break;
+        case "business":
+          context.go('/owner');
+          break;
+        case "employee":
+          context.go('/employee');
+          break;
+        default:
+          context.go('/customer');
+      }
     }
 
     setState(() => _loading = false);

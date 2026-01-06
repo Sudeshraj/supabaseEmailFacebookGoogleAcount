@@ -67,6 +67,8 @@ class _SplashScreenState extends State<SplashScreen> {
       return;
     }
 
+    //email verifyed
+
     final userId = user.id;
     final profile = await supabase
         .from('profiles')

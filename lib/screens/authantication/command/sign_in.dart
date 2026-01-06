@@ -1,15 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_application_1/main.dart';
-import 'package:flutter_application_1/screens/authantication/command/email_verify_checker.dart';
-import 'package:flutter_application_1/screens/authantication/command/multi_continue_screen.dart';
-import 'package:flutter_application_1/screens/authantication/command/not_you.dart';
-import 'package:flutter_application_1/screens/authantication/command/registration_flow.dart';
 import 'package:flutter_application_1/screens/authantication/services/session_manager.dart';
+import 'package:flutter_application_1/screens/authantication/services/singup_session.dart';
 import 'package:flutter_application_1/screens/commands/alertBox/reset_password.dart';
 import 'package:flutter_application_1/screens/commands/alertBox/show_custom_alert.dart';
-import 'package:flutter_application_1/screens/home/customer_home.dart';
-import 'package:flutter_application_1/screens/home/employee_dashboard.dart';
-import 'package:flutter_application_1/screens/home/owner_dashboard.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -27,6 +20,7 @@ class _SignInScreenState extends State<SignInScreen>
 
   bool _obscurePassword = true;
   bool _loading = false;
+  bool _coolDown = false;
 
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
@@ -108,206 +102,154 @@ class _SignInScreenState extends State<SignInScreen>
     try {
       setState(() => _loading = true);
 
+      // 1️⃣ Sign in
       final response = await supabase.auth.signInWithPassword(
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
       );
 
       final user = response.user;
-      if (user == null) throw Exception("Login failed. Please try again.");
-      final safeEmail = user.email ?? '';
+      if (user == null) {
+        throw Exception("Login failed. Please try again.");
+      }
+
       final userId = user.id;
+      final safeEmail = user.email ?? '';
+
+      // 2️⃣ Fetch profile
       final profile = await supabase
           .from('profiles')
           .select()
           .eq('id', userId)
           .maybeSingle();
 
-      // 🔹 Check Email Verification
-      if (user.emailConfirmedAt == null) {
+      // 3️⃣ Profile NOT exists → Register
+      if (profile == null) {
+        await SessionManagerto.saveEmailAndPassword(
+          email: safeEmail,
+          password: _passwordController.text.trim(),
+        );
+
         if (!mounted) return;
-
-        // Fetch profile from Supabase
-
-        if (profile == null) {
-          // ❌ profile එක නැහැ
-          final displayName = profile?['name'] ?? "Unknown User";
-          final photoUrl = "";
-
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(
-              builder: (_) => NotYouScreen(
-                email: safeEmail,
-                name: displayName,
-                photoUrl: photoUrl,
-                roles: [],
-                buttonText: "Not You?",
-                page: 'splash',
-                // ================== NOT YOU ==================
-                onNotYou: () async {
-                  final nav = navigatorKey.currentState;
-                  if (nav == null) return;
-                  final dialogCtx = nav.overlay!.context;
-
-                  await showCustomAlert(
-                    dialogCtx,
-                    title: "Delete Account?",
-                    message: "Are you sure you want to delete this profile?",
-                    isError: true,
-                    buttonText: "Delete",
-                    onOk: () async {
-                      try {
-                        await supabase.auth.admin.deleteUser(userId);
-                        nav.pushReplacement(
-                          MaterialPageRoute(
-                            builder: (_) => const RegistrationFlow(),
-                          ),
-                        );
-                      } catch (e) {
-                        messengerKey.currentState?.showSnackBar(
-                          const SnackBar(
-                            content: Text("Delete failed. Try again."),
-                          ),
-                        );
-                      }
-                    },
-                    onClose: () {
-                      supabase.auth.signOut();
-                    },
-                  );
-                },
-                // ================== CONTINUE ==================
-                onContinue: () async {
-                  context.go('/verify-email');
-                },
-              ),
-            ),
-          );
-        } else {
-          // ✅ profile එක තියෙනවා
-          final displayName = profile['name'] ?? "Unknown User";
-          final photoUrl = profile['photo'] ?? "";
-          final roles = (profile['roles'] as List?)?.cast<String>() ?? [];
-
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(
-              builder: (_) => NotYouScreen(
-                email: safeEmail,
-                name: displayName,
-                photoUrl: photoUrl,
-                roles: roles,
-                buttonText: "Not You?",
-                page: 'splash',
-                // ================== NOT YOU ==================
-                onNotYou: () async {
-                  final nav = navigatorKey.currentState;
-                  if (nav == null) return;
-                  final dialogCtx = nav.overlay!.context;
-
-                  await showCustomAlert(
-                    dialogCtx,
-                    title: "Delete Account?",
-                    message: "Are you sure you want to delete this profile?",
-                    isError: true,
-                    buttonText: "Delete",
-                    onOk: () async {
-                      try {
-                        await supabase.auth.admin.deleteUser(userId);
-                        nav.pushReplacement(
-                          MaterialPageRoute(
-                            builder: (_) => const RegistrationFlow(),
-                          ),
-                        );
-                      } catch (e) {
-                        messengerKey.currentState?.showSnackBar(
-                          const SnackBar(
-                            content: Text("Delete failed. Try again."),
-                          ),
-                        );
-                      }
-                    },
-                    onClose: () {
-                      supabase.auth.signOut();
-                    },
-                  );
-                },
-                // ================== CONTINUE ==================
-                onContinue: () async {
-                  final nav = navigatorKey.currentState;
-                  if (nav == null) return;
-                  nav.pushReplacement(
-                    MaterialPageRoute(builder: (_) => EmailVerifyChecker()),
-                  );
-                },
-              ),
-            ),
-          );
-        }
-
-        setState(() => _loading = false);
+        context.go('/reg');
         return;
       }
 
-      print(profile);
-      // 🔹 Fetch verified profile
-      if (profile == null) {
+      // 4️⃣ Blocked
+      if (profile['is_blocked'] == true) {
+        await supabase.auth.signOut();
         if (!mounted) return;
-        context.push('/reg');
-      } else {
-        String savedName =
-            profile['name'] ?? user.userMetadata?['full_name'] ?? user.email!;
-        String savedPhoto = profile['photo'] ?? "";
-        List<String> savedRoles =
-            (profile['roles'] as List?)?.cast<String>() ?? [];
 
-        if (savedRoles.isEmpty) savedRoles = ["customer"];
-
-        // 🔹 Save locally (secure)
-        await SessionManager.saveProfile(
-          email: user.email!,
-          name: savedName,
-          password: _passwordController.text.trim(),
-          roles: savedRoles,
-          photo: savedPhoto,
+        await showCustomAlert(
+          context,
+          title: "Account Blocked 🚫",
+          message: "Your account has been blocked.",
+          isError: true,
         );
+        return;
+      }
 
-        // 🔹 Redirect to proper dashboard
-        final redirectRole = savedRoles.first;
+      // 5️⃣ Inactive
+      if (profile['is_active'] == false) {
+        await supabase.auth.signOut();
         if (!mounted) return;
 
-        if (redirectRole == "customer") {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (_) => const CustomerHome()),
-          );
-        } else if (redirectRole == "business") {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (_) => const OwnerDashboard()),
-          );
-        } else if (redirectRole == "employee") {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (_) => const EmployeeDashboard()),
-          );
-        } else {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (_) => const CustomerHome()),
-          );
-        }
+        await showCustomAlert(
+          context,
+          title: "Account Inactive ⚠️",
+          message: "Your account is deactivated.",
+          isError: true,
+        );
+        return;
       }
-    } on AuthException catch (e) {
+
+      // 6️⃣ Onboarding not completed
+      // if (profile['onboarding_completed'] != true) {
+      //   if (!mounted) return;
+      //   context.go('/onboarding');
+      //   return;
+      // }
+
+      // 7️⃣ Role based routing
+      final role = profile['role'] ?? 'customer';
+
       if (!mounted) return;
-      await showCustomAlert(
-        context,
-        title: "Login Error ❌",
-        message: e.message,
-        isError: true,
-      );
-    } catch (e) {
+
+      switch (role) {
+        case 'customer':
+          context.go('/customer-home');
+          break;
+
+        case 'business':
+          context.go('/owner-dashboard');
+          break;
+
+        case 'employee':
+          context.go('/employee-dashboard');
+          break;
+
+        default:
+          context.go('/customer-home');
+      }
+    }
+    // 🔐 Auth errors
+    on AuthException catch (e) {
+      switch (e.code) {
+        case 'invalid_login_credentials':
+          if (!mounted) return;
+          context.go('/verify-email');
+          break;
+
+        case 'email_not_confirmed':
+          await SessionManagerto.saveEmailAndPassword(
+            email: _emailController.text.trim(),
+            password: _passwordController.text.trim(),
+          );
+
+          if (!mounted) return;
+          context.go('/verify-email');
+          break;
+
+        case 'too_many_requests':
+          if (!mounted) return;
+
+          await showCustomAlert(
+            context,
+            title: "Too Many Attempts ⏳",
+            message:
+                "You’ve tried too many times. Please wait a few minutes before trying again.",
+            isError: true,
+          );
+
+          // Optional: disable button for 30–60 seconds
+          setState(() => _coolDown = true);
+          Future.delayed(const Duration(seconds: 60), () {
+            if (mounted) setState(() => _coolDown = false);
+          });
+          break;
+
+        case 'user_banned':
+          if (!mounted) return;
+          await showCustomAlert(
+            context,
+            title: "Login Error ❌",
+            message: e.message,
+            isError: true,
+          );
+          break;
+
+        default:
+          if (!mounted) return;
+          await showCustomAlert(
+            context,
+            title: "Login Error ❌",
+            message: e.message,
+            isError: true,
+          );
+      }
+    }
+    // ❌ Unexpected
+    catch (e) {
       if (!mounted) return;
       await showCustomAlert(
         context,
@@ -348,7 +290,7 @@ class _SignInScreenState extends State<SignInScreen>
                   ),
                   padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.03),
+                    color: Colors.white.withValues(alpha: 0.03),
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(color: Colors.white12),
                   ),
@@ -365,12 +307,7 @@ class _SignInScreenState extends State<SignInScreen>
                               size: 22,
                             ),
                             onPressed: () {
-                              Navigator.pushReplacement(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => const ContinueScreen(),
-                                ),
-                              );
+                              context.push('/continue');
                             },
                           ),
                         ),
@@ -413,7 +350,7 @@ class _SignInScreenState extends State<SignInScreen>
                                     color: Colors.white54,
                                   ),
                                   filled: true,
-                                  fillColor: Colors.white.withOpacity(0.05),
+                                  fillColor: Colors.white.withValues(alpha: 0.05),
                                   border: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(8),
                                   ),
@@ -456,7 +393,7 @@ class _SignInScreenState extends State<SignInScreen>
                                     color: Colors.white54,
                                   ),
                                   filled: true,
-                                  fillColor: Colors.white.withOpacity(0.05),
+                                  fillColor: Colors.white.withValues(alpha: 0.05),
                                   border: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(8),
                                   ),
@@ -492,7 +429,8 @@ class _SignInScreenState extends State<SignInScreen>
                               SizedBox(
                                 width: double.infinity,
                                 child: ElevatedButton(
-                                  onPressed: _isValid && !_loading
+                                  onPressed:
+                                      (_isValid && !_loading && !_coolDown)
                                       ? loginUser
                                       : null,
                                   style: ElevatedButton.styleFrom(
@@ -509,6 +447,14 @@ class _SignInScreenState extends State<SignInScreen>
                                   child: _loading
                                       ? const CircularProgressIndicator(
                                           color: Colors.white,
+                                        )
+                                      : _coolDown
+                                      ? const Text(
+                                          'Please wait...',
+                                          style: TextStyle(
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.w600,
+                                          ),
                                         )
                                       : const Text(
                                           'Log in',
@@ -559,7 +505,7 @@ class _SignInScreenState extends State<SignInScreen>
                                 ),
                                 backgroundColor: const Color(
                                   0xFF1877F3,
-                                ).withOpacity(0.1),
+                                ).withValues(alpha: 0.1),
                               ),
                               child: const Text(
                                 'Create new account',
