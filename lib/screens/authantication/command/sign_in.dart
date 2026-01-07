@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_application_1/main.dart';
 import 'package:flutter_application_1/screens/authantication/services/session_manager.dart';
 import 'package:flutter_application_1/screens/authantication/services/singup_session.dart';
 import 'package:flutter_application_1/screens/commands/alertBox/reset_password.dart';
@@ -102,7 +103,7 @@ class _SignInScreenState extends State<SignInScreen>
     try {
       setState(() => _loading = true);
 
-      // 1️⃣ Sign in
+      // 1️⃣ SIGN IN
       final response = await supabase.auth.signInWithPassword(
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
@@ -113,29 +114,22 @@ class _SignInScreenState extends State<SignInScreen>
         throw Exception("Login failed. Please try again.");
       }
 
-      final userId = user.id;
-      final safeEmail = user.email ?? '';
-
-      // 2️⃣ Fetch profile
+      // 2️⃣ FETCH PROFILE (ONLY FOR VALIDATION)
       final profile = await supabase
           .from('profiles')
-          .select()
-          .eq('id', userId)
+          .select('id, role, is_blocked, is_active')
+          .eq('id', user.id)
           .maybeSingle();
 
-      // 3️⃣ Profile NOT exists → Register
+      // 3️⃣ PROFILE NOT CREATED → router will redirect to /reg
       if (profile == null) {
-        await SessionManagerto.saveEmailAndPassword(
-          email: safeEmail,
-          password: _passwordController.text.trim(),
-        );
-
+        await appState.restore();
         if (!mounted) return;
-        context.go('/reg');
+        context.go('/'); // 🔥 let main.dart decide
         return;
       }
 
-      // 4️⃣ Blocked
+      // 4️⃣ BLOCKED
       if (profile['is_blocked'] == true) {
         await supabase.auth.signOut();
         if (!mounted) return;
@@ -143,13 +137,13 @@ class _SignInScreenState extends State<SignInScreen>
         await showCustomAlert(
           context,
           title: "Account Blocked 🚫",
-          message: "Your account has been blocked.",
+          message: "Your account has been blocked. Please contact support.",
           isError: true,
         );
         return;
       }
 
-      // 5️⃣ Inactive
+      // 5️⃣ INACTIVE
       if (profile['is_active'] == false) {
         await supabase.auth.signOut();
         if (!mounted) return;
@@ -163,83 +157,48 @@ class _SignInScreenState extends State<SignInScreen>
         return;
       }
 
-      // 6️⃣ Onboarding not completed
-      // if (profile['onboarding_completed'] != true) {
-      //   if (!mounted) return;
-      //   context.go('/onboarding');
-      //   return;
-      // }
+      // 6️⃣ SAVE ROLE LOCALLY (NOT PASSWORD)
+      await SessionManager.saveUserRole(profile['role'] ?? 'customer');
 
-      // 7️⃣ Role based routing
-      final role = profile['role'] ?? 'customer';
-
+      // 7️⃣ DONE → ROUTER CONTROLS EVERYTHING
+      await appState.restore();
+      if (!mounted) return;
+      context.go('/'); // 🔥 main.dart redirect logic only
+    }
+    // 🔐 AUTH ERRORS
+    on AuthException catch (e) {
       if (!mounted) return;
 
-      switch (role) {
-        case 'customer':
-          context.go('/customer-home');
-          break;
-
-        case 'business':
-          context.go('/owner-dashboard');
-          break;
-
-        case 'employee':
-          context.go('/employee-dashboard');
-          break;
-
-        default:
-          context.go('/customer-home');
-      }
-    }
-    // 🔐 Auth errors
-    on AuthException catch (e) {
       switch (e.code) {
         case 'invalid_login_credentials':
-          if (!mounted) return;
-          context.go('/verify-email');
+          await showCustomAlert(
+            context,
+            title: "Login Failed ❌",
+            message: "Email or password is incorrect.",
+            isError: true,
+          );
           break;
 
         case 'email_not_confirmed':
-          await SessionManagerto.saveEmailAndPassword(
-            email: _emailController.text.trim(),
-            password: _passwordController.text.trim(),
-          );
-
           if (!mounted) return;
-          context.go('/verify-email');
+          context.go('/'); // 🔥 router → /verify-email
           break;
 
         case 'too_many_requests':
-          if (!mounted) return;
-
           await showCustomAlert(
             context,
             title: "Too Many Attempts ⏳",
-            message:
-                "You’ve tried too many times. Please wait a few minutes before trying again.",
+            message: "Please wait a few minutes and try again.",
             isError: true,
           );
 
-          // Optional: disable button for 30–60 seconds
           setState(() => _coolDown = true);
           Future.delayed(const Duration(seconds: 60), () {
             if (mounted) setState(() => _coolDown = false);
           });
           break;
 
-        case 'user_banned':
-          if (!mounted) return;
-          await showCustomAlert(
-            context,
-            title: "Login Error ❌",
-            message: e.message,
-            isError: true,
-          );
-          break;
-
         default:
-          if (!mounted) return;
           await showCustomAlert(
             context,
             title: "Login Error ❌",
@@ -248,7 +207,7 @@ class _SignInScreenState extends State<SignInScreen>
           );
       }
     }
-    // ❌ Unexpected
+    // ❌ UNEXPECTED
     catch (e) {
       if (!mounted) return;
       await showCustomAlert(
@@ -350,7 +309,9 @@ class _SignInScreenState extends State<SignInScreen>
                                     color: Colors.white54,
                                   ),
                                   filled: true,
-                                  fillColor: Colors.white.withValues(alpha: 0.05),
+                                  fillColor: Colors.white.withValues(
+                                    alpha: 0.05,
+                                  ),
                                   border: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(8),
                                   ),
@@ -393,7 +354,9 @@ class _SignInScreenState extends State<SignInScreen>
                                     color: Colors.white54,
                                   ),
                                   filled: true,
-                                  fillColor: Colors.white.withValues(alpha: 0.05),
+                                  fillColor: Colors.white.withValues(
+                                    alpha: 0.05,
+                                  ),
                                   border: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(8),
                                   ),
