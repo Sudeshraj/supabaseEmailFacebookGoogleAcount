@@ -7,7 +7,7 @@ import 'package:flutter_application_1/screens/authantication/command/finish_scre
 import 'package:flutter_application_1/screens/authantication/command/password_screen.dart';
 import 'package:flutter_application_1/screens/authantication/command/welcome.dart';
 import 'package:flutter_application_1/screens/authantication/services/registration_service.dart';
-import 'package:flutter_application_1/screens/commands/alertBox/show_custom_alert.dart';
+import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
 import 'package:flutter_application_1/screens/authantication/functions/loading_overlay.dart';
 
 class RegistrationFlow extends StatefulWidget {

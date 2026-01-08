@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/main.dart';
-import 'package:flutter_application_1/screens/authantication/services/session_manager.dart';
-import 'package:flutter_application_1/screens/authantication/services/singup_session.dart';
-import 'package:flutter_application_1/screens/commands/alertBox/reset_password.dart';
-import 'package:flutter_application_1/screens/commands/alertBox/show_custom_alert.dart';
+import 'package:flutter_application_1/alertBox/reset_password.dart';
+import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter_application_1/services/session_manager.dart';
+
+
 
 class SignInScreen extends StatefulWidget {
   const SignInScreen({super.key});
@@ -97,13 +98,13 @@ class _SignInScreenState extends State<SignInScreen>
   }
 
   // ======================================================================
-  // ✅ LOGIN FUNCTION WITH SUPABASE + LOCAL SESSION SAVE + NOTYOUSCREEN
+  // ✅ UPDATED: LOGIN FUNCTION WITH SESSION MANAGER PROFILE SAVING
   // ======================================================================
   Future<void> loginUser() async {
     try {
       setState(() => _loading = true);
 
-      // 1️⃣ SIGN IN
+      // 1️⃣ SIGN IN WITH SUPABASE
       final response = await supabase.auth.signInWithPassword(
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
@@ -114,14 +115,22 @@ class _SignInScreenState extends State<SignInScreen>
         throw Exception("Login failed. Please try again.");
       }
 
-      // 2️⃣ FETCH PROFILE (ONLY FOR VALIDATION)
+      // ✅ SAVE USER PROFILE TO SESSION MANAGER FOR CONTINUE SCREEN
+      await SessionManager.saveUserProfile(
+        email: user.email!,
+        userId: user.id,
+        name: user.userMetadata?['full_name'] ?? user.email!.split('@').first,
+      );
+      print('✅ Profile saved to SessionManager: ${user.email}');
+
+      // 2️⃣ FETCH PROFILE FROM DATABASE (FOR VALIDATION AND ROLE)
       final profile = await supabase
           .from('profiles')
-          .select('id, role, is_blocked, is_active')
+          .select('id, role, roles, is_blocked, is_active')
           .eq('id', user.id)
           .maybeSingle();
 
-      // 3️⃣ PROFILE NOT CREATED → router will redirect to /reg
+      // 3️⃣ PROFILE NOT CREATED IN DATABASE → router will redirect to /reg
       if (profile == null) {
         await appState.restore();
         if (!mounted) return;
@@ -129,9 +138,12 @@ class _SignInScreenState extends State<SignInScreen>
         return;
       }
 
-      // 4️⃣ BLOCKED
+      // 4️⃣ CHECK IF ACCOUNT IS BLOCKED
       if (profile['is_blocked'] == true) {
         await supabase.auth.signOut();
+        // Remove from SessionManager too
+        await SessionManager.removeProfile(user.email!);
+        
         if (!mounted) return;
 
         await showCustomAlert(
@@ -143,9 +155,12 @@ class _SignInScreenState extends State<SignInScreen>
         return;
       }
 
-      // 5️⃣ INACTIVE
+      // 5️⃣ CHECK IF ACCOUNT IS INACTIVE
       if (profile['is_active'] == false) {
         await supabase.auth.signOut();
+        // Remove from SessionManager too
+        await SessionManager.removeProfile(user.email!);
+        
         if (!mounted) return;
 
         await showCustomAlert(
@@ -157,15 +172,19 @@ class _SignInScreenState extends State<SignInScreen>
         return;
       }
 
-      // 6️⃣ SAVE ROLE LOCALLY (NOT PASSWORD)
-      await SessionManager.saveUserRole(profile['role'] ?? 'customer');
+      // 6️⃣ SAVE ROLE TO SESSION MANAGER
+      final String role = profile['role'] ?? 'customer';
+      await SessionManager.saveUserRole(role);
+      print('✅ Role saved: $role');
 
-      // 7️⃣ DONE → ROUTER CONTROLS EVERYTHING
+      // 7️⃣ UPDATE APP STATE AND NAVIGATE
       await appState.restore();
       if (!mounted) return;
-      context.go('/'); // 🔥 main.dart redirect logic only
+      
+      // Let router handle the redirection based on role
+      context.go('/'); // Router will redirect to appropriate screen
     }
-    // 🔐 AUTH ERRORS
+    // 🔐 AUTH ERRORS HANDLING
     on AuthException catch (e) {
       if (!mounted) return;
 
@@ -180,6 +199,18 @@ class _SignInScreenState extends State<SignInScreen>
           break;
 
         case 'email_not_confirmed':
+          // Save profile even if email not confirmed
+          final email = _emailController.text.trim();
+          final user = supabase.auth.currentUser;
+          
+          if (user != null) {
+            await SessionManager.saveUserProfile(
+              email: email,
+              userId: user.id,
+              name: email.split('@').first,
+            );
+          }
+            await appState.restore();
           if (!mounted) return;
           context.go('/'); // 🔥 router → /verify-email
           break;
@@ -207,7 +238,7 @@ class _SignInScreenState extends State<SignInScreen>
           );
       }
     }
-    // ❌ UNEXPECTED
+    // ❌ UNEXPECTED ERRORS
     catch (e) {
       if (!mounted) return;
       await showCustomAlert(
@@ -222,7 +253,41 @@ class _SignInScreenState extends State<SignInScreen>
   }
 
   // ======================================================================
-  // ✅ UI SECTION
+  // ✅ NEW: AUTO LOGIN FROM CONTINUE SCREEN
+  // ======================================================================
+  Future<void> _tryAutoLogin(String email) async {
+    try {
+      setState(() => _loading = true);
+      
+      // Try auto login using SessionManager
+      final success = await SessionManager.tryAutoLogin(email);
+      
+      if (success) {
+        // Auto login successful
+        await appState.restore();
+        if (!mounted) return;
+        context.go('/'); // Router will handle redirection
+      } else {
+        // Auto login failed, pre-fill email and show message
+        _emailController.text = email;
+        _validateForm();
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Please enter password for $email'),
+            duration: const Duration(seconds: 3),
+          )
+        );
+      }
+    } catch (e) {
+      print('❌ Auto login error: $e');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  // ======================================================================
+  // ✅ UI SECTION WITH CONTINUE SCREEN OPTION
   // ======================================================================
   @override
   Widget build(BuildContext context) {
@@ -249,25 +314,45 @@ class _SignInScreenState extends State<SignInScreen>
                   ),
                   padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.03),
+                    color: Colors.white.withOpacity(0.03),
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(color: Colors.white12),
                   ),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
+                      // ✅ CONTINUE SCREEN BACK BUTTON
                       if (_hasSavedProfile)
                         Align(
                           alignment: Alignment.topLeft,
-                          child: IconButton(
-                            icon: const Icon(
-                              Icons.arrow_back_ios_new_rounded,
-                              color: Colors.white,
-                              size: 22,
-                            ),
-                            onPressed: () {
-                              context.push('/continue');
-                            },
+                          child: Row(
+                            children: [
+                              IconButton(
+                                icon: const Icon(
+                                  Icons.arrow_back_ios_new_rounded,
+                                  color: Colors.white,
+                                  size: 22,
+                                ),
+                                onPressed: () async {
+                                  // Go to continue screen
+                                  context.push('/continue');
+                                },
+                              ),
+                              // Optional: Add text label
+                              if (_hasSavedProfile)
+                                GestureDetector(
+                                  onTap: () {
+                                    context.push('/continue');
+                                  },
+                                  child: const Text(
+                                    'Use another account',
+                                    style: TextStyle(
+                                      color: Colors.white70,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                ),
+                            ],
                           ),
                         ),
                       Expanded(
@@ -300,6 +385,8 @@ class _SignInScreenState extends State<SignInScreen>
                                 ),
                               ),
                               const SizedBox(height: 24),
+                              
+                              // ✅ EMAIL FIELD
                               TextField(
                                 controller: _emailController,
                                 style: const TextStyle(color: Colors.white),
@@ -309,9 +396,7 @@ class _SignInScreenState extends State<SignInScreen>
                                     color: Colors.white54,
                                   ),
                                   filled: true,
-                                  fillColor: Colors.white.withValues(
-                                    alpha: 0.05,
-                                  ),
+                                  fillColor: Colors.white.withOpacity(0.05),
                                   border: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(8),
                                   ),
@@ -332,18 +417,20 @@ class _SignInScreenState extends State<SignInScreen>
                                   suffixIcon: _emailController.text.isEmpty
                                       ? null
                                       : _isValidEmail
-                                      ? const Icon(
-                                          Icons.check_circle,
-                                          color: Color(0xFF4CAF50),
-                                        )
-                                      : const Icon(
-                                          Icons.error_outline,
-                                          color: Colors.redAccent,
-                                        ),
+                                          ? const Icon(
+                                              Icons.check_circle,
+                                              color: Color(0xFF4CAF50),
+                                            )
+                                          : const Icon(
+                                              Icons.error_outline,
+                                              color: Colors.redAccent,
+                                            ),
                                   errorText: _emailError,
                                 ),
                               ),
                               const SizedBox(height: 16),
+                              
+                              // ✅ PASSWORD FIELD
                               TextField(
                                 controller: _passwordController,
                                 obscureText: _obscurePassword,
@@ -354,9 +441,7 @@ class _SignInScreenState extends State<SignInScreen>
                                     color: Colors.white54,
                                   ),
                                   filled: true,
-                                  fillColor: Colors.white.withValues(
-                                    alpha: 0.05,
-                                  ),
+                                  fillColor: Colors.white.withOpacity(0.05),
                                   border: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(8),
                                   ),
@@ -389,13 +474,15 @@ class _SignInScreenState extends State<SignInScreen>
                                 ),
                               ),
                               const SizedBox(height: 24),
+                              
+                              // ✅ LOGIN BUTTON
                               SizedBox(
                                 width: double.infinity,
                                 child: ElevatedButton(
                                   onPressed:
                                       (_isValid && !_loading && !_coolDown)
-                                      ? loginUser
-                                      : null,
+                                          ? loginUser
+                                          : null,
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: const Color(0xFF1877F3),
                                     disabledBackgroundColor: Colors.white12,
@@ -412,23 +499,25 @@ class _SignInScreenState extends State<SignInScreen>
                                           color: Colors.white,
                                         )
                                       : _coolDown
-                                      ? const Text(
-                                          'Please wait...',
-                                          style: TextStyle(
-                                            fontSize: 16,
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        )
-                                      : const Text(
-                                          'Log in',
-                                          style: TextStyle(
-                                            fontSize: 17,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
+                                          ? const Text(
+                                              'Please wait...',
+                                              style: TextStyle(
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            )
+                                          : const Text(
+                                              'Log in',
+                                              style: TextStyle(
+                                                fontSize: 17,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
                                 ),
                               ),
                               const SizedBox(height: 12),
+                              
+                              // ✅ FORGOT PASSWORD
                               GestureDetector(
                                 onTap: () {
                                   showResetPasswordDialog(context);
@@ -446,6 +535,8 @@ class _SignInScreenState extends State<SignInScreen>
                           ),
                         ),
                       ),
+                      
+                      // ✅ CREATE ACCOUNT BUTTON
                       Column(
                         children: [
                           const SizedBox(height: 14),
@@ -455,7 +546,6 @@ class _SignInScreenState extends State<SignInScreen>
                               onPressed: () {
                                 context.push('/signup');
                               },
-
                               style: OutlinedButton.styleFrom(
                                 side: const BorderSide(
                                   color: Color(0xFF1877F3),
@@ -466,9 +556,7 @@ class _SignInScreenState extends State<SignInScreen>
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(24),
                                 ),
-                                backgroundColor: const Color(
-                                  0xFF1877F3,
-                                ).withValues(alpha: 0.1),
+                                backgroundColor: const Color(0xFF1877F3).withOpacity(0.1),
                               ),
                               child: const Text(
                                 'Create new account',
@@ -491,5 +579,13 @@ class _SignInScreenState extends State<SignInScreen>
         ),
       ),
     );
+  }
+  
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    _animationController.dispose();
+    super.dispose();
   }
 }

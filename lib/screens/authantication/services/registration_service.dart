@@ -10,8 +10,8 @@ import 'package:flutter_application_1/screens/authantication/command/not_you.dar
 import 'package:flutter_application_1/screens/authantication/command/splash.dart';
 import 'package:flutter_application_1/screens/authantication/command/email_verify_checker.dart';
 import 'package:flutter_application_1/screens/authantication/functions/loading_overlay.dart';
-import 'package:flutter_application_1/screens/commands/alertBox/reset_password_onfirm.dart';
-import 'package:flutter_application_1/screens/commands/alertBox/show_custom_alert.dart';
+import 'package:flutter_application_1/alertBox/reset_password_onfirm.dart';
+import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
 import 'session_manager.dart';
 
 class SaveUser {

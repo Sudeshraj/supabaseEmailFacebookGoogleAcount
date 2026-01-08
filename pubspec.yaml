@@ -33,6 +33,7 @@ dependencies:
   web: ^1.1.1
   supabase_flutter: ^2.12.0
   go_router: ^17.0.1
+  flutter_dotenv: ^6.0.0
 
 dev_dependencies:
   flutter_test:
@@ -43,3 +44,4 @@ flutter:
   uses-material-design: true
   assets:
     - assets/
+    - .env
