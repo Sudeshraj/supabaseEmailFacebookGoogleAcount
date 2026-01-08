@@ -154,9 +154,9 @@ class _EmailVerifyCheckerState extends State<EmailVerifyChecker>
   // LOGOUT
   // ------------------------------------------------------------
   Future<void> logout() async {
-    await supabase.auth.signOut();
+    // await supabase.auth.signOut();
     if (!mounted) return;
-    context.go('/splash');
+    context.go('/login');
   }
 
   // ------------------------------------------------------------

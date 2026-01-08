@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_application_1/screens/authantication/command/email_screen.dart';
 import 'package:flutter_application_1/screens/authantication/command/finish_screen.dart';
 import 'package:flutter_application_1/screens/authantication/command/password_screen.dart';
-import 'package:flutter_application_1/screens/authantication/services/signup_serivce.dart';
-import 'package:flutter_application_1/screens/commands/alertBox/show_custom_alert.dart';
+import 'package:flutter_application_1/services/signup_serivce.dart';
+import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
 import 'package:flutter_application_1/screens/authantication/functions/loading_overlay.dart';
 
 class SignupFlow extends StatefulWidget {
