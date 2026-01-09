@@ -6,8 +6,6 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_application_1/services/session_manager.dart';
 
-
-
 class SignInScreen extends StatefulWidget {
   const SignInScreen({super.key});
 
@@ -143,7 +141,7 @@ class _SignInScreenState extends State<SignInScreen>
         await supabase.auth.signOut();
         // Remove from SessionManager too
         await SessionManager.removeProfile(user.email!);
-        
+
         if (!mounted) return;
 
         await showCustomAlert(
@@ -160,7 +158,7 @@ class _SignInScreenState extends State<SignInScreen>
         await supabase.auth.signOut();
         // Remove from SessionManager too
         await SessionManager.removeProfile(user.email!);
-        
+
         if (!mounted) return;
 
         await showCustomAlert(
@@ -180,7 +178,7 @@ class _SignInScreenState extends State<SignInScreen>
       // 7️⃣ UPDATE APP STATE AND NAVIGATE
       await appState.restore();
       if (!mounted) return;
-      
+
       // Let router handle the redirection based on role
       context.go('/'); // Router will redirect to appropriate screen
     }
@@ -202,7 +200,7 @@ class _SignInScreenState extends State<SignInScreen>
           // Save profile even if email not confirmed
           final email = _emailController.text.trim();
           final user = supabase.auth.currentUser;
-          
+
           if (user != null) {
             await SessionManager.saveUserProfile(
               email: email,
@@ -210,7 +208,7 @@ class _SignInScreenState extends State<SignInScreen>
               name: email.split('@').first,
             );
           }
-            await appState.restore();
+          await appState.restore();
           if (!mounted) return;
           context.go('/'); // 🔥 router → /verify-email
           break;
@@ -255,13 +253,13 @@ class _SignInScreenState extends State<SignInScreen>
   // ======================================================================
   // ✅ NEW: AUTO LOGIN FROM CONTINUE SCREEN
   // ======================================================================
-  Future<void> _tryAutoLogin(String email) async {
+  Future<void> tryAutoLogin(String email) async {
     try {
       setState(() => _loading = true);
-      
+
       // Try auto login using SessionManager
       final success = await SessionManager.tryAutoLogin(email);
-      
+
       if (success) {
         // Auto login successful
         await appState.restore();
@@ -271,12 +269,12 @@ class _SignInScreenState extends State<SignInScreen>
         // Auto login failed, pre-fill email and show message
         _emailController.text = email;
         _validateForm();
-        
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Please enter password for $email'),
             duration: const Duration(seconds: 3),
-          )
+          ),
         );
       }
     } catch (e) {
@@ -385,7 +383,7 @@ class _SignInScreenState extends State<SignInScreen>
                                 ),
                               ),
                               const SizedBox(height: 24),
-                              
+
                               // ✅ EMAIL FIELD
                               TextField(
                                 controller: _emailController,
@@ -417,19 +415,19 @@ class _SignInScreenState extends State<SignInScreen>
                                   suffixIcon: _emailController.text.isEmpty
                                       ? null
                                       : _isValidEmail
-                                          ? const Icon(
-                                              Icons.check_circle,
-                                              color: Color(0xFF4CAF50),
-                                            )
-                                          : const Icon(
-                                              Icons.error_outline,
-                                              color: Colors.redAccent,
-                                            ),
+                                      ? const Icon(
+                                          Icons.check_circle,
+                                          color: Color(0xFF4CAF50),
+                                        )
+                                      : const Icon(
+                                          Icons.error_outline,
+                                          color: Colors.redAccent,
+                                        ),
                                   errorText: _emailError,
                                 ),
                               ),
                               const SizedBox(height: 16),
-                              
+
                               // ✅ PASSWORD FIELD
                               TextField(
                                 controller: _passwordController,
@@ -474,15 +472,15 @@ class _SignInScreenState extends State<SignInScreen>
                                 ),
                               ),
                               const SizedBox(height: 24),
-                              
+
                               // ✅ LOGIN BUTTON
                               SizedBox(
                                 width: double.infinity,
                                 child: ElevatedButton(
                                   onPressed:
                                       (_isValid && !_loading && !_coolDown)
-                                          ? loginUser
-                                          : null,
+                                      ? loginUser
+                                      : null,
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: const Color(0xFF1877F3),
                                     disabledBackgroundColor: Colors.white12,
@@ -499,24 +497,24 @@ class _SignInScreenState extends State<SignInScreen>
                                           color: Colors.white,
                                         )
                                       : _coolDown
-                                          ? const Text(
-                                              'Please wait...',
-                                              style: TextStyle(
-                                                fontSize: 16,
-                                                fontWeight: FontWeight.w600,
-                                              ),
-                                            )
-                                          : const Text(
-                                              'Log in',
-                                              style: TextStyle(
-                                                fontSize: 17,
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                            ),
+                                      ? const Text(
+                                          'Please wait...',
+                                          style: TextStyle(
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        )
+                                      : const Text(
+                                          'Log in',
+                                          style: TextStyle(
+                                            fontSize: 17,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
                                 ),
                               ),
                               const SizedBox(height: 12),
-                              
+
                               // ✅ FORGOT PASSWORD
                               GestureDetector(
                                 onTap: () {
@@ -535,7 +533,7 @@ class _SignInScreenState extends State<SignInScreen>
                           ),
                         ),
                       ),
-                      
+
                       // ✅ CREATE ACCOUNT BUTTON
                       Column(
                         children: [
@@ -556,7 +554,9 @@ class _SignInScreenState extends State<SignInScreen>
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(24),
                                 ),
-                                backgroundColor: const Color(0xFF1877F3).withOpacity(0.1),
+                                backgroundColor: const Color(
+                                  0xFF1877F3,
+                                ).withOpacity(0.1),
                               ),
                               child: const Text(
                                 'Create new account',
@@ -580,7 +580,7 @@ class _SignInScreenState extends State<SignInScreen>
       ),
     );
   }
-  
+
   @override
   void dispose() {
     _emailController.dispose();
