@@ -117,7 +117,11 @@ class _EmailScreenState extends State<EmailScreen>
                             size: 22,
                           ),
                           onPressed: () {
-                            context.pop();
+                            if (Navigator.canPop(context)) {
+                              context.pop();
+                            } else {                              
+                              context.go('/continue');
+                            }
                           },
                         ),
                       ),
