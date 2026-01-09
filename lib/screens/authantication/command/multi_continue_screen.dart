@@ -2,7 +2,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/main.dart';
 import 'package:flutter_application_1/router/auth_gate.dart';
-import 'package:flutter_application_1/alertBox/notyou.dart';
 import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
 import 'package:flutter_application_1/services/session_manager.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -35,32 +34,16 @@ class _ContinueScreenState extends State<ContinueScreen> {
   }
 
   // ============================================================
-  // PASSWORD DIALOG - AUTO LOGIN ON TYPE
+  // RESPONSIVE PASSWORD DIALOG
   // ============================================================
   Future<String?> _showPasswordDialog(String email) async {
-    final completer = Completer<String?>();
-    String? enteredPassword;
-    
-    showDialog(
+    return await showDialog<String?>(
       context: context,
       barrierDismissible: false,
       builder: (context) {
-        return AutoLoginPasswordDialog(
-          email: email,
-          onPasswordEntered: (password) {
-            enteredPassword = password;
-            completer.complete(password);
-            Navigator.pop(context);
-          },
-          onCancel: () {
-            completer.complete(null);
-            Navigator.pop(context);
-          },
-        );
+        return ResponsivePasswordDialog(email: email);
       },
     );
-    
-    return completer.future;
   }
 
   // ============================================================
@@ -68,7 +51,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
   // ============================================================
   Future<void> _handleAutoLogin(Map<String, dynamic> profile) async {
     if (_loading) return;
-    
+
     setState(() {
       _loading = true;
       _selectedEmail = profile['email'] as String?;
@@ -82,23 +65,23 @@ class _ContinueScreenState extends State<ContinueScreen> {
       }
 
       print('🔄 Attempting auto login for: $email');
-      
+
       // 1️⃣ TRY AUTO LOGIN FIRST
       final success = await SessionManager.tryAutoLogin(email);
-      
+
       if (success) {
         await _processSuccessfulLogin(profile);
         return;
       }
-      
+
       // 2️⃣ SHOW PASSWORD DIALOG
       final password = await _showPasswordDialog(email);
-      
+
       if (password == null || password.isEmpty) {
         setState(() => _loading = false);
         return;
       }
-      
+
       // 3️⃣ MANUAL LOGIN
       final response = await supabase.auth.signInWithPassword(
         email: email,
@@ -118,32 +101,53 @@ class _ContinueScreenState extends State<ContinueScreen> {
       );
 
       await _processSuccessfulLogin(profile);
-
     } on AuthException catch (e) {
-      print('❌ Auth error: ${e.message}');
       if (!mounted) return;
-      
-      await showCustomAlert(
-        context,
-        title: "Login Failed",
-        message: e.message,
-        isError: true,
-      );
-      
-      // await SessionManager.removeProfile(profile['email'] as String);
+
+      switch (e.code) {
+        case 'invalid_login_credentials':
+          await showCustomAlert(
+            context,
+            title: "Login Failed ❌",
+            message: "Email or password is incorrect.",
+            isError: true,
+          );
+          break;
+
+        case 'email_not_confirmed':
+          await appState.restore();
+          if (!mounted) return;
+          context.go('/verify-email'); // 🔥 router → /verify-email
+          break;
+
+        case 'too_many_requests':
+          await showCustomAlert(
+            context,
+            title: "Too Many Attempts ⏳",
+            message: "Please wait a few minutes and try again.",
+            isError: true,
+          );
+          break;
+
+        default:
+          await showCustomAlert(
+            context,
+            title: "Login Error ❌",
+            message: e.message,
+            isError: true,
+          );
+      }
       await _loadProfiles();
-      
     } catch (e) {
       print('❌ Login error: $e');
       if (!mounted) return;
-      
+
       await showCustomAlert(
         context,
         title: "Connection Error",
         message: "Please check your internet connection.",
         isError: false,
       );
-      
     } finally {
       if (mounted) {
         setState(() {
@@ -162,6 +166,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
     if (user == null) return;
 
     if (user.emailConfirmedAt == null) {
+      print('✅ Login successful! But email not verified.');
       await _showVerificationDialog(profile);
       return;
     }
@@ -179,9 +184,18 @@ class _ContinueScreenState extends State<ContinueScreen> {
     }
 
     final role = AuthGate.pickRole(dbProfile['role'] ?? dbProfile['roles']);
-    
+
     await SessionManager.saveUserRole(role);
     await SessionManager.updateLastLogin(profile['email'] as String);
+
+    // Save profile
+    await SessionManager.saveUserProfile(
+      email: dbProfile['email'] as String? ?? profile['email'] as String,
+      userId: user.id,
+      name: dbProfile['name'] as String? ?? dbProfile['email'].split('@').first,
+      photo: dbProfile['photo'] as String?,
+      roles: List<String>.from(profile['roles'] ?? []),
+    );
 
     print('✅ Login successful! Role: $role');
     if (!mounted) return;
@@ -199,37 +213,64 @@ class _ContinueScreenState extends State<ContinueScreen> {
   }
 
   // ============================================================
-  // EMAIL VERIFICATION DIALOG
+  // EMAIL VERIFICATION DIALOG (NOT YOU DIALOG)
   // ============================================================
   Future<void> _showVerificationDialog(Map<String, dynamic> profile) async {
-    await showNotYouDialog(
+    await showDialog(
       context: context,
-      email: profile['email'] as String,
-      name: profile['name'] as String? ?? 'Unknown User',
-      photoUrl: profile['photo'] as String? ?? '',
-      roles: [profile['role'] as String? ?? 'customer'],
-      buttonText: 'Not You?',
-      onContinue: () async {
-        Navigator.of(context, rootNavigator: true).pop();
-        if (navigatorKey.currentContext != null) {
-          navigatorKey.currentContext!.go('/verify-email');
-        }
-      },
-      onNotYou: () async {
-        final nav = navigatorKey.currentState;
-        if (nav == null) return;
-
-        final dialogCtx = nav.overlay!.context;
-        await showCustomAlert(
-          dialogCtx,
-          title: "Remove Profile?",
-          message: "This profile will be removed from this device.",
-          isError: true,
-          buttonText: "Delete",
-          onOk: () async {
-            await SessionManager.removeProfile(profile['email'] as String);
-            await _loadProfiles();
-          },
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1C1F26),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: Text(
+            'Email Not Verified',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Please verify your email to continue.',
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.8),
+                  fontSize: 16,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Email: ${profile['email']}',
+                style: const TextStyle(color: Colors.blueAccent, fontSize: 14),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                // Remove profile if not verified
+                SessionManager.removeProfile(profile['email'] as String);
+                _loadProfiles();
+              },
+              child: const Text(
+                'Not You?',
+                style: TextStyle(color: Colors.redAccent),
+              ),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(context);
+                context.go('/verify-email');
+              },
+              child: const Text('Verify Email'),
+            ),
+          ],
         );
       },
     );
@@ -241,13 +282,14 @@ class _ContinueScreenState extends State<ContinueScreen> {
   void _showProfilesMenu(Offset position) async {
     if (profiles.isEmpty) return;
 
+    final RenderBox overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox;
+
     final selected = await showMenu<Map<String, dynamic>>(
       context: context,
-      position: RelativeRect.fromLTRB(
-        position.dx, 
-        position.dy, 
-        position.dx + 40, 
-        position.dy + 40,
+      position: RelativeRect.fromRect(
+        position & const Size(40, 40),
+        Offset.zero & overlay.size,
       ),
       color: const Color(0xFF1C1F26),
       items: profiles
@@ -314,9 +356,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
   // ============================================================
   // CLEAR ALL PROFILES
   // ============================================================
-  Future<void> _clearAllProfiles() async {
+  Future<void> clearAllProfiles() async {
     if (profiles.isEmpty) return;
-    
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -339,10 +381,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text(
-              "Clear All",
-              style: TextStyle(color: Colors.red),
-            ),
+            child: const Text("Clear All", style: TextStyle(color: Colors.red)),
           ),
         ],
       ),
@@ -352,10 +391,10 @@ class _ContinueScreenState extends State<ContinueScreen> {
       for (final profile in profiles) {
         await SessionManager.removeProfile(profile['email'] as String);
       }
-      
+
       await SessionManager.clearContinueScreen();
       await _loadProfiles();
-      
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('All profiles cleared'),
@@ -369,233 +408,302 @@ class _ContinueScreenState extends State<ContinueScreen> {
   // BUILD PROFILE ITEM
   // ============================================================
   Widget _buildProfileItem(Map<String, dynamic> profile, int index) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.05),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: Colors.white.withOpacity(0.1),
-        ),
-      ),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        leading: CircleAvatar(
-          radius: 24,
-          backgroundColor: Colors.blue.withOpacity(0.2),
-          backgroundImage: (profile['photo'] != null &&
-                  profile['photo'].toString().isNotEmpty)
-              ? NetworkImage(profile['photo'] as String)
-              : null,
-          child: (profile['photo'] == null ||
-                  (profile['photo'] as String).isEmpty)
-              ? Icon(
-                  Icons.person,
-                  color: Colors.white.withOpacity(0.8),
-                )
-              : null,
-        ),
-        title: Text(
-          profile['name'] as String? ?? 'Unknown',
-          style: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.w500,
+    final isSelected = _selectedEmail == profile['email'];
+
+    return GestureDetector(
+      onTap: () => _handleAutoLogin(profile),
+      child: Card(
+        color: isSelected
+            ? Colors.blue.withOpacity(0.15)
+            : Colors.white.withOpacity(0.06),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(
+            color: isSelected
+                ? Colors.blueAccent.withOpacity(0.5)
+                : Colors.transparent,
+            width: 1,
           ),
         ),
-        subtitle: profile['email'] != null
-            ? Text(
-                profile['email'] as String,
-                style: TextStyle(
-                  color: Colors.white.withOpacity(0.6),
-                  fontSize: 12,
+        child: ListTile(
+          leading: CircleAvatar(
+            backgroundColor: Colors.blueAccent.withOpacity(0.2),
+            backgroundImage:
+                (profile['photo'] != null &&
+                    profile['photo'].toString().isNotEmpty)
+                ? NetworkImage(profile['photo'] as String)
+                : null,
+            child:
+                (profile['photo'] == null ||
+                    (profile['photo'] as String).isEmpty)
+                ? Icon(Icons.person, color: Colors.white.withOpacity(0.7))
+                : null,
+          ),
+          title: Text(
+            profile['name'] as String? ?? 'Unknown',
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          subtitle: profile['email'] != null
+              ? Text(
+                  profile['email'] as String,
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.6),
+                    fontSize: 12,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                )
+              : null,
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (profile['roles'] != null &&
+                  (profile['roles'] as List).isNotEmpty)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.green.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    (profile['roles'] as List).first.toString(),
+                    style: const TextStyle(
+                      color: Colors.greenAccent,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
                 ),
-              )
-            : null,
-        trailing: const Icon(
-          Icons.arrow_forward_ios,
-          color: Colors.white38,
-          size: 16,
+              const SizedBox(width: 8),
+              const Icon(
+                Icons.arrow_forward_ios_rounded,
+                color: Colors.white38,
+                size: 16,
+              ),
+            ],
+          ),
         ),
-        onTap: () => _handleAutoLogin(profile),
       ),
     );
   }
 
   // ============================================================
-  // UI - SIMPLE RESPONSIVE DESIGN
+  // UI - ORIGINAL FRAME
   // ============================================================
   @override
   Widget build(BuildContext context) {
-    final isMobile = MediaQuery.of(context).size.width < 600;
-    
+    final Size screenSize = MediaQuery.of(context).size;
+    final bool isWeb = screenSize.width > 700;
+    final double maxWidth = isWeb ? 450 : double.infinity;
+
     return Scaffold(
       backgroundColor: const Color(0xFF0F1820),
       body: SafeArea(
         child: Center(
-          child: Container(
-            constraints: BoxConstraints(
-              maxWidth: isMobile ? double.infinity : 500,
-            ),
-            padding: EdgeInsets.symmetric(
-              horizontal: isMobile ? 20 : 40,
-              vertical: 20,
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Header
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      'Continue',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 28,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    if (profiles.isNotEmpty)
-                      IconButton(
-                        icon: const Icon(
-                          Icons.more_vert,
-                          color: Colors.white70,
-                          size: 28,
-                        ),
-                        onPressed: () {
-                          _showProfilesMenu(
-                            const Offset(0, 0), // Will be handled by tap
-                          );
-                        },
-                      ),
-                  ],
-                ),
-                
-                const SizedBox(height: 10),
-                
-                Text(
-                  'Select an account to continue',
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.7),
-                    fontSize: 16,
-                  ),
-                ),
-                
-                const SizedBox(height: 30),
-                
-                // Profiles List
-                Expanded(
-                  child: _loading
-                      ? Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              const CircularProgressIndicator(
-                                color: Colors.blue,
-                              ),
-                              const SizedBox(height: 20),
-                              Text(
-                                'Logging in...',
-                                style: TextStyle(
-                                  color: Colors.white.withOpacity(0.8),
-                                ),
-                              ),
-                            ],
-                          ),
-                        )
-                      : profiles.isEmpty
-                          ? Center(
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(
-                                    Icons.people_outline,
-                                    size: 80,
-                                    color: Colors.white.withOpacity(0.3),
-                                  ),
-                                  const SizedBox(height: 20),
-                                  Text(
-                                    'No saved profiles',
-                                    style: TextStyle(
-                                      color: Colors.white.withOpacity(0.6),
-                                      fontSize: 18,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 10),
-                                  Text(
-                                    'Login to save your profile',
-                                    style: TextStyle(
-                                      color: Colors.white.withOpacity(0.4),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            )
-                          : ListView.builder(
-                              itemCount: profiles.length,
-                              itemBuilder: (context, index) {
-                                return _buildProfileItem(profiles[index], index);
-                              },
-                            ),
-                ),
-                
-                // Buttons
-                Padding(
-                  padding: const EdgeInsets.only(top: 20),
-                  child: Column(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: maxWidth),
+            child: Container(
+              height: screenSize.height,
+              margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.03),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: Colors.white12),
+              ),
+              child: Column(
+                children: [
+                  // Header with Three Dots Menu
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton(
-                          onPressed: () => context.go('/login'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.blue,
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                          ),
-                          child: const Text(
-                            'Login with another account',
-                            style: TextStyle(fontSize: 16),
-                          ),
+                      const Text(
+                        'Continue',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
-                      
-                      const SizedBox(height: 12),
-                      
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton(
-                          onPressed: () => context.go('/signup'),
-                          style: OutlinedButton.styleFrom(
-                            side: const BorderSide(color: Colors.blue),
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
+
+                      // Three Dots Menu Icon
+                      if (profiles.isNotEmpty)
+                        GestureDetector(
+                          onTapDown: (details) =>
+                              _showProfilesMenu(details.globalPosition),
+                          child: const Padding(
+                            padding: EdgeInsets.all(8.0),
+                            child: Icon(
+                              Icons.more_vert,
+                              color: Colors.white70,
+                              size: 24,
                             ),
                           ),
-                          child: const Text(
-                            'Create new account',
-                            style: TextStyle(color: Colors.blue),
-                          ),
                         ),
-                      ),
-                      
-                      if (profiles.isNotEmpty) ...[
-                        const SizedBox(height: 12),
-                        TextButton(
-                          onPressed: _clearAllProfiles,
-                          child: const Text(
-                            'Clear all profiles',
-                            style: TextStyle(color: Colors.red),
-                          ),
-                        ),
-                      ],
                     ],
                   ),
-                ),
-              ],
+
+                  const SizedBox(height: 10),
+
+                  // Subtitle
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      profiles.isEmpty
+                          ? 'No saved profiles'
+                          : '${profiles.length} saved profile${profiles.length == 1 ? '' : 's'}',
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.7),
+                        fontSize: 14,
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  // Profiles List
+                  Expanded(
+                    child: _loading
+                        ? Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const CircularProgressIndicator(
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                    Colors.blueAccent,
+                                  ),
+                                ),
+                                const SizedBox(height: 15),
+                                const Text(
+                                  'Logging in...',
+                                  style: TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                                if (_selectedEmail != null)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 8),
+                                    child: Text(
+                                      _selectedEmail!,
+                                      style: TextStyle(
+                                        color: Colors.white.withOpacity(0.6),
+                                        fontSize: 12,
+                                      ),
+                                      textAlign: TextAlign.center,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          )
+                        : profiles.isEmpty
+                        ? Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.person_add_disabled,
+                                  size: 60,
+                                  color: Colors.white.withOpacity(0.3),
+                                ),
+                                const SizedBox(height: 15),
+                                Text(
+                                  'No saved profiles',
+                                  style: TextStyle(
+                                    color: Colors.white.withOpacity(0.6),
+                                    fontSize: 16,
+                                  ),
+                                ),
+                                const SizedBox(height: 5),
+                                Text(
+                                  'Login to save your profile',
+                                  style: TextStyle(
+                                    color: Colors.white.withOpacity(0.4),
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          )
+                        : ListView.builder(
+                            shrinkWrap: true,
+                            itemCount: profiles.length,
+                            itemBuilder: (context, index) {
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 12),
+                                child: _buildProfileItem(
+                                  profiles[index],
+                                  index,
+                                ),
+                              );
+                            },
+                          ),
+                  ),
+
+                  // Footer Buttons
+                  Padding(
+                    padding: const EdgeInsets.only(top: 20),
+                    child: Column(
+                      children: [
+                        // Login with another account
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton(
+                            onPressed: () {
+                              context.go('/login');
+                            },
+                            style: OutlinedButton.styleFrom(
+                              side: const BorderSide(color: Colors.white24),
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                            ),
+                            child: const Text(
+                              'Login with another account',
+                              style: TextStyle(color: Colors.white70),
+                            ),
+                          ),
+                        ),
+
+                        const SizedBox(height: 16),
+
+                        // Create new account
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton(
+                            onPressed: () {
+                              // Go to signup page instead of RegistrationFlow
+                              context.go('/signup');
+                            },
+                            style: OutlinedButton.styleFrom(
+                              side: const BorderSide(color: Color(0xFF1877F3)),
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(24),
+                              ),
+                            ),
+                            child: const Text(
+                              'Create new account',
+                              style: TextStyle(
+                                color: Color(0xFF1877F3),
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+
+                        const SizedBox(height: 16),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -605,164 +713,235 @@ class _ContinueScreenState extends State<ContinueScreen> {
 }
 
 // ============================================================
-// AUTO LOGIN PASSWORD DIALOG
+// RESPONSIVE PASSWORD DIALOG WIDGET
 // ============================================================
-class AutoLoginPasswordDialog extends StatefulWidget {
+class ResponsivePasswordDialog extends StatefulWidget {
   final String email;
-  final Function(String?) onPasswordEntered;
-  final VoidCallback onCancel;
-  
-  const AutoLoginPasswordDialog({
-    super.key,
-    required this.email,
-    required this.onPasswordEntered,
-    required this.onCancel,
-  });
-  
+
+  const ResponsivePasswordDialog({super.key, required this.email});
+
   @override
-  State<AutoLoginPasswordDialog> createState() => _AutoLoginPasswordDialogState();
+  State<ResponsivePasswordDialog> createState() =>
+      _ResponsivePasswordDialogState();
 }
 
-class _AutoLoginPasswordDialogState extends State<AutoLoginPasswordDialog> {
+class _ResponsivePasswordDialogState extends State<ResponsivePasswordDialog> {
   final TextEditingController _controller = TextEditingController();
-  bool _obscureText = true;
-  Timer? _debounceTimer;
-  
+  bool _obscurePassword = true;
+  Timer? _autoLoginTimer;
+
   @override
   void dispose() {
     _controller.dispose();
-    _debounceTimer?.cancel();
+    _autoLoginTimer?.cancel();
     super.dispose();
   }
-  
-  void _checkAndLogin(String password) {
-    // Cancel previous timer
-    _debounceTimer?.cancel();
-    
-    // Start new timer
-    _debounceTimer = Timer(const Duration(milliseconds: 800), () {
-      if (password.length >= 6) { // Minimum password length
-        widget.onPasswordEntered(password);
-      }
-    });
+
+  void _checkAutoLogin(String password) {
+    _autoLoginTimer?.cancel();
+
+    // Auto login when password is 6+ characters and user pauses typing
+    if (password.length >= 6) {
+      _autoLoginTimer = Timer(const Duration(milliseconds: 500), () {
+        Navigator.pop(context, password);
+      });
+    }
   }
-  
+
+  // ResponsivePasswordDialog widget එකේ build method එකේ
   @override
   Widget build(BuildContext context) {
+    final Size screenSize = MediaQuery.of(context).size;
+    final bool isWeb = screenSize.width > 700;
+
+    // Calculate dialog width based on screen size
+    double dialogWidth;
+    double dialogMaxWidth;
+
+    if (isWeb) {
+      dialogWidth = screenSize.width * 0.25; // 25% of screen on web - smaller
+      dialogMaxWidth = 350; // Even smaller max width
+    } else {
+      dialogWidth = screenSize.width * 0.85; // 85% of screen on mobile
+      dialogMaxWidth = 400;
+    }
+
+    // Ensure dialog is not too small
+    final double calculatedWidth = dialogWidth
+        .clamp(300.0, dialogMaxWidth)
+        .toDouble();
+
     return Dialog(
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
+      backgroundColor: const Color(0xFF1C1F26),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      insetPadding: EdgeInsets.symmetric(
+        horizontal: isWeb ? (screenSize.width - calculatedWidth) / 2 : 20,
+        vertical: isWeb ? 100 : 20,
       ),
       child: Container(
-        padding: const EdgeInsets.all(24),
+        width: calculatedWidth,
+        padding: EdgeInsets.all(isWeb ? 24 : 20),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Title
-            const Text(
+            Text(
               'Enter Password',
               style: TextStyle(
-                fontSize: 20,
+                color: Colors.white,
+                fontSize: isWeb ? 20 : 18,
                 fontWeight: FontWeight.bold,
               ),
             ),
-            
+
             const SizedBox(height: 8),
-            
+
             // Email
             Text(
-              'For: ${widget.email}',
-              style: const TextStyle(
-                color: Colors.blue,
-                fontSize: 14,
+              'For:',
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.7),
+                fontSize: isWeb ? 14 : 13,
               ),
             ),
-            
-            const SizedBox(height: 20),
-            
+            Text(
+              widget.email,
+              style: TextStyle(
+                color: Colors.blueAccent,
+                fontSize: isWeb ? 14 : 13,
+                fontWeight: FontWeight.w500,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+
+            SizedBox(height: isWeb ? 20 : 16),
+
             // Password Field
             TextField(
               controller: _controller,
-              obscureText: _obscureText,
+              obscureText: _obscurePassword,
               autofocus: true,
+              style: TextStyle(color: Colors.white, fontSize: isWeb ? 16 : 15),
               decoration: InputDecoration(
                 labelText: 'Password',
+                labelStyle: TextStyle(
+                  color: Colors.white70,
+                  fontSize: isWeb ? 14 : 13,
+                ),
+                filled: true,
+                fillColor: Colors.white.withOpacity(0.08),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide.none,
+                ),
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: isWeb ? 16 : 14,
                 ),
                 suffixIcon: IconButton(
                   icon: Icon(
-                    _obscureText ? Icons.visibility_off : Icons.visibility,
+                    _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                    color: Colors.white70,
+                    size: isWeb ? 22 : 20,
                   ),
                   onPressed: () {
                     setState(() {
-                      _obscureText = !_obscureText;
+                      _obscurePassword = !_obscurePassword;
                     });
                   },
                 ),
               ),
+              textInputAction: TextInputAction.done,
               onChanged: (value) {
-                // Auto login when password length is sufficient
-                if (value.length >= 6) {
-                  _checkAndLogin(value);
-                }
+                _checkAutoLogin(value);
               },
               onSubmitted: (value) {
-                if (value.isNotEmpty) {
-                  widget.onPasswordEntered(value);
+                if (value.trim().isNotEmpty) {
+                  Navigator.pop(context, value.trim());
                 }
               },
             ),
-            
-            const SizedBox(height: 16),
-            
-            // Info
+
+            SizedBox(height: isWeb ? 16 : 12),
+
+            // Auto Login Info
             Container(
-              padding: const EdgeInsets.all(12),
+              padding: EdgeInsets.all(isWeb ? 12 : 10),
               decoration: BoxDecoration(
-                color: Colors.blue.withOpacity(0.1),
+                color: Colors.blueAccent.withOpacity(0.1),
                 borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.blueAccent.withOpacity(0.3)),
               ),
               child: Row(
                 children: [
-                  const Icon(
-                    Icons.info_outline,
-                    color: Colors.blue,
-                    size: 18,
+                  Icon(
+                    Icons.auto_awesome,
+                    color: Colors.blueAccent,
+                    size: isWeb ? 16 : 14,
                   ),
-                  const SizedBox(width: 10),
+                  SizedBox(width: isWeb ? 8 : 6),
                   Expanded(
                     child: Text(
-                      'Start typing password. Auto-login will trigger when password is complete.',
+                      'Type password - auto login in 0.5s',
                       style: TextStyle(
-                        color: Colors.grey[700],
-                        fontSize: 13,
+                        color: Colors.white.withOpacity(0.8),
+                        fontSize: isWeb ? 12 : 11,
                       ),
                     ),
                   ),
                 ],
               ),
             ),
-            
-            const SizedBox(height: 24),
-            
+
+            SizedBox(height: isWeb ? 20 : 16),
+
             // Buttons
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
                 TextButton(
-                  onPressed: widget.onCancel,
-                  child: const Text('Cancel'),
+                  onPressed: () => Navigator.pop(context, null),
+                  style: TextButton.styleFrom(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: isWeb ? 16 : 14,
+                      vertical: isWeb ? 10 : 8,
+                    ),
+                  ),
+                  child: Text(
+                    'Cancel',
+                    style: TextStyle(
+                      color: Colors.white70,
+                      fontSize: isWeb ? 14 : 13,
+                    ),
+                  ),
                 ),
-                const SizedBox(width: 12),
+                SizedBox(width: isWeb ? 10 : 8),
                 ElevatedButton(
                   onPressed: () {
-                    if (_controller.text.isNotEmpty) {
-                      widget.onPasswordEntered(_controller.text);
+                    final enteredPassword = _controller.text.trim();
+                    if (enteredPassword.isNotEmpty) {
+                      Navigator.pop(context, enteredPassword);
                     }
                   },
-                  child: const Text('Login'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blueAccent,
+                    foregroundColor: Colors.white,
+                    padding: EdgeInsets.symmetric(
+                      horizontal: isWeb ? 20 : 18,
+                      vertical: isWeb ? 12 : 10,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                  child: Text(
+                    'Login',
+                    style: TextStyle(
+                      fontSize: isWeb ? 14 : 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                 ),
               ],
             ),

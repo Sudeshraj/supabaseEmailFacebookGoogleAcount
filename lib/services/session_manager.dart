@@ -6,7 +6,6 @@ class SessionManager {
   static const String _keyProfiles = 'saved_profiles';
   static const String _currentUserKey = 'current_user';
   static const String _showContinueKey = 'show_continue_screen';
-  static const String _supabaseSessionKey = 'supabase_session';
   static const String _supabaseRefreshKey = 'supabase_refresh';
   
   static late SharedPreferences _prefs;
@@ -258,7 +257,7 @@ class SessionManager {
     }
   }
 
-  // Logout (clear session but keep profile)
+  // ✅ LOGOUT WITH CONTINUE SCREEN - Keep profile
   static Future<void> logoutForContinue() async {
     try {
       // Save current user email before logout
@@ -364,4 +363,45 @@ class SessionManager {
       return false;
     }
   }
+
+  // ✅ Get most recent user based on lastLogin time
+static Future<Map<String, dynamic>?> getMostRecentUser() async {
+  try {
+    final profiles = await getProfiles();
+    if (profiles.isEmpty) return null;
+    
+    // Sort by lastLogin time (most recent first)
+    profiles.sort((a, b) {
+      final aTime = DateTime.tryParse(a['lastLogin'] ?? '') ?? DateTime(1970);
+      final bTime = DateTime.tryParse(b['lastLogin'] ?? '') ?? DateTime(1970);
+      return bTime.compareTo(aTime); // Descending order
+    });
+    
+    return profiles.first;
+  } catch (e) {
+    print('❌ Error getting most recent user: $e');
+    return null;
+  }
 }
+
+  /// -------------------------------------------------------
+  /// 🔹 SharedPreferences helper (for custom use)
+  /// -------------------------------------------------------
+  static Future<SharedPreferences> getPrefs() async {
+    return await SharedPreferences.getInstance();
+  }
+
+  // ✅ Get last added user (original functionality)
+static Future<Map<String, dynamic>?> getLastUser() async {
+  try {
+    final profiles = await getProfiles();
+    if (profiles.isEmpty) return null;
+    return profiles.last; // Last in the list
+  } catch (e) {
+    print('❌ Error getting last user: $e');
+    return null;
+  }
+}
+
+}
+

@@ -44,57 +44,57 @@ late final AppState appState;
 class AppState extends ChangeNotifier {
   bool _loading = true;
   bool get loading => _loading;
-  
+
   set loading(bool value) {
     if (_loading != value) {
       _loading = value;
       notifyListeners();
     }
   }
-  
+
   bool _loggedIn = false;
   bool get loggedIn => _loggedIn;
-  
+
   set loggedIn(bool value) {
     if (_loggedIn != value) {
       _loggedIn = value;
       notifyListeners();
     }
   }
-  
+
   bool _emailVerified = false;
   bool get emailVerified => _emailVerified;
-  
+
   set emailVerified(bool value) {
     if (_emailVerified != value) {
       _emailVerified = value;
       notifyListeners();
     }
   }
-  
+
   bool _profileCompleted = false;
   bool get profileCompleted => _profileCompleted;
-  
+
   set profileCompleted(bool value) {
     if (_profileCompleted != value) {
       _profileCompleted = value;
       notifyListeners();
     }
   }
-  
+
   bool _hasLocalProfile = false;
   bool get hasLocalProfile => _hasLocalProfile;
-  
+
   set hasLocalProfile(bool value) {
     if (_hasLocalProfile != value) {
       _hasLocalProfile = value;
       notifyListeners();
     }
   }
-  
+
   String? _role;
   String? get role => _role;
-  
+
   set role(String? value) {
     if (_role != value) {
       _role = value;
@@ -103,45 +103,48 @@ class AppState extends ChangeNotifier {
   }
 
   // ✅ Auto login from continue screen
+  // 📍 USE: main() method එකේ පමණක්
+  // 📍 CALLED: ✅ Yes (in main())
   Future<void> restoreWithAutoLogin() async {
     loading = true;
-    
+
     print('🔄 Starting restoreWithAutoLogin...');
 
     try {
       // 1️⃣ Check for saved profiles
       hasLocalProfile = await SessionManager.hasProfile();
-      
+
       if (hasLocalProfile) {
         print('🔄 Found saved profiles, checking auto login...');
-        
+
         // Get most recent profile
         final recentProfile = await SessionManager.getMostRecentProfile();
         if (recentProfile != null && recentProfile.isNotEmpty) {
           final email = recentProfile['email'] as String?;
-          
+
           if (email != null) {
             // Check if Supabase has valid session
-            final hasValidSession = await SessionManager.hasValidSupabaseSession(email);
-            
+            final hasValidSession =
+                await SessionManager.hasValidSupabaseSession(email);
+
             if (hasValidSession) {
               print('✅ Valid Supabase session found for: $email');
-              
+
               // Restore app state
               await restore();
-              
+
               loading = false;
               return;
             } else {
               // Try auto login with refresh token
               final autoLoginSuccess = await SessionManager.tryAutoLogin(email);
-              
+
               if (autoLoginSuccess) {
                 print('✅ Auto login successful via refresh token');
-                
+
                 // Restore app state
                 await restore();
-                
+
                 loading = false;
                 return;
               }
@@ -153,7 +156,6 @@ class AppState extends ChangeNotifier {
       // 2️⃣ Fallback to normal restore
       print('🔍 No auto login available, using normal restore');
       await restore();
-      
     } catch (e) {
       print('❌ Auto login failed: $e');
       // Fall back to normal restore
@@ -165,6 +167,8 @@ class AppState extends ChangeNotifier {
   }
 
   // ✅ Helper method to get user profile
+    // 📍 USE: Internal use only (by restore())
+    // 📍 CALLED: ✅ Yes (by restore())
   Future<Map<String, dynamic>?> _getUserProfile(String userId) async {
     try {
       final supabase = Supabase.instance.client;
@@ -173,7 +177,7 @@ class AppState extends ChangeNotifier {
           .select('role, roles')
           .eq('id', userId)
           .maybeSingle();
-      
+
       return response;
     } catch (e) {
       print('❌ Error getting profile: $e');
@@ -181,6 +185,8 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  // 📍 USE: Anywhere after login/logout
+  // 📍 CALLED: ✅ Yes (by restoreWithAutoLogin(), router)
   Future<void> restore() async {
     loading = true;
     print('🔄 Starting restore...');
@@ -210,7 +216,7 @@ class AppState extends ChangeNotifier {
           userId: user.id,
           name: user.userMetadata?['full_name'],
         );
-        
+
         // Get profile from database
         final profile = await _getUserProfile(user.id);
 
@@ -219,7 +225,7 @@ class AppState extends ChangeNotifier {
         if (profileCompleted) {
           // Get role from SessionManager or database
           role = await SessionManager.getUserRole();
-          
+
           if (role == null) {
             role = AuthGate.pickRole(profile?['role'] ?? profile?['roles']);
             if (role != null) {
@@ -227,7 +233,7 @@ class AppState extends ChangeNotifier {
             }
           }
         }
-        
+
         print('   - Profile completed: $profileCompleted');
         print('   - Role: $role');
       } else {
@@ -247,12 +253,14 @@ class AppState extends ChangeNotifier {
       print('✅ Restore completed');
     }
   }
-  
+
   // ✅ Logout and prepare for continue screen
+  // 📍 USE: ContinueScreen වලදී
+  // 📍 CALLED: ❌ NO (not implemented anywhere)
   Future<void> logoutForContinueScreen() async {
     final supabase = Supabase.instance.client;
     final user = supabase.auth.currentUser;
-    
+
     if (user != null) {
       // Save user info for continue screen before logout
       await SessionManager.saveUserProfile(
@@ -261,44 +269,45 @@ class AppState extends ChangeNotifier {
         name: user.userMetadata?['full_name'] ?? user.email?.split('@').first,
       );
     }
-    
+
     await supabase.auth.signOut();
-    
+
     // Update app state
     loggedIn = false;
     emailVerified = false;
     profileCompleted = false;
     role = null;
-    
+
     print('✅ Logged out, profile saved for continue screen');
   }
-  
+
   // ✅ Direct auto login for a specific email
+  // 📍 USE: ContinueScreen වලදී
+  // 📍 CALLED: ❌ NO (not implemented anywhere)
   Future<bool> tryAutoLogin(String email) async {
     try {
       loading = true;
-      
+
       // Get profile to check if user exists
       final profile = await SessionManager.getProfileByEmail(email);
       if (profile == null) {
         print('❌ No profile found for: $email');
         return false;
       }
-      
+
       // Check if Supabase has a valid session
       final supabase = Supabase.instance.client;
       final session = supabase.auth.currentSession;
-      
+
       if (session != null && supabase.auth.currentUser?.email == email) {
         // User already logged in
         await restore();
         return true;
       }
-      
+
       // If no session, auto login not possible
       print('❌ No active session for: $email');
       return false;
-      
     } catch (e) {
       print('❌ Try auto login error: $e');
       return false;
@@ -336,7 +345,7 @@ Future<void> main() async {
     // Initialize Environment Manager FIRST
     final env = EnvironmentManager();
     await env.init(flavor: 'development'); // or 'production'
-    
+
     // Validate environment
     try {
       env.validate();
@@ -345,7 +354,7 @@ Future<void> main() async {
       print('💡 Please check your .env file');
       return;
     }
-    
+
     // Print environment info
     if (env.debugMode) {
       env.printInfo();
@@ -358,7 +367,7 @@ Future<void> main() async {
 
     // ✅ CORRECT: Initialize Supabase 2.12.0
     print('🔄 Initializing Supabase 2.12.0...');
-    
+
     // Configure Supabase
     await Supabase.initialize(
       url: env.supabaseUrl,
@@ -366,7 +375,7 @@ Future<void> main() async {
       // authOptions is optional in 2.12.0
       // Session persistence is enabled by default
     );
-    
+
     print('✅ Supabase initialized');
 
     // ✅ IMPORTANT: Check if session persistence is working
@@ -375,7 +384,9 @@ Future<void> main() async {
     print('   - URL: ${env.supabaseUrl.substring(0, 30)}...');
     print('   - Has session: ${supabase.auth.currentSession != null}');
     print('   - Current user: ${supabase.auth.currentUser?.email ?? "None"}');
-    print('   - Session expires at: ${supabase.auth.currentSession?.expiresAt}');
+    print(
+      '   - Session expires at: ${supabase.auth.currentSession?.expiresAt}',
+    );
 
     // Initialize SessionManager
     await SessionManager.init();
@@ -397,7 +408,7 @@ Future<void> main() async {
     // Initialize app state and router
     appState = AppState();
     router = createRouter(appState);
-    
+
     // Now restore app state
     await appState.restoreWithAutoLogin();
     print('✅ App state restored');
@@ -407,12 +418,11 @@ Future<void> main() async {
 
     // Run the app
     runApp(MyApp(env: env));
-    
   } catch (e, stackTrace) {
     print('❌❌❌ CRITICAL INITIALIZATION ERROR ❌❌❌');
     print('Error: $e');
     print('Stack trace: $stackTrace');
-    
+
     // Show error screen
     runApp(
       MaterialApp(
@@ -463,7 +473,7 @@ GoRouter createRouter(AppState state) {
     initialLocation: '/',
     redirect: (context, s) async {
       final path = s.matchedLocation;
-      
+
       print('🔄 Router redirect called:');
       print('   - Path: $path');
       print('   - State loading: ${state.loading}');
@@ -479,30 +489,31 @@ GoRouter createRouter(AppState state) {
       }
 
       // ✅ FIX: Check if should show continue screen FIRST
-      // if (!state.loggedIn) {
-      //   print('   ➡️ User not logged in, checking for continue screen...');
-        
-      //   final shouldShowContinue = await SessionManager.shouldShowContinueScreen();
-      //   final hasProfiles = await SessionManager.hasProfile();
-        
-      //   print('   ➡️ Should show continue: $shouldShowContinue');
-      //   print('   ➡️ Has profiles: $hasProfiles');
-        
-      //   // If we have profiles and should show continue, go to continue screen
-      //   if (shouldShowContinue && hasProfiles) {
-      //     if (path != '/continue') {
-      //       print('   ➡️ Redirecting to continue screen...');
-      //       return '/continue';
-      //     }
-      //     print('   ➡️ Already at continue screen');
-      //     return null;
-      //   }
-      // }
+      if (!state.loggedIn) {
+        print('   ➡️ User not logged in, checking for continue screen...');
+
+        final shouldShowContinue =
+            await SessionManager.shouldShowContinueScreen();
+        final hasProfiles = await SessionManager.hasProfile();
+
+        print('   ➡️ Should show continue: $shouldShowContinue');
+        print('   ➡️ Has profiles: $hasProfiles');
+
+        // If we have profiles and should show continue, go to continue screen
+        if (shouldShowContinue && hasProfiles) {
+          if (path == '/continue') {
+            print('   ➡️ Redirecting to continue screen...');
+            return '/continue';
+          }
+          print('   ➡️ Already at continue screen');
+          return null;
+        }
+      }
 
       // ❌ NOT LOGGED IN
       if (!state.loggedIn) {
         print('   ➡️ User not logged in and no continue screen needed');
-        
+
         // Routes allowed without login
         const publicRoutes = {
           // '/',
@@ -521,9 +532,9 @@ GoRouter createRouter(AppState state) {
 
         // Otherwise → login
         print('   ➡️ Redirecting to login');
-        // return '/login';
+        return '/login';
       }
-    
+
       // ❌ EMAIL NOT VERIFIED
       if (!state.emailVerified) {
         print('   ➡️ Email not verified');
@@ -563,10 +574,7 @@ GoRouter createRouter(AppState state) {
         path: '/verify-invalid',
         builder: (_, __) => const VerifyInvalidScreen(),
       ),
-      GoRoute(
-        path: '/continue', 
-        builder: (_, __) => const ContinueScreen(),
-      ),
+      GoRoute(path: '/continue', builder: (_, __) => const ContinueScreen()),
       GoRoute(path: '/customer', builder: (_, __) => const CustomerHome()),
       GoRoute(path: '/employee', builder: (_, __) => const EmployeeDashboard()),
       GoRoute(path: '/owner', builder: (_, __) => const OwnerDashboard()),
@@ -579,9 +587,9 @@ GoRouter createRouter(AppState state) {
 /// --------------------------------------------------
 class MyApp extends StatefulWidget {
   final EnvironmentManager env;
-  
+
   const MyApp({super.key, required this.env});
-  
+
   @override
   State<MyApp> createState() => _MyAppState();
 }
