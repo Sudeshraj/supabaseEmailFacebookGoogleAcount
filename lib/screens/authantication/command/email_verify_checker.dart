@@ -1,10 +1,11 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../services/session_manager.dart';
 import '../functions/open_email.dart';
+import 'package:flutter_application_1/services/session_manager.dart';
 
 class EmailVerifyChecker extends StatefulWidget {
   const EmailVerifyChecker({super.key});
@@ -60,7 +61,7 @@ class _EmailVerifyCheckerState extends State<EmailVerifyChecker>
   // RESTORE COOLDOWN
   // ------------------------------------------------------------
   Future<void> _restoreCooldown() async {
-    final prefs = await SessionManager.getPrefs();
+    final prefs = await SharedPreferences.getInstance();
     final lastSent = prefs.getInt('lastVerificationSent') ?? 0;
 
     if (lastSent == 0) return;
@@ -82,10 +83,17 @@ class _EmailVerifyCheckerState extends State<EmailVerifyChecker>
     final user = supabase.auth.currentUser;
     if (user?.email != null) return user!.email;
 
-    final local = await SessionManager.getLastUser();
-    if (local != null && local['email'] != null) {
-      return local['email'];
+    // Try to get from SessionManager
+    final recentUser = await SessionManager.getMostRecentUser();
+    if (recentUser != null && recentUser['email'] != null) {
+      return recentUser['email'] as String?;
     }
+    
+    final lastUser = await SessionManager.getLastUser();
+    if (lastUser != null && lastUser['email'] != null) {
+      return lastUser['email'] as String?;
+    }
+    
     return null;
   }
 
@@ -130,7 +138,7 @@ class _EmailVerifyCheckerState extends State<EmailVerifyChecker>
       return;
     }
 
-    final prefs = await SessionManager.getPrefs();
+    final prefs = await SharedPreferences.getInstance();
     final now = DateTime.now().millisecondsSinceEpoch;
 
     try {
@@ -151,12 +159,43 @@ class _EmailVerifyCheckerState extends State<EmailVerifyChecker>
   }
 
   // ------------------------------------------------------------
-  // LOGOUT
+  // LOGOUT - FIXED WITH MOUNTED CHECK
   // ------------------------------------------------------------
   Future<void> logout() async {
-    // await supabase.auth.signOut();
+    try {
+      // Clear any saved verification timer
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('lastVerificationSent');
+      
+      // Logout but keep profile for continue screen
+      await SessionManager.logoutForContinue();
+      
+      // Check if widget is still mounted before using context
+      if (!mounted) return;
+      
+      // Navigate to home
+      context.go('/');
+    } catch (e) {
+      print('❌ Logout error: $e');
+      
+      // Check if widget is still mounted before using context
+      if (!mounted) return;
+      
+      // Navigate to home even on error
+      context.go('/');
+    }
+  }
+
+  // ------------------------------------------------------------
+  // OPEN EMAIL APP - FIXED WITH MOUNTED CHECK
+  // ------------------------------------------------------------
+  Future<void> _openEmailApp() async {
+    final email = await _resolveEmail();
+    
+    // Check if widget is still mounted before using context
     if (!mounted) return;
-    context.go('/login');
+    
+    openEmailApp(context, email);
   }
 
   // ------------------------------------------------------------
@@ -204,7 +243,9 @@ class _EmailVerifyCheckerState extends State<EmailVerifyChecker>
                             size: 22,
                           ),
                           onPressed: () {
-                            context.go('/signin');
+                            if (mounted) {
+                              context.go('/login');
+                            }
                           },
                         ),
                       ),
@@ -228,10 +269,43 @@ class _EmailVerifyCheckerState extends State<EmailVerifyChecker>
                               ),
                             ),
                             const SizedBox(height: 12),
-                            const Text(
-                              "We’ve sent a verification link to your email.\nOpen it to continue.",
-                              textAlign: TextAlign.center,
-                              style: TextStyle(color: Colors.white70),
+                            FutureBuilder<String?>(
+                              future: _resolveEmail(),
+                              builder: (context, snapshot) {
+                                String emailText = 'your email';
+                                if (snapshot.hasData && snapshot.data != null) {
+                                  emailText = snapshot.data!;
+                                }
+                                
+                                return Column(
+                                  children: [
+                                    Text(
+                                      "We've sent a verification link to:",
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        color: Colors.white.withValues(alpha: 0.8),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      emailText,
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(
+                                        color: Colors.blueAccent,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      "Open it to continue.",
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        color: Colors.white.withValues(alpha: 0.7),
+                                      ),
+                                    ),
+                                  ],
+                                );
+                              },
                             ),
                             const SizedBox(height: 24),
                             Row(
@@ -267,18 +341,15 @@ class _EmailVerifyCheckerState extends State<EmailVerifyChecker>
                             _outlineButton(
                               text: "Open Email App",
                               icon: Icons.open_in_new,
-                              onPressed: () => openEmailApp(
-                                context,
-                                supabase.auth.currentUser?.email,
-                              ),
+                              onPressed: () => _openEmailApp(),
                             ),
                             const SizedBox(height: 12),
 
                             _outlineButton(
-                              text: "Verify Later",
+                              text: "Logout",
                               icon: Icons.logout,
                               color: Colors.redAccent,
-                              onPressed: logout,
+                              onPressed: () => logout(),
                             ),
                           ],
                         ),
