@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_application_1/main.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_application_1/screens/authantication/functions/loading_overlay.dart';
@@ -9,7 +10,7 @@ import 'package:flutter_application_1/services/session_manager.dart'; // ✅ Imp
 
 class SaveUser {
   final SupabaseClient supabase = Supabase.instance.client;
-  
+
   // =========================================================================================
   // REGISTER NEW USER WITH ROLE (FULL FLOW)
 
@@ -33,7 +34,7 @@ class SaveUser {
       if (user != null && user.identities != null && user.identities!.isEmpty) {
         // 🔴 Already existing user
         if (!context.mounted) return;
-
+        LoadingOverlay.hide();
         await showCustomAlert(
           context,
           title: "Account already exists",
@@ -42,7 +43,7 @@ class SaveUser {
         );
       } else {
         // 🟢 New user
-        
+
         // ✅ SAVE USER PROFILE TO SESSION MANAGER
         if (user != null) {
           await SessionManager.saveUserProfile(
@@ -50,10 +51,10 @@ class SaveUser {
             userId: user.id,
             name: email.split('@').first, // Default name
           );
-          
+
           print('✅ Profile saved for new user: $email');
         }
-        
+
         // 3️⃣ Save locally (Optional - if you still need this)
         // await SessionManagerto.saveEmailAndPassword(
         //   email: email,
@@ -61,7 +62,7 @@ class SaveUser {
         // );
 
         LoadingOverlay.hide();
-
+        appState.refreshState();
         if (!context.mounted) return;
 
         // 4️⃣ Navigate (GoRouter-safe)
@@ -93,7 +94,7 @@ class SaveUser {
       );
     }
   }
-  
+
   // ✅ OPTIONAL: Add this method for login flow too
   Future<void> loginUser(
     BuildContext context, {
@@ -101,13 +102,13 @@ class SaveUser {
     required String password,
   }) async {
     LoadingOverlay.show(context, message: "Logging in...");
-    
+
     try {
       final res = await supabase.auth.signInWithPassword(
         email: email,
         password: password,
       );
-      
+
       final user = res.user;
       if (user != null) {
         // ✅ SAVE USER PROFILE TO SESSION MANAGER
@@ -116,25 +117,25 @@ class SaveUser {
           userId: user.id,
           name: user.userMetadata?['full_name'] ?? email.split('@').first,
         );
-        
+
         print('✅ Profile saved for logged in user: $email');
-        
+
         LoadingOverlay.hide();
-        
+
         if (!context.mounted) return;
-        
+
         // Navigate to verify email or home based on state
         if (user.emailConfirmedAt == null) {
           context.go('/verify-email');
         } else {
           // AppState will handle redirection based on role
-          context.go('/customer'); // Temporary, router will redirect
+          context.go('/'); // Temporary, router will redirect
         }
       }
     } on AuthException catch (e) {
       LoadingOverlay.hide();
       if (!context.mounted) return;
-      
+
       await showCustomAlert(
         context,
         title: "Login Failed",
@@ -144,7 +145,7 @@ class SaveUser {
     } catch (e) {
       LoadingOverlay.hide();
       if (!context.mounted) return;
-      
+
       await showCustomAlert(
         context,
         title: "Login Failed",

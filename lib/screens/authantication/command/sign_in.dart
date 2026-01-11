@@ -130,7 +130,8 @@ class _SignInScreenState extends State<SignInScreen>
 
       // 3️⃣ PROFILE NOT CREATED IN DATABASE → router will redirect to /reg
       if (profile == null) {
-        await appState.restore();
+        // await appState.restore();
+         appState.refreshState();
         if (!mounted) return;
         context.go('/'); // 🔥 let main.dart decide
         return;
@@ -176,7 +177,8 @@ class _SignInScreenState extends State<SignInScreen>
       print('✅ Role saved: $role');
 
       // 7️⃣ UPDATE APP STATE AND NAVIGATE
-      await appState.restore();
+      // await appState.restore();
+       appState.refreshState();
       if (!mounted) return;
 
       // Let router handle the redirection based on role
@@ -208,7 +210,8 @@ class _SignInScreenState extends State<SignInScreen>
               name: email.split('@').first,
             );
           }
-          await appState.restore();
+          // await appState.restore();
+           appState.refreshState();
           if (!mounted) return;
           context.go('/'); // 🔥 router → /verify-email
           break;
@@ -262,7 +265,8 @@ class _SignInScreenState extends State<SignInScreen>
 
       if (success) {
         // Auto login successful
-        await appState.restore();
+        // await appState.restore();
+         appState.refreshState();
         if (!mounted) return;
         context.go('/'); // Router will handle redirection
       } else {

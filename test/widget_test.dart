@@ -11,7 +11,7 @@ void main() {
     await env.init(flavor: 'test'); // or 'development'
     
     // Build our app and trigger a frame.
-    await tester.pumpWidget(MyApp(env: env)); // Pass env here
+    await tester.pumpWidget(MyApp()); // Pass env here
 
     // Verify that our counter starts at 0.
     expect(find.text('0'), findsOneWidget);
