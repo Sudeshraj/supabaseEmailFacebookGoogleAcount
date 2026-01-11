@@ -115,7 +115,8 @@ class _ContinueScreenState extends State<ContinueScreen> {
           break;
 
         case 'email_not_confirmed':
-          await appState.restore();
+          // await appState.restore();
+          appState.refreshState();
           if (!mounted) return;
           context.go('/verify-email'); // 🔥 router → /verify-email
           break;
