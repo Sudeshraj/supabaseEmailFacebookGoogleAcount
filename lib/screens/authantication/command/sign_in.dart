@@ -122,13 +122,16 @@ class _SignInScreenState extends State<SignInScreen>
       print('✅ Profile saved to SessionManager: ${user.email}');
 
       // 2️⃣ FETCH PROFILE FROM DATABASE (FOR VALIDATION AND ROLE)
-      final profile = await supabase
+      // try { 
+        
+        final profile = await supabase
           .from('profiles')
-          .select('id, role, roles, is_blocked, is_active')
+          .select('*')
           .eq('id', user.id)
           .maybeSingle();
 
-      // 3️⃣ PROFILE NOT CREATED IN DATABASE → router will redirect to /reg
+            // 3️⃣ PROFILE NOT CREATED IN DATABASE → router will redirect to /reg
+            print('✅ Profile fetched: $profile');
       if (profile == null) {
         // await appState.restore();
          appState.refreshState();
@@ -146,7 +149,7 @@ class _SignInScreenState extends State<SignInScreen>
         if (!mounted) return;
 
         await showCustomAlert(
-          context,
+          context: context,
           title: "Account Blocked 🚫",
           message: "Your account has been blocked. Please contact support.",
           isError: true,
@@ -163,7 +166,7 @@ class _SignInScreenState extends State<SignInScreen>
         if (!mounted) return;
 
         await showCustomAlert(
-          context,
+         context: context,
           title: "Account Inactive ⚠️",
           message: "Your account is deactivated.",
           isError: true,
@@ -183,6 +186,13 @@ class _SignInScreenState extends State<SignInScreen>
 
       // Let router handle the redirection based on role
       context.go('/'); // Router will redirect to appropriate screen
+
+      // }catch (_) {
+      //     appState.refreshState();
+      //   if (!mounted) return;
+      //   context.go('/');
+      // }
+        
     }
     // 🔐 AUTH ERRORS HANDLING
     on AuthException catch (e) {
@@ -191,7 +201,7 @@ class _SignInScreenState extends State<SignInScreen>
       switch (e.code) {
         case 'invalid_login_credentials':
           await showCustomAlert(
-            context,
+           context: context,
             title: "Login Failed ❌",
             message: "Email or password is incorrect.",
             isError: true,
@@ -218,7 +228,7 @@ class _SignInScreenState extends State<SignInScreen>
 
         case 'too_many_requests':
           await showCustomAlert(
-            context,
+           context: context,
             title: "Too Many Attempts ⏳",
             message: "Please wait a few minutes and try again.",
             isError: true,
@@ -232,7 +242,7 @@ class _SignInScreenState extends State<SignInScreen>
 
         default:
           await showCustomAlert(
-            context,
+            context: context,
             title: "Login Error ❌",
             message: e.message,
             isError: true,
@@ -243,7 +253,7 @@ class _SignInScreenState extends State<SignInScreen>
     catch (e) {
       if (!mounted) return;
       await showCustomAlert(
-        context,
+       context: context,
         title: "Unexpected Error",
         message: e.toString(),
         isError: true,

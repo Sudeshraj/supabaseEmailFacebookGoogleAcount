@@ -162,7 +162,7 @@ class SaveUser {
       }
 
       await showCustomAlert(
-        context,
+       context: context,
         title: "Registration Failed",
         message: e.message,
         isError: true,
@@ -174,7 +174,7 @@ class SaveUser {
       if (!context.mounted) return;
 
       await showCustomAlert(
-        context,
+       context: context,
         title: "Registration Failed",
         message: e.toString(),
         isError: true,
@@ -240,7 +240,7 @@ class SaveUser {
     } catch (e) {
       LoadingOverlay.hide();
       await showCustomAlert(
-        context,
+       context: context,
         title: "Error",
         message: e.toString(),
         isError: true,
@@ -284,7 +284,7 @@ class SaveUser {
     } catch (_) {
       if (!context.mounted) return;
       await showCustomAlert(
-        context,
+       context: context,
         title: "Email Already Registered",
         message: "Wrong password. Use Forgot Password.",
         isError: true,
@@ -361,7 +361,7 @@ class SaveUser {
             final dialogCtx = nav.overlay!.context;
 
             await showCustomAlert(
-              dialogCtx,
+              context: dialogCtx,
               title: "Delete Account?",
               message: "Are you sure you want to delete this profile?",
               isError: true,

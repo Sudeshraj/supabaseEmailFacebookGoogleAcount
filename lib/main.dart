@@ -183,8 +183,8 @@ GoRouter _createRouter() {
         // Once loading is complete, redirect based on app state
         if (appState.loggedIn) {
           if (!appState.emailVerified) return '/verify-email';
-          if (appState.profileCompleted) return '/reg';
-print(appState.profileCompleted);
+          if (!appState.profileCompleted) return '/reg';
+          print('✅ Profile completed: ${appState.profileCompleted}');
           // Role-based routing from splash
           switch (appState.role) {
             case 'business':

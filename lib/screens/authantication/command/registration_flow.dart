@@ -138,7 +138,7 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
   Future<void> _handleRegistration() async {
     if (email == null || password == null || roles.isEmpty) {
       await showCustomAlert(
-        context,
+        context: context,
         title: "Incomplete Info",
         message: "Please complete all fields before signing up.",
         isError: true,
@@ -174,7 +174,7 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
       if (nav == null) return;
       final dialogCtx = nav.overlay!.context;
       await showCustomAlert(
-        dialogCtx,
+        context: dialogCtx,
         title: "Registration Failed",
         message: e.toString(),
         isError: true,
