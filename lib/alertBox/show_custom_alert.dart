@@ -1,184 +1,303 @@
 import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:url_launcher/url_launcher_string.dart';
 
-// login, verified email alert
-Future<void> showCustomAlert(
-  BuildContext context, {
+// ========================================================================
+// CUSTOM ALERT DIALOG (Production Ready)
+// ========================================================================
+
+/// Shows a custom alert dialog with optional actions
+Future<void> showCustomAlert({
+  required BuildContext context,
   required String title,
   required String message,
   bool isError = false,
   String buttonText = "OK",
   VoidCallback? onOk,
   VoidCallback? onClose,
-
-  // 🔥 REMOVED FEATURE: showEmailButton, userEmail
+  List<Widget>? customActions,
 }) async {
-  final screenWidth = MediaQuery.of(context).size.width;
-  final isWeb = screenWidth > 600;
+  // Prevent multiple dialogs
+  if (ModalRoute.of(context)?.isCurrent != true) return;
 
   await showDialog(
     context: context,
     barrierDismissible: false,
+    barrierColor: Colors.black54,
     builder: (context) {
-      return Center(
-        child: ConstrainedBox(
-          constraints: BoxConstraints(maxWidth: isWeb ? 420 : double.infinity),
-          child: Dialog(
-            backgroundColor: const Color(0xFF121A24),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(18),
-            ),
-            child: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 24, 24, 20),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Icon(
-                        isError
-                            ? Icons.error_outline
-                            : Icons.check_circle_outline,
-                        color: isError
-                            ? Colors.redAccent
-                            : const Color(0xFF4CAF50),
-                        size: 56,
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        title,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        message,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          fontSize: 15,
-                          color: Colors.white70,
-                          height: 1.4,
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-
-                      // 🔥 ONLY ONE BUTTON NOW (OK)
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: isError
-                                ? Colors.redAccent
-                                : const Color(0xFF1877F3),
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                          ),
-                          onPressed: () {
-                            Navigator.of(context).pop();
-                            if (onOk != null) onOk();
-                          },
-                          child: Text(
-                            buttonText,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                // CLOSE ICON (top corner)
-                Positioned(
-                  right: -6,
-                  top: -6,
-                  child: GestureDetector(
-                    onTap: () {
-                      Navigator.of(context).pop();
-                      if (onClose != null) onClose();
-                    },
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: Colors.redAccent.withValues(alpha: 0.9),
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.redAccent.withValues(alpha: 0.3),
-                            blurRadius: 6,
-                            offset: const Offset(0, 3),
-                          ),
-                        ],
-                      ),
-                      padding: const EdgeInsets.all(6),
-                      child: const Icon(
-                        Icons.close_rounded,
-                        color: Colors.white,
-                        size: 20,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
+      return _CustomAlertDialog(
+        title: title,
+        message: message,
+        isError: isError,
+        buttonText: buttonText,
+        onOk: onOk,
+        onClose: onClose,
+        customActions: customActions,
       );
     },
   );
 }
 
-Future<void> openEmailApp(BuildContext context, String? userEmail) async {
+// ========================================================================
+// CUSTOM ALERT DIALOG WIDGET
+// ========================================================================
+
+class _CustomAlertDialog extends StatelessWidget {
+  final String title;
+  final String message;
+  final bool isError;
+  final String buttonText;
+  final VoidCallback? onOk;
+  final VoidCallback? onClose;
+  final List<Widget>? customActions;
+
+  const _CustomAlertDialog({
+    required this.title,
+    required this.message,
+    required this.isError,
+    required this.buttonText,
+    this.onOk,
+    this.onClose,
+    this.customActions,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isLargeScreen = screenWidth > 600;
+
+    // Colors based on theme and error state
+    final backgroundColor = isDark ? const Color(0xFF1E1E1E) : Colors.white;
+    final titleColor = isDark ? Colors.white : Colors.black87;
+    final messageColor = isDark ? Colors.white70 : Colors.black54;
+    final primaryColor = isError 
+        ? theme.colorScheme.error 
+        : theme.primaryColor;
+    final iconColor = isError 
+        ? theme.colorScheme.error 
+        : theme.colorScheme.primary;
+
+    return Center(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: isLargeScreen ? 420 : screenWidth * 0.9,
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: IntrinsicWidth(
+            child: IntrinsicHeight(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: backgroundColor,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.2),
+                      blurRadius: 20,
+                      offset: const Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    // Main content
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(24, 32, 24, 20),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          // Icon
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: primaryColor.withOpacity(0.1),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              isError 
+                                  ? Icons.error_outline 
+                                  : Icons.check_circle_outline,
+                              color: iconColor,
+                              size: 36,
+                            ),
+                          ),
+                          const SizedBox(height: 20),
+
+                          // Title
+                          Text(
+                            title,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w600,
+                              color: titleColor,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+
+                          // Message
+                          Flexible(
+                            child: SingleChildScrollView(
+                              physics: const BouncingScrollPhysics(),
+                              child: Text(
+                                message,
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  color: messageColor,
+                                  height: 1.5,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+
+                          // Actions
+                          if (customActions != null) ...[
+                            ...customActions!,
+                          ] else ...[
+                            // Default OK button
+                            SizedBox(
+                              width: double.infinity,
+                              child: ElevatedButton(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: primaryColor,
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 14,
+                                    horizontal: 32,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  elevation: 0,
+                                ),
+                                onPressed: () {
+                                  Navigator.of(context).pop();
+                                  onOk?.call();
+                                },
+                                child: Text(
+                                  buttonText,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 15,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+
+                    // Close button (only for dialogs without custom actions)
+                    if (customActions == null)
+                      Positioned(
+                        right: 12,
+                        top: 12,
+                        child: GestureDetector(
+                          onTap: () {
+                            Navigator.of(context).pop();
+                            onClose?.call();
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.all(4),
+                            decoration: BoxDecoration(
+                              color: Colors.black12,
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              Icons.close,
+                              size: 18,
+                              color: titleColor.withOpacity(0.6),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ========================================================================
+// EMAIL APP UTILITY
+// ========================================================================
+
+/// Opens the user's email app based on their email domain
+Future<void> openEmailApp(BuildContext context, [String? userEmail]) async {
   try {
-    Uri? emailUri;
+    String emailUrl;
 
     if (kIsWeb) {
-      final domain = userEmail?.split('@').last.toLowerCase() ?? '';
-      if (domain.contains('gmail')) {
-        emailUri = Uri.parse('https://mail.google.com/mail/u/0/#inbox');
-      } else if (domain.contains('yahoo')) {
-        emailUri = Uri.parse('https://mail.yahoo.com/');
-      } else if (domain.contains('outlook') ||
-          domain.contains('hotmail') ||
-          domain.contains('live')) {
-        emailUri = Uri.parse('https://outlook.live.com/mail/inbox');
+      // Web platforms
+      final emailDomain = userEmail?.split('@').last.toLowerCase() ?? '';
+      
+      if (emailDomain.contains('gmail')) {
+        emailUrl = 'https://mail.google.com/';
+      } else if (emailDomain.contains('yahoo')) {
+        emailUrl = 'https://mail.yahoo.com/';
+      } else if (emailDomain.contains('outlook') || 
+                 emailDomain.contains('hotmail') || 
+                 emailDomain.contains('live')) {
+        emailUrl = 'https://outlook.live.com/';
       } else {
-        emailUri = Uri.parse('https://mail.google.com/');
+        emailUrl = 'https://mail.google.com/'; // Default fallback
       }
-
-      await launchUrl(emailUri, mode: LaunchMode.platformDefault);
     } else if (Platform.isAndroid || Platform.isIOS) {
-      emailUri = Uri(scheme: 'mailto');
-
-      if (!await canLaunchUrl(emailUri)) {
-        emailUri = Uri.parse('https://mail.google.com/');
-      }
-
-      await launchUrl(emailUri, mode: LaunchMode.externalApplication);
+      // Mobile platforms
+      emailUrl = 'mailto:';
     } else {
-      emailUri = Uri(scheme: 'mailto');
-      await launchUrl(emailUri, mode: LaunchMode.externalApplication);
+      // Desktop platforms
+      emailUrl = 'mailto:';
+    }
+
+    final canLaunch = await canLaunchUrlString(emailUrl);
+    
+    if (canLaunch) {
+      await launchUrlString(
+        emailUrl,
+        mode: LaunchMode.externalApplication,
+      );
+    } else {
+      // Fallback to generic mailto
+      if (!await launchUrlString('mailto:')) {
+        _showEmailAppError(context);
+      }
     }
   } catch (e) {
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Couldn't open your email app. Please open manually."),
-          backgroundColor: Colors.orangeAccent,
-        ),
-      );
-    }
+    _showEmailAppError(context);
   }
+}
+
+void _showEmailAppError(BuildContext context) {
+  // Use a delayed post frame callback to ensure context is valid
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.clearSnackBars();
+    messenger.showSnackBar(
+      SnackBar(
+        content: const Text(
+          'Please check your email app manually',
+          style: TextStyle(color: Colors.white),
+        ),
+        backgroundColor: Colors.orange.shade800,
+        duration: const Duration(seconds: 4),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+        ),
+      ),
+    );
+  });
 }

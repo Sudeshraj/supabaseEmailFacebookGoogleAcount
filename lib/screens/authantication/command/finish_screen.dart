@@ -1,203 +1,166 @@
 import 'package:flutter/material.dart';
 
-class FinishScreen extends StatefulWidget {
-  final Future<void> Function() onSignUp;
+class FinishScreen extends StatelessWidget {
   final PageController controller;
+  final VoidCallback onSignUp;
+  final String? email;
 
   const FinishScreen({
     super.key,
-    required this.onSignUp,
     required this.controller,
+    required this.onSignUp,
+    this.email,
   });
 
   @override
-  State<FinishScreen> createState() => _FinishScreenState();
-}
-
-class _FinishScreenState extends State<FinishScreen>
-    with SingleTickerProviderStateMixin {
-  bool _isLoading = false;
-  String? _errorMessage;
-
-  late AnimationController _animationController;
-  late Animation<double> _fadeAnimation;
-  late Animation<double> _scaleAnimation;
-
-  @override
-  void initState() {
-    super.initState();
-
-    // ⭐ Same animations as CompanyNameScreen
-    _animationController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 600),
-    );
-
-    _fadeAnimation =
-        CurvedAnimation(parent: _animationController, curve: Curves.easeIn);
-
-    _scaleAnimation = Tween<double>(begin: 0.95, end: 1.0).animate(
-      CurvedAnimation(parent: _animationController, curve: Curves.easeOutBack),
-    );
-
-    _animationController.forward();
-  }
-
-  Future<void> _handleSignUp() async {
-    if (_isLoading) return;
-
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
-
-    try {
-      await widget.onSignUp();
-    } catch (e) {
-      setState(() => _errorMessage = e.toString());
-    } finally {
-      setState(() => _isLoading = false);
-    }
-  }
-
-  @override
-  void dispose() {
-    _animationController.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
-    final bool isWeb = size.width > 700;
-    final double maxWidth = isWeb ? 480 : double.infinity;
-
-    return Scaffold(
-      backgroundColor: const Color(0xFF0F1820),
-      body: SafeArea(
-        child: Center(
-          child: FadeTransition(
-            opacity: _fadeAnimation,
-            child: ScaleTransition(
-              scale: _scaleAnimation,
-              child: ConstrainedBox(
-                constraints: BoxConstraints(maxWidth: maxWidth),
-                child: Container(
-                  height: size.height - 40,
-                  margin:
-                      const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.03),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Colors.white12),
+    return Container(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          const SizedBox(height: 40),
+          
+          // Success Icon
+          Container(
+            width: 100,
+            height: 100,
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              Icons.check_circle,
+              size: 60,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+          ),
+          
+          const SizedBox(height: 32),
+          
+          // Title
+          Text(
+            "Ready to Sign Up",
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          
+          const SizedBox(height: 16),
+          
+          // Email preview
+          if (email != null) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.email_outlined,
+                    color: Theme.of(context).colorScheme.primary,
                   ),
-
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // 🔙 Back Arrow same as CompanyNameScreen
-                      IconButton(
-                        icon: const Icon(
-                          Icons.arrow_back_ios_new_rounded,
-                          color: Colors.white,
-                          size: 22,
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          "Email",
+                          style: Theme.of(context).textTheme.labelSmall,
                         ),
-                        onPressed: _isLoading
-                            ? null
-                            : () {
-                                widget.controller.previousPage(
-                                  duration: const Duration(milliseconds: 300),
-                                  curve: Curves.ease,
-                                );
-                              },
-                      ),
-
-                      const SizedBox(height: 10),
-
-                      Expanded(
-                        child: SingleChildScrollView(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                "Finish creating your account",
-                                style: TextStyle(
-                                  fontSize: 26,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white,
-                                ),
-                              ),
-
-                              const SizedBox(height: 10),
-
-                              const Text(
-                                "By tapping Sign Up, you agree to our Terms, Privacy Policy, and Cookies Policy.",
-                                style: TextStyle(
-                                  fontSize: 15,
-                                  color: Colors.white70,
-                                  height: 1.4,
-                                ),
-                              ),
-
-                              const SizedBox(height: 28),
-
-                              SizedBox(
-                                width: double.infinity,
-                                height: 50,
-                                child: ElevatedButton(
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: const Color(0xFF1877F3),
-                                    foregroundColor: Colors.white,
-                                    disabledBackgroundColor: Colors.white12,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(25),
-                                    ),
-                                  ),
-                                  onPressed:
-                                      _isLoading ? null : () => _handleSignUp(),
-                                  child:
-                                  //  _isLoading
-                                  //     ? const SizedBox(
-                                  //         width: 22,
-                                  //         height: 22,
-                                  //         child: CircularProgressIndicator(
-                                  //           strokeWidth: 2,
-                                  //           color: Colors.white,
-                                  //         ),
-                                  //       )
-                                      // :
-                                       const Text(
-                                          "Sign Up",
-                                          style: TextStyle(
-                                            fontSize: 18,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                ),
-                              ),
-
-                              if (_errorMessage != null) ...[
-                                const SizedBox(height: 12),
-                                Text(
-                                  _errorMessage!,
-                                  style: const TextStyle(
-                                    color: Colors.redAccent,
-                                    fontSize: 14,
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
+                        Text(
+                          email!,
+                          style: Theme.of(context).textTheme.bodyMedium,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              "You'll receive a verification email at this address",
+              style: Theme.of(context).textTheme.bodySmall,
+              textAlign: TextAlign.center,
+            ),
+          ],
+          
+          const SizedBox(height: 32),
+          
+          // Terms and Conditions
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Text.rich(
+              TextSpan(
+                text: "By signing up, you agree to our ",
+                style: Theme.of(context).textTheme.bodySmall,
+                children: [
+                  TextSpan(
+                    text: "Terms of Service",
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.primary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const TextSpan(text: " and "),
+                  TextSpan(
+                    text: "Privacy Policy",
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.primary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const TextSpan(text: "."),
+                ],
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ),
+          
+          const Spacer(),
+          
+          // Sign Up Button
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: onSignUp,
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: const Text(
+                "Create Account",
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
             ),
           ),
-        ),
+          
+          const SizedBox(height: 16),
+          
+          // Back Button
+          TextButton(
+            onPressed: () {
+              controller.previousPage(
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeInOut,
+              );
+            },
+            child: const Text("Go Back"),
+          ),
+          
+          const SizedBox(height: 20),
+        ],
       ),
     );
   }

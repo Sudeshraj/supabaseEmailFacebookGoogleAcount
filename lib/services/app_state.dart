@@ -305,7 +305,7 @@ class AppState extends ChangeNotifier {
         //     .maybeSingle();
         final profile = await supabase
             .from('profiles')
-            .select('id')
+            .select('id, is_blocked, is_active')
             .eq('id', user.id)
             .maybeSingle();
 
@@ -327,7 +327,7 @@ class AppState extends ChangeNotifier {
           _setProfileCompleted(true);
         } else {
           _setRole(null);
-          _setProfileCompleted(true);
+          _setProfileCompleted(false);
         }
 
         developer.log(

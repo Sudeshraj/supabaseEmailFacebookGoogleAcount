@@ -106,12 +106,12 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
       switch (e.code) {
         case 'invalid_login_credentials':
-          await showCustomAlert(
-            context,
-            title: "Login Failed ❌",
-            message: "Email or password is incorrect.",
-            isError: true,
-          );
+  await showCustomAlert(
+  context: context,
+  title: "Login Failed ❌",
+  message: "Email or password is incorrect.",
+  isError: true,
+);
           break;
 
         case 'email_not_confirmed':
@@ -123,7 +123,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
         case 'too_many_requests':
           await showCustomAlert(
-            context,
+            context: context,
             title: "Too Many Attempts ⏳",
             message: "Please wait a few minutes and try again.",
             isError: true,
@@ -132,7 +132,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
         default:
           await showCustomAlert(
-            context,
+            context: context,
             title: "Login Error ❌",
             message: e.message,
             isError: true,
@@ -144,7 +144,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
       if (!mounted) return;
 
       await showCustomAlert(
-        context,
+        context: context,
         title: "Connection Error",
         message: "Please check your internet connection.",
         isError: false,
