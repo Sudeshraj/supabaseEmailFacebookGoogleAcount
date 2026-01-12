@@ -1,8 +1,8 @@
 import 'dart:async';
-import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter_application_1/screens/authantication/command/policy_screen.dart';
 // import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -29,8 +29,6 @@ import 'services/session_manager.dart';
 // Utils
 import 'screens/net_disconnect/network_banner.dart';
 import 'screens/net_disconnect/verify_invalid.dart';
-import 'screens/authantication/functions/loading_overlay.dart';
-import 'router/auth_gate.dart';
 
 // ====================
 // GLOBAL VARIABLES
@@ -213,11 +211,21 @@ GoRouter _createRouter() {
 
       // Authentication logic
       if (!appState.loggedIn) {
-        if (path == '/login' || path == '/signup' || path == '/continue' || path == '/verify-email') {
+        if (path == '/login' ||
+            path == '/signup' ||
+            path == '/continue' ||
+            path == '/verify-email' ||
+            path == '/privacy' ||
+            path == '/terms' ||
+            path == '/verify-invalid') {
           return null;
         }
         return '/login';
       }
+
+      // if (path == '/verify-invalid') {
+      //   return null;
+      // }
 
       // Email verification
       if (!appState.emailVerified && path != '/verify-email') {
@@ -225,18 +233,30 @@ GoRouter _createRouter() {
       }
 
       // Profile completion
-      if (!appState.profileCompleted && path != '/reg') {
-        return '/reg';
-      }
+      // if (!appState.profileCompleted && path != '/reg') {
+      //   return '/reg';
+      // }
 
-      // Role-based routing for other paths
-      switch (appState.role) {
-        case 'business':
-          return path == '/owner' ? null : '/owner';
-        case 'employee':
-          return path == '/employee' ? null : '/employee';
-        default:
-          return path == '/customer' ? null : '/customer';
+if (!appState.profileCompleted) {
+   if (path != '/reg') {
+      print('🔐 Redirecting to /reg because profile not completed');
+      return '/reg';
+   }
+   // path == '/reg' නම් null return කරන්න (නැතිනම් infinite loop වෙයි)
+  //  return null; // meka damme naththam pahala thiyena linuth wada karanava
+}
+
+print(  'User Role: ${appState.role}, Profile Completed: ${appState.profileCompleted}');
+      // Role-based routing for other paths | ihata eka block ekkatavath giye naththam metanata enava
+      if (appState.profileCompleted) {
+        switch (appState.role) {
+          case 'business':
+            return path == '/owner' ? null : '/owner';
+          case 'employee':
+            return path == '/employee' ? null : '/employee';
+          default:
+            return path == '/customer' ? null : '/customer';
+        }
       }
     },
     routes: [
@@ -256,6 +276,14 @@ GoRouter _createRouter() {
       GoRoute(path: '/customer', builder: (_, __) => const CustomerHome()),
       GoRoute(path: '/employee', builder: (_, __) => const EmployeeDashboard()),
       GoRoute(path: '/owner', builder: (_, __) => const OwnerDashboard()),
+      GoRoute(
+        path: '/privacy',
+        builder: (context, state) => const PolicyScreen(isPrivacyPolicy: true),
+      ),
+      GoRoute(
+        path: '/terms',
+        builder: (context, state) => const PolicyScreen(isPrivacyPolicy: false),
+      ),
     ],
     errorBuilder: (context, state) => Scaffold(
       body: Center(
@@ -318,12 +346,28 @@ class _MyAppState extends State<MyApp> {
 
   void _handleEmailVerification() {
     final uri = Uri.base;
+
+    print('🔍 Full URL: $uri');
+    print('🔍 Query params: ${uri.queryParameters}');
+    print('🔍 Fragment: ${uri.fragment}');
+    print('🔍 Has fragment: ${uri.hasFragment}');
+
     if (uri.path.contains('verify-email')) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        final errorCode = uri.queryParameters['error_code'];
-        final error = uri.queryParameters['error'];
-        if (errorCode == 'otp_expired' || error == 'access_denied') {
+       
+        String? errorCode = uri.queryParameters['error_code'];
+        String? error = uri.queryParameters['error'];
+
+        if (uri.hasFragment) {        
+          final fragmentParams = Uri.splitQueryString(uri.fragment);
+          errorCode ??= fragmentParams['error_code'];
+          error ??= fragmentParams['error'];
+        }
+
+        if (errorCode == 'otp_expired' || error == 'access_denied') {        
           router.go('/verify-invalid');
+        } else {         
+          router.go('/');
         }
       });
     }
