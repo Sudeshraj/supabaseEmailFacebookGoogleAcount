@@ -1,11 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_application_1/screens/authantication/command/email_screen.dart';
+import 'package:flutter_application_1/services/signup_serivce.dart';
 import 'package:flutter_application_1/screens/authantication/command/finish_screen.dart';
-import 'package:flutter_application_1/screens/authantication/command/password_screen.dart';
-import 'package:flutter_application_1/screens/authantication/services/auth_service.dart'; // Updated import
+import 'package:flutter_application_1/screens/authantication/command/email_password_screen.dart';
 import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
 import 'package:flutter_application_1/screens/authantication/functions/loading_overlay.dart';
-import 'package:flutter_application_1/services/signup_serivce.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class SignupFlow extends StatefulWidget {
@@ -16,8 +14,6 @@ class SignupFlow extends StatefulWidget {
 }
 
 class _SignupFlowState extends State<SignupFlow> {
-  final PageController _controller = PageController();
-
   String? email;
   String? password;
 
@@ -25,45 +21,32 @@ class _SignupFlowState extends State<SignupFlow> {
   final AuthService _authService = AuthService();
 
   @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Theme.of(context).colorScheme.background,
       body: SafeArea(
-        child: PageView(
-          controller: _controller,
-          physics: const NeverScrollableScrollPhysics(),
-          children: [
-            // STEP 2: EMAIL
-            EmailScreen(
-              onNext: (e) {
-                setState(() => email = e);
-                _nextPage();
-              },
-              controller: _controller,
-            ),
-
-            // STEP 3: PASSWORD
-            PasswordScreen(
-              onNext: (p) {
-                setState(() => password = p);
-                _nextPage();
-              },
-              controller: _controller,
-            ),
-
-            // STEP 4: FINISH
-            FinishScreen(
-              controller: _controller,
-              onSignUp: _handleRegistration,
-              email: email,
-            ),
-          ],
+        child: EmailPasswordScreen(
+          initialEmail: email,
+          initialPassword: password,
+          onNext: (newEmail, newPassword) async {
+            print('Navigating to finish screen');
+            print('Email: $newEmail');
+            print('Password: $newPassword');
+            
+            // Direct navigation without using GoRouter extras
+            await Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (context) => FinishScreen(
+                  onSignUp: _handleRegistration,
+                  titleText: 'Ready to Sign Up',
+                  privacyText: 'By signing up, you agree to our Terms and Privacy Policy',
+                  btnText: 'Sign Up',
+                  email: newEmail, // Pass email directly
+                  password: newPassword, // Pass password directly
+                ),
+              ),
+            );
+          },
         ),
       ),
     );
@@ -72,23 +55,7 @@ class _SignupFlowState extends State<SignupFlow> {
   // -----------------------------------------------------------------------
   // REGISTRATION HANDLER
   // -----------------------------------------------------------------------
-  Future<void> _handleRegistration() async {
-    // Validate inputs
-    if (email == null || email!.isEmpty) {
-      await _showError("Please enter your email");
-      return;
-    }
-
-    if (password == null || password!.isEmpty) {
-      await _showError("Please enter your password");
-      return;
-    }
-
-    if (password!.length < 6) {
-      await _showError("Password must be at least 6 characters");
-      return;
-    }
-
+  Future<void> _handleRegistration(String email, String password) async {
     try {
       // Show loading overlay
       LoadingOverlay.show(
@@ -99,8 +66,8 @@ class _SignupFlowState extends State<SignupFlow> {
       // Call the updated AuthService registerUser method
       await _authService.registerUser(
         context: context,
-        email: email!,
-        password: password!,
+        email: email,
+        password: password,
       );
 
       // LoadingOverlay will be hidden by AuthService
@@ -121,31 +88,8 @@ class _SignupFlowState extends State<SignupFlow> {
           message: errorMessage,
           isError: true,
         );
-
-        // If it's an existing user error, go back to login
-        if (e is AuthException && 
-            (e.message.contains('already registered') || 
-             e.message.contains('user already exists'))) {
-          // Optionally navigate to login page
-          // GoRouter.of(context).go('/login');
-        }
       }
     } 
-  }
-
-  // -----------------------------------------------------------------------
-  // HELPER METHODS
-  // -----------------------------------------------------------------------
-  
-  Future<void> _showError(String message) async {
-    if (context.mounted) {
-      await showCustomAlert(
-        context: context,
-        title: "Error",
-        message: message,
-        isError: true,
-      );
-    }
   }
 
   String _getUserFriendlyError(String errorMessage) {
@@ -164,20 +108,5 @@ class _SignupFlowState extends State<SignupFlow> {
     } else {
       return 'Unable to create account. Please try again.';
     }
-  }
-
-  void _nextPage() {
-    _controller.nextPage(
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeInOut,
-    );
-  }
-
-  // Optional: Add back navigation
-  void _previousPage() {
-    _controller.previousPage(
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeInOut,
-    );
   }
 }

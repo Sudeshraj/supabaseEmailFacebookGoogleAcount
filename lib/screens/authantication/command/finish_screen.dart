@@ -2,19 +2,23 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 class FinishScreen extends StatefulWidget {
-  final PageController controller;
-  final Future<void> Function() onSignUp;
-  final String? titleText;
-  final String? privacyText;
-  final String? btnText;
+  final Future<void> Function(String email, String password) onSignUp;
+  final String titleText;
+  final String privacyText;
+  final String btnText;
+  
+  // Add parameters for email and password
+  final String email;
+  final String password;
 
   const FinishScreen({
     super.key,
-    required this.controller,
     required this.onSignUp,
-    this.titleText,
-    this.privacyText,
-    this.btnText,
+    required this.titleText,
+    required this.privacyText,
+    required this.btnText,
+    required this.email, // Required parameter
+    required this.password, // Required parameter
   });
 
   @override
@@ -33,6 +37,9 @@ class _FinishScreenState extends State<FinishScreen>
   @override
   void initState() {
     super.initState();
+
+    // Now we don't need to access context in initState
+    // because email and password come from widget properties
 
     // Animations initialization
     _animationController = AnimationController(
@@ -61,7 +68,7 @@ class _FinishScreenState extends State<FinishScreen>
     });
 
     try {
-      await widget.onSignUp();
+      await widget.onSignUp(widget.email, widget.password);
     } catch (e) {
       setState(() => _errorMessage = e.toString());
     } finally {
@@ -119,10 +126,8 @@ class _FinishScreenState extends State<FinishScreen>
                           onPressed: _isLoading
                               ? null
                               : () {
-                                  widget.controller.previousPage(
-                                    duration: const Duration(milliseconds: 300),
-                                    curve: Curves.ease,
-                                  );
+                                  // Go back with data preserved
+                                  GoRouter.of(context).pop();
                                 },
                         ),
                       ),
@@ -134,15 +139,13 @@ class _FinishScreenState extends State<FinishScreen>
                         width: 100,
                         height: 100,
                         decoration: BoxDecoration(
-                          color: Theme.of(
-                            context,
-                          ).colorScheme.primary.withOpacity(0.1),
+                          color: const Color(0xFF1877F3).withOpacity(0.1),
                           shape: BoxShape.circle,
                         ),
-                        child: Icon(
+                        child: const Icon(
                           Icons.check_circle,
                           size: 60,
-                          color: Theme.of(context).colorScheme.primary,
+                          color: Color(0xFF1877F3),
                         ),
                       ),
 
@@ -150,7 +153,7 @@ class _FinishScreenState extends State<FinishScreen>
 
                       // Title
                       Text(
-                        widget.titleText ?? "Ready to Sign Up",
+                        widget.titleText,
                         style: const TextStyle(
                           fontSize: 26,
                           fontWeight: FontWeight.bold,
@@ -160,111 +163,105 @@ class _FinishScreenState extends State<FinishScreen>
 
                       const SizedBox(height: 24),
 
-                      // Email preview (if available)
-                      // if (widget.email != null) ...[
-                      //   Container(
-                      //     padding: const EdgeInsets.symmetric(
-                      //       horizontal: 16,
-                      //       vertical: 12,
-                      //     ),
-                      //     decoration: BoxDecoration(
-                      //       color: Colors.white.withOpacity(0.05),
-                      //       borderRadius: BorderRadius.circular(12),
-                      //       border: Border.all(color: Colors.white12),
-                      //     ),
-                      //     child: Row(
-                      //       children: [
-                      //         Icon(
-                      //           Icons.email_outlined,
-                      //           color: Theme.of(context).colorScheme.primary,
-                      //         ),
-                      //         const SizedBox(width: 12),
-                      //         Expanded(
-                      //           child: Column(
-                      //             crossAxisAlignment: CrossAxisAlignment.start,
-                      //             children: [
-                      //               const Text(
-                      //                 "Email",
-                      //                 style: TextStyle(
-                      //                   color: Colors.white70,
-                      //                   fontSize: 12,
-                      //                 ),
-                      //               ),
-                      //               Text(
-                      //                 widget.email!,
-                      //                 style: const TextStyle(
-                      //                   color: Colors.white,
-                      //                   fontSize: 14,
-                      //                 ),
-                      //                 overflow: TextOverflow.ellipsis,
-                      //               ),
-                      //             ],
-                      //           ),
-                      //         ),
-                      //       ],
-                      //     ),
-                      //   ),
-                      //   const SizedBox(height: 12),
-                      //   const Text(
-                      //     "You'll receive a verification email at this address",
-                      //     style: TextStyle(color: Colors.white70, fontSize: 13),
-                      //     textAlign: TextAlign.center,
-                      //   ),
-                      //   const SizedBox(height: 24),
-                      // ],
+                      // Email preview
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.05),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.white12),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.email_outlined,
+                              color: Color(0xFF1877F3),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    "Email",
+                                    style: TextStyle(
+                                      color: Colors.white70,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                  Text(
+                                    widget.email,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 14,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      const SizedBox(height: 12),
+
+                      const Text(
+                        "You'll receive a verification email at this address",
+                        style: TextStyle(color: Colors.white70, fontSize: 13),
+                        textAlign: TextAlign.center,
+                      ),
+
+                      const SizedBox(height: 24),
 
                       // Terms and Conditions
-                      // finish_screen.dart (updated section)
-                      // Terms and Privacy text section එක update කරන්න
-                      if (widget.privacyText != null) ...[
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          child: Text.rich(
-                            TextSpan(
-                              text: "By signing up, you agree to our ",
-                              style: const TextStyle(
-                                color: Colors.white70,
-                                fontSize: 14,
-                              ),
-                              children: [
-                                WidgetSpan(
-                                  child: GestureDetector(
-                                    onTap: () => context.go('/terms'),
-                                    child: Text(
-                                      "Terms of Service",
-                                      style: TextStyle(
-                                        color: Theme.of(
-                                          context,
-                                        ).colorScheme.primary,
-                                        fontWeight: FontWeight.w600,
-                                        decoration: TextDecoration.underline,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                const TextSpan(text: " and "),
-                                WidgetSpan(
-                                  child: GestureDetector(
-                                    onTap: () => context.go('/privacy'),
-                                    child: Text(
-                                      "Privacy Policy",
-                                      style: TextStyle(
-                                        color: Theme.of(
-                                          context,
-                                        ).colorScheme.primary,
-                                        fontWeight: FontWeight.w600,
-                                        decoration: TextDecoration.underline,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                const TextSpan(text: "."),
-                              ],
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: Text.rich(
+                          TextSpan(
+                            text: "By signing up, you agree to our ",
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 14,
                             ),
-                            textAlign: TextAlign.center,
+                            children: [
+                              WidgetSpan(
+                                child: GestureDetector(
+                                  onTap: () => context.go('/terms'),
+                                  child: const Text(
+                                    "Terms of Service",
+                                    style: TextStyle(
+                                      color: Color(0xFF1877F3),
+                                      fontWeight: FontWeight.w600,
+                                      decoration: TextDecoration.underline,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const TextSpan(text: " and "),
+                              WidgetSpan(
+                                child: GestureDetector(
+                                  onTap: () => context.go('/privacy'),
+                                  child: const Text(
+                                    "Privacy Policy",
+                                    style: TextStyle(
+                                      color: Color(0xFF1877F3),
+                                      fontWeight: FontWeight.w600,
+                                      decoration: TextDecoration.underline,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const TextSpan(text: "."),
+                            ],
                           ),
+                          textAlign: TextAlign.center,
                         ),
-                      ],
+                      ),
+
                       const Spacer(),
 
                       // Sign Up Button
@@ -292,7 +289,7 @@ class _FinishScreenState extends State<FinishScreen>
                                   ),
                                 )
                               : Text(
-                                  widget.btnText ?? "Sign Up",
+                                  widget.btnText,
                                   style: const TextStyle(
                                     fontSize: 16,
                                     fontWeight: FontWeight.w600,
@@ -308,10 +305,7 @@ class _FinishScreenState extends State<FinishScreen>
                         onPressed: _isLoading
                             ? null
                             : () {
-                                widget.controller.previousPage(
-                                  duration: const Duration(milliseconds: 300),
-                                  curve: Curves.ease,
-                                );
+                                GoRouter.of(context).pop();
                               },
                         child: const Text(
                           "Go Back",
