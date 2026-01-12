@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:developer' as developer;
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -313,18 +314,15 @@ class AppState extends ChangeNotifier {
 
         if (profileCompleted) {
           String? userRole = await SessionManager.getUserRole();
+           _setProfileCompleted(true);
+            _setRole(userRole);
 
           if (userRole == null) {
             // Fetch from database
-            final dbProfile = await _fetchDatabaseProfile(user.id);
-            userRole = AuthGate.pickRole(
-              dbProfile?['role'] ?? dbProfile?['roles'],
-            );
-            await SessionManager.saveUserRole(userRole);
-          }
-
-          _setRole(userRole);
-          _setProfileCompleted(true);
+            await initializeUserRole(user.id);
+            return;
+          }         
+         
         } else {
           _setRole(null);
           _setProfileCompleted(false);
@@ -342,19 +340,61 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  Future<Map<String, dynamic>?> _fetchDatabaseProfile(String userId) async {
-    try {
-      final supabase = Supabase.instance.client;
-      final response = await supabase
-          .from('profiles')
-          .select('role, roles')
-          .eq('id', userId)
-          .maybeSingle();
+  // Future<Map<String, dynamic>?> _fetchDatabaseProfile(String userId) async {
+  //   try {
+  //     final supabase = Supabase.instance.client;
+  //     final response = await supabase
+  //         .from('profiles')
+  //         .select('roles!inner(name)')
+  //         .eq('id', userId)
+  //         .maybeSingle();
 
-      return response;
+  //     return response;
+  //   } catch (e) {
+  //     developer.log('❌ Database profile fetch error: $e', name: 'AppState');
+  //     return null;
+  //   }
+  // }
+
+  Future<void> initializeUserRole(String userId) async {
+    const defaultRole = 'customer';
+    String? userRole = await SessionManager.getUserRole();
+
+    try {
+      // 1. Database අයන්න
+      final supabase = Supabase.instance.client;
+      final result = await supabase
+          .from('profiles')
+          .select('roles(name)')
+          .eq('id', userId)
+          .single()
+          .timeout(const Duration(seconds: 5));
+
+      // 2. Role එක ගන්න
+      final roleName =
+          (result['roles'] as List)
+                  .cast<Map<String, dynamic>>()
+                  .firstOrNull?['name']
+              as String?;
+
+      // 3. AuthGate එකට දෙන්න
+      var userRole = AuthGate.pickRole(roleName ?? defaultRole);
+
+      // 4. Save කරන්න
+      await SessionManager.saveUserRole(userRole);
+
+      print('User role initialized: $userRole');
+      _setRole(userRole);
+    } on TimeoutException {
+      print('Database timeout, using default role');
+      userRole = defaultRole;
+      await SessionManager.saveUserRole(userRole);
+      _setRole(userRole);
     } catch (e) {
-      developer.log('❌ Database profile fetch error: $e', name: 'AppState');
-      return null;
+      print('Failed to get user role: $e');
+      userRole = defaultRole;
+      await SessionManager.saveUserRole(userRole);
+      _setRole(userRole);      
     }
   }
 
