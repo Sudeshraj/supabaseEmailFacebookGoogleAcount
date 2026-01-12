@@ -1,10 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/main.dart';
-import 'package:flutter_application_1/screens/authantication/command/email_screen.dart';
 import 'package:flutter_application_1/screens/authantication/business_reg/company_name_screen.dart';
 import 'package:flutter_application_1/screens/authantication/customer_reg/name_screen.dart';
 import 'package:flutter_application_1/screens/authantication/command/finish_screen.dart';
-import 'package:flutter_application_1/screens/authantication/command/password_screen.dart';
 import 'package:flutter_application_1/screens/authantication/command/welcome.dart';
 import 'package:flutter_application_1/screens/authantication/services/registration_service.dart';
 import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
@@ -81,24 +79,18 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
       },
       controller: _controller,
     ),
-    EmailScreen(
-      onNext: (e) {
-        setState(() => email = e);
-        _nextPage();
-      },
-      controller: _controller,
-    ),
-    PasswordScreen(
-      onNext: (p) {
-        setState(() => password = p);
-        _nextPage();
-      },
-      controller: _controller,
-    ),
-    FinishScreen(
-      controller: _controller,
-      onSignUp: () async => _handleRegistration(),
-    ),
+    // EmailScreen(
+    //   onNext: (e) {
+    //     setState(() => email = e);
+    //     _nextPage();
+    //   },
+    //   controller: _controller,
+    // ),
+   
+    // FinishScreen(
+    //   controller: _controller,
+    //   onSignUp: () async => _handleRegistration(),
+    // ),
   ];
 
   // -----------------------------------------------------------------------
@@ -112,30 +104,17 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
       },
       controller: _controller,
     ),
-    EmailScreen(
-      onNext: (e) {
-        setState(() => email = e);
-        _nextPage();
-      },
-      controller: _controller,
-    ),
-    PasswordScreen(
-      onNext: (p) {
-        setState(() => password = p);
-        _nextPage();
-      },
-      controller: _controller,
-    ),
-    FinishScreen(
-      controller: _controller,
-      onSignUp: () async => _handleRegistration(),
-    ),
+   
+    // FinishScreen(
+    //   controller: _controller,
+    //   onSignUp: () async => _handleRegistration(),
+    // ),
   ];
 
   // -----------------------------------------------------------------------
   // HANDLER — CALLED FOR BOTH ROLES
   // -----------------------------------------------------------------------
-  Future<void> _handleRegistration() async {
+  Future<void> handleRegistration() async {
     if (email == null || password == null || roles.isEmpty) {
       await showCustomAlert(
         context: context,

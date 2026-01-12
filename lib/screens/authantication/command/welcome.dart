@@ -114,7 +114,6 @@ Widget _roleCard({
   );
 }
 
-
   @override
   Widget build(BuildContext context) {
     final bg = const Color(0xFF0F1820);
@@ -144,22 +143,7 @@ Widget _roleCard({
                   ),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      // 🔙 Back
-                      Align(
-                        alignment: Alignment.topLeft,
-                        child: IconButton(
-                          icon: const Icon(
-                            Icons.arrow_back_ios_new_rounded,
-                            color: Colors.white,
-                            size: 22,
-                          ),
-                          onPressed: () =>
-                              Navigator.of(context).maybePop(),
-                        ),
-                      ),
-
-                      // 🌟 Main content
+                    children: [                      
                       Expanded(
                         child: SingleChildScrollView(
                           physics: const BouncingScrollPhysics(),
