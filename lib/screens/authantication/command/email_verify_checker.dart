@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter_application_1/main.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -88,12 +89,12 @@ class _EmailVerifyCheckerState extends State<EmailVerifyChecker>
     if (recentUser != null && recentUser['email'] != null) {
       return recentUser['email'] as String?;
     }
-    
+
     final lastUser = await SessionManager.getLastUser();
     if (lastUser != null && lastUser['email'] != null) {
       return lastUser['email'] as String?;
     }
-    
+
     return null;
   }
 
@@ -166,21 +167,22 @@ class _EmailVerifyCheckerState extends State<EmailVerifyChecker>
       // Clear any saved verification timer
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('lastVerificationSent');
-      
+
       // Logout but keep profile for continue screen
       await SessionManager.logoutForContinue();
-      
+
       // Check if widget is still mounted before using context
       if (!mounted) return;
-      
+
       // Navigate to home
+      // appState.refreshState();
       context.go('/');
     } catch (e) {
       print('❌ Logout error: $e');
-      
+
       // Check if widget is still mounted before using context
       if (!mounted) return;
-      
+
       // Navigate to home even on error
       context.go('/');
     }
@@ -191,10 +193,10 @@ class _EmailVerifyCheckerState extends State<EmailVerifyChecker>
   // ------------------------------------------------------------
   Future<void> _openEmailApp() async {
     final email = await _resolveEmail();
-    
+
     // Check if widget is still mounted before using context
     if (!mounted) return;
-    
+
     openEmailApp(context, email);
   }
 
@@ -244,7 +246,7 @@ class _EmailVerifyCheckerState extends State<EmailVerifyChecker>
                           ),
                           onPressed: () {
                             if (mounted) {
-                              context.go('/login');
+                              context.go('/');
                             }
                           },
                         ),
@@ -276,14 +278,16 @@ class _EmailVerifyCheckerState extends State<EmailVerifyChecker>
                                 if (snapshot.hasData && snapshot.data != null) {
                                   emailText = snapshot.data!;
                                 }
-                                
+
                                 return Column(
                                   children: [
                                     Text(
                                       "We've sent a verification link to:",
                                       textAlign: TextAlign.center,
                                       style: TextStyle(
-                                        color: Colors.white.withValues(alpha: 0.8),
+                                        color: Colors.white.withValues(
+                                          alpha: 0.8,
+                                        ),
                                       ),
                                     ),
                                     const SizedBox(height: 4),
@@ -300,7 +304,9 @@ class _EmailVerifyCheckerState extends State<EmailVerifyChecker>
                                       "Open it to continue.",
                                       textAlign: TextAlign.center,
                                       style: TextStyle(
-                                        color: Colors.white.withValues(alpha: 0.7),
+                                        color: Colors.white.withValues(
+                                          alpha: 0.7,
+                                        ),
                                       ),
                                     ),
                                   ],

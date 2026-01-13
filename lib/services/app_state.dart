@@ -17,6 +17,7 @@ class AppState extends ChangeNotifier {
   bool _emailVerified = false;
   bool _profileCompleted = false;
   bool _hasLocalProfile = false;
+  bool _countinueSc = false;
   String? _role;
   String? _errorMessage;
   DateTime? _lastUpdateTime;
@@ -29,6 +30,7 @@ class AppState extends ChangeNotifier {
   bool get emailVerified => _emailVerified;
   bool get profileCompleted => _profileCompleted;
   bool get hasLocalProfile => _hasLocalProfile;
+  bool get continueSc => _countinueSc;
   String? get role => _role;
   String? get errorMessage => _errorMessage;
   DateTime? get lastUpdateTime => _lastUpdateTime;
@@ -84,7 +86,14 @@ class AppState extends ChangeNotifier {
       notifyListeners();
     }
   }
+  void _setCountinueScreen(bool value) {
+    if (_countinueSc != value) {
+      _countinueSc = value;
+      notifyListeners();
+    }
+  }
 
+  
   // ====================
   // PUBLIC METHODS
   // ====================
@@ -99,13 +108,12 @@ class AppState extends ChangeNotifier {
     try {
       // 1. Check local profiles
       final hasProfiles = await SessionManager.hasProfile();
+      final csc = await SessionManager.shouldShowContinueScreen();
       print(hasProfiles);
-      developer.log(
-        hasProfiles
-            ? '✅ Local user profile found'
-            : '⚠️ No local user profile found',
-      );
+     
+    
       _setHasLocalProfile(hasProfiles);
+      _setCountinueScreen(csc);
 
       // 2. Check authentication state
       await _checkAuthenticationState();

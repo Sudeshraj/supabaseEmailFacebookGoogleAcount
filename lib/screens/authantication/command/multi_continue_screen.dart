@@ -99,19 +99,19 @@ class _ContinueScreenState extends State<ContinueScreen> {
         photo: profile['photo'] as String?,
         roles: List<String>.from(profile['roles'] ?? []),
       );
-
+  appState.refreshState();
       await _processSuccessfulLogin(profile);
     } on AuthException catch (e) {
       if (!mounted) return;
 
       switch (e.code) {
         case 'invalid_login_credentials':
-  await showCustomAlert(
-  context: context,
-  title: "Login Failed ❌",
-  message: "Email or password is incorrect.",
-  isError: true,
-);
+          await showCustomAlert(
+            context: context,
+            title: "Login Failed ❌",
+            message: "Email or password is incorrect.",
+            isError: true,
+          );
           break;
 
         case 'email_not_confirmed':
