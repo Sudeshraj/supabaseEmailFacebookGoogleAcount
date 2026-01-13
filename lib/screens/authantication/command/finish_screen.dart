@@ -164,58 +164,58 @@ class _FinishScreenState extends State<FinishScreen>
                       const SizedBox(height: 24),
 
                       // Email preview
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 12,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.05),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: Colors.white12),
-                        ),
-                        child: Row(
-                          children: [
-                            const Icon(
-                              Icons.email_outlined,
-                              color: Color(0xFF1877F3),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text(
-                                    "Email",
-                                    style: TextStyle(
-                                      color: Colors.white70,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                  Text(
-                                    widget.email,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 14,
-                                    ),
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
+                      // Container(
+                      //   padding: const EdgeInsets.symmetric(
+                      //     horizontal: 16,
+                      //     vertical: 12,
+                      //   ),
+                      //   decoration: BoxDecoration(
+                      //     color: Colors.white.withOpacity(0.05),
+                      //     borderRadius: BorderRadius.circular(12),
+                      //     border: Border.all(color: Colors.white12),
+                      //   ),
+                      //   child: Row(
+                      //     children: [
+                      //       const Icon(
+                      //         Icons.email_outlined,
+                      //         color: Color(0xFF1877F3),
+                      //       ),
+                      //       const SizedBox(width: 12),
+                      //       Expanded(
+                      //         child: Column(
+                      //           crossAxisAlignment: CrossAxisAlignment.start,
+                      //           children: [
+                      //             const Text(
+                      //               "Email",
+                      //               style: TextStyle(
+                      //                 color: Colors.white70,
+                      //                 fontSize: 12,
+                      //               ),
+                      //             ),
+                      //             Text(
+                      //               widget.email,
+                      //               style: const TextStyle(
+                      //                 color: Colors.white,
+                      //                 fontSize: 14,
+                      //               ),
+                      //               overflow: TextOverflow.ellipsis,
+                      //             ),
+                      //           ],
+                      //         ),
+                      //       ),
+                      //     ],
+                      //   ),
+                      // ),
 
-                      const SizedBox(height: 12),
+                      // const SizedBox(height: 12),
 
-                      const Text(
-                        "You'll receive a verification email at this address",
-                        style: TextStyle(color: Colors.white70, fontSize: 13),
-                        textAlign: TextAlign.center,
-                      ),
+                      // const Text(
+                      //   "You'll receive a verification email at this address",
+                      //   style: TextStyle(color: Colors.white70, fontSize: 13),
+                      //   textAlign: TextAlign.center,
+                      // ),
 
-                      const SizedBox(height: 24),
+                      // const SizedBox(height: 24),
 
                       // Terms and Conditions
                       Padding(
@@ -230,7 +230,7 @@ class _FinishScreenState extends State<FinishScreen>
                             children: [
                               WidgetSpan(
                                 child: GestureDetector(
-                                  onTap: () => context.go('/terms'),
+                                  onTap: () => context.push('/terms'),
                                   child: const Text(
                                     "Terms of Service",
                                     style: TextStyle(
@@ -244,7 +244,7 @@ class _FinishScreenState extends State<FinishScreen>
                               const TextSpan(text: " and "),
                               WidgetSpan(
                                 child: GestureDetector(
-                                  onTap: () => context.go('/privacy'),
+                                  onTap: () => context.push('/privacy'),
                                   child: const Text(
                                     "Privacy Policy",
                                     style: TextStyle(

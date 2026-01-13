@@ -194,8 +194,17 @@ GoRouter _createRouter() {
           }
         } else {
           // Not logged in
+            if(appState.hasLocalProfile && appState.continueSc){
+        if (path != '/continue') {
+          print('🔐 Redirecting to /continue because continueSc is false');
+          return '/continue';
+        }
+      }
+          print(appState.hasLocalProfile
+              ? '🔐 Redirecting to /continue from splash'
+              : '🔐 Redirecting to /login from splash');
           if (appState.hasLocalProfile) return '/continue';
-          return '/login';
+          // return '/login';
         }
       }
 
@@ -227,9 +236,18 @@ GoRouter _createRouter() {
       //   return null;
       // }
 
+     
+
       // Email verification
       if (!appState.emailVerified && path != '/verify-email') {
         return '/verify-email';
+      }
+
+       if(appState.loggedIn && appState.hasLocalProfile && appState.continueSc){
+        if (path != '/continue') {
+          print('🔐 Redirecting to /continue because continueSc is false');
+          return '/continue';
+        }
       }
 
       // Profile completion
@@ -258,6 +276,7 @@ print(  'User Role: ${appState.role}, Profile Completed: ${appState.profileCompl
             return path == '/customer' ? null : '/customer';
         }
       }
+      return null;
     },
     routes: [
       GoRoute(path: '/', builder: (_, __) => const SplashScreen()),

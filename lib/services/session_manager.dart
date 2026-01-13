@@ -285,8 +285,9 @@ class SessionManager {
   // Check if should show continue screen
   static Future<bool> shouldShowContinueScreen() async {
     final show = _prefs.getBool(_showContinueKey) ?? false;
-    final hasProfiles = await hasProfile();
-    return show && hasProfiles;
+    // final hasProfiles = await hasProfile();
+    // return show && hasProfiles;
+    return show;
   }
 
   // Clear continue screen flag
