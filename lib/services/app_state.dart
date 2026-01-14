@@ -154,6 +154,10 @@ class AppState extends ChangeNotifier {
     try {
       await _checkAuthenticationState();
       await _updateUserProfile();
+
+       final hasProfiles = await SessionManager.hasProfile();
+       _setHasLocalProfile(hasProfiles);
+
       _lastUpdateTime = DateTime.now();
       _setErrorMessage(null);
 
@@ -412,5 +416,9 @@ class AppState extends ChangeNotifier {
     _setProfileCompleted(false);
     _setRole(null);
     _setHasLocalProfile(false);
+  }
+
+  Future<void> emailVerifyerError() async {   
+    _setEmailVerified(false);   
   }
 }

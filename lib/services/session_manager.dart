@@ -214,6 +214,7 @@ class SessionManager {
   // Check if has any profiles
   static Future<bool> hasProfile() async {
     final profiles = await getProfiles();
+    print('🔍 Checking profiles, count: ${profiles.length}');
     return profiles.isNotEmpty;
   }
 

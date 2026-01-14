@@ -175,7 +175,7 @@ class _EmailVerifyCheckerState extends State<EmailVerifyChecker>
       if (!mounted) return;
 
       // Navigate to home
-      // appState.refreshState();
+      appState.refreshState();
       context.go('/');
     } catch (e) {
       print('❌ Logout error: $e');

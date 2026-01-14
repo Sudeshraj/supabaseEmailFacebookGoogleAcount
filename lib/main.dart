@@ -170,7 +170,11 @@ GoRouter _createRouter() {
     navigatorKey: navigatorKey,
     refreshListenable: appState,
     initialLocation: '/',
-    debugLogDiagnostics: kDebugMode,
+    debugLogDiagnostics: true,
+    observers: [
+      if (kDebugMode) MyRouteObserver(), // Add this
+    ],
+    // debugLogDiagnostics: kDebugMode,
     redirect: (context, state) {
       final path = state.matchedLocation;
 
@@ -194,25 +198,37 @@ GoRouter _createRouter() {
           }
         } else {
           // Not logged in
-            if(appState.hasLocalProfile && appState.continueSc){
-        if (path != '/continue') {
-          print('🔐 Redirecting to /continue because continueSc is false');
-          return '/continue';
-        }
-      }
-          print(appState.hasLocalProfile
-              ? '🔐 Redirecting to /continue from splash'
-              : '🔐 Redirecting to /login from splash');
+
+          // if (appState.continueSc) {
+          //   if (path != '/continue') {
+          //     print('🔐 Redirecting to /continue because continueSc is false');
+          //     return '/continue';
+          //   }
+          // }
+          // print(
+          //   appState.hasLocalProfile
+          //       ? '🔐 Redirecting to /continue from splash'
+          //       : '🔐 Redirecting to /login from splash',
+          // );
+          print(appState.hasLocalProfile);
           if (appState.hasLocalProfile) return '/continue';
-          // return '/login';
+          return '/login';
         }
       }
 
       if (appState.loading) return '/';
+      print('🔐 ${appState.loggedIn}');
+      print('🔐 ${appState.emailVerified}');
 
       // Continue screen logic
       if (!appState.loggedIn && appState.hasLocalProfile) {
-        final shouldShowContinue = path != '/login' && path != '/signup';
+        final shouldShowContinue =
+            path != '/login' && path != '/signup' && path != '/verify-email';
+
+        // if (!appState.emailVerified) {
+        //   return '/verify-email';
+        // }
+        // if (!appState.emailVerified) return '/verify-email';
         if (shouldShowContinue && path != '/continue') {
           return '/continue';
         }
@@ -236,35 +252,37 @@ GoRouter _createRouter() {
       //   return null;
       // }
 
-     
-
       // Email verification
       if (!appState.emailVerified && path != '/verify-email') {
         return '/verify-email';
       }
+      print('🔐 ${appState.emailVerified}');
+      if (!appState.emailVerified) return '/verify-email';
 
-       if(appState.loggedIn && appState.hasLocalProfile && appState.continueSc){
-        if (path != '/continue') {
-          print('🔐 Redirecting to /continue because continueSc is false');
-          return '/continue';
-        }
-      }
+      // if (appState.loggedIn && appState.hasLocalProfile) {
+      //   if (path != '/continue') {
+      //     print('🔐 Redirecting to /continue because continueSc is false');
+      //     return '/continue';
+      //   }
+      // }
 
       // Profile completion
       // if (!appState.profileCompleted && path != '/reg') {
       //   return '/reg';
       // }
 
-if (!appState.profileCompleted) {
-   if (path != '/reg') {
-      print('🔐 Redirecting to /reg because profile not completed');
-      return '/reg';
-   }
-   // path == '/reg' නම් null return කරන්න (නැතිනම් infinite loop වෙයි)
-  //  return null; // meka damme naththam pahala thiyena linuth wada karanava
-}
+      if (!appState.profileCompleted) {
+        if (path != '/reg') {
+          print('🔐 Redirecting to /reg because profile not completed');
+          return '/reg';
+        }
+        // path == '/reg' නම් null return කරන්න (නැතිනම් infinite loop වෙයි)
+        //  return null; // meka damme naththam pahala thiyena linuth wada karanava
+      }
 
-print(  'User Role: ${appState.role}, Profile Completed: ${appState.profileCompleted}');
+      print(
+        'User Role: ${appState.role}, Profile Completed: ${appState.profileCompleted}',
+      );
       // Role-based routing for other paths | ihata eka block ekkatavath giye naththam metanata enava
       if (appState.profileCompleted) {
         switch (appState.role) {
@@ -280,7 +298,26 @@ print(  'User Role: ${appState.role}, Profile Completed: ${appState.profileCompl
     },
     routes: [
       GoRoute(path: '/', builder: (_, __) => const SplashScreen()),
-      GoRoute(path: '/login', builder: (_, __) => const SignInScreen()),
+      // GoRoute(path: '/login', builder: (_, __) => const SignInScreen()),
+      // routes.dart එකේ
+      GoRoute(
+        path: '/login',
+        pageBuilder: (context, state) {
+          final extra = state.extra;
+
+          // Check if extra is already a SignInScreen
+          if (extra is SignInScreen) {
+            return MaterialPage(key: state.pageKey, child: extra);
+          }
+
+          // Otherwise create new one
+          final email = (extra is Map ? extra['email'] : null) as String?;
+          return MaterialPage(
+            key: state.pageKey,
+            child: SignInScreen(prefilledEmail: email),
+          );
+        },
+      ),
       GoRoute(path: '/signup', builder: (_, __) => const SignupFlow()),
       GoRoute(path: '/reg', builder: (_, __) => const RegistrationFlow()),
       GoRoute(
@@ -373,19 +410,18 @@ class _MyAppState extends State<MyApp> {
 
     if (uri.path.contains('verify-email')) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-       
         String? errorCode = uri.queryParameters['error_code'];
         String? error = uri.queryParameters['error'];
 
-        if (uri.hasFragment) {        
+        if (uri.hasFragment) {
           final fragmentParams = Uri.splitQueryString(uri.fragment);
           errorCode ??= fragmentParams['error_code'];
           error ??= fragmentParams['error'];
         }
 
-        if (errorCode == 'otp_expired' || error == 'access_denied') {        
+        if (errorCode == 'otp_expired' || error == 'access_denied') {
           router.go('/verify-invalid');
-        } else {         
+        } else {
           router.go('/');
         }
       });
@@ -485,5 +521,48 @@ class _ErrorApp extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+// Create route observer
+class MyRouteObserver extends NavigatorObserver {
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    debugPrint('🚀 Pushed route: ${_getRouteName(route)}');
+    debugPrint('   Previous route: ${_getRouteName(previousRoute)}');
+    debugPrint('   Route settings: ${route.settings}');
+    debugPrint('   Route runtimeType: ${route.runtimeType}');
+  }
+
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    debugPrint('🔙 Popped route: ${_getRouteName(route)}');
+    debugPrint('   Returning to: ${_getRouteName(previousRoute)}');
+    debugPrint('   Full route: $route');
+  }
+
+  @override
+  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
+    debugPrint(
+      '🔄 Replaced route: ${_getRouteName(oldRoute)} -> ${_getRouteName(newRoute)}',
+    );
+  }
+
+  String _getRouteName(Route<dynamic>? route) {
+    if (route == null) return 'null';
+
+    final name = route.settings.name;
+    if (name != null && name.isNotEmpty) {
+      return name;
+    }
+
+    // Try to get name from toString()
+    final routeStr = route.toString();
+    final match = RegExp(r'"(.*?)"').firstMatch(routeStr);
+    if (match != null && match.group(1) != null) {
+      return match.group(1)!;
+    }
+
+    return route.runtimeType.toString();
   }
 }
