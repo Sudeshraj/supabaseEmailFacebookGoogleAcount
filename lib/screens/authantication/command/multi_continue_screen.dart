@@ -99,7 +99,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
         photo: profile['photo'] as String?,
         roles: List<String>.from(profile['roles'] ?? []),
       );
-  appState.refreshState();
+      appState.refreshState();
       await _processSuccessfulLogin(profile);
     } on AuthException catch (e) {
       if (!mounted) return;
@@ -116,6 +116,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
         case 'email_not_confirmed':
           // await appState.restore();
+          appState.emailVerifyerError();
           appState.refreshState();
           if (!mounted) return;
           context.go('/verify-email'); // 🔥 router → /verify-email

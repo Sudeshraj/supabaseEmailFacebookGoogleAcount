@@ -27,7 +27,7 @@ class AuthService {
     required String password,
   }) async {
     final Completer<void> completer = Completer<void>();
-    
+
     try {
       // Validate inputs
       if (!_isValidEmail(email)) {
@@ -41,10 +41,7 @@ class AuthService {
       }
 
       // Show loading overlay
-      LoadingOverlay.show(
-        context, 
-        message: "Creating account...",
-      );
+      LoadingOverlay.show(context, message: "Creating account...");
 
       // Perform registration
       final response = await _supabase.auth.signUp(
@@ -58,18 +55,28 @@ class AuthService {
       );
 
       final user = response.user;
-      
+
       // Handle existing user
-      if (_isExistingUser(user)) {
-        await _handleExistingUser(context, email);
+      if (user?.identities?.isEmpty ?? true) {
+        if (context.mounted) {
+          await _handleExistingUser(context, email);
+        }
+
         return;
       }
+      // if (_isExistingUser(user)) {
+      //     print('🔑 Existing user detected during registration 2');
+      //   await _handleExistingUser(context, email);
+      //   return;
+      // }
+      print('🔑 Existing user detected during registration3');
 
       // Handle successful registration
-      await _handleSuccessfulRegistration(context, user, email);
+      if (context.mounted){
+        await _handleSuccessfulRegistration(context, user, email);
+      }
       
       completer.complete();
-      
     } on AuthException catch (e) {
       await _handleAuthException(context, e, 'Registration');
     } on TimeoutException catch (e) {
@@ -94,7 +101,7 @@ class AuthService {
     required String password,
   }) async {
     final Completer<void> completer = Completer<void>();
-    
+
     try {
       // Validate inputs
       if (!_isValidEmail(email)) {
@@ -103,10 +110,7 @@ class AuthService {
       }
 
       // Show loading overlay
-      LoadingOverlay.show(
-        context, 
-        message: "Signing in...",
-      );
+      LoadingOverlay.show(context, message: "Signing in...");
 
       // Perform login
       final response = await _supabase.auth.signInWithPassword(
@@ -115,15 +119,14 @@ class AuthService {
       );
 
       final user = response.user;
-      
+
       if (user != null) {
         await _handleSuccessfulLogin(context, user, email);
       } else {
         throw Exception('Login failed - no user returned');
       }
-      
+
       completer.complete();
-      
     } on AuthException catch (e) {
       await _handleAuthException(context, e, 'Login');
     } on TimeoutException catch (e) {
@@ -151,11 +154,9 @@ class AuthService {
     return password.trim().length >= 6;
   }
 
-  bool _isExistingUser(User? user) {
-    return user != null && 
-           user.identities != null && 
-           user.identities!.isEmpty;
-  }
+  // bool _isExistingUser(User? user) {
+  //   return user != null && user.identities != null && user.identities!.isEmpty;
+  // }
 
   String _getRedirectUrl() {
     if (kIsWeb) {
@@ -165,25 +166,27 @@ class AuthService {
     }
   }
 
-  Future<void> _handleExistingUser(
-    BuildContext context, 
-    String email,
-  ) async {
-    developer.log('User already exists: $email', name: _tag);
-    
-    // Save email for login screen
+  Future<void> _handleExistingUser(BuildContext context, String email) async {
+    debugPrint('\n🎯 _handleExistingUser CALLED');
+    debugPrint('   Email: $email');
+
+    // Save to SessionManager
     // await SessionManager.saveLastEmail(email);
-    
+    debugPrint('   ✅ Email saved to SessionManager');
+
     if (context.mounted) {
-      // Navigate to login with pre-filled email
-      context.go('/login', extra: {'email': email});
-      
+      // Close any open dialogs first
+      Navigator.of(context, rootNavigator: true).pop();
+
+      // Use pushReplacement instead of go
+      context.pushReplacement('/login', extra: {'email': email});
+
       // Show info message
       WidgetsBinding.instance.addPostFrameCallback((_) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: const Text('Account already exists. Please sign in.'),
-            duration: const Duration(seconds: 3),
+            duration: const Duration(seconds: 5),
             backgroundColor: Colors.blue,
           ),
         );
@@ -210,14 +213,14 @@ class AuthService {
     );
 
     developer.log('User registered successfully: $email', name: _tag);
-    
+
     // Refresh app state
     appState.refreshState();
 
     // Navigate to verify email
     if (context.mounted) {
       context.go('/verify-email');
-      
+
       // Show success message
       WidgetsBinding.instance.addPostFrameCallback((_) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -245,10 +248,13 @@ class AuthService {
     );
 
     developer.log('User logged in successfully: $email', name: _tag);
-    
+
     // Check if email needs verification
     if (user.emailConfirmedAt == null) {
-      developer.log('Email not verified, redirecting to verify page', name: _tag);
+      developer.log(
+        'Email not verified, redirecting to verify page',
+        name: _tag,
+      );
       if (context.mounted) context.go('/verify-email');
       return;
     }
@@ -260,7 +266,7 @@ class AuthService {
     if (context.mounted) {
       developer.log('Login successful, navigating to home', name: _tag);
       context.go('/home');
-      
+
       // Show welcome message
       WidgetsBinding.instance.addPostFrameCallback((_) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -279,13 +285,14 @@ class AuthService {
     AuthException e,
     String operation,
   ) async {
-    developer.log('$operation AuthException: ${e.message}', 
-      name: _tag, 
+    developer.log(
+      '$operation AuthException: ${e.message}',
+      name: _tag,
       error: e,
     );
 
     final errorMessage = _getUserFriendlyErrorMessage(e);
-    
+
     if (context.mounted) {
       await showCustomAlert(
         context: context, // Fixed: Added required context parameter
@@ -301,16 +308,14 @@ class AuthService {
     TimeoutException e,
     String operation,
   ) async {
-    developer.log('$operation timeout: ${e.message}', 
-      name: _tag, 
-      error: e,
-    );
+    developer.log('$operation timeout: ${e.message}', name: _tag, error: e);
 
     if (context.mounted) {
       await showCustomAlert(
         context: context, // Fixed: Added required context parameter
         title: "Connection Timeout",
-        message: "The request took too long. Please check your internet connection and try again.",
+        message:
+            "The request took too long. Please check your internet connection and try again.",
         isError: true,
       );
     }
@@ -322,8 +327,9 @@ class AuthService {
     StackTrace stackTrace,
     String operation,
   ) async {
-    developer.log('$operation error: $e', 
-      name: _tag, 
+    developer.log(
+      '$operation error: $e',
+      name: _tag,
       error: e,
       stackTrace: stackTrace,
     );
@@ -364,19 +370,18 @@ class AuthService {
 
   String _getUserFriendlyErrorMessage(AuthException e) {
     final message = e.message.toLowerCase();
-    
-    if (message.contains('already registered') || 
+
+    if (message.contains('already registered') ||
         message.contains('user already exists')) {
       return 'An account with this email already exists. Please sign in instead.';
-    } else if (message.contains('invalid login') || 
-               message.contains('invalid credentials')) {
+    } else if (message.contains('invalid login') ||
+        message.contains('invalid credentials')) {
       return 'Invalid email or password. Please check your credentials and try again.';
     } else if (message.contains('email not confirmed')) {
       return 'Please verify your email address before signing in. Check your inbox for the verification email.';
     } else if (message.contains('too many requests')) {
       return 'Too many attempts. Please wait a few minutes and try again.';
-    } else if (message.contains('network') || 
-               message.contains('connection')) {
+    } else if (message.contains('network') || message.contains('connection')) {
       return 'Network error. Please check your internet connection.';
     } else if (message.contains('weak password')) {
       return 'Password is too weak. Please use a stronger password.';
@@ -392,21 +397,22 @@ class AuthService {
   Future<void> logout(BuildContext context) async {
     try {
       LoadingOverlay.show(context, message: "Signing out...");
-      
+
       await _supabase.auth.signOut();
       // await SessionManager.clearUserProfile();
-      
+
       appState.refreshState();
-      
+
       if (context.mounted) {
         context.go('/login');
       }
-      
+
       developer.log('User logged out successfully', name: _tag);
     } catch (e, stackTrace) {
-      developer.log('Logout error: $e', 
-        name: _tag, 
-        error: e, 
+      developer.log(
+        'Logout error: $e',
+        name: _tag,
+        error: e,
         stackTrace: stackTrace,
       );
     } finally {
@@ -420,29 +426,34 @@ class AuthService {
   }) async {
     try {
       LoadingOverlay.show(context, message: "Sending reset email...");
-      
+
       await _supabase.auth.resetPasswordForEmail(
         email,
-        redirectTo: _getRedirectUrl().replaceFirst('verify-email', 'reset-password'),
+        redirectTo: _getRedirectUrl().replaceFirst(
+          'verify-email',
+          'reset-password',
+        ),
       );
-      
+
       developer.log('Password reset email sent to: $email', name: _tag);
-      
+
       if (context.mounted) {
         await showCustomAlert(
           context: context, // Fixed: Added required context parameter
           title: "Email Sent",
-          message: "If an account exists with this email, you will receive a password reset link shortly.",
+          message:
+              "If an account exists with this email, you will receive a password reset link shortly.",
           isError: false,
         );
       }
     } catch (e, stackTrace) {
-      developer.log('Password reset error: $e', 
-        name: _tag, 
-        error: e, 
+      developer.log(
+        'Password reset error: $e',
+        name: _tag,
+        error: e,
         stackTrace: stackTrace,
       );
-      
+
       if (context.mounted) {
         await showCustomAlert(
           context: context, // Fixed: Added required context parameter
