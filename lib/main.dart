@@ -403,10 +403,10 @@ class _MyAppState extends State<MyApp> {
   void _handleEmailVerification() {
     final uri = Uri.base;
 
-    print('🔍 Full URL: $uri');
-    print('🔍 Query params: ${uri.queryParameters}');
-    print('🔍 Fragment: ${uri.fragment}');
-    print('🔍 Has fragment: ${uri.hasFragment}');
+     debugPrint('🔍 Full URL: $uri');
+     debugPrint('🔍 Query params: ${uri.queryParameters}');
+     debugPrint('🔍 Fragment: ${uri.fragment}');
+     debugPrint('🔍 Has fragment: ${uri.hasFragment}');
 
     if (uri.path.contains('verify-email')) {
       WidgetsBinding.instance.addPostFrameCallback((_) {

@@ -149,9 +149,14 @@ class _EmailPasswordScreenState extends State<EmailPasswordScreen>
                             size: 22,
                           ),
                           onPressed: () {
-                            // GoRouter එකෙන් පෙර page එකට යන්න
-                            // data preserve වෙනවා
-                            GoRouter.of(context).pop();
+                            // Check if we can go back before popping
+                            if (GoRouter.of(context).canPop()) {
+                              GoRouter.of(context).pop();
+                            } else {
+                              // If nothing to pop, navigate to a default route
+                              GoRouter.of(context).go('/');
+                              // OR: GoRouter.of(context).replace('/');
+                            }
                           },
                         ),
                       ),
