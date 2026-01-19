@@ -263,7 +263,7 @@ class SessionManager {
     try {
       // Save current user email before logout
       final email = await getCurrentUserEmail();
-      
+      setCurrentUser(email!);
       // Enable continue screen
       await _prefs.setBool(_showContinueKey, true);
       

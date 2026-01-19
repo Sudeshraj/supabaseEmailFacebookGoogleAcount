@@ -72,20 +72,28 @@ class AuthService {
       print('🔑 Existing user detected during registration3');
 
       // Handle successful registration
-      if (context.mounted){
+      if (context.mounted) {
         await _handleSuccessfulRegistration(context, user, email);
       }
-      
+
       completer.complete();
     } on AuthException catch (e) {
-      await _handleAuthException(context, e, 'Registration');
+      if (context.mounted) {
+        await _handleAuthException(context, e, 'Registration');
+      }
     } on TimeoutException catch (e) {
-      await _handleTimeoutException(context, e, 'Registration');
+      if (context.mounted) {
+        await _handleTimeoutException(context, e, 'Registration');
+      }
     } catch (e, stackTrace) {
-      await _handleGenericException(context, e, stackTrace, 'Registration');
+      if (context.mounted) {
+        await _handleGenericException(context, e, stackTrace, 'Registration');
+      }
     } finally {
       // Always ensure overlay is hidden
-      _safeHideOverlay(context);
+      if (context.mounted) {
+        _safeHideOverlay(context);
+      }
     }
 
     return completer.future;
@@ -121,21 +129,31 @@ class AuthService {
       final user = response.user;
 
       if (user != null) {
-        await _handleSuccessfulLogin(context, user, email);
+        if (context.mounted) {
+          await _handleSuccessfulLogin(context, user, email);
+        }
       } else {
         throw Exception('Login failed - no user returned');
       }
 
       completer.complete();
     } on AuthException catch (e) {
-      await _handleAuthException(context, e, 'Login');
+      if (context.mounted) {
+        await _handleAuthException(context, e, 'Login');
+      }
     } on TimeoutException catch (e) {
-      await _handleTimeoutException(context, e, 'Login');
+      if (context.mounted) {
+        await _handleTimeoutException(context, e, 'Login');
+      }
     } catch (e, stackTrace) {
-      await _handleGenericException(context, e, stackTrace, 'Login');
+      if (context.mounted) {
+        await _handleGenericException(context, e, stackTrace, 'Login');
+      }
     } finally {
       // Always ensure overlay is hidden
-      _safeHideOverlay(context);
+      if (context.mounted) {
+        _safeHideOverlay(context);
+      }
     }
 
     return completer.future;
@@ -416,7 +434,9 @@ class AuthService {
         stackTrace: stackTrace,
       );
     } finally {
-      _safeHideOverlay(context);
+      if (context.mounted) {
+        _safeHideOverlay(context);
+      }
     }
   }
 
@@ -463,7 +483,9 @@ class AuthService {
         );
       }
     } finally {
-      _safeHideOverlay(context);
+      if (context.mounted) {
+        _safeHideOverlay(context);
+      }
     }
   }
 }
