@@ -3,7 +3,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_application_1/screens/authantication/command/policy_screen.dart';
-// import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -44,17 +43,13 @@ late final EnvironmentManager environment;
 // ERROR HANDLER
 // ====================
 void setupErrorHandling() {
-  // Flutter framework errors
   FlutterError.onError = (details) {
     FlutterError.presentError(details);
-
-    // Send to Crashlytics in production
     if (!kDebugMode) {
       // FirebaseCrashlytics.instance.recordFlutterError(details);
     }
   };
 
-  // Uncaught errors
   PlatformDispatcher.instance.onError = (error, stack) {
     if (kDebugMode) {
       print('❌ Uncaught error: $error');
@@ -65,7 +60,7 @@ void setupErrorHandling() {
       // FirebaseCrashlytics.instance.recordError(error, stack);
     }
 
-    return true; // Prevent app from closing
+    return true;
   };
 }
 
@@ -73,7 +68,7 @@ void setupErrorHandling() {
 // APP LIFECYCLE
 // ====================
 class AppLifecycleObserver with WidgetsBindingObserver {
-  AppLifecycleObserver(appState);
+  AppLifecycleObserver();
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
@@ -82,7 +77,6 @@ class AppLifecycleObserver with WidgetsBindingObserver {
         appState.refreshState(silent: true);
         break;
       case AppLifecycleState.paused:
-        // Save state if needed
         break;
       case AppLifecycleState.inactive:
         break;
@@ -98,10 +92,7 @@ class AppLifecycleObserver with WidgetsBindingObserver {
 // MAIN METHOD
 // ====================
 Future<void> main() async {
-  // Initialize Flutter engine
   WidgetsFlutterBinding.ensureInitialized();
-
-  // Set up error handling
   setupErrorHandling();
 
   print('🚀 ${DateTime.now()}: Starting application...');
@@ -119,11 +110,6 @@ Future<void> main() async {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
-
-    // Configure Crashlytics
-    if (!kDebugMode) {
-      // await FirebaseCrashlytics.instance.setCrashlyticsCollectionEnabled(true);
-    }
 
     // ========== PHASE 3: SUPABASE ==========
     await Supabase.initialize(
@@ -143,7 +129,7 @@ Future<void> main() async {
     router = _createRouter();
 
     // ========== PHASE 7: LIFECYCLE ==========
-    WidgetsBinding.instance.addObserver(AppLifecycleObserver(appState));
+    WidgetsBinding.instance.addObserver(AppLifecycleObserver());
 
     // ========== PHASE 8: RUN APP ==========
     print('✅ ${DateTime.now()}: Initialization complete');
@@ -157,11 +143,13 @@ Future<void> main() async {
       // FirebaseCrashlytics.instance.recordError(e, stackTrace);
     }
 
-    // Show error screen
     runApp(_ErrorApp(error: e.toString()));
   }
 }
 
+// ====================
+// ROUTER CONFIGURATION
+// ====================
 // ====================
 // ROUTER CONFIGURATION
 // ====================
@@ -170,147 +158,115 @@ GoRouter _createRouter() {
     navigatorKey: navigatorKey,
     refreshListenable: appState,
     initialLocation: '/',
-    debugLogDiagnostics: true,
+    debugLogDiagnostics: kDebugMode,
     observers: [
-      if (kDebugMode) MyRouteObserver(), // Add this
+      if (kDebugMode) MyRouteObserver(),
     ],
-    // debugLogDiagnostics: kDebugMode,
-    redirect: (context, state) {
+    redirect: (context, state) async {
       final path = state.matchedLocation;
 
-      // Splash screen logic - Only show splash at '/'
-      if (path == '/') {
-        if (appState.loading) return null; // Show splash while loading
+      // Public routes that should always be accessible
+      final publicRoutes = [
+        '/',
+        '/login',
+        '/signup',
+        '/continue',
+        '/verify-email',
+        '/verify-invalid',
+        '/privacy',
+        '/terms',
+        '/clear-data',
+      ];
 
-        // Once loading is complete, redirect based on app state
-        if (appState.loggedIn) {
-          if (!appState.emailVerified) return '/verify-email';
-          if (!appState.profileCompleted) return '/reg';
-          print('✅ Profile completed: ${appState.profileCompleted}');
-          // Role-based routing from splash
-          switch (appState.role) {
-            case 'business':
-              return '/owner';
-            case 'employee':
-              return '/employee';
-            default:
-              return '/customer';
+      // Always allow public routes regardless of auth state
+      if (publicRoutes.contains(path)) {
+        // Splash screen logic
+        if (path == '/') {
+          if (appState.loading) return null;
+
+          if (appState.loggedIn) {
+            if (!appState.emailVerified) return '/verify-email';
+            if (!appState.profileCompleted) return '/reg';
+            
+            print('✅ Profile completed: ${appState.profileCompleted}');
+            switch (appState.role) {
+              case 'business':
+                return '/owner';
+              case 'employee':
+                return '/employee';
+              default:
+                return '/customer';
+            }
+          } else {
+            // Check if should show continue screen
+            final shouldShowContinue = await SessionManager.shouldShowContinueScreen();
+            final hasProfile = await SessionManager.hasProfile();
+            
+            if (shouldShowContinue && hasProfile) {
+              return '/continue';
+            }
+            return '/login';
           }
-        } else {
-          // Not logged in
+        }
+        
+        // Other public routes don't need redirection
+        return null;
+      }
 
-          // if (appState.continueSc) {
-          //   if (path != '/continue') {
-          //     print('🔐 Redirecting to /continue because continueSc is false');
-          //     return '/continue';
-          //   }
-          // }
-          // print(
-          //   appState.hasLocalProfile
-          //       ? '🔐 Redirecting to /continue from splash'
-          //       : '🔐 Redirecting to /login from splash',
-          // );
-          print(appState.hasLocalProfile);
-          if (appState.hasLocalProfile) return '/continue';
+      if (appState.loading) return '/';
+
+      // Continue screen logic - only for logged out users with profiles
+      if (!appState.loggedIn) {
+        final shouldShowContinue = await SessionManager.shouldShowContinueScreen();
+        final hasProfile = await SessionManager.hasProfile();
+        
+        if (shouldShowContinue && hasProfile && path != '/continue') {
+          return '/continue';
+        }
+        
+        // If not logged in and trying to access protected route, go to login
+        if (!publicRoutes.contains(path)) {
           return '/login';
         }
       }
 
-      if (appState.loading) return '/';
-      print('🔐 ${appState.loggedIn}');
-      print('🔐 ${appState.emailVerified}');
-
-      // Continue screen logic
-      if (!appState.loggedIn && appState.hasLocalProfile) {
-        final shouldShowContinue =
-            path != '/login' && path != '/signup' && path != '/verify-email';
-
-        // if (!appState.emailVerified) {
-        //   return '/verify-email';
-        // }
-        // if (!appState.emailVerified) return '/verify-email';
-        if (shouldShowContinue && path != '/continue') {
-          return '/continue';
+      // Authentication logic for logged in users
+      if (appState.loggedIn) {
+        // Email verification check
+        if (!appState.emailVerified && path != '/verify-email') {
+          return '/verify-email';
         }
-      }
 
-      // Authentication logic
-      if (!appState.loggedIn) {
-        if (path == '/login' ||
-            path == '/signup' ||
-            path == '/continue' ||
-            path == '/verify-email' ||
-            path == '/privacy' ||
-            path == '/terms' ||
-            path == '/verify-invalid') {
-          return null;
-        }
-        return '/login';
-      }
-
-      // if (path == '/verify-invalid') {
-      //   return null;
-      // }
-
-      // Email verification
-      if (!appState.emailVerified && path != '/verify-email') {
-        return '/verify-email';
-      }
-      print('🔐 ${appState.emailVerified}');
-      if (!appState.emailVerified) return '/verify-email';
-
-      // if (appState.loggedIn && appState.hasLocalProfile) {
-      //   if (path != '/continue') {
-      //     print('🔐 Redirecting to /continue because continueSc is false');
-      //     return '/continue';
-      //   }
-      // }
-
-      // Profile completion
-      // if (!appState.profileCompleted && path != '/reg') {
-      //   return '/reg';
-      // }
-
-      if (!appState.profileCompleted) {
-        if (path != '/reg') {
-          print('🔐 Redirecting to /reg because profile not completed');
+        // Profile completion check
+        if (!appState.profileCompleted && path != '/reg') {
           return '/reg';
         }
-        // path == '/reg' නම් null return කරන්න (නැතිනම් infinite loop වෙයි)
-        //  return null; // meka damme naththam pahala thiyena linuth wada karanava
-      }
 
-      print(
-        'User Role: ${appState.role}, Profile Completed: ${appState.profileCompleted}',
-      );
-      // Role-based routing for other paths | ihata eka block ekkatavath giye naththam metanata enava
-      if (appState.profileCompleted) {
-        switch (appState.role) {
-          case 'business':
-            return path == '/owner' ? null : '/owner';
-          case 'employee':
-            return path == '/employee' ? null : '/employee';
-          default:
-            return path == '/customer' ? null : '/customer';
+        // Role-based routing
+        if (appState.profileCompleted) {
+          switch (appState.role) {
+            case 'business':
+              return path == '/owner' ? null : '/owner';
+            case 'employee':
+              return path == '/employee' ? null : '/employee';
+            default:
+              return path == '/customer' ? null : '/customer';
+          }
         }
       }
+      
+      // Default - allow access
       return null;
     },
     routes: [
       GoRoute(path: '/', builder: (_, __) => const SplashScreen()),
-      // GoRoute(path: '/login', builder: (_, __) => const SignInScreen()),
-      // routes.dart එකේ
       GoRoute(
         path: '/login',
         pageBuilder: (context, state) {
           final extra = state.extra;
-
-          // Check if extra is already a SignInScreen
           if (extra is SignInScreen) {
             return MaterialPage(key: state.pageKey, child: extra);
           }
-
-          // Otherwise create new one
           final email = (extra is Map ? extra['email'] : null) as String?;
           return MaterialPage(
             key: state.pageKey,
@@ -339,6 +295,10 @@ GoRouter _createRouter() {
       GoRoute(
         path: '/terms',
         builder: (context, state) => const PolicyScreen(isPrivacyPolicy: false),
+      ),
+      GoRoute(
+        path: '/clear-data',
+        builder: (context, state) => const ClearDataScreen(),
       ),
     ],
     errorBuilder: (context, state) => Scaffold(
@@ -403,10 +363,12 @@ class _MyAppState extends State<MyApp> {
   void _handleEmailVerification() {
     final uri = Uri.base;
 
-     debugPrint('🔍 Full URL: $uri');
-     debugPrint('🔍 Query params: ${uri.queryParameters}');
-     debugPrint('🔍 Fragment: ${uri.fragment}');
-     debugPrint('🔍 Has fragment: ${uri.hasFragment}');
+    if (kDebugMode) {
+      debugPrint('🔍 Full URL: $uri');
+      debugPrint('🔍 Query params: ${uri.queryParameters}');
+      debugPrint('🔍 Fragment: ${uri.fragment}');
+      debugPrint('🔍 Has fragment: ${uri.hasFragment}');
+    }
 
     if (uri.path.contains('verify-email')) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -524,45 +486,208 @@ class _ErrorApp extends StatelessWidget {
   }
 }
 
-// Create route observer
+// ====================
+// CLEAR DATA SCREEN
+// ====================
+class ClearDataScreen extends StatelessWidget {
+  const ClearDataScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final isMobile = MediaQuery.of(context).size.width < 600;
+    final screenWidth = MediaQuery.of(context).size.width;
+    
+    // Calculate responsive width
+    double calculateContainerWidth() {
+      if (isMobile) {
+        return screenWidth * 0.95; // 95% width on mobile
+      } else {
+        final calculatedWidth = screenWidth * 0.45;
+        return calculatedWidth < 500 ? calculatedWidth : 500.0;
+      }
+    }
+    
+    final containerWidth = calculateContainerWidth();
+
+    return Scaffold(
+      backgroundColor: const Color(0xFF0F1820),
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(vertical: 20.0),
+            child: Container(
+              width: containerWidth,
+              margin: EdgeInsets.all(isMobile ? 16.0 : 20.0),
+              padding: EdgeInsets.all(isMobile ? 20.0 : 24.0),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.03),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: Colors.white12),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.delete_forever,
+                    size: isMobile ? 50.0 : 60.0,
+                    color: Colors.red.withOpacity(0.8),
+                  ),
+                  SizedBox(height: isMobile ? 16.0 : 20.0),
+                  Text(
+                    'Clear All Data',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: isMobile ? 22.0 : 24.0,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  SizedBox(height: isMobile ? 12.0 : 16.0),
+                  Text(
+                    'This will remove all saved accounts, preferences, and login information from this device.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.7),
+                      fontSize: isMobile ? 14.0 : 16.0,
+                    ),
+                  ),
+                  SizedBox(height: isMobile ? 24.0 : 32.0),
+                  // Responsive button layout
+                  if (isMobile) ...[
+                    // Mobile: vertical buttons
+                    Column(
+                      children: [
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton(
+                            onPressed: () => context.go('/'),
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 16.0),
+                              side: const BorderSide(color: Colors.white24),
+                            ),
+                            child: Text(
+                              'Cancel',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: isMobile ? 15.0 : 16.0,
+                              ),
+                            ),
+                          ),
+                        ),
+                        SizedBox(height: 12.0),
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton(
+                            onPressed: () async {
+                              await SessionManager.clearAll();
+                              final supabase = Supabase.instance.client;
+                              await supabase.auth.signOut();
+                              appState.refreshState();
+                              context.go('/');
+                            },
+                            style: ElevatedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 16.0),
+                              backgroundColor: Colors.red,
+                            ),
+                            child: Text(
+                              'Clear All',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: isMobile ? 15.0 : 16.0,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ] else ...[
+                    // Desktop/Web: horizontal buttons
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => context.go('/'),
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 16.0),
+                              side: const BorderSide(color: Colors.white24),
+                            ),
+                            child: Text(
+                              'Cancel',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: isMobile ? 15.0 : 16.0,
+                              ),
+                            ),
+                          ),
+                        ),
+                        SizedBox(width: 16.0),
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: () async {
+                              await SessionManager.clearAll();
+                              final supabase = Supabase.instance.client;
+                              await supabase.auth.signOut();
+                              appState.refreshState();
+                              context.go('/');
+                            },
+                            style: ElevatedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 16.0),
+                              backgroundColor: Colors.red,
+                            ),
+                            child: Text(
+                              'Clear All',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: isMobile ? 15.0 : 16.0,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                  // Add extra bottom padding for mobile
+                  if (isMobile) SizedBox(height: 8.0),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ====================
+// ROUTE OBSERVER
+// ====================
 class MyRouteObserver extends NavigatorObserver {
   @override
   void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
-    debugPrint('🚀 Pushed route: ${_getRouteName(route)}');
-    debugPrint('   Previous route: ${_getRouteName(previousRoute)}');
-    debugPrint('   Route settings: ${route.settings}');
-    debugPrint('   Route runtimeType: ${route.runtimeType}');
+    if (kDebugMode) {
+      debugPrint('🚀 Pushed route: ${_getRouteName(route)}');
+    }
   }
 
   @override
   void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
-    debugPrint('🔙 Popped route: ${_getRouteName(route)}');
-    debugPrint('   Returning to: ${_getRouteName(previousRoute)}');
-    debugPrint('   Full route: $route');
+    if (kDebugMode) {
+      debugPrint('🔙 Popped route: ${_getRouteName(route)}');
+    }
   }
 
   @override
   void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
-    debugPrint(
-      '🔄 Replaced route: ${_getRouteName(oldRoute)} -> ${_getRouteName(newRoute)}',
-    );
+    if (kDebugMode) {
+      debugPrint(
+        '🔄 Replaced route: ${_getRouteName(oldRoute)} -> ${_getRouteName(newRoute)}',
+      );
+    }
   }
 
   String _getRouteName(Route<dynamic>? route) {
     if (route == null) return 'null';
-
-    final name = route.settings.name;
-    if (name != null && name.isNotEmpty) {
-      return name;
-    }
-
-    // Try to get name from toString()
-    final routeStr = route.toString();
-    final match = RegExp(r'"(.*?)"').firstMatch(routeStr);
-    if (match != null && match.group(1) != null) {
-      return match.group(1)!;
-    }
-
-    return route.runtimeType.toString();
+    return route.settings.name ?? route.runtimeType.toString();
   }
 }

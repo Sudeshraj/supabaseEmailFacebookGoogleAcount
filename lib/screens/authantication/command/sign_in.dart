@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_application_1/main.dart';
 import 'package:flutter_application_1/alertBox/reset_password.dart';
 import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
+import 'package:flutter_application_1/services/supabase_persistence.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_application_1/services/session_manager.dart';
@@ -23,6 +24,8 @@ class _SignInScreenState extends State<SignInScreen>
   bool _obscurePassword = true;
   bool _loading = false;
   bool _coolDown = false;
+  bool _rememberMe = false;
+  bool _showPrivacyLinks = true;
 
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
@@ -40,22 +43,13 @@ class _SignInScreenState extends State<SignInScreen>
   void initState() {
     super.initState();
     _checkSavedProfile();
+    _loadRememberMeSetting();
 
-      debugPrint('\n' + '='*50);
-  debugPrint('🚀 SIGNINSCREEN INITSTATE CALLED');
-  debugPrint('='*50);
-  debugPrint('📧 widget.prefilledEmail: ${widget.prefilledEmail}');
-  debugPrint('🔑 widget.key: ${widget.key}');
-  
-  // Initialize controllers with debug
-  if (widget.prefilledEmail != null) {
-    _emailController = TextEditingController(text: widget.prefilledEmail);
-    debugPrint('✅ Controller initialized with: ${widget.prefilledEmail}');
-  } else {
-    _emailController = TextEditingController();
-    debugPrint('⚠️ Controller initialized EMPTY');
-  }
-  
+    if (widget.prefilledEmail != null) {
+      _emailController = TextEditingController(text: widget.prefilledEmail);
+    } else {
+      _emailController = TextEditingController();
+    }
 
     _animationController = AnimationController(
       vsync: this,
@@ -70,17 +64,20 @@ class _SignInScreenState extends State<SignInScreen>
     );
 
     _animationController.forward();
-print(widget.prefilledEmail);
-print(  'Checking prefilled email in SignInScreen');
-     // ✅ Check for email from multiple sources
-   WidgetsBinding.instance.addPostFrameCallback((_) {
-    print(  'Checking prefilled email in SignInScreen');
-    _checkForPrefilledEmail();
-  });
 
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkForPrefilledEmail();
+    });
 
     _emailController.addListener(_validateForm);
     _passwordController.addListener(_validateForm);
+  }
+
+  Future<void> _loadRememberMeSetting() async {
+    final rememberMe = await SessionManager.isRememberMeEnabled();
+    setState(() {
+      _rememberMe = rememberMe;
+    });
   }
 
   bool _isValidEmailFormat(String value) {
@@ -122,31 +119,23 @@ print(  'Checking prefilled email in SignInScreen');
   }
 
   void _checkForPrefilledEmail() async {
-  // 1. Check widget parameter first
-  if (widget.prefilledEmail != null && widget.prefilledEmail!.isNotEmpty) {
-    _emailController.text = widget.prefilledEmail!;
-  } 
-  // 2. Check from SessionManager
-  else {
-    // final lastEmail = await SessionManager.getLastEmail();
-    // if (lastEmail != null && lastEmail.isNotEmpty) {
-    //   _emailController.text = lastEmail;
-    //   // Clear after use
-    //   await SessionManager.clearLastEmail();
-    // }
-  }
-  
-  // Validate after setting email
-  WidgetsBinding.instance.addPostFrameCallback((_) {
-    if (mounted) {
-      _validateForm();
-      setState(() {});
+    if (widget.prefilledEmail != null && widget.prefilledEmail!.isNotEmpty) {
+      _emailController.text = widget.prefilledEmail!;
     }
-  });
-}
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _validateForm();
+        setState(() {});
+      }
+    });
+  }
 
   // ======================================================================
-  // ✅ UPDATED: LOGIN FUNCTION WITH SESSION MANAGER PROFILE SAVING
+  // ✅ UPDATED: LOGIN FUNCTION WITH REMEMBER ME
+  // ======================================================================
+  // ======================================================================
+  // ✅ UPDATED: LOGIN FUNCTION WITH AUTO-LOGIN TOKEN SAVING
   // ======================================================================
   Future<void> loginUser() async {
     try {
@@ -159,41 +148,70 @@ print(  'Checking prefilled email in SignInScreen');
       );
 
       final user = response.user;
+      final session = response.session;
+
       if (user == null) {
         throw Exception("Login failed. Please try again.");
       }
 
-      // ✅ SAVE USER PROFILE TO SESSION MANAGER FOR CONTINUE SCREEN
+      // After successful login in loginUser() method:
+      print('🎉 LOGIN SUCCESS - VERIFYING PERSISTENCE');
+      print('   - User: ${user.email}');
+      print('   - Session valid: ${session != null}');
+
+      // Force session to persist
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      // Debug persistence
+      await SupabasePersistenceHelper.debugSessionPersistence();
+
+      // Save to shared preferences for backup
+      await SessionManager.setCurrentUser(user.email!);
+      print('✅ User email saved to preferences: ${user.email}');
+
+      // ✅ SAVE REFRESH TOKEN PROPERLY AFTER LOGIN
+      final refreshToken = session?.refreshToken;
+
+      // ✅ SAVE USER PROFILE WITH REMEMBER ME SETTING AND TOKEN
       await SessionManager.saveUserProfile(
         email: user.email!,
         userId: user.id,
         name: user.userMetadata?['full_name'] ?? user.email!.split('@').first,
+        rememberMe: _rememberMe,
+        refreshToken: refreshToken,
       );
-      print('✅ Profile saved to SessionManager: ${user.email}');
 
-      // 2️⃣ FETCH PROFILE FROM DATABASE (FOR VALIDATION AND ROLE)
-      // try {
+      // Also save the token separately for easier access
+      if (refreshToken != null) {
+        await SessionManager.saveRefreshToken(user.email!, refreshToken);
+      }
 
+      print(
+        '✅ Profile saved: ${user.email} (Remember Me: $_rememberMe, Token: ${refreshToken != null ? "Saved" : "Not saved"})',
+      );
+
+      // Update app state remember me setting
+      await appState.setRememberMe(_rememberMe);
+
+      // 2️⃣ FETCH PROFILE FROM DATABASE
       final profile = await supabase
           .from('profiles')
           .select('*')
           .eq('id', user.id)
           .maybeSingle();
 
-      // 3️⃣ PROFILE NOT CREATED IN DATABASE → router will redirect to /reg
       print('✅ Profile fetched: $profile');
+
       if (profile == null) {
-        // await appState.restore();
         appState.refreshState();
         if (!mounted) return;
-        context.go('/'); // 🔥 let main.dart decide
+        context.go('/');
         return;
       }
 
-      // 4️⃣ CHECK IF ACCOUNT IS BLOCKED
+      // 3️⃣ CHECK IF ACCOUNT IS BLOCKED
       if (profile['is_blocked'] == true) {
         await supabase.auth.signOut();
-        // Remove from SessionManager too
         await SessionManager.removeProfile(user.email!);
 
         if (!mounted) return;
@@ -207,10 +225,9 @@ print(  'Checking prefilled email in SignInScreen');
         return;
       }
 
-      // 5️⃣ CHECK IF ACCOUNT IS INACTIVE
+      // 4️⃣ CHECK IF ACCOUNT IS INACTIVE
       if (profile['is_active'] == false) {
         await supabase.auth.signOut();
-        // Remove from SessionManager too
         await SessionManager.removeProfile(user.email!);
 
         if (!mounted) return;
@@ -224,24 +241,17 @@ print(  'Checking prefilled email in SignInScreen');
         return;
       }
 
-      // 6️⃣ SAVE ROLE TO SESSION MANAGER
+      // 5️⃣ SAVE ROLE TO SESSION MANAGER
       final String role = profile['role'] ?? 'customer';
       await SessionManager.saveUserRole(role);
       print('✅ Role saved: $role');
 
-      // 7️⃣ UPDATE APP STATE AND NAVIGATE
-      // await appState.restore();
+      // 6️⃣ UPDATE APP STATE AND NAVIGATE
       appState.refreshState();
       if (!mounted) return;
 
       // Let router handle the redirection based on role
-      context.go('/'); // Router will redirect to appropriate screen
-
-      // }catch (_) {
-      //     appState.refreshState();
-      //   if (!mounted) return;
-      //   context.go('/');
-      // }
+      context.go('/');
     }
     // 🔐 AUTH ERRORS HANDLING
     on AuthException catch (e) {
@@ -258,21 +268,25 @@ print(  'Checking prefilled email in SignInScreen');
           break;
 
         case 'email_not_confirmed':
-          // Save profile even if email not confirmed
+          // Save profile with remember me setting even if email not confirmed
           final email = _emailController.text.trim();
           final user = supabase.auth.currentUser;
 
           if (user != null) {
+            final session = supabase.auth.currentSession;
+            final refreshToken = session?.refreshToken;
+
             await SessionManager.saveUserProfile(
               email: email,
               userId: user.id,
               name: email.split('@').first,
+              rememberMe: _rememberMe,
+              refreshToken: refreshToken,
             );
           }
-          // await appState.restore();
           appState.refreshState();
           if (!mounted) return;
-          context.go('/'); // 🔥 router → /verify-email
+          context.go('/');
           break;
 
         case 'too_many_requests':
@@ -313,42 +327,7 @@ print(  'Checking prefilled email in SignInScreen');
   }
 
   // ======================================================================
-  // ✅ NEW: AUTO LOGIN FROM CONTINUE SCREEN
-  // ======================================================================
-  Future<void> tryAutoLogin(String email) async {
-    try {
-      setState(() => _loading = true);
-
-      // Try auto login using SessionManager
-      final success = await SessionManager.tryAutoLogin(email);
-
-      if (success) {
-        // Auto login successful
-        // await appState.restore();
-        appState.refreshState();
-        if (!mounted) return;
-        context.go('/'); // Router will handle redirection
-      } else {
-        // Auto login failed, pre-fill email and show message
-        _emailController.text = email;
-        _validateForm();
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Please enter password for $email'),
-            duration: const Duration(seconds: 3),
-          ),
-        );
-      }
-    } catch (e) {
-      print('❌ Auto login error: $e');
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  // ======================================================================
-  // ✅ UI SECTION WITH CONTINUE SCREEN OPTION
+  // ✅ UI SECTION WITH REMEMBER ME AND PRIVACY LINKS
   // ======================================================================
   @override
   Widget build(BuildContext context) {
@@ -395,11 +374,9 @@ print(  'Checking prefilled email in SignInScreen');
                                   size: 22,
                                 ),
                                 onPressed: () async {
-                                  // Go to continue screen
                                   context.push('/continue');
                                 },
                               ),
-                              // Optional: Add text label
                               if (_hasSavedProfile)
                                 GestureDetector(
                                   onTap: () {
@@ -447,7 +424,7 @@ print(  'Checking prefilled email in SignInScreen');
                               ),
                               const SizedBox(height: 24),
 
-                              // ✅ EMAIL FIELD - Updated for prefilled email
+                              // ✅ EMAIL FIELD
                               TextField(
                                 controller: _emailController,
                                 style: const TextStyle(color: Colors.white),
@@ -475,7 +452,6 @@ print(  'Checking prefilled email in SignInScreen');
                                     ),
                                     borderRadius: BorderRadius.circular(8),
                                   ),
-                                  // ✅ Prefix icon එකතු කරන්න
                                   prefixIcon: const Icon(
                                     Icons.email_outlined,
                                     color: Colors.white54,
@@ -494,14 +470,6 @@ print(  'Checking prefilled email in SignInScreen');
                                         ),
                                   errorText: _emailError,
                                 ),
-                                // ✅ Auto focus password field if email is prefilled
-                                onEditingComplete: () {
-                                  if (_emailController.text.isNotEmpty &&
-                                      widget.prefilledEmail != null) {
-                                    // ✅ Use widget.prefilledEmail
-                                    FocusScope.of(context).nextFocus();
-                                  }
-                                },
                               ),
                               const SizedBox(height: 16),
 
@@ -548,7 +516,29 @@ print(  'Checking prefilled email in SignInScreen');
                                   ),
                                 ),
                               ),
-                              const SizedBox(height: 24),
+                              const SizedBox(height: 16),
+
+                              // ✅ REMEMBER ME CHECKBOX
+                              Row(
+                                children: [
+                                  Checkbox(
+                                    value: _rememberMe,
+                                    onChanged: (value) {
+                                      setState(() {
+                                        _rememberMe = value ?? false;
+                                      });
+                                    },
+                                    activeColor: const Color(0xFF1877F3),
+                                    checkColor: Colors.white,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  const Text(
+                                    'Remember Me',
+                                    style: TextStyle(color: Colors.white70),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
 
                               // ✅ LOGIN BUTTON
                               SizedBox(
@@ -611,10 +601,61 @@ print(  'Checking prefilled email in SignInScreen');
                         ),
                       ),
 
-                      // ✅ CREATE ACCOUNT BUTTON
+                      // ✅ PRIVACY LINKS AND CREATE ACCOUNT
                       Column(
                         children: [
-                          const SizedBox(height: 14),
+                          // Privacy Policy Links
+                          if (_showPrivacyLinks)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 16),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  TextButton(
+                                    onPressed: () => context.go('/privacy'),
+                                    child: const Text(
+                                      'Privacy Policy',
+                                      style: TextStyle(
+                                        color: Colors.white70,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    width: 1,
+                                    height: 12,
+                                    color: Colors.white30,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  TextButton(
+                                    onPressed: () => context.go('/terms'),
+                                    child: const Text(
+                                      'Terms of Service',
+                                      style: TextStyle(
+                                        color: Colors.white70,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+
+                          // Clear Data Option
+                          TextButton(
+                            onPressed: () => context.go('/clear-data'),
+                            child: const Text(
+                              'Clear All Data',
+                              style: TextStyle(
+                                color: Colors.redAccent,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+
+                          // Create Account Button
                           SizedBox(
                             width: double.infinity,
                             child: OutlinedButton(
