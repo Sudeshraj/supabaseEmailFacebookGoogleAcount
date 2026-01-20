@@ -20,36 +20,306 @@ class _ContinueScreenState extends State<ContinueScreen> {
   List<Map<String, dynamic>> profiles = [];
   bool _loading = false;
   String? _selectedEmail;
+  bool _showComplianceDialog = false;
+
+  // Add password controller here
+  late TextEditingController _passwordController;
+  bool _obscurePassword = true;
 
   @override
   void initState() {
     super.initState();
     _loadProfiles();
+    _checkCompliance();
+    _passwordController = TextEditingController(); // Initialize here
+  }
+
+  @override
+  void dispose() {
+    _passwordController.dispose(); // Don't forget to dispose
+    super.dispose();
   }
 
   Future<void> _loadProfiles() async {
-    final list = await SessionManager.getProfiles();
+    // Load only profiles with remember me enabled
+    final allProfiles = await SessionManager.getProfiles();
+    final rememberMeProfiles = allProfiles
+        .where((p) => p['rememberMe'] == true)
+        .toList();
     if (!mounted) return;
-    setState(() => profiles = list);
+    setState(() => profiles = rememberMeProfiles);
   }
 
-  // ============================================================
-  // RESPONSIVE PASSWORD DIALOG
-  // ============================================================
-  Future<String?> _showPasswordDialog(String email) async {
-    return await showDialog<String?>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) {
-        return ResponsivePasswordDialog(email: email);
-      },
-    );
+  Future<void> _checkCompliance() async {
+    final rememberMe = await SessionManager.isRememberMeEnabled();
+    if (!rememberMe) {
+      setState(() {
+        _showComplianceDialog = true;
+      });
+    }
   }
 
+// ============================================================
+// SMART PASSWORD DIALOG WITH AUTO-SUBMIT (RESPONSIVE VERSION)
+// ============================================================
+Future<String?> _showPasswordDialog(String email) async {
+  final passwordController = TextEditingController();
+  bool obscurePassword = true;
+
+  return await showDialog<String?>(
+    context: context,
+    barrierDismissible: false,
+    builder: (context) {
+      // Check screen size for responsiveness
+      final isMobile = MediaQuery.of(context).size.width < 600;
+      final screenWidth = MediaQuery.of(context).size.width;
+      
+      // Calculate dialog width with proper double type
+      double calculateDialogWidth() {
+        if (isMobile) {
+          return screenWidth * 0.9; // 90% width on mobile
+        } else {
+          final calculatedWidth = screenWidth * 0.4;
+          return calculatedWidth < 500 ? calculatedWidth : 500.0;
+        }
+      }
+      
+      final dialogWidth = calculateDialogWidth();
+
+      return Dialog(
+        backgroundColor: const Color(0xFF1C1F26),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        insetPadding: EdgeInsets.symmetric(
+          horizontal: isMobile ? 16.0 : (screenWidth - dialogWidth) / 2,
+          vertical: 20.0,
+        ),
+        child: SizedBox(
+          width: dialogWidth, // Responsive width
+          child: StatefulBuilder(
+            builder: (context, setState) {
+              // Declare submit function FIRST
+              void submitPassword(String password) {
+                if (password.isEmpty) return;
+                
+                // Set submitting state
+                setState(() {});
+                
+                // Close dialog with password after short delay
+                Future.delayed(const Duration(milliseconds: 300), () {
+                  if (mounted) {
+                    Navigator.pop(context, password);
+                  }
+                });
+              }
+
+              // Auto-submit function
+              void checkAutoSubmit(String value) {
+                if (value.length >= 6) {
+                  // Auto-submit after 0.5 seconds of no typing
+                  Future.delayed(const Duration(milliseconds: 500), () {
+                    if (mounted && passwordController.text.length >= 6) {
+                      submitPassword(passwordController.text.trim());
+                    }
+                  });
+                }
+              }
+
+              return Padding(
+                padding: EdgeInsets.all(isMobile ? 16.0 : 20.0),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Header - Responsive layout
+                    Row(
+                      children: [
+                        CircleAvatar(
+                          backgroundColor: Colors.blueAccent.withOpacity(0.2),
+                          radius: isMobile ? 18.0 : 20.0,
+                          child: Icon(
+                            Icons.person,
+                            color: Colors.blueAccent,
+                            size: isMobile ? 18.0 : 20.0,
+                          ),
+                        ),
+                        SizedBox(width: isMobile ? 10.0 : 12.0),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Enter Password',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: isMobile ? 15.0 : 16.0,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              Text(
+                                email,
+                                style: TextStyle(
+                                  color: Colors.white.withOpacity(0.7),
+                                  fontSize: isMobile ? 11.0 : 12.0,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                                maxLines: 2,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    
+                    SizedBox(height: isMobile ? 16.0 : 20.0),
+                    
+                    // Password Field
+                    TextField(
+                      controller: passwordController,
+                      obscureText: obscurePassword,
+                      autofocus: true,
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: isMobile ? 15.0 : 16.0,
+                      ),
+                      decoration: InputDecoration(
+                        labelText: 'Password',
+                        labelStyle: const TextStyle(color: Colors.white70),
+                        filled: true,
+                        fillColor: Colors.white.withOpacity(0.08),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: BorderSide.none,
+                        ),
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: isMobile ? 14.0 : 16.0,
+                          vertical: isMobile ? 12.0 : 14.0,
+                        ),
+                        suffixIcon: IconButton(
+                          icon: Icon(
+                            obscurePassword ? Icons.visibility_off : Icons.visibility,
+                            color: Colors.white70,
+                            size: isMobile ? 20.0 : 24.0,
+                          ),
+                          onPressed: () {
+                            setState(() => obscurePassword = !obscurePassword);
+                          },
+                        ),
+                      ),
+                      textInputAction: TextInputAction.done,
+                      onChanged: (value) {
+                        checkAutoSubmit(value);
+                        setState(() {}); // Update UI for hints
+                      },
+                      onSubmitted: (value) {
+                        submitPassword(value.trim());
+                      },
+                    ),
+                    
+                    // Auto-submit hint
+                    if (passwordController.text.isNotEmpty && passwordController.text.length < 6)
+                      Padding(
+                        padding: EdgeInsets.only(top: isMobile ? 6.0 : 8.0),
+                        child: Text(
+                          'Type ${6 - passwordController.text.length} more characters for auto-login',
+                          style: TextStyle(
+                            color: Colors.blueAccent.withOpacity(0.8),
+                            fontSize: isMobile ? 10.0 : 11.0,
+                          ),
+                        ),
+                      ),
+                    
+                    if (passwordController.text.length >= 6)
+                      Padding(
+                        padding: EdgeInsets.only(top: isMobile ? 6.0 : 8.0),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.auto_awesome,
+                              color: Colors.greenAccent,
+                              size: isMobile ? 12.0 : 14.0,
+                            ),
+                            SizedBox(width: isMobile ? 4.0 : 6.0),
+                            Text(
+                              'Auto-submit ready',
+                              style: TextStyle(
+                                color: Colors.greenAccent,
+                                fontSize: isMobile ? 10.0 : 11.0,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    
+                    SizedBox(height: isMobile ? 16.0 : 20.0),
+                    
+                    // Buttons - Responsive layout
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context, null),
+                          style: TextButton.styleFrom(
+                            padding: EdgeInsets.symmetric(
+                              horizontal: isMobile ? 14.0 : 16.0,
+                              vertical: isMobile ? 8.0 : 10.0,
+                            ),
+                          ),
+                          child: Text(
+                            'Cancel',
+                            style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: isMobile ? 14.0 : 15.0,
+                            ),
+                          ),
+                        ),
+                        SizedBox(width: isMobile ? 8.0 : 10.0),
+                        ElevatedButton(
+                          onPressed: passwordController.text.isEmpty
+                              ? null
+                              : () {
+                                  submitPassword(passwordController.text.trim());
+                                },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.blueAccent,
+                            foregroundColor: Colors.white,
+                            disabledBackgroundColor: Colors.blueAccent.withOpacity(0.5),
+                            padding: EdgeInsets.symmetric(
+                              horizontal: isMobile ? 18.0 : 20.0,
+                              vertical: isMobile ? 10.0 : 12.0,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                          child: Text(
+                            'Login',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              fontSize: isMobile ? 14.0 : 15.0,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    
+                    // Add some bottom padding on mobile for better UX
+                    if (isMobile) const SizedBox(height: 8.0),
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
+      );
+    },
+  );
+}
+
   // ============================================================
-  // AUTO-LOGIN HANDLER
+  // DIRECT PASSWORD LOGIN (NO EXTRA CONFIRMATION DIALOG)
   // ============================================================
-  Future<void> _handleAutoLogin(Map<String, dynamic> profile) async {
+  Future<void> _handleLogin(Map<String, dynamic> profile) async {
     if (_loading) return;
 
     setState(() {
@@ -64,17 +334,40 @@ class _ContinueScreenState extends State<ContinueScreen> {
         return;
       }
 
-      print('🔄 Attempting auto login for: $email');
+      print('🎯 PROFILE SELECTED: $email');
 
-      // 1️⃣ TRY AUTO LOGIN FIRST
-      final success = await SessionManager.tryAutoLogin(email);
+      // 1️⃣ FIRST TRY AUTO-LOGIN
+      print('🔄 Checking for auto-login...');
+      final autoLoginSuccess = await SessionManager.tryAutoLogin(email);
 
-      if (success) {
-        await _processSuccessfulLogin(profile);
-        return;
+      if (autoLoginSuccess) {
+        print('✅ AUTO-LOGIN SUCCESSFUL!');
+
+        // Process successful login
+        final supabase = Supabase.instance.client;
+        final user = supabase.auth.currentUser;
+
+        if (user != null) {
+          // Save profile
+          await SessionManager.saveUserProfile(
+            email: email,
+            userId: user.id,
+            name: profile['name'] as String? ?? email.split('@').first,
+            photo: profile['photo'] as String?,
+            roles: List<String>.from(profile['roles'] ?? []),
+            rememberMe: profile['rememberMe'] == true,
+          );
+
+          appState.refreshState();
+          await _processSuccessfulLogin(profile);
+          return;
+        }
       }
 
-      // 2️⃣ SHOW PASSWORD DIALOG
+      // 2️⃣ AUTO-LOGIN FAILED - SHOW PASSWORD DIALOG DIRECTLY
+      print('⚠️ Auto-login not available, showing password dialog');
+
+      // DIRECTLY SHOW PASSWORD DIALOG - NO EXTRA CONFIRMATION
       final password = await _showPasswordDialog(email);
 
       if (password == null || password.isEmpty) {
@@ -82,7 +375,8 @@ class _ContinueScreenState extends State<ContinueScreen> {
         return;
       }
 
-      // 3️⃣ MANUAL LOGIN
+      // 3️⃣ MANUAL LOGIN WITH PASSWORD
+      print('🔄 Attempting manual login...');
       final response = await supabase.auth.signInWithPassword(
         email: email,
         password: password,
@@ -91,6 +385,8 @@ class _ContinueScreenState extends State<ContinueScreen> {
       final user = response.user;
       if (user == null) throw Exception("Login failed.");
 
+      print('✅ MANUAL LOGIN SUCCESSFUL!');
+
       // Save profile
       await SessionManager.saveUserProfile(
         email: email,
@@ -98,7 +394,10 @@ class _ContinueScreenState extends State<ContinueScreen> {
         name: profile['name'] as String? ?? email.split('@').first,
         photo: profile['photo'] as String?,
         roles: List<String>.from(profile['roles'] ?? []),
+        rememberMe: profile['rememberMe'] == true,
       );
+
+      // Update app state
       appState.refreshState();
       await _processSuccessfulLogin(profile);
     } on AuthException catch (e) {
@@ -115,11 +414,10 @@ class _ContinueScreenState extends State<ContinueScreen> {
           break;
 
         case 'email_not_confirmed':
-          // await appState.restore();
           appState.emailVerifyerError();
           appState.refreshState();
           if (!mounted) return;
-          context.go('/verify-email'); // 🔥 router → /verify-email
+          context.go('/verify-email');
           break;
 
         case 'too_many_requests':
@@ -160,6 +458,109 @@ class _ContinueScreenState extends State<ContinueScreen> {
     }
   }
 
+  // // ============================================================
+  // // COMPLIANCE CONFIRMATION DIALOG
+  // // ============================================================
+  // // ============================================================
+  // // SMART COMPLIANCE CONFIRMATION DIALOG
+  // // ============================================================
+  // Future<bool> _showComplianceConfirmation(String email) async {
+  //   return await showDialog<bool>(
+  //         context: context,
+  //         barrierDismissible: false,
+  //         builder: (context) {
+  //           return AlertDialog(
+  //             backgroundColor: const Color(0xFF1C1F26),
+  //             shape: RoundedRectangleBorder(
+  //               borderRadius: BorderRadius.circular(16),
+  //             ),
+  //             title: const Text(
+  //               'Continue to Login',
+  //               style: TextStyle(
+  //                 color: Colors.white,
+  //                 fontSize: 20,
+  //                 fontWeight: FontWeight.bold,
+  //               ),
+  //             ),
+  //             content: Column(
+  //               mainAxisSize: MainAxisSize.min,
+  //               crossAxisAlignment: CrossAxisAlignment.start,
+  //               children: [
+  //                 const Text(
+  //                   'You selected:',
+  //                   style: TextStyle(color: Colors.white70),
+  //                 ),
+  //                 const SizedBox(height: 8),
+  //                 Text(
+  //                   email,
+  //                   style: const TextStyle(
+  //                     color: Colors.blueAccent,
+  //                     fontWeight: FontWeight.w500,
+  //                   ),
+  //                 ),
+  //                 const SizedBox(height: 16),
+  //                 Container(
+  //                   padding: const EdgeInsets.all(12),
+  //                   decoration: BoxDecoration(
+  //                     color: Colors.blue.withOpacity(0.1),
+  //                     borderRadius: BorderRadius.circular(8),
+  //                     border: Border.all(
+  //                       color: Colors.blueAccent.withOpacity(0.3),
+  //                     ),
+  //                   ),
+  //                   child: const Column(
+  //                     crossAxisAlignment: CrossAxisAlignment.start,
+  //                     children: [
+  //                       Row(
+  //                         children: [
+  //                           Icon(
+  //                             Icons.auto_awesome,
+  //                             size: 16,
+  //                             color: Colors.blueAccent,
+  //                           ),
+  //                           SizedBox(width: 8),
+  //                           Text(
+  //                             'Auto-login attempted',
+  //                             style: TextStyle(
+  //                               color: Colors.white,
+  //                               fontSize: 12,
+  //                               fontWeight: FontWeight.w500,
+  //                             ),
+  //                           ),
+  //                         ],
+  //                       ),
+  //                       SizedBox(height: 8),
+  //                       Text(
+  //                         'Please enter your password to continue.',
+  //                         style: TextStyle(color: Colors.white70, fontSize: 12),
+  //                       ),
+  //                     ],
+  //                   ),
+  //                 ),
+  //               ],
+  //             ),
+  //             actions: [
+  //               TextButton(
+  //                 onPressed: () => Navigator.pop(context, false),
+  //                 child: const Text(
+  //                   'Cancel',
+  //                   style: TextStyle(color: Colors.white70),
+  //                 ),
+  //               ),
+  //               ElevatedButton(
+  //                 onPressed: () => Navigator.pop(context, true),
+  //                 style: ElevatedButton.styleFrom(
+  //                   backgroundColor: Colors.blueAccent,
+  //                 ),
+  //                 child: const Text('Enter Password'),
+  //               ),
+  //             ],
+  //           );
+  //         },
+  //       ) ??
+  //       false;
+  // }
+
   // ============================================================
   // PROCESS SUCCESSFUL LOGIN
   // ============================================================
@@ -175,7 +576,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
     final dbProfile = await supabase
         .from('profiles')
-        .select('role, roles')
+        .select('*')
         .eq('id', user.id)
         .maybeSingle();
 
@@ -190,13 +591,15 @@ class _ContinueScreenState extends State<ContinueScreen> {
     await SessionManager.saveUserRole(role);
     await SessionManager.updateLastLogin(profile['email'] as String);
 
-    // Save profile
+    // Save profile with remember me
+    final rememberMe = profile['rememberMe'] == true;
     await SessionManager.saveUserProfile(
       email: dbProfile['email'] as String? ?? profile['email'] as String,
       userId: user.id,
       name: dbProfile['name'] as String? ?? dbProfile['email'].split('@').first,
       photo: dbProfile['photo'] as String?,
       roles: List<String>.from(profile['roles'] ?? []),
+      rememberMe: rememberMe,
     );
 
     print('✅ Login successful! Role: $role');
@@ -215,7 +618,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
   }
 
   // ============================================================
-  // EMAIL VERIFICATION DIALOG (NOT YOU DIALOG)
+  // EMAIL VERIFICATION DIALOG
   // ============================================================
   Future<void> _showVerificationDialog(Map<String, dynamic> profile) async {
     await showDialog(
@@ -226,9 +629,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
-          title: Text(
+          title: const Text(
             'Email Not Verified',
-            style: const TextStyle(
+            style: TextStyle(
               color: Colors.white,
               fontSize: 20,
               fontWeight: FontWeight.bold,
@@ -238,17 +641,19 @@ class _ContinueScreenState extends State<ContinueScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
+              const Text(
                 'Please verify your email to continue.',
-                style: TextStyle(
-                  color: Colors.white.withOpacity(0.8),
-                  fontSize: 16,
-                ),
+                style: TextStyle(color: Colors.white70, fontSize: 16),
               ),
               const SizedBox(height: 16),
               Text(
                 'Email: ${profile['email']}',
                 style: const TextStyle(color: Colors.blueAccent, fontSize: 14),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'You need to verify your email before accessing the app.',
+                style: TextStyle(color: Colors.orangeAccent, fontSize: 12),
               ),
             ],
           ),
@@ -261,7 +666,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                 _loadProfiles();
               },
               child: const Text(
-                'Not You?',
+                'Remove Account',
                 style: TextStyle(color: Colors.redAccent),
               ),
             ),
@@ -270,6 +675,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
                 Navigator.pop(context);
                 context.go('/verify-email');
               },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blueAccent,
+              ),
               child: const Text('Verify Email'),
             ),
           ],
@@ -279,141 +687,14 @@ class _ContinueScreenState extends State<ContinueScreen> {
   }
 
   // ============================================================
-  // POPUP DELETE MENU
-  // ============================================================
-  void _showProfilesMenu(Offset position) async {
-    if (profiles.isEmpty) return;
-
-    final RenderBox overlay =
-        Overlay.of(context).context.findRenderObject() as RenderBox;
-
-    final selected = await showMenu<Map<String, dynamic>>(
-      context: context,
-      position: RelativeRect.fromRect(
-        position & const Size(40, 40),
-        Offset.zero & overlay.size,
-      ),
-      color: const Color(0xFF1C1F26),
-      items: profiles
-          .map(
-            (p) => PopupMenuItem<Map<String, dynamic>>(
-              value: p,
-              child: Row(
-                children: [
-                  CircleAvatar(
-                    radius: 16,
-                    backgroundImage:
-                        (p['photo'] != null && p['photo'].toString().isNotEmpty)
-                        ? NetworkImage(p['photo'].toString())
-                        : null,
-                    child: (p['photo'] == null || p['photo'].toString().isEmpty)
-                        ? const Icon(Icons.person, color: Colors.white)
-                        : null,
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          p['name'] as String? ?? 'Unknown',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          p['email'] as String? ?? 'No Email',
-                          style: const TextStyle(
-                            color: Colors.white70,
-                            fontSize: 11,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.delete, color: Colors.redAccent),
-                    onPressed: () async {
-                      await SessionManager.removeProfile(p['email'] as String);
-                      _loadProfiles();
-                      if (!mounted) return;
-                      Navigator.pop(context);
-                    },
-                  ),
-                ],
-              ),
-            ),
-          )
-          .toList(),
-    );
-
-    if (selected != null) {
-      _handleAutoLogin(selected);
-    }
-  }
-
-  // ============================================================
-  // CLEAR ALL PROFILES
-  // ============================================================
-  Future<void> clearAllProfiles() async {
-    if (profiles.isEmpty) return;
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1C1F26),
-        title: const Text(
-          "Clear All Profiles?",
-          style: TextStyle(color: Colors.white),
-        ),
-        content: Text(
-          "Remove all ${profiles.length} saved profiles from this device?",
-          style: const TextStyle(color: Colors.white70),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text(
-              "Cancel",
-              style: TextStyle(color: Colors.white70),
-            ),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text("Clear All", style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed == true) {
-      for (final profile in profiles) {
-        await SessionManager.removeProfile(profile['email'] as String);
-      }
-
-      await SessionManager.clearContinueScreen();
-      await _loadProfiles();
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('All profiles cleared'),
-          backgroundColor: Colors.green,
-        ),
-      );
-    }
-  }
-
-  // ============================================================
   // BUILD PROFILE ITEM
   // ============================================================
   Widget _buildProfileItem(Map<String, dynamic> profile, int index) {
     final isSelected = _selectedEmail == profile['email'];
+    final rememberMe = profile['rememberMe'] == true;
 
     return GestureDetector(
-      onTap: () => _handleAutoLogin(profile),
+      onTap: () => _handleLogin(profile),
       child: Card(
         color: isSelected
             ? Colors.blue.withOpacity(0.15)
@@ -429,7 +710,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
         ),
         child: ListTile(
           leading: CircleAvatar(
-            backgroundColor: Colors.blueAccent.withOpacity(0.2),
+            backgroundColor: rememberMe
+                ? Colors.blueAccent.withOpacity(0.2)
+                : Colors.grey.withOpacity(0.2),
             backgroundImage:
                 (profile['photo'] != null &&
                     profile['photo'].toString().isNotEmpty)
@@ -438,15 +721,31 @@ class _ContinueScreenState extends State<ContinueScreen> {
             child:
                 (profile['photo'] == null ||
                     (profile['photo'] as String).isEmpty)
-                ? Icon(Icons.person, color: Colors.white.withOpacity(0.7))
+                ? Icon(
+                    Icons.person,
+                    color: rememberMe ? Colors.white : Colors.grey,
+                  )
                 : null,
           ),
-          title: Text(
-            profile['name'] as String? ?? 'Unknown',
-            style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w500,
-            ),
+          title: Row(
+            children: [
+              Text(
+                profile['name'] as String? ?? 'Unknown',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              if (rememberMe)
+                Padding(
+                  padding: const EdgeInsets.only(left: 8),
+                  child: Icon(
+                    Icons.fingerprint,
+                    color: Colors.greenAccent.withOpacity(0.8),
+                    size: 16,
+                  ),
+                ),
+            ],
           ),
           subtitle: profile['email'] != null
               ? Text(
@@ -482,6 +781,17 @@ class _ContinueScreenState extends State<ContinueScreen> {
                   ),
                 ),
               const SizedBox(width: 8),
+              IconButton(
+                icon: const Icon(
+                  Icons.delete_outline,
+                  color: Colors.redAccent,
+                  size: 18,
+                ),
+                onPressed: () async {
+                  await _showDeleteConfirmation(profile);
+                },
+              ),
+              const SizedBox(width: 4),
               const Icon(
                 Icons.arrow_forward_ios_rounded,
                 color: Colors.white38,
@@ -495,7 +805,133 @@ class _ContinueScreenState extends State<ContinueScreen> {
   }
 
   // ============================================================
-  // UI - ORIGINAL FRAME
+  // DELETE CONFIRMATION
+  // ============================================================
+  Future<void> _showDeleteConfirmation(Map<String, dynamic> profile) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1C1F26),
+        title: const Text(
+          "Remove Account?",
+          style: TextStyle(color: Colors.white),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              "Remove ${profile['email']} from this device?",
+              style: const TextStyle(color: Colors.white70),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              "This will not delete your account, only remove it from this device.",
+              style: TextStyle(color: Colors.grey, fontSize: 12),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text(
+              "Cancel",
+              style: TextStyle(color: Colors.white70),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text("Remove"),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await SessionManager.removeProfile(profile['email'] as String);
+      await _loadProfiles();
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${profile['email']} removed'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
+  }
+
+  // ============================================================
+  // CLEAR ALL PROFILES WITH COMPLIANCE
+  // ============================================================
+  Future<void> clearAllProfiles() async {
+    if (profiles.isEmpty) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1C1F26),
+        title: const Text(
+          "Clear All Profiles?",
+          style: TextStyle(color: Colors.white),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              "Remove all ${profiles.length} saved profiles from this device?",
+              style: const TextStyle(color: Colors.white70),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              "This will clear all saved login information and preferences.",
+              style: TextStyle(color: Colors.grey, fontSize: 12),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              "Your accounts will not be deleted, only removed from this device.",
+              style: TextStyle(color: Colors.grey, fontSize: 12),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text(
+              "Cancel",
+              style: TextStyle(color: Colors.white70),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text("Clear All"),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      for (final profile in profiles) {
+        await SessionManager.removeProfile(profile['email'] as String);
+      }
+
+      await SessionManager.clearContinueScreen();
+      await SessionManager.setRememberMe(false);
+      await _loadProfiles();
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('All profiles cleared'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
+  }
+
+  // ============================================================
+  // UI - UPDATED FOR COMPLIANCE
   // ============================================================
   @override
   Widget build(BuildContext context) {
@@ -520,53 +956,94 @@ class _ContinueScreenState extends State<ContinueScreen> {
               ),
               child: Column(
                 children: [
-                  // Header with Three Dots Menu
+                  // Header
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text(
-                        'Continue',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-
-                      // Three Dots Menu Icon
-                      if (profiles.isNotEmpty)
-                        GestureDetector(
-                          onTapDown: (details) =>
-                              _showProfilesMenu(details.globalPosition),
-                          child: const Padding(
-                            padding: EdgeInsets.all(8.0),
-                            child: Icon(
-                              Icons.more_vert,
-                              color: Colors.white70,
-                              size: 24,
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Continue',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 24,
+                              fontWeight: FontWeight.bold,
                             ),
                           ),
+                          const SizedBox(height: 4),
+                          Text(
+                            profiles.isEmpty
+                                ? 'No saved profiles'
+                                : '${profiles.length} profile${profiles.length == 1 ? '' : 's'} with Remember Me',
+                            style: TextStyle(
+                              color: Colors.white.withOpacity(0.7),
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (profiles.isNotEmpty)
+                        IconButton(
+                          icon: const Icon(
+                            Icons.delete_sweep,
+                            color: Colors.redAccent,
+                            size: 24,
+                          ),
+                          onPressed: clearAllProfiles,
+                          tooltip: 'Clear All Profiles',
                         ),
                     ],
                   ),
 
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 20),
 
-                  // Subtitle
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      profiles.isEmpty
-                          ? 'No saved profiles'
-                          : '${profiles.length} saved profile${profiles.length == 1 ? '' : 's'}',
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.7),
-                        fontSize: 14,
+                  // Compliance Notice
+                  if (_showComplianceDialog)
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      margin: const EdgeInsets.only(bottom: 16),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: Colors.blueAccent.withOpacity(0.3),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.info_outline,
+                            color: Colors.blueAccent,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Remember Me Disabled',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Enable "Remember Me" during login to save profiles',
+                                  style: TextStyle(
+                                    color: Colors.white.withOpacity(0.7),
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                  ),
-
-                  const SizedBox(height: 20),
 
                   // Profiles List
                   Expanded(
@@ -614,20 +1091,27 @@ class _ContinueScreenState extends State<ContinueScreen> {
                                   color: Colors.white.withOpacity(0.3),
                                 ),
                                 const SizedBox(height: 15),
-                                Text(
-                                  'No saved profiles',
+                                const Text(
+                                  'No Saved Profiles',
                                   style: TextStyle(
-                                    color: Colors.white.withOpacity(0.6),
+                                    color: Colors.white,
                                     fontSize: 16,
+                                    fontWeight: FontWeight.w500,
                                   ),
                                 ),
-                                const SizedBox(height: 5),
+                                const SizedBox(height: 8),
                                 Text(
-                                  'Login to save your profile',
+                                  'Enable "Remember Me" during login\nto save your profile',
+                                  textAlign: TextAlign.center,
                                   style: TextStyle(
-                                    color: Colors.white.withOpacity(0.4),
-                                    fontSize: 12,
+                                    color: Colors.white.withOpacity(0.6),
+                                    fontSize: 14,
                                   ),
+                                ),
+                                const SizedBox(height: 20),
+                                OutlinedButton(
+                                  onPressed: () => context.go('/login'),
+                                  child: const Text('Go to Login'),
                                 ),
                               ],
                             ),
@@ -673,14 +1157,63 @@ class _ContinueScreenState extends State<ContinueScreen> {
                           ),
                         ),
 
-                        const SizedBox(height: 16),
+                        const SizedBox(height: 12),
+
+                        // Clear all data button
+                        TextButton(
+                          onPressed: () => context.go('/clear-data'),
+                          child: const Text(
+                            'Clear All Data',
+                            style: TextStyle(
+                              color: Colors.redAccent,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+
+                        const SizedBox(height: 12),
+
+                        // Privacy links
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            TextButton(
+                              onPressed: () => context.go('/privacy'),
+                              child: const Text(
+                                'Privacy Policy',
+                                style: TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Container(
+                              width: 1,
+                              height: 12,
+                              color: Colors.white30,
+                            ),
+                            const SizedBox(width: 8),
+                            TextButton(
+                              onPressed: () => context.go('/terms'),
+                              child: const Text(
+                                'Terms of Service',
+                                style: TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+
+                        const SizedBox(height: 12),
 
                         // Create new account
                         SizedBox(
                           width: double.infinity,
                           child: OutlinedButton(
                             onPressed: () {
-                              // Go to signup page instead of RegistrationFlow
                               context.go('/signup');
                             },
                             style: OutlinedButton.styleFrom(
@@ -699,8 +1232,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
                             ),
                           ),
                         ),
-
-                        const SizedBox(height: 16),
                       ],
                     ),
                   ),
@@ -715,63 +1246,51 @@ class _ContinueScreenState extends State<ContinueScreen> {
 }
 
 // ============================================================
-// RESPONSIVE PASSWORD DIALOG WIDGET
+// SECURITY COMPLIANT PASSWORD DIALOG
 // ============================================================
-class ResponsivePasswordDialog extends StatefulWidget {
+class SecurityCompliantPasswordDialog extends StatefulWidget {
   final String email;
 
-  const ResponsivePasswordDialog({super.key, required this.email});
+  const SecurityCompliantPasswordDialog({super.key, required this.email});
 
   @override
-  State<ResponsivePasswordDialog> createState() =>
-      _ResponsivePasswordDialogState();
+  State<SecurityCompliantPasswordDialog> createState() =>
+      _SecurityCompliantPasswordDialogState();
 }
 
-class _ResponsivePasswordDialogState extends State<ResponsivePasswordDialog> {
+class _SecurityCompliantPasswordDialogState
+    extends State<SecurityCompliantPasswordDialog> {
   final TextEditingController _controller = TextEditingController();
   bool _obscurePassword = true;
-  Timer? _autoLoginTimer;
+  bool _isValid = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.addListener(_validatePassword);
+  }
+
+  void _validatePassword() {
+    setState(() {
+      _isValid = _controller.text.length >= 6;
+    });
+  }
 
   @override
   void dispose() {
     _controller.dispose();
-    _autoLoginTimer?.cancel();
     super.dispose();
   }
 
-  void _checkAutoLogin(String password) {
-    _autoLoginTimer?.cancel();
-
-    // Auto login when password is 6+ characters and user pauses typing
-    if (password.length >= 6) {
-      _autoLoginTimer = Timer(const Duration(milliseconds: 500), () {
-        Navigator.pop(context, password);
-      });
-    }
-  }
-
-  // ResponsivePasswordDialog widget එකේ build method එකේ
   @override
   Widget build(BuildContext context) {
     final Size screenSize = MediaQuery.of(context).size;
     final bool isWeb = screenSize.width > 700;
 
-    // Calculate dialog width based on screen size
-    double dialogWidth;
-    double dialogMaxWidth;
-
-    if (isWeb) {
-      dialogWidth = screenSize.width * 0.25; // 25% of screen on web - smaller
-      dialogMaxWidth = 350; // Even smaller max width
-    } else {
-      dialogWidth = screenSize.width * 0.85; // 85% of screen on mobile
-      dialogMaxWidth = 400;
-    }
-
-    // Ensure dialog is not too small
-    final double calculatedWidth = dialogWidth
-        .clamp(300.0, dialogMaxWidth)
-        .toDouble();
+    double dialogWidth = isWeb
+        ? screenSize.width * 0.25
+        : screenSize.width * 0.85;
+    final double calculatedWidth = dialogWidth.clamp(300.0, 400.0).toDouble();
 
     return Dialog(
       backgroundColor: const Color(0xFF1C1F26),
@@ -788,11 +1307,11 @@ class _ResponsivePasswordDialogState extends State<ResponsivePasswordDialog> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Title
-            Text(
+            const Text(
               'Enter Password',
               style: TextStyle(
                 color: Colors.white,
-                fontSize: isWeb ? 20 : 18,
+                fontSize: 20,
                 fontWeight: FontWeight.bold,
               ),
             ),
@@ -804,48 +1323,44 @@ class _ResponsivePasswordDialogState extends State<ResponsivePasswordDialog> {
               'For:',
               style: TextStyle(
                 color: Colors.white.withOpacity(0.7),
-                fontSize: isWeb ? 14 : 13,
+                fontSize: 14,
               ),
             ),
             Text(
               widget.email,
-              style: TextStyle(
+              style: const TextStyle(
                 color: Colors.blueAccent,
-                fontSize: isWeb ? 14 : 13,
+                fontSize: 14,
                 fontWeight: FontWeight.w500,
               ),
               overflow: TextOverflow.ellipsis,
             ),
 
-            SizedBox(height: isWeb ? 20 : 16),
+            const SizedBox(height: 20),
 
             // Password Field
             TextField(
               controller: _controller,
               obscureText: _obscurePassword,
               autofocus: true,
-              style: TextStyle(color: Colors.white, fontSize: isWeb ? 16 : 15),
+              style: const TextStyle(color: Colors.white, fontSize: 16),
               decoration: InputDecoration(
                 labelText: 'Password',
-                labelStyle: TextStyle(
-                  color: Colors.white70,
-                  fontSize: isWeb ? 14 : 13,
-                ),
+                labelStyle: const TextStyle(color: Colors.white70),
                 filled: true,
                 fillColor: Colors.white.withOpacity(0.08),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
                   borderSide: BorderSide.none,
                 ),
-                contentPadding: EdgeInsets.symmetric(
+                contentPadding: const EdgeInsets.symmetric(
                   horizontal: 16,
-                  vertical: isWeb ? 16 : 14,
+                  vertical: 14,
                 ),
                 suffixIcon: IconButton(
                   icon: Icon(
                     _obscurePassword ? Icons.visibility_off : Icons.visibility,
                     color: Colors.white70,
-                    size: isWeb ? 22 : 20,
                   ),
                   onPressed: () {
                     setState(() {
@@ -855,9 +1370,6 @@ class _ResponsivePasswordDialogState extends State<ResponsivePasswordDialog> {
                 ),
               ),
               textInputAction: TextInputAction.done,
-              onChanged: (value) {
-                _checkAutoLogin(value);
-              },
               onSubmitted: (value) {
                 if (value.trim().isNotEmpty) {
                   Navigator.pop(context, value.trim());
@@ -865,30 +1377,30 @@ class _ResponsivePasswordDialogState extends State<ResponsivePasswordDialog> {
               },
             ),
 
-            SizedBox(height: isWeb ? 16 : 12),
+            const SizedBox(height: 16),
 
-            // Auto Login Info
+            // Security Info
             Container(
-              padding: EdgeInsets.all(isWeb ? 12 : 10),
+              padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.blueAccent.withOpacity(0.1),
+                color: Colors.green.withOpacity(0.1),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.blueAccent.withOpacity(0.3)),
+                border: Border.all(color: Colors.greenAccent.withOpacity(0.3)),
               ),
               child: Row(
                 children: [
-                  Icon(
-                    Icons.auto_awesome,
-                    color: Colors.blueAccent,
-                    size: isWeb ? 16 : 14,
+                  const Icon(
+                    Icons.security,
+                    color: Colors.greenAccent,
+                    size: 16,
                   ),
-                  SizedBox(width: isWeb ? 8 : 6),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Type password - auto login in 0.5s',
+                      'Your password is securely encrypted',
                       style: TextStyle(
                         color: Colors.white.withOpacity(0.8),
-                        fontSize: isWeb ? 12 : 11,
+                        fontSize: 12,
                       ),
                     ),
                   ),
@@ -896,7 +1408,7 @@ class _ResponsivePasswordDialogState extends State<ResponsivePasswordDialog> {
               ),
             ),
 
-            SizedBox(height: isWeb ? 20 : 16),
+            const SizedBox(height: 20),
 
             // Buttons
             Row(
@@ -905,44 +1417,41 @@ class _ResponsivePasswordDialogState extends State<ResponsivePasswordDialog> {
                 TextButton(
                   onPressed: () => Navigator.pop(context, null),
                   style: TextButton.styleFrom(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: isWeb ? 16 : 14,
-                      vertical: isWeb ? 10 : 8,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 10,
                     ),
                   ),
-                  child: Text(
+                  child: const Text(
                     'Cancel',
-                    style: TextStyle(
-                      color: Colors.white70,
-                      fontSize: isWeb ? 14 : 13,
-                    ),
+                    style: TextStyle(color: Colors.white70),
                   ),
                 ),
-                SizedBox(width: isWeb ? 10 : 8),
+                const SizedBox(width: 10),
                 ElevatedButton(
-                  onPressed: () {
-                    final enteredPassword = _controller.text.trim();
-                    if (enteredPassword.isNotEmpty) {
-                      Navigator.pop(context, enteredPassword);
-                    }
-                  },
+                  onPressed: _isValid
+                      ? () {
+                          final enteredPassword = _controller.text.trim();
+                          if (enteredPassword.isNotEmpty) {
+                            Navigator.pop(context, enteredPassword);
+                          }
+                        }
+                      : null,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.blueAccent,
                     foregroundColor: Colors.white,
-                    padding: EdgeInsets.symmetric(
-                      horizontal: isWeb ? 20 : 18,
-                      vertical: isWeb ? 12 : 10,
+                    disabledBackgroundColor: Colors.blueAccent.withOpacity(0.5),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 12,
                     ),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(10),
                     ),
                   ),
-                  child: Text(
+                  child: const Text(
                     'Login',
-                    style: TextStyle(
-                      fontSize: isWeb ? 14 : 13,
-                      fontWeight: FontWeight.w600,
-                    ),
+                    style: TextStyle(fontWeight: FontWeight.w600),
                   ),
                 ),
               ],

@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:developer' as developer;
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-// import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 
 import 'session_manager.dart';
 import '../router/auth_gate.dart';
@@ -17,10 +16,11 @@ class AppState extends ChangeNotifier {
   bool _emailVerified = false;
   bool _profileCompleted = false;
   bool _hasLocalProfile = false;
-  bool _countinueSc = false;
+  bool _continueSc = false;
   String? _role;
   String? _errorMessage;
   DateTime? _lastUpdateTime;
+  bool _rememberMeEnabled = false;
 
   // ====================
   // PUBLIC GETTERS
@@ -30,10 +30,11 @@ class AppState extends ChangeNotifier {
   bool get emailVerified => _emailVerified;
   bool get profileCompleted => _profileCompleted;
   bool get hasLocalProfile => _hasLocalProfile;
-  bool get continueSc => _countinueSc;
+  bool get continueSc => _continueSc;
   String? get role => _role;
   String? get errorMessage => _errorMessage;
   DateTime? get lastUpdateTime => _lastUpdateTime;
+  bool get rememberMeEnabled => _rememberMeEnabled;
 
   // ====================
   // PRIVATE SETTERS
@@ -86,14 +87,21 @@ class AppState extends ChangeNotifier {
       notifyListeners();
     }
   }
-  void _setCountinueScreen(bool value) {
-    if (_countinueSc != value) {
-      _countinueSc = value;
+
+  void _setContinueScreen(bool value) {
+    if (_continueSc != value) {
+      _continueSc = value;
       notifyListeners();
     }
   }
 
-  
+  void _setRememberMeEnabled(bool value) {
+    if (_rememberMeEnabled != value) {
+      _rememberMeEnabled = value;
+      notifyListeners();
+    }
+  }
+
   // ====================
   // PUBLIC METHODS
   // ====================
@@ -106,14 +114,14 @@ class AppState extends ChangeNotifier {
     developer.log('🔄 AppState: Initializing...', name: 'AppState');
 
     try {
-      // 1. Check local profiles
+      // 1. Check local profiles and remember me settings
       final hasProfiles = await SessionManager.hasProfile();
       final csc = await SessionManager.shouldShowContinueScreen();
-      print(hasProfiles);
-     
-    
+      final rememberMe = await SessionManager.isRememberMeEnabled();
+
       _setHasLocalProfile(hasProfiles);
-      _setCountinueScreen(csc);
+      _setContinueScreen(csc);
+      _setRememberMeEnabled(rememberMe);
 
       // 2. Check authentication state
       await _checkAuthenticationState();
@@ -133,11 +141,6 @@ class AppState extends ChangeNotifier {
         stackTrace: stackTrace,
       );
 
-      // Report to Crashlytics in production
-      if (!kDebugMode) {
-        // FirebaseCrashlytics.instance.recordError(e, stackTrace);
-      }
-
       // Fallback to safe state
       _resetToSafeState();
     } finally {
@@ -155,8 +158,11 @@ class AppState extends ChangeNotifier {
       await _checkAuthenticationState();
       await _updateUserProfile();
 
-       final hasProfiles = await SessionManager.hasProfile();
-       _setHasLocalProfile(hasProfiles);
+      final hasProfiles = await SessionManager.hasProfile();
+      final rememberMe = await SessionManager.isRememberMeEnabled();
+      
+      _setHasLocalProfile(hasProfiles);
+      _setRememberMeEnabled(rememberMe);
 
       _lastUpdateTime = DateTime.now();
       _setErrorMessage(null);
@@ -180,39 +186,81 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// 🚪 Logout user
-  Future<void> logout() async {
+/// 🚪 Logout user (full logout) - PRESERVE AUTO-LOGIN CAPABILITY
+Future<void> logout() async {
+  _setLoading(true);
+
+  try {
+    final supabase = Supabase.instance.client;
+    final user = supabase.auth.currentUser;
+    final email = user?.email;
+
+    if (user != null && email != null) {
+      // Get current session before logout
+      final currentSession = supabase.auth.currentSession;
+      final refreshToken = currentSession?.refreshToken;
+      
+      // Check if remember me is enabled
+      final rememberMe = await SessionManager.isRememberMeEnabled();
+      
+      if (rememberMe && refreshToken != null) {
+        // Save refresh token BEFORE logout for future auto-login
+        await SessionManager.saveUserProfile(
+          email: email,
+          userId: user.id,
+          name: user.userMetadata?['full_name'] ?? email.split('@').first,
+          rememberMe: rememberMe,
+          refreshToken: refreshToken, // Save token before logout
+        );
+        print('✅ Refresh token saved before logout for auto-login');
+      }
+    }
+
+    // Sign out from Supabase (this clears the session)
+    await supabase.auth.signOut();
+    print('✅ User signed out from Supabase');
+
+    // Update app state
+    _setLoggedIn(false);
+    _setEmailVerified(false);
+    _setProfileCompleted(false);
+    _setRole(null);
+
+    developer.log('✅ User logged out (auto-login capability preserved)', name: 'AppState');
+    
+  } catch (e, stackTrace) {
+    developer.log(
+      '❌ Logout error: $e',
+      name: 'AppState',
+      error: e,
+      stackTrace: stackTrace,
+    );
+
+    _setErrorMessage('Logout failed');
+    rethrow;
+  } finally {
+    _setLoading(false);
+  }
+}
+
+  /// 🔄 Logout for continue screen (keep profile)
+  Future<void> logoutForContinue() async {
     _setLoading(true);
 
     try {
-      final supabase = Supabase.instance.client;
-      final user = supabase.auth.currentUser;
-
-      if (user != null && user.email != null) {
-        // Save user data for continue screen
-        await SessionManager.saveUserProfile(
-          email: user.email!,
-          userId: user.id,
-          name: user.userMetadata?['full_name'],
-        );
-      }
-
-      // Sign out
-      await supabase.auth.signOut();
-
-      // Clear role but keep profiles
-      // await SessionManager.clearUserRole();
-
-      // Update state
+      // Use SessionManager's logoutForContinue method
+      await SessionManager.logoutForContinue();
+      
+      // Update app state
       _setLoggedIn(false);
       _setEmailVerified(false);
       _setProfileCompleted(false);
       _setRole(null);
 
-      developer.log('✅ User logged out', name: 'AppState');
+      developer.log('✅ User logged out for continue screen', name: 'AppState');
     } catch (e, stackTrace) {
       developer.log(
-        '❌ Logout error: $e',
+        '❌ Logout for continue error: $e',
         name: 'AppState',
         error: e,
         stackTrace: stackTrace,
@@ -249,6 +297,7 @@ class AppState extends ChangeNotifier {
       case '/login':
       case '/signup':
       case '/continue':
+      case '/clear-data':
         return !_loggedIn;
       default:
         return true;
@@ -269,6 +318,7 @@ class AppState extends ChangeNotifier {
       'role': _role,
       'emailVerified': _emailVerified,
       'profileCompleted': _profileCompleted,
+      'rememberMeEnabled': _rememberMeEnabled,
       'lastUpdate': _lastUpdateTime?.toIso8601String(),
     };
   }
@@ -276,6 +326,12 @@ class AppState extends ChangeNotifier {
   /// 🎯 Clear error message
   void clearError() {
     _setErrorMessage(null);
+  }
+
+  /// 💾 Enable/Disable Remember Me
+  Future<void> setRememberMe(bool enabled) async {
+    await SessionManager.setRememberMe(enabled);
+    _setRememberMeEnabled(enabled);
   }
 
   // ====================
@@ -301,21 +357,19 @@ class AppState extends ChangeNotifier {
     try {
       final supabase = Supabase.instance.client;
       final user = supabase.auth.currentUser!;
-      // Save user profile
-      if (user.email != null) {
+      
+      // Save user profile only if remember me is enabled
+      final rememberMe = await SessionManager.isRememberMeEnabled();
+      if (user.email != null && rememberMe) {
         await SessionManager.saveUserProfile(
           email: user.email!,
           userId: user.id,
           name: user.email!.split('@').first,
+          rememberMe: rememberMe,
         );
       }
 
       if (_loggedIn) {
-        // final profile = await supabase
-        //     .from('profiles')
-        //     .select('role, roles')
-        //     .eq('id', user.id)
-        //     .maybeSingle();
         final profile = await supabase
             .from('profiles')
             .select('id, is_blocked, is_active')
@@ -324,17 +378,15 @@ class AppState extends ChangeNotifier {
 
         _setProfileCompleted(profile != null);
 
-        if (profileCompleted) {
+        if (_profileCompleted) {
           String? userRole = await SessionManager.getUserRole();
-           _setProfileCompleted(true);
-            _setRole(userRole);
+          _setRole(userRole);
 
           if (userRole == null) {
             // Fetch from database
             await initializeUserRole(user.id);
             return;
           }         
-         
         } else {
           _setRole(null);
           _setProfileCompleted(false);
@@ -351,22 +403,6 @@ class AppState extends ChangeNotifier {
       _setRole(null);
     }
   }
-
-  // Future<Map<String, dynamic>?> _fetchDatabaseProfile(String userId) async {
-  //   try {
-  //     final supabase = Supabase.instance.client;
-  //     final response = await supabase
-  //         .from('profiles')
-  //         .select('roles!inner(name)')
-  //         .eq('id', userId)
-  //         .maybeSingle();
-
-  //     return response;
-  //   } catch (e) {
-  //     developer.log('❌ Database profile fetch error: $e', name: 'AppState');
-  //     return null;
-  //   }
-  // }
 
   Future<void> initializeUserRole(String userId) async {
     const defaultRole = 'customer';
@@ -390,7 +426,7 @@ class AppState extends ChangeNotifier {
               as String?;
 
       // 3. AuthGate එකට දෙන්න
-      var userRole = AuthGate.pickRole(roleName ?? defaultRole);
+      userRole = AuthGate.pickRole(roleName ?? defaultRole);
 
       // 4. Save කරන්න
       await SessionManager.saveUserRole(userRole);
@@ -416,6 +452,7 @@ class AppState extends ChangeNotifier {
     _setProfileCompleted(false);
     _setRole(null);
     _setHasLocalProfile(false);
+    _setRememberMeEnabled(false);
   }
 
   Future<void> emailVerifyerError() async {   
