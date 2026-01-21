@@ -2,6 +2,9 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter_application_1/screens/authantication/command/clear_data_screen.dart';
+import 'package:flutter_application_1/screens/authantication/command/data_consent_screen.dart';
+import 'package:flutter_application_1/screens/authantication/command/finish_screen.dart';
 import 'package:flutter_application_1/screens/authantication/command/policy_screen.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -73,20 +76,50 @@ class AppLifecycleObserver with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     switch (state) {
-      case AppLifecycleState.resumed:
+       case AppLifecycleState.resumed:
+        // App came to foreground
         appState.refreshState(silent: true);
+        
+        // ✅ Validate and refresh session if needed
+        _validateSessionOnResume();
         break;
+        
       case AppLifecycleState.paused:
+        // App went to background
+        print('📱 App backgrounded - saving session state');
         break;
+        
       case AppLifecycleState.inactive:
-        break;
       case AppLifecycleState.detached:
-        break;
       case AppLifecycleState.hidden:
         break;
     }
   }
 }
+
+  Future<void> _validateSessionOnResume() async {
+    try {
+      // Wait a moment for Supabase to initialize
+      await Future.delayed(const Duration(milliseconds: 300));
+      
+      // Validate and refresh session if needed
+      await SessionManager.validateAndRefreshSession();
+      
+      // Check if auto-login should be attempted
+      final currentUser = Supabase.instance.client.auth.currentUser;
+      if (currentUser == null) {
+        // No user logged in, check if we should auto-login
+        final rememberMe = await SessionManager.isRememberMeEnabled();
+        if (rememberMe) {
+          print('🔄 App resumed, attempting auto-login...');
+          await appState.attemptAutoLogin();
+        }
+      }
+    } catch (e) {
+      print('❌ Error validating session on resume: $e');
+    }
+  }
+
 
 // ====================
 // MAIN METHOD
@@ -159,9 +192,7 @@ GoRouter _createRouter() {
     refreshListenable: appState,
     initialLocation: '/',
     debugLogDiagnostics: kDebugMode,
-    observers: [
-      if (kDebugMode) MyRouteObserver(),
-    ],
+    observers: [if (kDebugMode) MyRouteObserver()],
     redirect: (context, state) async {
       final path = state.matchedLocation;
 
@@ -170,6 +201,8 @@ GoRouter _createRouter() {
         '/',
         '/login',
         '/signup',
+        '/finish', // Add this
+        '/data-consent',
         '/continue',
         '/verify-email',
         '/verify-invalid',
@@ -187,7 +220,7 @@ GoRouter _createRouter() {
           if (appState.loggedIn) {
             if (!appState.emailVerified) return '/verify-email';
             if (!appState.profileCompleted) return '/reg';
-            
+
             print('✅ Profile completed: ${appState.profileCompleted}');
             switch (appState.role) {
               case 'business':
@@ -199,16 +232,17 @@ GoRouter _createRouter() {
             }
           } else {
             // Check if should show continue screen
-            final shouldShowContinue = await SessionManager.shouldShowContinueScreen();
+            final shouldShowContinue =
+                await SessionManager.shouldShowContinueScreen();
             final hasProfile = await SessionManager.hasProfile();
-            
+
             if (shouldShowContinue && hasProfile) {
               return '/continue';
             }
             return '/login';
           }
         }
-        
+
         // Other public routes don't need redirection
         return null;
       }
@@ -217,13 +251,14 @@ GoRouter _createRouter() {
 
       // Continue screen logic - only for logged out users with profiles
       if (!appState.loggedIn) {
-        final shouldShowContinue = await SessionManager.shouldShowContinueScreen();
+        final shouldShowContinue =
+            await SessionManager.shouldShowContinueScreen();
         final hasProfile = await SessionManager.hasProfile();
-        
+
         if (shouldShowContinue && hasProfile && path != '/continue') {
           return '/continue';
         }
-        
+
         // If not logged in and trying to access protected route, go to login
         if (!publicRoutes.contains(path)) {
           return '/login';
@@ -254,7 +289,7 @@ GoRouter _createRouter() {
           }
         }
       }
-      
+
       // Default - allow access
       return null;
     },
@@ -285,20 +320,73 @@ GoRouter _createRouter() {
         builder: (_, __) => const VerifyInvalidScreen(),
       ),
       GoRoute(path: '/continue', builder: (_, __) => const ContinueScreen()),
+
+      // Add the /finish route for signup completion
+      GoRoute(
+        path: '/finish',
+        pageBuilder: (context, state) {
+          final extra = state.extra as Map<String, dynamic>?;
+          return MaterialPage(
+            key: state.pageKey,
+            child: FinishScreen(
+              email: extra?['email'] ?? '',
+              password: extra?['password'] ?? '',
+            ),
+          );
+        },
+      ),
+
       GoRoute(path: '/customer', builder: (_, __) => const CustomerHome()),
       GoRoute(path: '/employee', builder: (_, __) => const EmployeeDashboard()),
       GoRoute(path: '/owner', builder: (_, __) => const OwnerDashboard()),
-      GoRoute(
-        path: '/privacy',
-        builder: (context, state) => const PolicyScreen(isPrivacyPolicy: true),
-      ),
-      GoRoute(
-        path: '/terms',
-        builder: (context, state) => const PolicyScreen(isPrivacyPolicy: false),
-      ),
+  GoRoute(
+    path: '/privacy',
+    pageBuilder: (context, state) {
+      // Get the referrer (where user came from)
+      final referrer = state.uri.queryParameters['from'];
+      
+      return MaterialPage(
+        key: state.pageKey,
+        child: PolicyScreen(
+          isPrivacyPolicy: true,
+          returnRoute: referrer ?? '/login', // Default to login
+        ),
+      );
+    },
+  ),
+  
+  GoRoute(
+    path: '/terms',
+    pageBuilder: (context, state) {
+      // Get the referrer (where user came from)
+      final referrer = state.uri.queryParameters['from'];
+      
+      return MaterialPage(
+        key: state.pageKey,
+        child: PolicyScreen(
+          isPrivacyPolicy: false,
+          returnRoute: referrer ?? '/login', // Default to login
+        ),
+      );
+    },
+  ),
       GoRoute(
         path: '/clear-data',
         builder: (context, state) => const ClearDataScreen(),
+      ),
+      GoRoute(
+        path: '/data-consent',
+        pageBuilder: (context, state) {
+          final extra = state.extra as Map<String, dynamic>?;
+          return MaterialPage(
+            key: state.pageKey,
+            child: DataConsentScreen(
+              email: extra?['email'] ?? '',
+              password: extra?['password'] ?? '',
+              // onContinue: extra?['onContinue'] ?? (bool rememberMe) {},
+            ),
+          );
+        },
       ),
     ],
     errorBuilder: (context, state) => Scaffold(
@@ -489,175 +577,183 @@ class _ErrorApp extends StatelessWidget {
 // ====================
 // CLEAR DATA SCREEN
 // ====================
-class ClearDataScreen extends StatelessWidget {
-  const ClearDataScreen({super.key});
+// class ClearDataScreen extends StatelessWidget {
+//   const ClearDataScreen({super.key});
 
-  @override
-  Widget build(BuildContext context) {
-    final isMobile = MediaQuery.of(context).size.width < 600;
-    final screenWidth = MediaQuery.of(context).size.width;
-    
-    // Calculate responsive width
-    double calculateContainerWidth() {
-      if (isMobile) {
-        return screenWidth * 0.95; // 95% width on mobile
-      } else {
-        final calculatedWidth = screenWidth * 0.45;
-        return calculatedWidth < 500 ? calculatedWidth : 500.0;
-      }
-    }
-    
-    final containerWidth = calculateContainerWidth();
+//   @override
+//   Widget build(BuildContext context) {
+//     final isMobile = MediaQuery.of(context).size.width < 600;
+//     final screenWidth = MediaQuery.of(context).size.width;
 
-    return Scaffold(
-      backgroundColor: const Color(0xFF0F1820),
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(vertical: 20.0),
-            child: Container(
-              width: containerWidth,
-              margin: EdgeInsets.all(isMobile ? 16.0 : 20.0),
-              padding: EdgeInsets.all(isMobile ? 20.0 : 24.0),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.03),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: Colors.white12),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.delete_forever,
-                    size: isMobile ? 50.0 : 60.0,
-                    color: Colors.red.withOpacity(0.8),
-                  ),
-                  SizedBox(height: isMobile ? 16.0 : 20.0),
-                  Text(
-                    'Clear All Data',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: isMobile ? 22.0 : 24.0,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  SizedBox(height: isMobile ? 12.0 : 16.0),
-                  Text(
-                    'This will remove all saved accounts, preferences, and login information from this device.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: Colors.white.withOpacity(0.7),
-                      fontSize: isMobile ? 14.0 : 16.0,
-                    ),
-                  ),
-                  SizedBox(height: isMobile ? 24.0 : 32.0),
-                  // Responsive button layout
-                  if (isMobile) ...[
-                    // Mobile: vertical buttons
-                    Column(
-                      children: [
-                        SizedBox(
-                          width: double.infinity,
-                          child: OutlinedButton(
-                            onPressed: () => context.go('/'),
-                            style: OutlinedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(vertical: 16.0),
-                              side: const BorderSide(color: Colors.white24),
-                            ),
-                            child: Text(
-                              'Cancel',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: isMobile ? 15.0 : 16.0,
-                              ),
-                            ),
-                          ),
-                        ),
-                        SizedBox(height: 12.0),
-                        SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton(
-                            onPressed: () async {
-                              await SessionManager.clearAll();
-                              final supabase = Supabase.instance.client;
-                              await supabase.auth.signOut();
-                              appState.refreshState();
-                              context.go('/');
-                            },
-                            style: ElevatedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(vertical: 16.0),
-                              backgroundColor: Colors.red,
-                            ),
-                            child: Text(
-                              'Clear All',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                                fontSize: isMobile ? 15.0 : 16.0,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ] else ...[
-                    // Desktop/Web: horizontal buttons
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: () => context.go('/'),
-                            style: OutlinedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(vertical: 16.0),
-                              side: const BorderSide(color: Colors.white24),
-                            ),
-                            child: Text(
-                              'Cancel',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: isMobile ? 15.0 : 16.0,
-                              ),
-                            ),
-                          ),
-                        ),
-                        SizedBox(width: 16.0),
-                        Expanded(
-                          child: ElevatedButton(
-                            onPressed: () async {
-                              await SessionManager.clearAll();
-                              final supabase = Supabase.instance.client;
-                              await supabase.auth.signOut();
-                              appState.refreshState();
-                              context.go('/');
-                            },
-                            style: ElevatedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(vertical: 16.0),
-                              backgroundColor: Colors.red,
-                            ),
-                            child: Text(
-                              'Clear All',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                                fontSize: isMobile ? 15.0 : 16.0,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                  // Add extra bottom padding for mobile
-                  if (isMobile) SizedBox(height: 8.0),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
+//     // Calculate responsive width
+//     double calculateContainerWidth() {
+//       if (isMobile) {
+//         return screenWidth * 0.95; // 95% width on mobile
+//       } else {
+//         final calculatedWidth = screenWidth * 0.45;
+//         return calculatedWidth < 500 ? calculatedWidth : 500.0;
+//       }
+//     }
+
+//     final containerWidth = calculateContainerWidth();
+
+//     return Scaffold(
+//       backgroundColor: const Color(0xFF0F1820),
+//       body: SafeArea(
+//         child: Center(
+//           child: SingleChildScrollView(
+//             padding: const EdgeInsets.symmetric(vertical: 20.0),
+//             child: Container(
+//               width: containerWidth,
+//               margin: EdgeInsets.all(isMobile ? 16.0 : 20.0),
+//               padding: EdgeInsets.all(isMobile ? 20.0 : 24.0),
+//               decoration: BoxDecoration(
+//                 color: Colors.white.withOpacity(0.03),
+//                 borderRadius: BorderRadius.circular(20),
+//                 border: Border.all(color: Colors.white12),
+//               ),
+//               child: Column(
+//                 mainAxisSize: MainAxisSize.min,
+//                 children: [
+//                   Icon(
+//                     Icons.delete_forever,
+//                     size: isMobile ? 50.0 : 60.0,
+//                     color: Colors.red.withOpacity(0.8),
+//                   ),
+//                   SizedBox(height: isMobile ? 16.0 : 20.0),
+//                   Text(
+//                     'Clear All Data',
+//                     style: TextStyle(
+//                       color: Colors.white,
+//                       fontSize: isMobile ? 22.0 : 24.0,
+//                       fontWeight: FontWeight.bold,
+//                     ),
+//                   ),
+//                   SizedBox(height: isMobile ? 12.0 : 16.0),
+//                   Text(
+//                     'This will remove all saved accounts, preferences, and login information from this device.',
+//                     textAlign: TextAlign.center,
+//                     style: TextStyle(
+//                       color: Colors.white.withOpacity(0.7),
+//                       fontSize: isMobile ? 14.0 : 16.0,
+//                     ),
+//                   ),
+//                   SizedBox(height: isMobile ? 24.0 : 32.0),
+//                   // Responsive button layout
+//                   if (isMobile) ...[
+//                     // Mobile: vertical buttons
+//                     Column(
+//                       children: [
+//                         SizedBox(
+//                           width: double.infinity,
+//                           child: OutlinedButton(
+//                             onPressed: () => context.go('/'),
+//                             style: OutlinedButton.styleFrom(
+//                               padding: const EdgeInsets.symmetric(
+//                                 vertical: 16.0,
+//                               ),
+//                               side: const BorderSide(color: Colors.white24),
+//                             ),
+//                             child: Text(
+//                               'Cancel',
+//                               style: TextStyle(
+//                                 color: Colors.white,
+//                                 fontSize: isMobile ? 15.0 : 16.0,
+//                               ),
+//                             ),
+//                           ),
+//                         ),
+//                         SizedBox(height: 12.0),
+//                         SizedBox(
+//                           width: double.infinity,
+//                           child: ElevatedButton(
+//                             onPressed: () async {
+//                               await SessionManager.clearAll();
+//                               final supabase = Supabase.instance.client;
+//                               await supabase.auth.signOut();
+//                               appState.refreshState();
+//                               context.go('/');
+//                             },
+//                             style: ElevatedButton.styleFrom(
+//                               padding: const EdgeInsets.symmetric(
+//                                 vertical: 16.0,
+//                               ),
+//                               backgroundColor: Colors.red,
+//                             ),
+//                             child: Text(
+//                               'Clear All',
+//                               style: TextStyle(
+//                                 color: Colors.white,
+//                                 fontWeight: FontWeight.bold,
+//                                 fontSize: isMobile ? 15.0 : 16.0,
+//                               ),
+//                             ),
+//                           ),
+//                         ),
+//                       ],
+//                     ),
+//                   ] else ...[
+//                     // Desktop/Web: horizontal buttons
+//                     Row(
+//                       children: [
+//                         Expanded(
+//                           child: OutlinedButton(
+//                             onPressed: () => context.go('/'),
+//                             style: OutlinedButton.styleFrom(
+//                               padding: const EdgeInsets.symmetric(
+//                                 vertical: 16.0,
+//                               ),
+//                               side: const BorderSide(color: Colors.white24),
+//                             ),
+//                             child: Text(
+//                               'Cancel',
+//                               style: TextStyle(
+//                                 color: Colors.white,
+//                                 fontSize: isMobile ? 15.0 : 16.0,
+//                               ),
+//                             ),
+//                           ),
+//                         ),
+//                         SizedBox(width: 16.0),
+//                         Expanded(
+//                           child: ElevatedButton(
+//                             onPressed: () async {
+//                               await SessionManager.clearAll();
+//                               final supabase = Supabase.instance.client;
+//                               await supabase.auth.signOut();
+//                               appState.refreshState();
+//                               context.go('/');
+//                             },
+//                             style: ElevatedButton.styleFrom(
+//                               padding: const EdgeInsets.symmetric(
+//                                 vertical: 16.0,
+//                               ),
+//                               backgroundColor: Colors.red,
+//                             ),
+//                             child: Text(
+//                               'Clear All',
+//                               style: TextStyle(
+//                                 color: Colors.white,
+//                                 fontWeight: FontWeight.bold,
+//                                 fontSize: isMobile ? 15.0 : 16.0,
+//                               ),
+//                             ),
+//                           ),
+//                         ),
+//                       ],
+//                     ),
+//                   ],
+//                   // Add extra bottom padding for mobile
+//                   if (isMobile) SizedBox(height: 8.0),
+//                 ],
+//               ),
+//             ),
+//           ),
+//         ),
+//       ),
+//     );
+//   }
+// }
 
 // ====================
 // ROUTE OBSERVER

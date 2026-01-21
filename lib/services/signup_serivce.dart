@@ -21,83 +21,169 @@ class AuthService {
   // REGISTER NEW USER
   // =========================================================================================
 
-  Future<void> registerUser({
-    required BuildContext context, // Fixed: Added required context parameter
-    required String email,
-    required String password,
-  }) async {
-    final Completer<void> completer = Completer<void>();
-
-    try {
-      // Validate inputs
-      if (!_isValidEmail(email)) {
-        _showErrorAlert(context, 'Invalid email format');
-        return;
-      }
-
-      if (!_isValidPassword(password)) {
-        _showErrorAlert(context, 'Password must be at least 6 characters');
-        return;
-      }
-
-      // Show loading overlay
-      LoadingOverlay.show(context, message: "Creating account...");
-
-      // Perform registration
-      final response = await _supabase.auth.signUp(
-        email: email.trim(),
-        password: password.trim(),
-        emailRedirectTo: _getRedirectUrl(),
-        data: {
-          'created_at': DateTime.now().toIso8601String(),
-          'email': email.trim(),
-        },
-      );
-
-      final user = response.user;
-
-      // Handle existing user
-      if (user?.identities?.isEmpty ?? true) {
-        if (context.mounted) {
-          await _handleExistingUser(context, email);
-        }
-
-        return;
-      }
-      // if (_isExistingUser(user)) {
-      //     print('🔑 Existing user detected during registration 2');
-      //   await _handleExistingUser(context, email);
-      //   return;
-      // }
-      print('🔑 Existing user detected during registration3');
-
-      // Handle successful registration
-      if (context.mounted) {
-        await _handleSuccessfulRegistration(context, user, email);
-      }
-
-      completer.complete();
-    } on AuthException catch (e) {
-      if (context.mounted) {
-        await _handleAuthException(context, e, 'Registration');
-      }
-    } on TimeoutException catch (e) {
-      if (context.mounted) {
-        await _handleTimeoutException(context, e, 'Registration');
-      }
-    } catch (e, stackTrace) {
-      if (context.mounted) {
-        await _handleGenericException(context, e, stackTrace, 'Registration');
-      }
-    } finally {
-      // Always ensure overlay is hidden
-      if (context.mounted) {
-        _safeHideOverlay(context);
-      }
+// auth_service.dart - registerUser method
+// auth_service.dart - registerUser method
+Future<void> registerUser({
+  required BuildContext context,
+  required String email,
+  required String password,
+  bool rememberMe = true,
+  bool marketingConsent = false, // ✅ Add marketing consent
+}) async {
+  try {
+    // Validate inputs
+    if (!_isValidEmail(email)) {
+      _showErrorAlert(context, 'Invalid email format');
+      return;
     }
 
-    return completer.future;
+    if (!_isValidPassword(password)) {
+      _showErrorAlert(context, 'Password must be at least 6 characters');
+      return;
+    }
+
+    // Show loading overlay
+    LoadingOverlay.show(context, message: "Creating account...");
+
+    // ✅ Store consent timestamps
+    final now = DateTime.now().toIso8601String();
+
+    // Perform registration with all consent data
+    final response = await _supabase.auth.signUp(
+      email: email.trim(),
+      password: password.trim(),
+      emailRedirectTo: _getRedirectUrl(),
+      data: {
+        'created_at': now,
+        'email': email.trim(),
+        
+        // ✅ Consent tracking for App Store compliance
+        'terms_accepted_at': now,
+        'privacy_accepted_at': now,
+        'data_consent_given': true,
+        'marketing_consent': marketingConsent,
+        'marketing_consent_at': marketingConsent ? now : null,
+        
+        'remember_me_enabled': rememberMe,
+        'app_version': '1.0.0',
+        'platform': 'mobile',
+      },
+    );
+
+    final user = response.user;
+    final session = response.session;
+    final refreshToken = session?.refreshToken;
+
+    // Handle existing user
+    if (user?.identities?.isEmpty ?? true) {
+      LoadingOverlay.hide();
+      await _handleExistingUser(context, email);
+      return;
+    }
+
+    // Handle successful registration
+    LoadingOverlay.hide();
+    await _handleSuccessfulRegistration(
+      context,
+      user!,
+      email,
+      rememberMe,
+      refreshToken,
+      marketingConsent, // ✅ Pass marketing consent
+    );
+    
+  } on AuthException catch (e) {
+    LoadingOverlay.hide();
+    await _handleAuthException(context, e, 'Registration');
+  } catch (e, stackTrace) {
+    LoadingOverlay.hide();
+    await _handleGenericException(context, e, stackTrace, 'Registration');
   }
+}
+
+// ✅ Update registration handler
+Future<void> _handleSuccessfulRegistration(
+  BuildContext context,
+  User user,
+  String email,
+  bool rememberMe,
+  String? refreshToken,
+  bool marketingConsent,
+) async {
+  try {
+    // ✅ Save user profile with all consent data
+    await SessionManager.saveUserProfile(
+      email: email,
+      userId: user.id,
+      name: email.split('@').first,
+      rememberMe: rememberMe,
+      refreshToken: refreshToken,
+      termsAcceptedAt: DateTime.now(),
+      privacyAcceptedAt: DateTime.now(),
+      marketingConsent: marketingConsent,
+      marketingConsentAt: marketingConsent ? DateTime.now() : null,
+    );
+
+    developer.log(
+      '✅ User registered: $email '
+      '(Remember Me: $rememberMe, '
+      'Marketing: $marketingConsent)',
+      name: _tag,
+    );
+
+    // ✅ Log consent for compliance
+    developer.log(
+      '✅ User consent recorded: '
+      'Terms: ${DateTime.now()}, '
+      'Privacy: ${DateTime.now()}, '
+      'Marketing: ${marketingConsent ? DateTime.now() : "Not given"}',
+      name: _tag,
+    );
+
+    // ✅ Refresh app state
+    appState.refreshState();
+
+    // ✅ Navigate to verify email
+    if (context.mounted) {
+      context.go('/verify-email');
+
+      // ✅ Show success message
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              rememberMe
+                  ? 'Account created! Check your email for verification.'
+                  : 'Account created! Please verify your email.',
+            ),
+            duration: const Duration(seconds: 4),
+            backgroundColor: Colors.green,
+            action: SnackBarAction(
+              label: 'OK',
+              textColor: Colors.white,
+              onPressed: () {
+                ScaffoldMessenger.of(context).hideCurrentSnackBar();
+              },
+            ),
+          ),
+        );
+      });
+    }
+  } catch (e) {
+    developer.log('❌ Error in registration handler: $e', name: _tag);
+    if (context.mounted) {
+      await showCustomAlert(
+        context: context,
+        title: "Registration Error",
+        message: "Unable to save profile. Please try again.",
+        isError: true,
+      );
+    }
+  }
+}
+
+
+
 
   // =========================================================================================
   // LOGIN USER
@@ -212,45 +298,77 @@ class AuthService {
     }
   }
 
-  Future<void> _handleSuccessfulRegistration(
-    BuildContext context,
-    User? user,
-    String email,
-  ) async {
-    if (user == null) {
-      developer.log('Registration succeeded but user is null', name: _tag);
-      throw Exception('Registration failed - no user created');
-    }
+// Future<void> _handleSuccessfulRegistration(
+//   BuildContext context,
+//   User? user,
+//   String email,
+//   bool rememberMe,
+// ) async {
+//   if (user == null) {
+//     developer.log('Registration succeeded but user is null', name: _tag);
+//     throw Exception('Registration failed - no user created');
+//   }
 
-    // Save user profile - REMOVE createdAt parameter if SessionManager doesn't support it
-    await SessionManager.saveUserProfile(
-      email: email,
-      userId: user.id,
-      name: email.split('@').first,
-      // createdAt: DateTime.now(), // Remove this line if SessionManager doesn't have this parameter
-    );
+//   try {
+//     // ✅ Get current session from Supabase client (not from User object)
+//     final supabase = Supabase.instance.client;
+//     final currentSession = supabase.auth.currentSession;
+//     final refreshToken = currentSession?.refreshToken;
 
-    developer.log('User registered successfully: $email', name: _tag);
+//     // ✅ Save user profile
+//     await SessionManager.saveUserProfile(
+//       email: email,
+//       userId: user.id,
+//       name: email.split('@').first,
+//       rememberMe: rememberMe,
+//       refreshToken: refreshToken, // ✅ Pass the refresh token
+//       termsAcceptedAt: DateTime.now(),
+//       privacyAcceptedAt: DateTime.now(),
+//     );
 
-    // Refresh app state
-    appState.refreshState();
+//     developer.log(
+//       '✅ User registered: $email (Remember Me: $rememberMe)',
+//       name: _tag,
+//     );
 
-    // Navigate to verify email
-    if (context.mounted) {
-      context.go('/verify-email');
+//     if (refreshToken != null) {
+//       developer.log('✅ Refresh token saved for auto-login', name: _tag);
+//     }
 
-      // Show success message
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Account created! Please verify your email.'),
-            duration: const Duration(seconds: 3),
-            backgroundColor: Colors.green,
-          ),
-        );
-      });
-    }
-  }
+//     // ✅ Refresh app state
+//     appState.refreshState();
+
+//     // ✅ Navigate to verify email
+//     if (context.mounted) {
+//       context.go('/verify-email');
+
+//       // ✅ Show success message
+//       WidgetsBinding.instance.addPostFrameCallback((_) {
+//         ScaffoldMessenger.of(context).showSnackBar(
+//           SnackBar(
+//             content: Text(
+//               rememberMe
+//                   ? 'Account created! You will stay logged in.'
+//                   : 'Account created! Please verify your email.',
+//             ),
+//             duration: const Duration(seconds: 3),
+//             backgroundColor: Colors.green,
+//           ),
+//         );
+//       });
+//     }
+//   } catch (e) {
+//     developer.log('❌ Error in registration handler: $e', name: _tag);
+//     if (context.mounted) {
+//       await showCustomAlert(
+//         context: context,
+//         title: "Registration Error",
+//         message: "Unable to save profile. Please try again.",
+//         isError: true,
+//       );
+//     }
+//   }
+// }
 
   Future<void> _handleSuccessfulLogin(
     BuildContext context,
