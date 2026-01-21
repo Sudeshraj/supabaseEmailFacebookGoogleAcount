@@ -5,12 +5,16 @@ class EmailPasswordScreen extends StatefulWidget {
   final String? initialEmail;
   final String? initialPassword;
   final void Function(String email, String password) onNext;
+  final VoidCallback? onBack;
+  final bool isLoading;
 
   const EmailPasswordScreen({
     super.key,
     this.initialEmail,
     this.initialPassword,
     required this.onNext,
+    this.onBack,
+    this.isLoading = false,
   });
 
   @override
@@ -26,6 +30,7 @@ class _EmailPasswordScreenState extends State<EmailPasswordScreen>
   String? _passwordError;
   bool _obscurePassword = true;
   bool _isValid = false;
+  bool _isProcessing = false;
 
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
@@ -100,6 +105,47 @@ class _EmailPasswordScreenState extends State<EmailPasswordScreen>
     });
   }
 
+  void _handleNextPressed() {
+    if (!_isValid || _isProcessing || widget.isLoading) return;
+
+    final email = _emailController.text.trim();
+    final password = _passwordController.text.trim();
+
+    setState(() {
+      _isProcessing = true;
+    });
+
+    // Call the onNext callback
+    widget.onNext(email, password);
+  }
+
+  void _handleBackPressed() {
+    if (_isProcessing || widget.isLoading) return;
+
+    if (widget.onBack != null) {
+      widget.onBack!();
+    } else {
+      // Default back navigation
+      if (GoRouter.of(context).canPop()) {
+        GoRouter.of(context).pop();
+      } else {
+        GoRouter.of(context).go('/login');
+      }
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant EmailPasswordScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    
+    // Update processing state based on parent's isLoading
+    if (oldWidget.isLoading != widget.isLoading) {
+      setState(() {
+        _isProcessing = widget.isLoading;
+      });
+    }
+  }
+
   @override
   void dispose() {
     _emailController.dispose();
@@ -113,6 +159,8 @@ class _EmailPasswordScreenState extends State<EmailPasswordScreen>
     final size = MediaQuery.of(context).size;
     final bool isWeb = size.width > 700;
     final double maxWidth = isWeb ? 480 : double.infinity;
+    
+    final bool showLoading = _isProcessing || widget.isLoading;
 
     return Scaffold(
       backgroundColor: const Color(0xFF0F1820),
@@ -139,25 +187,16 @@ class _EmailPasswordScreenState extends State<EmailPasswordScreen>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // 🔙 Back Button - GoRouter use කරලා
+                      // 🔙 Back Button
                       Align(
                         alignment: Alignment.topLeft,
                         child: IconButton(
-                          icon: const Icon(
+                          icon: Icon(
                             Icons.arrow_back_ios_new_rounded,
-                            color: Colors.white,
+                            color: showLoading ? Colors.white30 : Colors.white,
                             size: 22,
                           ),
-                          onPressed: () {
-                            // Check if we can go back before popping
-                            if (GoRouter.of(context).canPop()) {
-                              GoRouter.of(context).pop();
-                            } else {
-                              // If nothing to pop, navigate to a default route
-                              GoRouter.of(context).go('/');
-                              // OR: GoRouter.of(context).replace('/');
-                            }
-                          },
+                          onPressed: showLoading ? null : _handleBackPressed,
                         ),
                       ),
 
@@ -189,7 +228,10 @@ class _EmailPasswordScreenState extends State<EmailPasswordScreen>
                       TextField(
                         controller: _emailController,
                         keyboardType: TextInputType.emailAddress,
-                        style: const TextStyle(color: Colors.white),
+                        style: TextStyle(
+                          color: showLoading ? Colors.white54 : Colors.white,
+                        ),
+                        enabled: !showLoading,
                         decoration: InputDecoration(
                           hintText: "Email address",
                           hintStyle: const TextStyle(color: Colors.white54),
@@ -211,6 +253,12 @@ class _EmailPasswordScreenState extends State<EmailPasswordScreen>
                             ),
                             borderRadius: BorderRadius.circular(8),
                           ),
+                          disabledBorder: OutlineInputBorder(
+                            borderSide: BorderSide(
+                              color: Colors.white10,
+                            ),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
                           errorText: _emailError,
                           errorStyle: const TextStyle(
                             color: Colors.redAccent,
@@ -225,7 +273,10 @@ class _EmailPasswordScreenState extends State<EmailPasswordScreen>
                       TextField(
                         controller: _passwordController,
                         obscureText: _obscurePassword,
-                        style: const TextStyle(color: Colors.white),
+                        style: TextStyle(
+                          color: showLoading ? Colors.white54 : Colors.white,
+                        ),
+                        enabled: !showLoading,
                         decoration: InputDecoration(
                           hintText: "Create a password",
                           hintStyle: const TextStyle(color: Colors.white54),
@@ -247,19 +298,27 @@ class _EmailPasswordScreenState extends State<EmailPasswordScreen>
                             ),
                             borderRadius: BorderRadius.circular(8),
                           ),
-                          suffixIcon: IconButton(
-                            icon: Icon(
-                              _obscurePassword
-                                  ? Icons.visibility_off
-                                  : Icons.visibility,
-                              color: Colors.white70,
+                          disabledBorder: OutlineInputBorder(
+                            borderSide: BorderSide(
+                              color: Colors.white10,
                             ),
-                            onPressed: () {
-                              setState(() {
-                                _obscurePassword = !_obscurePassword;
-                              });
-                            },
+                            borderRadius: BorderRadius.circular(8),
                           ),
+                          suffixIcon: showLoading 
+                              ? const SizedBox.shrink()
+                              : IconButton(
+                                  icon: Icon(
+                                    _obscurePassword
+                                        ? Icons.visibility_off
+                                        : Icons.visibility,
+                                    color: Colors.white70,
+                                  ),
+                                  onPressed: () {
+                                    setState(() {
+                                      _obscurePassword = !_obscurePassword;
+                                    });
+                                  },
+                                ),
                           errorText: _passwordError,
                           errorStyle: const TextStyle(
                             color: Colors.redAccent,
@@ -281,75 +340,107 @@ class _EmailPasswordScreenState extends State<EmailPasswordScreen>
 
                       const SizedBox(height: 32),
 
-                      // Next Button
-                      // Next Button - සරල කරපු version
-                      SizedBox(
-                        width: double.infinity,
-                        height: 52,
-                        child: ElevatedButton(
-                          onPressed: _isValid
-                              ? () {
-                                  // Debug prints
-                                  print(
-                                    '✅ Next button pressed - Form is valid',
-                                  );
-                                  print(
-                                    '📧 Email: ${_emailController.text.trim()}',
-                                  );
-                                  print(
-                                    '🔒 Password: ${'*' * _passwordController.text.length}',
-                                  );
-
-                                  // Call the onNext callback
-                                  widget.onNext(
-                                    _emailController.text.trim(),
-                                    _passwordController.text.trim(),
-                                  );
-                                }
-                              : null,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: _isValid
-                                ? const Color(0xFF1877F3)
-                                : Colors.white12,
-                            foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(25),
-                            ),
+                      // Loading indicator or Next Button
+                      if (showLoading) ...[
+                        Container(
+                          width: double.infinity,
+                          height: 52,
+                          decoration: BoxDecoration(
+                            color: Colors.blue.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(25),
                           ),
-                          child: Text(
-                            _isValid ? "Continue ✅" : "Continue",
-                            style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
+                          child: const Center(
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                                SizedBox(width: 12),
+                                Text(
+                                  "Processing...",
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ),
-                      ),
+                      ] else ...[
+                        // Next Button
+                        SizedBox(
+                          width: double.infinity,
+                          height: 52,
+                          child: ElevatedButton(
+                            onPressed: _isValid ? _handleNextPressed : null,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: _isValid
+                                  ? const Color(0xFF1877F3)
+                                  : Colors.white12,
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(25),
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text(
+                                  "Continue",
+                                  style: const TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                if (_isValid) ...[
+                                  const SizedBox(width: 8),
+                                  const Icon(
+                                    Icons.arrow_forward_rounded,
+                                    size: 20,
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
 
                       const SizedBox(height: 32),
 
                       // Info Text at Bottom
-                      const Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            "We'll use this email for:",
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: Colors.white,
-                              fontWeight: FontWeight.w500,
+                      AnimatedOpacity(
+                        duration: const Duration(milliseconds: 300),
+                        opacity: showLoading ? 0.5 : 1.0,
+                        child: const Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              "We'll use this email for:",
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.white,
+                                fontWeight: FontWeight.w500,
+                              ),
                             ),
-                          ),
-                          SizedBox(height: 8),
-                          Text(
-                            "• Account verification\n• Password recovery\n• Important updates",
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: Colors.white70,
-                              height: 1.6,
+                            SizedBox(height: 8),
+                            Text(
+                              "• Account verification\n• Password recovery\n• Important updates",
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.white70,
+                                height: 1.6,
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ],
                   ),
