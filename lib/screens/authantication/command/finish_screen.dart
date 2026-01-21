@@ -1,24 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:flutter_application_1/services/signup_serivce.dart';
 
 class FinishScreen extends StatefulWidget {
-  final Future<void> Function(String email, String password) onSignUp;
-  final String titleText;
-  final String privacyText;
-  final String btnText;
-  
-  // Add parameters for email and password
   final String email;
   final String password;
 
   const FinishScreen({
     super.key,
-    required this.onSignUp,
-    required this.titleText,
-    required this.privacyText,
-    required this.btnText,
-    required this.email, // Required parameter
-    required this.password, // Required parameter
+    required this.email,
+    required this.password,
   });
 
   @override
@@ -29,6 +20,7 @@ class _FinishScreenState extends State<FinishScreen>
     with SingleTickerProviderStateMixin {
   bool _isLoading = false;
   String? _errorMessage;
+  final AuthService _authService = AuthService();
 
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
@@ -38,10 +30,6 @@ class _FinishScreenState extends State<FinishScreen>
   void initState() {
     super.initState();
 
-    // Now we don't need to access context in initState
-    // because email and password come from widget properties
-
-    // Animations initialization
     _animationController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 600),
@@ -68,13 +56,27 @@ class _FinishScreenState extends State<FinishScreen>
     });
 
     try {
-      await widget.onSignUp(widget.email, widget.password);
+      await _authService.registerUser(
+        context: context,
+        email: widget.email,
+        password: widget.password,
+      );
+      
+      // If registration succeeds, the auth service will navigate automatically
     } catch (e) {
       setState(() => _errorMessage = e.toString());
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
       }
+    }
+  }
+
+  void _handleBackButton() {
+    if (GoRouter.of(context).canPop()) {
+      GoRouter.of(context).pop();
+    } else {
+      GoRouter.of(context).go('/signup');
     }
   }
 
@@ -123,12 +125,7 @@ class _FinishScreenState extends State<FinishScreen>
                             color: Colors.white,
                             size: 22,
                           ),
-                          onPressed: _isLoading
-                              ? null
-                              : () {
-                                  // Go back with data preserved
-                                  GoRouter.of(context).pop();
-                                },
+                          onPressed: _isLoading ? null : _handleBackButton,
                         ),
                       ),
 
@@ -152,9 +149,9 @@ class _FinishScreenState extends State<FinishScreen>
                       const SizedBox(height: 32),
 
                       // Title
-                      Text(
-                        widget.titleText,
-                        style: const TextStyle(
+                      const Text(
+                        'Ready to Sign Up',
+                        style: TextStyle(
                           fontSize: 26,
                           fontWeight: FontWeight.bold,
                           color: Colors.white,
@@ -164,58 +161,58 @@ class _FinishScreenState extends State<FinishScreen>
                       const SizedBox(height: 24),
 
                       // Email preview
-                      // Container(
-                      //   padding: const EdgeInsets.symmetric(
-                      //     horizontal: 16,
-                      //     vertical: 12,
-                      //   ),
-                      //   decoration: BoxDecoration(
-                      //     color: Colors.white.withOpacity(0.05),
-                      //     borderRadius: BorderRadius.circular(12),
-                      //     border: Border.all(color: Colors.white12),
-                      //   ),
-                      //   child: Row(
-                      //     children: [
-                      //       const Icon(
-                      //         Icons.email_outlined,
-                      //         color: Color(0xFF1877F3),
-                      //       ),
-                      //       const SizedBox(width: 12),
-                      //       Expanded(
-                      //         child: Column(
-                      //           crossAxisAlignment: CrossAxisAlignment.start,
-                      //           children: [
-                      //             const Text(
-                      //               "Email",
-                      //               style: TextStyle(
-                      //                 color: Colors.white70,
-                      //                 fontSize: 12,
-                      //               ),
-                      //             ),
-                      //             Text(
-                      //               widget.email,
-                      //               style: const TextStyle(
-                      //                 color: Colors.white,
-                      //                 fontSize: 14,
-                      //               ),
-                      //               overflow: TextOverflow.ellipsis,
-                      //             ),
-                      //           ],
-                      //         ),
-                      //       ),
-                      //     ],
-                      //   ),
-                      // ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.05),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.white12),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.email_outlined,
+                              color: Color(0xFF1877F3),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    "Email",
+                                    style: TextStyle(
+                                      color: Colors.white70,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                  Text(
+                                    widget.email,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 14,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
 
-                      // const SizedBox(height: 12),
+                      const SizedBox(height: 12),
 
-                      // const Text(
-                      //   "You'll receive a verification email at this address",
-                      //   style: TextStyle(color: Colors.white70, fontSize: 13),
-                      //   textAlign: TextAlign.center,
-                      // ),
+                      const Text(
+                        "You'll receive a verification email at this address",
+                        style: TextStyle(color: Colors.white70, fontSize: 13),
+                        textAlign: TextAlign.center,
+                      ),
 
-                      // const SizedBox(height: 24),
+                      const SizedBox(height: 24),
 
                       // Terms and Conditions
                       Padding(
@@ -288,9 +285,9 @@ class _FinishScreenState extends State<FinishScreen>
                                     color: Colors.white,
                                   ),
                                 )
-                              : Text(
-                                  widget.btnText,
-                                  style: const TextStyle(
+                              : const Text(
+                                  'Sign Up',
+                                  style: TextStyle(
                                     fontSize: 16,
                                     fontWeight: FontWeight.w600,
                                   ),
@@ -302,11 +299,7 @@ class _FinishScreenState extends State<FinishScreen>
 
                       // Back Button (alternative)
                       TextButton(
-                        onPressed: _isLoading
-                            ? null
-                            : () {
-                                GoRouter.of(context).pop();
-                              },
+                        onPressed: _isLoading ? null : _handleBackButton,
                         child: const Text(
                           "Go Back",
                           style: TextStyle(color: Colors.white70),

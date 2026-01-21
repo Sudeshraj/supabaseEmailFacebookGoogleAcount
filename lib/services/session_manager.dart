@@ -17,190 +17,264 @@ class SessionManager {
   }
 
   // ✅ Save user profile WITH REMEMBER ME OPTION
-  // ✅ Save user profile WITH REMEMBER ME AND TOKENS
-  static Future<void> saveUserProfile({
-    required String email,
-    required String userId,
-    String? name,
-    String? photo,
-    List<String>? roles,
-    bool rememberMe = false,
-    String? refreshToken,
-  }) async {
-    try {
-      if (!rememberMe) {
-        print('⚠️ Remember Me not enabled, skipping profile save');
-        return;
-      }
+// SessionManager.dart - Best solution
+// SessionManager.dart - saveUserProfile method
+static Future<void> saveUserProfile({
+  required String email,
+  required String userId,
+  String? name,
+  String? photo,
+  List<String>? roles,
+  bool rememberMe = true,
+  String? refreshToken,
+  DateTime? termsAcceptedAt,
+  DateTime? privacyAcceptedAt,
+  bool? marketingConsent,
+  DateTime? marketingConsentAt,
+}) async {
+  try {
+    final profiles = await getProfiles();
+    final index = profiles.indexWhere((p) => p['email'] == email);
+    
+    final existingProfile = index != -1 ? profiles[index] : <String, dynamic>{};
+    
+    final profileData = <String, dynamic>{
+      'email': email,
+      'userId': userId,
+      'name': name ?? existingProfile['name'] ?? email.split('@').first,
+      'photo': photo ?? existingProfile['photo'] ?? '',
+      'roles': roles ?? existingProfile['roles'] ?? <String>[],
+      'lastLogin': DateTime.now().toIso8601String(),
+      'createdAt': existingProfile['createdAt'] ?? DateTime.now().toIso8601String(),
+      'rememberMe': rememberMe,
+      
+      // Session tokens
+      'refreshToken': refreshToken ?? existingProfile['refreshToken'] ?? '',
+      'tokenSavedAt': refreshToken != null 
+          ? DateTime.now().toIso8601String()
+          : existingProfile['tokenSavedAt'] ?? '',
+          
+      // Required consents (App Store compliance)
+      'termsAcceptedAt': termsAcceptedAt?.toIso8601String() 
+          ?? existingProfile['termsAcceptedAt'] 
+          ?? DateTime.now().toIso8601String(),
+          
+      'privacyAcceptedAt': privacyAcceptedAt?.toIso8601String()
+          ?? existingProfile['privacyAcceptedAt']
+          ?? DateTime.now().toIso8601String(),
+          
+      'dataConsentGiven': true,
+      
+      // Optional marketing consent
+      'marketingConsent': marketingConsent ?? existingProfile['marketingConsent'] ?? false,
+      'marketingConsentAt': marketingConsentAt?.toIso8601String()
+          ?? existingProfile['marketingConsentAt']
+          ?? (marketingConsent == true ? DateTime.now().toIso8601String() : ''),
+          
+      // App version info for debugging
+      'appVersion': '1.0.0',
+      'consentVersion': '2.0',
+    };
 
-      final profiles = await getProfiles();
-      final index = profiles.indexWhere((p) => p['email'] == email);
-
-      if (index == -1) {
-        profiles.add({
-          'email': email,
-          'userId': userId,
-          'name': name ?? email.split('@').first,
-          'photo': photo ?? '',
-          'roles': roles ?? <String>[],
-          'lastLogin': DateTime.now().toIso8601String(),
-          'createdAt': DateTime.now().toIso8601String(),
-          'rememberMe': rememberMe,
-          'refreshToken': refreshToken,
-          'tokenSavedAt': DateTime.now().toIso8601String(),
-        });
-        print('✅ New profile created for: $email (Remember Me: $rememberMe)');
-      } else {
-        profiles[index] = {
-          ...profiles[index],
-          'userId': userId,
-          'name': name ?? profiles[index]['name'],
-          'photo': photo ?? profiles[index]['photo'],
-          'roles': roles ?? profiles[index]['roles'],
-          'lastLogin': DateTime.now().toIso8601String(),
-          'rememberMe': rememberMe,
-          'refreshToken': refreshToken ?? profiles[index]['refreshToken'],
-          'tokenSavedAt': refreshToken != null
-              ? DateTime.now().toIso8601String()
-              : profiles[index]['tokenSavedAt'],
-        };
-        print('✅ Profile updated for: $email (Remember Me: $rememberMe)');
-      }
-
-      await _prefs.setString(_keyProfiles, jsonEncode(profiles));
-      await setCurrentUser(email);
-      await _prefs.setBool(_showContinueKey, true);
-      await setRememberMe(rememberMe);
-    } catch (e) {
-      print('❌ Error saving profile: $e');
+    if (index == -1) {
+      profiles.add(profileData);
+      print('✅ New profile saved: $email');
+    } else {
+      profiles[index] = profileData;
+      print('✅ Profile updated: $email');
     }
+
+    await _prefs.setString(_keyProfiles, jsonEncode(profiles));
+    await setCurrentUser(email);
+    
+    if (rememberMe) {
+      await _prefs.setBool(_showContinueKey, true);
+      print('✅ Continue screen enabled for: $email');
+    }
+    
+    await setRememberMe(rememberMe);
+    
+    // ✅ Log consent for App Store compliance
+    print('📊 Consent Data Saved:');
+    print('   - Terms accepted: ${profileData['termsAcceptedAt']}');
+    print('   - Privacy accepted: ${profileData['privacyAcceptedAt']}');
+    print('   - Marketing consent: ${profileData['marketingConsent']}');
+    print('   - Marketing consent at: ${profileData['marketingConsentAt']}');
+    
+  } catch (e) {
+    print('❌ Error saving profile: $e');
+    rethrow;
   }
+}
 
   // ✅ WORKING AUTO-LOGIN WITH PERSISTENCE CHECK
-  static Future<bool> tryAutoLogin(String email) async {
+// SessionManager.dart - tryAutoLogin method
+static Future<bool> tryAutoLogin(String email) async {
+  try {
+    print('🚀 ===== ATTEMPTING AUTO-LOGIN =====');
+    print('📧 Target email: $email');
+
+    // 1. Check if profile exists
+    final profile = await getProfileByEmail(email);
+    if (profile == null || profile.isEmpty) {
+      print('⚠️ Auto-login failed: No profile found');
+      return false;
+    }
+
+    // 2. Check if profile has remember me enabled
+    final profileRememberMe = profile['rememberMe'] ?? true;
+    
+    if (!profileRememberMe) {
+      print('⚠️ Auto-login failed: User opted out of auto-login');
+      return false;
+    }
+
+    // 3. Check if user has given consent (App Store/Play Store requirement)
+    final termsAccepted = profile['termsAcceptedAt'] != null;
+    final privacyAccepted = profile['privacyAcceptedAt'] != null;
+    final dataConsentGiven = profile['dataConsentGiven'] == true;
+    
+    if (!termsAccepted || !privacyAccepted || !dataConsentGiven) {
+      print('⚠️ Auto-login failed: User consent not recorded');
+      return false;
+    }
+
+    // 4. DEBUG: Check session persistence
+    await SupabasePersistenceHelper.debugSessionPersistence();
+
+    // 5. Get Supabase instance
+    final supabase = Supabase.instance.client;
+    
+    // Wait for Supabase to initialize
+    await Future.delayed(const Duration(milliseconds: 500));
+
+    // METHOD 1: Check current session
+    final currentSession = supabase.auth.currentSession;
+    final currentUser = supabase.auth.currentUser;
+
+    print('🔍 Current session check:');
+    print('   - Current user: ${currentUser?.email}');
+    print('   - Has session: ${currentSession != null}');
+
+    if (currentSession != null && currentUser?.email == email) {
+      // ✅ Check if session is valid
+      if (_isSessionValid(currentSession)) {
+        print('✅ AUTO-LOGIN SUCCESS: Valid session found!');
+        await updateLastLogin(email);
+        return true;
+      } else {
+        print('⚠️ Session expired, trying to refresh...');
+      }
+    }
+
+    // METHOD 2: Try using refresh token
+    final refreshToken = profile['refreshToken'] as String?;
+    if (refreshToken != null && refreshToken.isNotEmpty) {
+      print('🔄 Found refresh token, attempting to restore session...');
+      
+      try {
+        // ✅ CORRECT METHOD: Use setSession with refresh token
+        await supabase.auth.setSession(refreshToken);
+        
+        // Wait for session to be set
+        await Future.delayed(const Duration(milliseconds: 300));
+        
+        final newSession = supabase.auth.currentSession;
+        final newUser = supabase.auth.currentUser;
+        
+        if (newSession != null && newUser?.email == email) {
+          print('✅ Session restored using refresh token!');
+          await updateLastLogin(email);
+          return true;
+        } else {
+          print('❌ Refresh token did not restore session');
+        }
+      } catch (e) {
+        print('❌ Refresh token error: $e');
+      }
+    }
+
+    // METHOD 3: Try to get current user directly
+    print('🔄 Attempting to get current user...');
+    
     try {
-      print('🚀 ===== ATTEMPTING AUTO-LOGIN =====');
-      print('📧 Target email: $email');
-
-      // 1. Check if remember me is enabled
-      final rememberMeEnabled = await isRememberMeEnabled();
-      if (!rememberMeEnabled) {
-        print('⚠️ Auto-login failed: Remember Me not enabled');
-        return false;
-      }
-
-      // 2. Check if profile exists
-      final profile = await getProfileByEmail(email);
-      if (profile == null || profile.isEmpty) {
-        print('⚠️ Auto-login failed: No profile found');
-        return false;
-      }
-
-      // 3. Check if profile has remember me enabled
-      if (profile['rememberMe'] != true) {
-        print('⚠️ Auto-login failed: Profile does not have Remember Me');
-        return false;
-      }
-
-      // 4. DEBUG: Check session persistence
-      await SupabasePersistenceHelper.debugSessionPersistence();
-
-      // 5. Check current Supabase state
-      final supabase = Supabase.instance.client;
-
-      // Wait for Supabase to initialize
-      await Future.delayed(const Duration(milliseconds: 300));
-
-      // METHOD 1: Direct check
-      final currentUser = supabase.auth.currentUser;
-      final currentSession = supabase.auth.currentSession;
-
-      print('🔍 METHOD 1 - Direct check:');
-      print('   - Current user: ${currentUser?.email}');
-      print('   - Has session: ${currentSession != null}');
-
-      if (currentSession != null && currentUser?.email == email) {
-        print('✅ AUTO-LOGIN SUCCESS: User already authenticated!');
+      // ✅ Get current user directly
+      final user = supabase.auth.currentUser;
+      
+      if (user != null && user.email == email) {
+        print('✅ Found authenticated user!');
         await updateLastLogin(email);
         return true;
       }
-
-      // METHOD 2: Check persisted session in storage
-      print('🔄 METHOD 2 - Checking persisted storage...');
-
-      final hasPersistedSession =
-          await SupabasePersistenceHelper.hasPersistedSession();
-      print('   - Has persisted session in storage: $hasPersistedSession');
-
-      if (hasPersistedSession) {
-        print('🔄 Persisted session found, waiting for Supabase to restore...');
-
-        // Give Supabase more time to restore from storage
-        for (int i = 0; i < 3; i++) {
-          await Future.delayed(const Duration(milliseconds: 400));
-
-          final userAfterWait = supabase.auth.currentUser;
-          final sessionAfterWait = supabase.auth.currentSession;
-
-          print(
-            '   - Check ${i + 1}: User=${userAfterWait?.email}, Session=${sessionAfterWait != null}',
-          );
-
-          if (sessionAfterWait != null && userAfterWait?.email == email) {
-            print('✅ AUTO-LOGIN SUCCESS: Session restored from persistence!');
-            await updateLastLogin(email);
-            return true;
-          }
-        }
+      
+      // Try one more time after delay
+      await Future.delayed(const Duration(milliseconds: 800));
+      
+      final userAfterDelay = supabase.auth.currentUser;
+      if (userAfterDelay != null && userAfterDelay.email == email) {
+        print('✅ User found after delay!');
+        await updateLastLogin(email);
+        return true;
       }
+    } catch (e) {
+      print('❌ Error getting current user: $e');
+    }
 
-      // METHOD 3: Try to manually trigger session restoration
-      print('🔄 METHOD 3 - Manual restoration attempt...');
-
-      try {
-        // Access auth properties to trigger any lazy loading
-        final userId = currentUser?.id;
-        final userRole = currentUser?.role;
-        final appMetadata = currentUser?.appMetadata;
-
-        print('   - User ID: $userId');
-        print('   - User role: $userRole');
-        print('   - App metadata: $appMetadata');
-
-        // One more wait
+    // METHOD 4: Check session storage directly
+    print('🔄 Checking persisted storage...');
+    
+    final hasPersistedSession = await SupabasePersistenceHelper.hasPersistedSession();
+    if (hasPersistedSession) {
+      print('📊 Persisted session found in storage');
+      
+      // Try multiple checks with delays
+      for (int i = 0; i < 3; i++) {
         await Future.delayed(const Duration(milliseconds: 500));
-
-        final finalUser = supabase.auth.currentUser;
-        final finalSession = supabase.auth.currentSession;
-
-        print('🔍 FINAL CHECK:');
-        print('   - User: ${finalUser?.email}');
-        print('   - Session: ${finalSession != null}');
-
-        if (finalSession != null && finalUser?.email == email) {
-          print('✅ AUTO-LOGIN SUCCESS: Manual restoration worked!');
+        
+        final user = supabase.auth.currentUser;
+        final session = supabase.auth.currentSession;
+        
+        print('   - Check ${i + 1}: User=${user?.email}, Session=${session != null}');
+        
+        if (session != null && user?.email == email) {
+          print('✅ Session restored from persistence!');
           await updateLastLogin(email);
           return true;
         }
-      } catch (e) {
-        print('❌ Manual restoration error: $e');
       }
-
-      // 6. Auto-login failed
-      print('❌ AUTO-LOGIN FAILED: No active session could be restored');
-      print('ℹ️ Possible reasons:');
-      print('   1. User logged out manually');
-      print('   2. Session expired (default: 1 hour)');
-      print('   3. App data was cleared');
-      print('   4. Supabase persistence not working');
-
-      return false;
-    } catch (e, stackTrace) {
-      print('❌ AUTO-LOGIN ERROR: $e');
-      print('Stack: $stackTrace');
-      return false;
     }
+
+    // 6. Auto-login failed
+    print('❌ AUTO-LOGIN FAILED: Could not restore session');
+    
+    // Log debug info
+    print('📊 Debug Information:');
+    print('   - Profile exists: Yes');
+    print('   - Remember Me enabled: $profileRememberMe');
+    print('   - Terms accepted: $termsAccepted');
+    print('   - Privacy accepted: $privacyAccepted');
+    print('   - Refresh token available: ${refreshToken != null && refreshToken.isNotEmpty}');
+    
+    return false;
+  } catch (e, stackTrace) {
+    print('❌ AUTO-LOGIN ERROR: $e');
+    print('Stack: $stackTrace');
+    return false;
   }
+}
+
+// ✅ Helper method to check session validity
+static bool _isSessionValid(Session? session) {
+  if (session == null) return false;
+  if (session.expiresAt == null) return true; // Assume valid if no expiry
+  
+  final expiryTime = DateTime.fromMillisecondsSinceEpoch(session.expiresAt!);
+  final now = DateTime.now();
+  final timeUntilExpiry = expiryTime.difference(now);
+  
+  // Session is valid if it expires in more than 2 minutes
+  return timeUntilExpiry.inMinutes > 2;
+}
 
   // ✅ Check if we have valid stored token
   static Future<bool> hasValidStoredToken(String email) async {
@@ -553,4 +627,79 @@ class SessionManager {
       return false;
     }
   }
+
+
+  // SessionManager.dart - Add these helper methods
+static Future<bool> restoreSessionFromStorage(String email) async {
+  try {
+    final supabase = Supabase.instance.client;
+    
+    // Try to get the current session
+    final currentSession = supabase.auth.currentSession;
+    final currentUser = supabase.auth.currentUser;
+    
+    // If already logged in with correct user, return success
+    if (currentSession != null && currentUser?.email == email) {
+      return true;
+    }
+    
+    // Try to get profile and refresh token
+    final profile = await getProfileByEmail(email);
+    if (profile == null) return false;
+    
+    final refreshToken = profile['refreshToken'] as String?;
+    if (refreshToken == null || refreshToken.isEmpty) {
+      return false;
+    }
+    
+    // Try to set session with refresh token
+    await supabase.auth.setSession(refreshToken);
+    
+    // Wait and check
+    await Future.delayed(const Duration(milliseconds: 800));
+    
+    final newSession = supabase.auth.currentSession;
+    final newUser = supabase.auth.currentUser;
+    
+    return newSession != null && newUser?.email == email;
+    
+  } catch (e) {
+    print('❌ Error restoring session: $e');
+    return false;
+  }
+}
+
+static Future<void> validateAndRefreshSession() async {
+  try {
+    final supabase = Supabase.instance.client;
+    final session = supabase.auth.currentSession;
+    
+    if (session == null) {
+      print('⚠️ No active session to validate');
+      return;
+    }
+    
+    // Check if session is about to expire (less than 5 minutes)
+    if (session.expiresAt != null) {
+      final expiryTime = DateTime.fromMillisecondsSinceEpoch(session.expiresAt!);
+      final now = DateTime.now();
+      final minutesUntilExpiry = expiryTime.difference(now).inMinutes;
+      
+      if (minutesUntilExpiry < 5) {
+        print('🔄 Session expiring soon ($minutesUntilExpiry minutes), attempting refresh...');
+        
+        try {
+          // Supabase automatically refreshes tokens when needed
+          // We just need to trigger a check
+          await supabase.auth.getUser();
+          print('✅ Session refresh triggered');
+        } catch (e) {
+          print('❌ Session refresh failed: $e');
+        }
+      }
+    }
+  } catch (e) {
+    print('❌ Error validating session: $e');
+  }
+}
 }

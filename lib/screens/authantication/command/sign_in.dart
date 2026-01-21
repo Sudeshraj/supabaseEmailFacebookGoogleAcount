@@ -25,7 +25,7 @@ class _SignInScreenState extends State<SignInScreen>
   bool _loading = false;
   bool _coolDown = false;
   bool _rememberMe = false;
-  bool _showPrivacyLinks = true;
+  final bool _showPrivacyLinks = true;
 
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
@@ -131,12 +131,6 @@ class _SignInScreenState extends State<SignInScreen>
     });
   }
 
-  // ======================================================================
-  // ✅ UPDATED: LOGIN FUNCTION WITH REMEMBER ME
-  // ======================================================================
-  // ======================================================================
-  // ✅ UPDATED: LOGIN FUNCTION WITH AUTO-LOGIN TOKEN SAVING
-  // ======================================================================
   Future<void> loginUser() async {
     try {
       setState(() => _loading = true);
@@ -326,9 +320,16 @@ class _SignInScreenState extends State<SignInScreen>
     }
   }
 
-  // ======================================================================
-  // ✅ UI SECTION WITH REMEMBER ME AND PRIVACY LINKS
-  // ======================================================================
+  void _handleBackButton() {
+    // Try to pop first
+    if (GoRouter.of(context).canPop()) {
+      GoRouter.of(context).pop();
+    } else {
+      // If nothing to pop, navigate to splash
+      GoRouter.of(context).go('/');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final bg = const Color(0xFF0F1820);
@@ -373,9 +374,8 @@ class _SignInScreenState extends State<SignInScreen>
                                   color: Colors.white,
                                   size: 22,
                                 ),
-                                onPressed: () async {
-                                  context.push('/continue');
-                                },
+                                onPressed:
+                                    _handleBackButton, // ✅ Use the handler
                               ),
                               if (_hasSavedProfile)
                                 GestureDetector(
@@ -602,9 +602,10 @@ class _SignInScreenState extends State<SignInScreen>
                       ),
 
                       // ✅ PRIVACY LINKS AND CREATE ACCOUNT
+                      // sign_in_screen.dart - build method තුළ privacy links section
                       Column(
                         children: [
-                          // Privacy Policy Links
+                          // Privacy Policy Links - ALWAYS VISIBLE
                           if (_showPrivacyLinks)
                             Padding(
                               padding: const EdgeInsets.only(bottom: 16),
@@ -612,7 +613,12 @@ class _SignInScreenState extends State<SignInScreen>
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
                                   TextButton(
-                                    onPressed: () => context.go('/privacy'),
+                                    onPressed: () {
+                                      // ✅ Navigate to privacy policy with return route
+                                      context.push(
+                                        '/privacy?from=${Uri.encodeComponent('/login')}',
+                                      );
+                                    },
                                     child: const Text(
                                       'Privacy Policy',
                                       style: TextStyle(
@@ -629,7 +635,12 @@ class _SignInScreenState extends State<SignInScreen>
                                   ),
                                   const SizedBox(width: 8),
                                   TextButton(
-                                    onPressed: () => context.go('/terms'),
+                                    onPressed: () {
+                                      // ✅ Navigate to terms with return route
+                                      context.push(
+                                        '/terms?from=${Uri.encodeComponent('/login')}',
+                                      );
+                                    },
                                     child: const Text(
                                       'Terms of Service',
                                       style: TextStyle(
@@ -642,7 +653,7 @@ class _SignInScreenState extends State<SignInScreen>
                               ),
                             ),
 
-                          // Clear Data Option
+                          // Data Management Option
                           TextButton(
                             onPressed: () => context.go('/clear-data'),
                             child: const Text(
@@ -655,34 +666,64 @@ class _SignInScreenState extends State<SignInScreen>
                           ),
                           const SizedBox(height: 8),
 
-                          // Create Account Button
-                          SizedBox(
+                          // Create Account Button with explicit consent notice
+                          Container(
                             width: double.infinity,
-                            child: OutlinedButton(
-                              onPressed: () {
-                                context.push('/signup');
-                              },
-                              style: OutlinedButton.styleFrom(
-                                side: const BorderSide(
-                                  color: Color(0xFF1877F3),
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.03),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: Colors.white12),
+                            ),
+                            child: Column(
+                              children: [
+                                const Text(
+                                  'New to MySalon?',
+                                  style: TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 13,
+                                  ),
                                 ),
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 14,
+                                const SizedBox(height: 8),
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: OutlinedButton(
+                                    onPressed: () {
+                                      context.go('/signup');
+                                    },
+                                    style: OutlinedButton.styleFrom(
+                                      side: const BorderSide(
+                                        color: Color(0xFF1877F3),
+                                      ),
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 14,
+                                      ),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(24),
+                                      ),
+                                      backgroundColor: const Color(
+                                        0xFF1877F3,
+                                      ).withOpacity(0.1),
+                                    ),
+                                    child: const Text(
+                                      'Create new account',
+                                      style: TextStyle(
+                                        color: Color(0xFF1877F3),
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
                                 ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(24),
+                                const SizedBox(height: 8),
+                                const Text(
+                                  'By creating an account, you agree to our Terms and Privacy Policy',
+                                  style: TextStyle(
+                                    color: Colors.white60,
+                                    fontSize: 11,
+                                  ),
+                                  textAlign: TextAlign.center,
                                 ),
-                                backgroundColor: const Color(
-                                  0xFF1877F3,
-                                ).withOpacity(0.1),
-                              ),
-                              child: const Text(
-                                'Create new account',
-                                style: TextStyle(
-                                  color: Color(0xFF1877F3),
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
+                              ],
                             ),
                           ),
                           const SizedBox(height: 30),

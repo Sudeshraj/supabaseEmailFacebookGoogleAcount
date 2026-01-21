@@ -1,14 +1,16 @@
-// lib/screens/policy_screen.dart
+// policy_screen.dart - Navigation fix
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_application_1/utils/policy_content.dart';
 
 class PolicyScreen extends StatelessWidget {
   final bool isPrivacyPolicy;
-  
+  final String? returnRoute; // ✅ Add return route parameter
+
   const PolicyScreen({
     super.key,
     required this.isPrivacyPolicy,
+    this.returnRoute, // ✅ Optional return route
   });
 
   @override
@@ -24,210 +26,184 @@ class PolicyScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: const Color(0xFF0F1820),
       appBar: AppBar(
-        backgroundColor: const Color(0xFF0F1820),
+        backgroundColor: Colors.transparent,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => context.canPop() ? context.pop() : context.go('/'),
+          onPressed: () => _handleBack(context), // ✅ Use helper method
         ),
         title: Text(
           title,
           style: const TextStyle(color: Colors.white),
         ),
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
+      body: SafeArea(
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Last Updated
+            // Last Updated Banner
             Container(
+              width: double.infinity,
               padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.05),
-                borderRadius: BorderRadius.circular(8),
+              color: Colors.blue.withOpacity(0.1),
+              child: Text(
+                PolicyContent.lastUpdated,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 12,
+                ),
               ),
-              child: Row(
-                children: [
-                  const Icon(Icons.update, color: Colors.white70, size: 16),
-                  const SizedBox(width: 8),
-                  Text(
-                    PolicyContent.lastUpdated,
+            ),
+            
+            // Policy Content
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(20),
+                child: Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.03),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    content,
                     style: const TextStyle(
                       color: Colors.white70,
                       fontSize: 14,
+                      height: 1.6,
                     ),
+                  ),
+                ),
+              ),
+            ),
+            
+            // Acceptance Footer
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.05),
+                border: Border(top: BorderSide(color: Colors.white24)),
+              ),
+              child: Column(
+                children: [
+                  const Text(
+                    'By continuing, you acknowledge that you have read and understood this policy.',
+                    style: TextStyle(
+                      color: Colors.white70,
+                      fontSize: 13,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => _handleDecline(context),
+                          style: OutlinedButton.styleFrom(
+                            side: const BorderSide(color: Colors.white24),
+                          ),
+                          child: const Text(
+                            'Decline',
+                            style: TextStyle(color: Colors.white70),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: () => _handleAccept(context),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF1877F3),
+                          ),
+                          child: const Text(
+                            'I Accept',
+                            style: TextStyle(color: Colors.white),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
             ),
-            
-            const SizedBox(height: 24),
-            
-            // Content with Markdown-style formatting
-            _buildFormattedContent(content),
-            
-            const SizedBox(height: 40),
-            
-            // Back Button
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: () => context.canPop() ? context.pop() : context.go('/'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF1877F3),
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                ),
-                child: const Text('Back to Sign Up'),
-              ),
-            ),
-            
-            const SizedBox(height: 20),
-            
-            // Link to other policy
-            if (isPrivacyPolicy)
-              TextButton(
-                onPressed: () => context.go('/terms'),
-                child: const Text(
-                  'View Terms of Service',
-                  style: TextStyle(color: Colors.blue),
-                ),
-              )
-            else
-              TextButton(
-                onPressed: () => context.go('/privacy'),
-                child: const Text(
-                  'View Privacy Policy',
-                  style: TextStyle(color: Colors.blue),
-                ),
-              ),
           ],
         ),
       ),
     );
   }
-  
-  Widget _buildFormattedContent(String content) {
-    final lines = content.split('\n');
-    final widgets = <Widget>[];
-    
-    for (var line in lines) {
-      if (line.trim().isEmpty) {
-        widgets.add(const SizedBox(height: 16));
-        continue;
-      }
-      
-      if (line.startsWith('### ')) {
-        // Subheading
-        widgets.add(
-          Text(
-            line.substring(4),
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-        );
-        widgets.add(const SizedBox(height: 8));
-      } else if (line.startsWith('- **') || line.startsWith('- ')) {
-        // List item
-        widgets.add(
-          Padding(
-            padding: const EdgeInsets.only(left: 16, bottom: 4),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  '• ',
-                  style: TextStyle(color: Colors.white70),
-                ),
-                Expanded(
-                  child: Text(
-                    line.replaceFirst('- ', ''),
-                    style: const TextStyle(
-                      color: Colors.white70,
-                      fontSize: 15,
-                      height: 1.5,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      } else if (line.startsWith('**') && line.endsWith('**')) {
-        // Bold text
-        widgets.add(
-          Text(
-            line.substring(2, line.length - 2),
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-        );
-      } else if (line.contains(':')) {
-        // Key-value pair (like Email:)
-        final parts = line.split(':');
-        if (parts.length >= 2) {
-          widgets.add(
-            RichText(
-              text: TextSpan(
-                text: '${parts[0]}: ',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 15,
-                ),
-                children: [
-                  TextSpan(
-                    text: parts.sublist(1).join(':'),
-                    style: const TextStyle(
-                      color: Colors.white70,
-                      fontWeight: FontWeight.normal,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        }
-      } else if (int.tryParse(line.split('.')[0]) != null && line.contains('.')) {
-        // Numbered list
-        widgets.add(
-          Padding(
-            padding: const EdgeInsets.only(left: 16, bottom: 4),
-            child: Text(
-              line,
-              style: const TextStyle(
-                color: Colors.white70,
-                fontSize: 15,
-                height: 1.5,
-              ),
-            ),
-          ),
-        );
+
+  // ✅ Helper method to handle back navigation
+  void _handleBack(BuildContext context) {
+    // Check if we have a specific return route
+    if (returnRoute != null && returnRoute!.isNotEmpty) {
+      context.go(returnRoute!);
+    } else {
+      // Default: Go back or to login screen
+      if (GoRouter.of(context).canPop()) {
+        context.pop();
       } else {
-        // Regular paragraph
-        widgets.add(
-          Text(
-            line,
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 15,
-              height: 1.6,
+        context.go('/login');
+      }
+    }
+  }
+
+  // ✅ Handle decline button
+  void _handleDecline(BuildContext context) {
+    // Show confirmation dialog
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1E293B),
+        title: const Text(
+          'Decline Policy',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: const Text(
+          'You must accept our policies to use this app. Would you like to review them again?',
+          style: TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context); // Close dialog
+              _handleBack(context); // Navigate back
+            },
+            child: const Text(
+              'Go Back',
+              style: TextStyle(color: Colors.white70),
             ),
           ),
-        );
-      }
-      
-      widgets.add(const SizedBox(height: 8));
-    }
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context); // Close dialog
+              // Stay on policy screen
+            },
+            child: const Text(
+              'Review Again',
+              style: TextStyle(color: Colors.blue),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ✅ Handle accept button
+  void _handleAccept(BuildContext context) {
+    // Record acceptance time
+    final now = DateTime.now();
+    print('✅ Policy accepted at: $now');
     
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: widgets,
+    // Navigate back or to appropriate screen
+    _handleBack(context);
+    
+    // Show confirmation snackbar
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Policy accepted successfully'),
+        duration: Duration(seconds: 2),
+        backgroundColor: Colors.green,
+      ),
     );
   }
 }

@@ -334,6 +334,67 @@ Future<void> logout() async {
     _setRememberMeEnabled(enabled);
   }
 
+  // app_state.dart තුළ
+Future<void> attemptAutoLogin() async {
+  try {
+    print('🔄 AppState: Attempting auto-login...');
+    
+    // Check if auto-login is enabled globally
+    final rememberMeEnabled = await SessionManager.isRememberMeEnabled();
+    if (!rememberMeEnabled) {
+      print('⚠️ AppState: Auto-login disabled globally');
+      return;
+    }
+    
+    // Get most recent user
+    final recentProfile = await SessionManager.getMostRecentProfile();
+    if (recentProfile == null || recentProfile.isEmpty) {
+      print('⚠️ AppState: No recent profile found');
+      return;
+    }
+    
+    final email = recentProfile['email'] as String?;
+    if (email == null || email.isEmpty) {
+      print('⚠️ AppState: No email in recent profile');
+      return;
+    }
+    
+    // Check consent (App Store requirement)
+    final termsAccepted = recentProfile['termsAcceptedAt'] != null;
+    final privacyAccepted = recentProfile['privacyAcceptedAt'] != null;
+    
+    if (!termsAccepted || !privacyAccepted) {
+      print('⚠️ AppState: User consent not recorded - requiring re-login');
+      return;
+    }
+    
+    print('🔍 AppState: Attempting auto-login for $email');
+    
+    // Attempt auto-login with retry logic
+    bool success = false;
+    
+    for (int attempt = 1; attempt <= 3; attempt++) {
+      print('   - Attempt $attempt of 3');
+      success = await SessionManager.tryAutoLogin(email);
+      
+      if (success) {
+        print('✅ AppState: Auto-login successful for $email');
+        refreshState();
+        return;
+      }
+      
+      if (attempt < 3) {
+        await Future.delayed(const Duration(milliseconds: 500));
+      }
+    }
+    
+    print('❌ AppState: Auto-login failed after 3 attempts');
+    
+  } catch (e) {
+    print('❌ AppState: Error during auto-login: $e');
+  }
+}
+
   // ====================
   // PRIVATE METHODS
   // ====================
