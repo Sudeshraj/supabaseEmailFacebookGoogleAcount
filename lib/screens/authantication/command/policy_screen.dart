@@ -1,16 +1,15 @@
-// policy_screen.dart - Navigation fix
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_application_1/utils/policy_content.dart';
 
 class PolicyScreen extends StatelessWidget {
   final bool isPrivacyPolicy;
-  final String? returnRoute; // ✅ Add return route parameter
+  final Map<String, dynamic>? extraData;
 
   const PolicyScreen({
     super.key,
     required this.isPrivacyPolicy,
-    this.returnRoute, // ✅ Optional return route
+    this.extraData,
   });
 
   @override
@@ -29,7 +28,7 @@ class PolicyScreen extends StatelessWidget {
         backgroundColor: Colors.transparent,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => _handleBack(context), // ✅ Use helper method
+          onPressed: () => _handleBack(context),
         ),
         title: Text(
           title,
@@ -44,13 +43,23 @@ class PolicyScreen extends StatelessWidget {
               width: double.infinity,
               padding: const EdgeInsets.all(12),
               color: Colors.blue.withOpacity(0.1),
-              child: Text(
-                PolicyContent.lastUpdated,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: Colors.white70,
-                  fontSize: 12,
-                ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(
+                    Icons.update,
+                    color: Colors.blue,
+                    size: 16,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    PolicyContent.lastUpdated,
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
               ),
             ),
             
@@ -132,24 +141,18 @@ class PolicyScreen extends StatelessWidget {
     );
   }
 
-  // ✅ Helper method to handle back navigation
   void _handleBack(BuildContext context) {
-    // Check if we have a specific return route
-    if (returnRoute != null && returnRoute!.isNotEmpty) {
-      context.go(returnRoute!);
+    // Simply pop to go back to DataConsentScreen
+    // This preserves the state of DataConsentScreen
+    if (GoRouter.of(context).canPop()) {
+      GoRouter.of(context).pop();
     } else {
-      // Default: Go back or to login screen
-      if (GoRouter.of(context).canPop()) {
-        context.pop();
-      } else {
-        context.go('/login');
-      }
+      // Fallback navigation
+      context.go('/login');
     }
   }
 
-  // ✅ Handle decline button
   void _handleDecline(BuildContext context) {
-    // Show confirmation dialog
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -165,8 +168,8 @@ class PolicyScreen extends StatelessWidget {
         actions: [
           TextButton(
             onPressed: () {
-              Navigator.pop(context); // Close dialog
-              _handleBack(context); // Navigate back
+              Navigator.pop(context);
+              _handleBack(context);
             },
             child: const Text(
               'Go Back',
@@ -175,8 +178,7 @@ class PolicyScreen extends StatelessWidget {
           ),
           TextButton(
             onPressed: () {
-              Navigator.pop(context); // Close dialog
-              // Stay on policy screen
+              Navigator.pop(context);
             },
             child: const Text(
               'Review Again',
@@ -188,20 +190,20 @@ class PolicyScreen extends StatelessWidget {
     );
   }
 
-  // ✅ Handle accept button
   void _handleAccept(BuildContext context) {
-    // Record acceptance time
-    final now = DateTime.now();
-    print('✅ Policy accepted at: $now');
+    // Record acceptance
+    print('✅ ${isPrivacyPolicy ? 'Privacy Policy' : 'Terms of Service'} accepted');
     
-    // Navigate back or to appropriate screen
+    // Go back to DataConsentScreen
     _handleBack(context);
     
-    // Show confirmation snackbar
+    // Show confirmation
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Policy accepted successfully'),
-        duration: Duration(seconds: 2),
+      SnackBar(
+        content: Text(
+          '${isPrivacyPolicy ? 'Privacy Policy' : 'Terms of Service'} accepted',
+        ),
+        duration: const Duration(seconds: 2),
         backgroundColor: Colors.green,
       ),
     );

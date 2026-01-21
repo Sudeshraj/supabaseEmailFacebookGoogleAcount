@@ -76,19 +76,19 @@ class AppLifecycleObserver with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     switch (state) {
-       case AppLifecycleState.resumed:
+      case AppLifecycleState.resumed:
         // App came to foreground
         appState.refreshState(silent: true);
-        
+
         // ✅ Validate and refresh session if needed
         _validateSessionOnResume();
         break;
-        
+
       case AppLifecycleState.paused:
         // App went to background
         print('📱 App backgrounded - saving session state');
         break;
-        
+
       case AppLifecycleState.inactive:
       case AppLifecycleState.detached:
       case AppLifecycleState.hidden:
@@ -97,29 +97,28 @@ class AppLifecycleObserver with WidgetsBindingObserver {
   }
 }
 
-  Future<void> _validateSessionOnResume() async {
-    try {
-      // Wait a moment for Supabase to initialize
-      await Future.delayed(const Duration(milliseconds: 300));
-      
-      // Validate and refresh session if needed
-      await SessionManager.validateAndRefreshSession();
-      
-      // Check if auto-login should be attempted
-      final currentUser = Supabase.instance.client.auth.currentUser;
-      if (currentUser == null) {
-        // No user logged in, check if we should auto-login
-        final rememberMe = await SessionManager.isRememberMeEnabled();
-        if (rememberMe) {
-          print('🔄 App resumed, attempting auto-login...');
-          await appState.attemptAutoLogin();
-        }
-      }
-    } catch (e) {
-      print('❌ Error validating session on resume: $e');
-    }
-  }
+Future<void> _validateSessionOnResume() async {
+  try {
+    // Wait a moment for Supabase to initialize
+    await Future.delayed(const Duration(milliseconds: 300));
 
+    // Validate and refresh session if needed
+    await SessionManager.validateAndRefreshSession();
+
+    // Check if auto-login should be attempted
+    final currentUser = Supabase.instance.client.auth.currentUser;
+    if (currentUser == null) {
+      // No user logged in, check if we should auto-login
+      final rememberMe = await SessionManager.isRememberMeEnabled();
+      if (rememberMe) {
+        print('🔄 App resumed, attempting auto-login...');
+        await appState.attemptAutoLogin();
+      }
+    }
+  } catch (e) {
+    print('❌ Error validating session on resume: $e');
+  }
+}
 
 // ====================
 // MAIN METHOD
@@ -339,53 +338,41 @@ GoRouter _createRouter() {
       GoRoute(path: '/customer', builder: (_, __) => const CustomerHome()),
       GoRoute(path: '/employee', builder: (_, __) => const EmployeeDashboard()),
       GoRoute(path: '/owner', builder: (_, __) => const OwnerDashboard()),
-  GoRoute(
-    path: '/privacy',
-    pageBuilder: (context, state) {
-      // Get the referrer (where user came from)
-      final referrer = state.uri.queryParameters['from'];
-      
-      return MaterialPage(
-        key: state.pageKey,
-        child: PolicyScreen(
-          isPrivacyPolicy: true,
-          returnRoute: referrer ?? '/login', // Default to login
-        ),
-      );
-    },
-  ),
-  
-  GoRoute(
-    path: '/terms',
-    pageBuilder: (context, state) {
-      // Get the referrer (where user came from)
-      final referrer = state.uri.queryParameters['from'];
-      
-      return MaterialPage(
-        key: state.pageKey,
-        child: PolicyScreen(
-          isPrivacyPolicy: false,
-          returnRoute: referrer ?? '/login', // Default to login
-        ),
-      );
-    },
-  ),
+      GoRoute(
+        path: '/privacy',
+        name: 'privacy',
+        builder: (context, state) {
+          final extra = state.extra as Map<String, dynamic>?;
+          return PolicyScreen(isPrivacyPolicy: true, extraData: extra);
+        },
+      ),
+
+      GoRoute(
+        path: '/terms',
+        name: 'terms',
+        builder: (context, state) {
+          final extra = state.extra as Map<String, dynamic>?;
+          return PolicyScreen(isPrivacyPolicy: false, extraData: extra);
+        },
+      ),
       GoRoute(
         path: '/clear-data',
         builder: (context, state) => const ClearDataScreen(),
       ),
       GoRoute(
         path: '/data-consent',
-        pageBuilder: (context, state) {
-          final extra = state.extra as Map<String, dynamic>?;
-          return MaterialPage(
-            key: state.pageKey,
-            child: DataConsentScreen(
-              email: extra?['email'] ?? '',
-              password: extra?['password'] ?? '',
-              // onContinue: extra?['onContinue'] ?? (bool rememberMe) {},
-            ),
-          );
+        name: 'data-consent',
+        builder: (context, state) {
+          final extra = state.extra as Map<String, dynamic>? ?? {};
+          final email = extra['email'] as String? ?? '';
+          final password = extra['password'] as String? ?? '';
+
+          if (email.isEmpty || password.isEmpty) {
+            // Redirect back to signup if no credentials
+            return const SignupFlow();
+          }
+
+          return DataConsentScreen(email: email, password: password);
         },
       ),
     ],

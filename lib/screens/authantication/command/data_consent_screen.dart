@@ -37,7 +37,7 @@ class _DataConsentScreenState extends State<DataConsentScreen>
 
     // Default values
     _rememberMe = true;
-    _acceptedMarketing = false; // Opt-in for marketing
+    _acceptedMarketing = false;
 
     _animationController = AnimationController(
       vsync: this,
@@ -54,11 +54,6 @@ class _DataConsentScreenState extends State<DataConsentScreen>
     );
 
     _animationController.forward();
-
-    // Auto-scroll to show all content
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      // Ensure user sees the entire consent form
-    });
   }
 
   bool get _isContinueEnabled {
@@ -81,7 +76,6 @@ class _DataConsentScreenState extends State<DataConsentScreen>
       print('✅ Remember Me: $_rememberMe');
       print('📨 Marketing Opt-in: $_acceptedMarketing');
 
-      // Call AuthService with consent data
       await _authService.registerUser(
         context: context,
         email: widget.email,
@@ -90,7 +84,6 @@ class _DataConsentScreenState extends State<DataConsentScreen>
         marketingConsent: _acceptedMarketing,
       );
 
-      // If registration succeeds, the auth service will navigate automatically
       print('✅ Registration completed successfully');
       
     } catch (e) {
@@ -103,6 +96,8 @@ class _DataConsentScreenState extends State<DataConsentScreen>
   }
 
   void _handleBackButton() {
+    if (_isLoading) return;
+    
     if (GoRouter.of(context).canPop()) {
       GoRouter.of(context).pop();
     } else {
@@ -110,11 +105,20 @@ class _DataConsentScreenState extends State<DataConsentScreen>
     }
   }
 
- void _showPolicyDetails(bool isPrivacyPolicy) {
-  final route = isPrivacyPolicy ? '/privacy' : '/terms';
-  // ✅ Include current route as referrer
-  context.push('$route?from=${Uri.encodeComponent('/data-consent')}');
-}
+  void _showPolicyDetails(bool isPrivacyPolicy) {
+    final route = isPrivacyPolicy ? '/privacy' : '/terms';
+    
+    // Use push to preserve current screen in navigation stack
+    GoRouter.of(context).push(
+      route,
+      extra: {
+        'email': widget.email,
+        'password': widget.password,
+        'returnRoute': '/data-consent',
+        'from': 'data-consent',
+      },
+    );
+  }
 
   @override
   void dispose() {
@@ -178,6 +182,53 @@ class _DataConsentScreenState extends State<DataConsentScreen>
 
                       const SizedBox(height: 20),
 
+                      // Account Info Banner (Shows current email)
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.blue.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: Colors.blue.withOpacity(0.3),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.email_outlined,
+                              color: Colors.blue,
+                              size: 18,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Registering email:',
+                                    style: TextStyle(
+                                      color: Colors.white70,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                  Text(
+                                    widget.email,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      const SizedBox(height: 20),
+
                       // Scrollable Content
                       Expanded(
                         child: SingleChildScrollView(
@@ -204,54 +255,6 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                                   fontSize: 15,
                                   color: Colors.white70,
                                   height: 1.5,
-                                ),
-                              ),
-
-                              const SizedBox(height: 32),
-
-                              // Account Info Card
-                              Container(
-                                padding: const EdgeInsets.all(16),
-                                decoration: BoxDecoration(
-                                  color: Colors.blue.withOpacity(0.1),
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(
-                                    color: Colors.blue.withOpacity(0.3),
-                                  ),
-                                ),
-                                child: Row(
-                                  children: [
-                                    const Icon(
-                                      Icons.account_circle,
-                                      color: Colors.blue,
-                                      size: 24,
-                                    ),
-                                    const SizedBox(width: 12),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          const Text(
-                                            'Creating account for',
-                                            style: TextStyle(
-                                              color: Colors.white70,
-                                              fontSize: 12,
-                                            ),
-                                          ),
-                                          Text(
-                                            widget.email,
-                                            style: const TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 15,
-                                              fontWeight: FontWeight.w500,
-                                            ),
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ],
                                 ),
                               ),
 
