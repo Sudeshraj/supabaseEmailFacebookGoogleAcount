@@ -23,6 +23,7 @@ class _SignupFlowState extends State<SignupFlow> {
           initialEmail: _email,
           initialPassword: _password,
           onNext: _handleNextPressed,
+          isLoading: _isLoading, // ✅ Add this line
         ),
       ),
     );
@@ -47,7 +48,6 @@ class _SignupFlowState extends State<SignupFlow> {
     } catch (e) {
       print('❌ Navigation error: $e');
       // Handle error appropriately
-    } finally {
       setState(() {
         _isLoading = false;
       });
@@ -70,8 +70,12 @@ class _SignupFlowState extends State<SignupFlow> {
   }
 
   void _checkForNavigationResult() {
-    // This method can be used to handle any return data from DataConsentScreen
-    // For example, if registration was successful, we might want to navigate away
+    // Reset loading state when returning
+    if (_isLoading) {
+      setState(() {
+        _isLoading = false;
+      });
+    }
     print('↩️ Returned to SignupFlow');
     print('📧 Current email: $_email');
   }
