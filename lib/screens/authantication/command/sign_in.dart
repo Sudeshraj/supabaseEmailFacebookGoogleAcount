@@ -278,6 +278,7 @@ class _SignInScreenState extends State<SignInScreen>
               refreshToken: refreshToken,
             );
           }
+          appState.emailVerifyerError();
           appState.refreshState();
           if (!mounted) return;
           context.go('/');
