@@ -7,10 +7,19 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_application_1/services/session_manager.dart';
 
+import '../../../utils/simple_toast.dart';
+
 class SignInScreen extends StatefulWidget {
   final String? prefilledEmail;
+  final bool showMessage; // ✅ Add this parameter
+  final String? message; // ✅ Custom message
 
-  const SignInScreen({super.key, this.prefilledEmail});
+  const SignInScreen({
+    super.key,
+    this.prefilledEmail,
+    this.showMessage = false,
+    this.message,
+  });
 
   @override
   State<SignInScreen> createState() => _SignInScreenState();
@@ -44,9 +53,9 @@ class _SignInScreenState extends State<SignInScreen>
     super.initState();
     _checkSavedProfile();
     _loadRememberMeSetting();
-
     if (widget.prefilledEmail != null) {
       _emailController = TextEditingController(text: widget.prefilledEmail);
+      print('📧 Prefilled email: ${widget.prefilledEmail}');
     } else {
       _emailController = TextEditingController();
     }
@@ -67,10 +76,30 @@ class _SignInScreenState extends State<SignInScreen>
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkForPrefilledEmail();
+
+      // ✅ Show custom message if provided
+      if (widget.showMessage && widget.message != null) {
+        _showCustomMessage(widget.message!);
+      }
     });
 
     _emailController.addListener(_validateForm);
     _passwordController.addListener(_validateForm);
+  }
+
+  void _showCustomMessage(String message) {
+    // ✅ Pass both required parameters
+    SimpleToast.info(
+      context, // First parameter: BuildContext
+      message, // Second parameter: String message
+    );
+
+    // Or with named duration parameter:
+    // SimpleToast.info(
+    //   context,
+    //   message,
+    //   duration: const Duration(seconds: 5),
+    // );
   }
 
   Future<void> _loadRememberMeSetting() async {
