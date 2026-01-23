@@ -294,17 +294,21 @@ GoRouter _createRouter() {
     },
     routes: [
       GoRoute(path: '/', builder: (_, __) => const SplashScreen()),
+      // router.dart
       GoRoute(
         path: '/login',
-        pageBuilder: (context, state) {
-          final extra = state.extra;
-          if (extra is SignInScreen) {
-            return MaterialPage(key: state.pageKey, child: extra);
-          }
-          final email = (extra is Map ? extra['email'] : null) as String?;
-          return MaterialPage(
-            key: state.pageKey,
-            child: SignInScreen(prefilledEmail: email),
+        name: 'login',
+        builder: (context, state) {
+          final extra = state.extra as Map<String, dynamic>?;
+          final prefilledEmail = extra?['prefilledEmail'] as String?;
+          final showMessage = extra?['showMessage'] as bool? ?? false;
+          final message =
+              extra?['message'] as String?; // ✅ Extract custom message
+
+          return SignInScreen(
+            prefilledEmail: prefilledEmail,
+            showMessage: showMessage,
+            message: message, // ✅ Pass custom message
           );
         },
       ),
@@ -363,16 +367,16 @@ GoRouter _createRouter() {
         path: '/data-consent',
         name: 'data-consent',
         builder: (context, state) {
-          final extra = state.extra as Map<String, dynamic>? ?? {};
-          final email = extra['email'] as String? ?? '';
-          final password = extra['password'] as String? ?? '';
+          final extra = state.extra as Map<String, dynamic>?;
+          final email = extra?['email'] as String? ?? '';
+          final password = extra?['password'] as String? ?? '';
+          final source = extra?['source'] as String?;
 
-          if (email.isEmpty || password.isEmpty) {
-            // Redirect back to signup if no credentials
-            return const SignupFlow();
-          }
-
-          return DataConsentScreen(email: email, password: password);
+          return DataConsentScreen(
+            email: email,
+            password: password,
+            source: source,
+          );
         },
       ),
     ],

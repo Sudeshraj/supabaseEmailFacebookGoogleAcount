@@ -105,6 +105,7 @@ class _EmailPasswordScreenState extends State<EmailPasswordScreen>
     });
   }
 
+  // email_password_screen.dart
   void _handleNextPressed() {
     if (!_isValid || _isProcessing || widget.isLoading) return;
 
@@ -134,14 +135,32 @@ class _EmailPasswordScreenState extends State<EmailPasswordScreen>
     }
   }
 
+  // email_password_screen.dart
+  // email_password_screen.dart
   @override
   void didUpdateWidget(covariant EmailPasswordScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
-    
-    // Update processing state based on parent's isLoading
-    if (oldWidget.isLoading != widget.isLoading) {
+
+    print(
+      '📱 EmailPasswordScreen: isLoading changed from ${oldWidget.isLoading} to ${widget.isLoading}',
+    );
+
+    // ✅ Sync with parent's loading state
+    if (widget.isLoading != _isProcessing) {
       setState(() {
         _isProcessing = widget.isLoading;
+      });
+    }
+
+    // ✅ If parent just finished loading (true → false), also reset our state
+    if (oldWidget.isLoading == true && widget.isLoading == false) {
+      Future.delayed(const Duration(milliseconds: 100), () {
+        if (mounted && _isProcessing) {
+          setState(() {
+            _isProcessing = false;
+            print('🔄 EmailPasswordScreen: Auto-reset processing state');
+          });
+        }
       });
     }
   }
@@ -159,7 +178,7 @@ class _EmailPasswordScreenState extends State<EmailPasswordScreen>
     final size = MediaQuery.of(context).size;
     final bool isWeb = size.width > 700;
     final double maxWidth = isWeb ? 480 : double.infinity;
-    
+
     final bool showLoading = _isProcessing || widget.isLoading;
 
     return Scaffold(
@@ -254,9 +273,7 @@ class _EmailPasswordScreenState extends State<EmailPasswordScreen>
                             borderRadius: BorderRadius.circular(8),
                           ),
                           disabledBorder: OutlineInputBorder(
-                            borderSide: BorderSide(
-                              color: Colors.white10,
-                            ),
+                            borderSide: BorderSide(color: Colors.white10),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           errorText: _emailError,
@@ -299,12 +316,10 @@ class _EmailPasswordScreenState extends State<EmailPasswordScreen>
                             borderRadius: BorderRadius.circular(8),
                           ),
                           disabledBorder: OutlineInputBorder(
-                            borderSide: BorderSide(
-                              color: Colors.white10,
-                            ),
+                            borderSide: BorderSide(color: Colors.white10),
                             borderRadius: BorderRadius.circular(8),
                           ),
-                          suffixIcon: showLoading 
+                          suffixIcon: showLoading
                               ? const SizedBox.shrink()
                               : IconButton(
                                   icon: Icon(

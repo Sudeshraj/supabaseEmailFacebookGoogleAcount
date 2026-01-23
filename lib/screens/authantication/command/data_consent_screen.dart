@@ -5,11 +5,13 @@ import 'package:flutter_application_1/services/signup_serivce.dart';
 class DataConsentScreen extends StatefulWidget {
   final String email;
   final String password;
+  final String? source; // To know where it came from
 
   const DataConsentScreen({
     super.key,
     required this.email,
     required this.password,
+    this.source,
   });
 
   @override
@@ -60,8 +62,10 @@ class _DataConsentScreenState extends State<DataConsentScreen>
     return _acceptedTerms && _acceptedPrivacy && !_isLoading;
   }
 
+  // data_consent_screen.dart - _handleContinue method
+  // data_consent_screen.dart - _handleContinue method
   Future<void> _handleContinue() async {
-    if (!_isContinueEnabled) return;
+    if (!_isContinueEnabled || _isLoading) return;
 
     setState(() {
       _isLoading = true;
@@ -69,13 +73,9 @@ class _DataConsentScreenState extends State<DataConsentScreen>
     });
 
     try {
-      print('🚀 Starting registration with consent...');
-      print('📧 Email: ${widget.email}');
-      print('✅ Terms Accepted: $_acceptedTerms');
-      print('✅ Privacy Accepted: $_acceptedPrivacy');
-      print('✅ Remember Me: $_rememberMe');
-      print('📨 Marketing Opt-in: $_acceptedMarketing');
+      print('🚀 Starting registration for: ${widget.email}');
 
+      // Call auth service
       await _authService.registerUser(
         context: context,
         email: widget.email,
@@ -84,20 +84,27 @@ class _DataConsentScreenState extends State<DataConsentScreen>
         marketingConsent: _acceptedMarketing,
       );
 
-      print('✅ Registration completed successfully');
-      
+      print('✅ Registration completed');
+
+      // If we reach here, registration was successful
+      // AuthService will handle navigation
     } catch (e) {
       print('❌ Registration error: $e');
-      setState(() {
-        _errorMessage = e.toString();
-        _isLoading = false;
-      });
+
+      // Reset loading state
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+
+      // Don't show error - AuthService handles it
     }
   }
 
   void _handleBackButton() {
     if (_isLoading) return;
-    
+
     if (GoRouter.of(context).canPop()) {
       GoRouter.of(context).pop();
     } else {
@@ -107,7 +114,7 @@ class _DataConsentScreenState extends State<DataConsentScreen>
 
   void _showPolicyDetails(bool isPrivacyPolicy) {
     final route = isPrivacyPolicy ? '/privacy' : '/terms';
-    
+
     // Use push to preserve current screen in navigation stack
     GoRouter.of(context).push(
       route,
@@ -123,6 +130,9 @@ class _DataConsentScreenState extends State<DataConsentScreen>
   @override
   void dispose() {
     _animationController.dispose();
+    if (_isLoading) {
+      print('⚠️ DataConsentScreen disposing while still loading');
+    }
     super.dispose();
   }
 
@@ -284,8 +294,7 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                                     _acceptedTerms = value ?? false;
                                   });
                                 },
-                                onViewPressed: () =>
-                                    _showPolicyDetails(false),
+                                onViewPressed: () => _showPolicyDetails(false),
                                 isLoading: _isLoading,
                               ),
 
@@ -303,8 +312,7 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                                     _acceptedPrivacy = value ?? false;
                                   });
                                 },
-                                onViewPressed: () =>
-                                    _showPolicyDetails(true),
+                                onViewPressed: () => _showPolicyDetails(true),
                                 isLoading: _isLoading,
                               ),
 
@@ -328,9 +336,7 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                                 decoration: BoxDecoration(
                                   color: Colors.white.withOpacity(0.03),
                                   borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(
-                                    color: Colors.white24,
-                                  ),
+                                  border: Border.all(color: Colors.white24),
                                 ),
                                 child: Row(
                                   children: [
@@ -364,8 +370,9 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                                           Text(
                                             'Recommended for faster access. Uncheck if using a shared device.',
                                             style: TextStyle(
-                                              color:
-                                                  Colors.white.withOpacity(0.6),
+                                              color: Colors.white.withOpacity(
+                                                0.6,
+                                              ),
                                               fontSize: 13,
                                             ),
                                           ),
@@ -384,9 +391,7 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                                 decoration: BoxDecoration(
                                   color: Colors.white.withOpacity(0.03),
                                   borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(
-                                    color: Colors.white24,
-                                  ),
+                                  border: Border.all(color: Colors.white24),
                                 ),
                                 child: Row(
                                   children: [
@@ -421,8 +426,9 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                                           Text(
                                             'Receive updates, promotions, and news about our services. You can unsubscribe anytime.',
                                             style: TextStyle(
-                                              color:
-                                                  Colors.white.withOpacity(0.6),
+                                              color: Colors.white.withOpacity(
+                                                0.6,
+                                              ),
                                               fontSize: 13,
                                             ),
                                           ),
@@ -475,10 +481,18 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                                       ),
                                     ),
                                     const SizedBox(height: 4),
-                                    _buildBulletPoint('Access your personal data'),
-                                    _buildBulletPoint('Correct inaccurate data'),
-                                    _buildBulletPoint('Delete your data anytime'),
-                                    _buildBulletPoint('Opt-out of communications'),
+                                    _buildBulletPoint(
+                                      'Access your personal data',
+                                    ),
+                                    _buildBulletPoint(
+                                      'Correct inaccurate data',
+                                    ),
+                                    _buildBulletPoint(
+                                      'Delete your data anytime',
+                                    ),
+                                    _buildBulletPoint(
+                                      'Opt-out of communications',
+                                    ),
                                     _buildBulletPoint('Export your data'),
                                   ],
                                 ),
@@ -575,8 +589,9 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                         width: double.infinity,
                         height: 52,
                         child: ElevatedButton(
-                          onPressed:
-                              _isContinueEnabled ? _handleContinue : null,
+                          onPressed: _isContinueEnabled
+                              ? _handleContinue
+                              : null,
                           style: ElevatedButton.styleFrom(
                             backgroundColor: _isContinueEnabled
                                 ? const Color(0xFF1877F3)
@@ -599,10 +614,7 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                               : Row(
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
-                                    const Icon(
-                                      Icons.check_circle,
-                                      size: 20,
-                                    ),
+                                    const Icon(Icons.check_circle, size: 20),
                                     const SizedBox(width: 8),
                                     const Text(
                                       'Create Account',
@@ -693,10 +705,7 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                           const SizedBox(width: 4),
                           const Text(
                             '*',
-                            style: TextStyle(
-                              color: Colors.red,
-                              fontSize: 16,
-                            ),
+                            style: TextStyle(color: Colors.red, fontSize: 16),
                           ),
                         ],
                       ],
@@ -724,16 +733,11 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                   horizontal: 16,
                   vertical: 6,
                 ),
-                side: BorderSide(
-                  color: Colors.blue.withOpacity(0.5),
-                ),
+                side: BorderSide(color: Colors.blue.withOpacity(0.5)),
               ),
               child: const Text(
                 'View Details',
-                style: TextStyle(
-                  color: Colors.blue,
-                  fontSize: 13,
-                ),
+                style: TextStyle(color: Colors.blue, fontSize: 13),
               ),
             ),
           ),
@@ -748,20 +752,11 @@ class _DataConsentScreenState extends State<DataConsentScreen>
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            '• ',
-            style: TextStyle(
-              color: Colors.green,
-              fontSize: 14,
-            ),
-          ),
+          const Text('• ', style: TextStyle(color: Colors.green, fontSize: 14)),
           Expanded(
             child: Text(
               text,
-              style: const TextStyle(
-                color: Colors.white70,
-                fontSize: 13,
-              ),
+              style: const TextStyle(color: Colors.white70, fontSize: 13),
             ),
           ),
         ],
