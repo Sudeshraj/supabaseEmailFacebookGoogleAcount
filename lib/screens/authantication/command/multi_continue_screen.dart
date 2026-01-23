@@ -24,7 +24,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
   // Add password controller here
   late TextEditingController _passwordController;
-  bool _obscurePassword = true;
 
   @override
   void initState() {

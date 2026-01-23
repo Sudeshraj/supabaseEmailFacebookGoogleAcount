@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_application_1/main.dart';
 import 'package:flutter_application_1/screens/authantication/business_reg/company_name_screen.dart';
 import 'package:flutter_application_1/screens/authantication/customer_reg/name_screen.dart';
-import 'package:flutter_application_1/screens/authantication/command/finish_screen.dart';
 import 'package:flutter_application_1/screens/authantication/command/welcome.dart';
 import 'package:flutter_application_1/screens/authantication/services/registration_service.dart';
 import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
