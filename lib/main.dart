@@ -2,10 +2,14 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter_application_1/screens/authantication/command/auth_callback_handler.dart';
 import 'package:flutter_application_1/screens/authantication/command/clear_data_screen.dart';
 import 'package:flutter_application_1/screens/authantication/command/data_consent_screen.dart';
 import 'package:flutter_application_1/screens/authantication/command/finish_screen.dart';
 import 'package:flutter_application_1/screens/authantication/command/policy_screen.dart';
+import 'package:flutter_application_1/screens/authantication/command/reset_password_confirm.dart';
+import 'package:flutter_application_1/screens/authantication/command/reset_password_form.dart';
+import 'package:flutter_application_1/screens/authantication/command/reset_password_request.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -150,6 +154,9 @@ Future<void> main() async {
       debug: kDebugMode,
     );
 
+    // ✅ SETUP AUTH STATE LISTENER FOR PASSWORD RESET
+    _setupAuthStateListener();
+
     // ========== PHASE 4: SERVICES ==========
     await SessionManager.init();
 
@@ -179,9 +186,63 @@ Future<void> main() async {
   }
 }
 
-// ====================
-// ROUTER CONFIGURATION
-// ====================
+// ✅ UPDATED: Setup auth state listener for all auth events
+void _setupAuthStateListener() {
+  final supabase = Supabase.instance.client;
+  
+  supabase.auth.onAuthStateChange.listen((data) {
+    final event = data.event;
+    final session = data.session;
+    
+    if (kDebugMode) {
+      print('🔐 Auth State Change: $event');
+    }
+    
+    // Handle password recovery
+    if (event == AuthChangeEvent.passwordRecovery) {
+      print('✅ Password recovery detected!');
+      print('   User: ${session?.user.email}');
+      
+      // Navigate to password reset form
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        try {
+          if (navigatorKey.currentContext != null) {
+            print('📍 Navigating to reset-password-form');
+            router.go('/reset-password-form');
+          } else {
+            print('⚠️ Context not ready, will retry...');
+            // Retry after delay
+            Future.delayed(const Duration(seconds: 1), () {
+              if (navigatorKey.currentContext != null) {
+                router.go('/reset-password-form');
+              }
+            });
+          }
+        } catch (e) {
+          print('❌ Navigation error: $e');
+        }
+      });
+    }
+    
+    // Handle other auth events (optional debugging)
+    if (kDebugMode) {
+      switch (event) {
+        case AuthChangeEvent.signedIn:
+          print('🎉 User signed in: ${session?.user.email}');
+          break;
+        case AuthChangeEvent.signedOut:
+          print('👋 User signed out');
+          break;
+        case AuthChangeEvent.userUpdated:
+          print('📝 User updated');
+          break;
+        default:
+          break;
+      }
+    }
+  });
+}
+
 // ====================
 // ROUTER CONFIGURATION
 // ====================
@@ -200,7 +261,7 @@ GoRouter _createRouter() {
         '/',
         '/login',
         '/signup',
-        '/finish', // Add this
+        '/finish',
         '/data-consent',
         '/continue',
         '/verify-email',
@@ -208,6 +269,10 @@ GoRouter _createRouter() {
         '/privacy',
         '/terms',
         '/clear-data',
+        '/reset-password',
+        '/reset-password-confirm',
+        '/reset-password-form',
+        '/auth/callback',
       ];
 
       // Always allow public routes regardless of auth state
@@ -294,7 +359,8 @@ GoRouter _createRouter() {
     },
     routes: [
       GoRoute(path: '/', builder: (_, __) => const SplashScreen()),
-      // router.dart
+      
+      // Login route
       GoRoute(
         path: '/login',
         name: 'login',
@@ -302,16 +368,16 @@ GoRouter _createRouter() {
           final extra = state.extra as Map<String, dynamic>?;
           final prefilledEmail = extra?['prefilledEmail'] as String?;
           final showMessage = extra?['showMessage'] as bool? ?? false;
-          final message =
-              extra?['message'] as String?; // ✅ Extract custom message
+          final message = extra?['message'] as String?;
 
           return SignInScreen(
             prefilledEmail: prefilledEmail,
             showMessage: showMessage,
-            message: message, // ✅ Pass custom message
+            message: message,
           );
         },
       ),
+      
       GoRoute(path: '/signup', builder: (_, __) => const SignupFlow()),
       GoRoute(path: '/reg', builder: (_, __) => const RegistrationFlow()),
       GoRoute(
@@ -324,7 +390,7 @@ GoRouter _createRouter() {
       ),
       GoRoute(path: '/continue', builder: (_, __) => const ContinueScreen()),
 
-      // Add the /finish route for signup completion
+      // Signup completion
       GoRoute(
         path: '/finish',
         pageBuilder: (context, state) {
@@ -339,9 +405,12 @@ GoRouter _createRouter() {
         },
       ),
 
+      // Home screens
       GoRoute(path: '/customer', builder: (_, __) => const CustomerHome()),
       GoRoute(path: '/employee', builder: (_, __) => const EmployeeDashboard()),
       GoRoute(path: '/owner', builder: (_, __) => const OwnerDashboard()),
+      
+      // Policy screens
       GoRoute(
         path: '/privacy',
         name: 'privacy',
@@ -350,7 +419,6 @@ GoRouter _createRouter() {
           return PolicyScreen(isPrivacyPolicy: true, extraData: extra);
         },
       ),
-
       GoRoute(
         path: '/terms',
         name: 'terms',
@@ -359,6 +427,8 @@ GoRouter _createRouter() {
           return PolicyScreen(isPrivacyPolicy: false, extraData: extra);
         },
       ),
+      
+      // Data management
       GoRoute(
         path: '/clear-data',
         builder: (context, state) => const ClearDataScreen(),
@@ -376,6 +446,39 @@ GoRouter _createRouter() {
             email: email,
             password: password,
             source: source,
+          );
+        },
+      ),
+      
+      // ✅ AUTH CALLBACK HANDLER - MOST IMPORTANT FOR PASSWORD RESET
+      GoRoute(
+        path: '/auth/callback',
+        name: 'auth-callback',
+        builder: (_, __) => const AuthCallbackHandlerScreen(),
+      ),
+      
+      // ✅ PASSWORD RESET FLOW ROUTES
+      GoRoute(
+        path: '/reset-password',
+        name: 'reset-password',
+        builder: (_, __) => const ResetPasswordRequestScreen(),
+      ),
+      
+      GoRoute(
+        path: '/reset-password-form',
+        name: 'reset-password-form',
+        builder: (_, __) => const ResetPasswordFormScreen(),
+      ),
+      
+      GoRoute(
+        path: '/reset-password-confirm',
+        name: 'reset-password-confirm',
+        pageBuilder: (context, state) {
+          final extra = state.extra as Map<String, dynamic>?;
+          final email = extra?['email'] ?? '';
+          return MaterialPage(
+            key: state.pageKey,
+            child: ResetPasswordConfirmScreen(email: email),
           );
         },
       ),
@@ -427,7 +530,7 @@ class _MyAppState extends State<MyApp> {
   void initState() {
     super.initState();
     _initNetworkMonitoring();
-    _handleEmailVerification();
+    _handleInitialDeepLink();
   }
 
   void _initNetworkMonitoring() {
@@ -439,33 +542,61 @@ class _MyAppState extends State<MyApp> {
     });
   }
 
-  void _handleEmailVerification() {
+  void _handleInitialDeepLink() {
     final uri = Uri.base;
-
+    
     if (kDebugMode) {
-      debugPrint('🔍 Full URL: $uri');
-      debugPrint('🔍 Query params: ${uri.queryParameters}');
-      debugPrint('🔍 Fragment: ${uri.fragment}');
-      debugPrint('🔍 Has fragment: ${uri.hasFragment}');
+      print('🔗 Initial deep link: $uri');
+      print('   Path: ${uri.path}');
+      print('   Query: ${uri.queryParameters}');
+      print('   Full URL: ${uri.toString()}');
     }
-
-    if (uri.path.contains('verify-email')) {
+    
+    // Check if this is an auth callback
+    final hasAuthPath = uri.path.contains('/auth/') || 
+                       uri.path.contains('auth/callback') ||
+                       uri.toString().contains('/auth/v1/');
+    
+    final hasAuthParams = uri.queryParameters.containsKey('type') ||
+                         uri.queryParameters.containsKey('token') ||
+                         uri.queryParameters.containsKey('error_code');
+    
+    // If it looks like an auth callback, let the AuthCallbackHandler handle it
+    if (hasAuthPath || hasAuthParams) {
+      print('✅ Auth-related deep link detected');
+      print('   Letting AuthCallbackHandlerScreen process it...');
+      return;
+    }
+    
+    // Handle email verification specifically
+    if (uri.toString().contains('verify-email')) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         String? errorCode = uri.queryParameters['error_code'];
         String? error = uri.queryParameters['error'];
-
+        
+        // Check fragment too
         if (uri.hasFragment) {
-          final fragmentParams = Uri.splitQueryString(uri.fragment);
-          errorCode ??= fragmentParams['error_code'];
-          error ??= fragmentParams['error'];
+          try {
+            final fragmentParams = Uri.splitQueryString(uri.fragment);
+            errorCode ??= fragmentParams['error_code'];
+            error ??= fragmentParams['error'];
+          } catch (e) {
+            print('⚠️ Error parsing fragment: $e');
+          }
         }
-
+        
         if (errorCode == 'otp_expired' || error == 'access_denied') {
           router.go('/verify-invalid');
         } else {
           router.go('/');
         }
       });
+    }
+    
+    // Check for password reset links (additional check)
+    if (uri.queryParameters['type'] == 'recovery') {
+      print('🔗 Password reset link detected in initial URL');
+      // Auth state listener will handle this
     }
   }
 
@@ -564,187 +695,6 @@ class _ErrorApp extends StatelessWidget {
     );
   }
 }
-
-// ====================
-// CLEAR DATA SCREEN
-// ====================
-// class ClearDataScreen extends StatelessWidget {
-//   const ClearDataScreen({super.key});
-
-//   @override
-//   Widget build(BuildContext context) {
-//     final isMobile = MediaQuery.of(context).size.width < 600;
-//     final screenWidth = MediaQuery.of(context).size.width;
-
-//     // Calculate responsive width
-//     double calculateContainerWidth() {
-//       if (isMobile) {
-//         return screenWidth * 0.95; // 95% width on mobile
-//       } else {
-//         final calculatedWidth = screenWidth * 0.45;
-//         return calculatedWidth < 500 ? calculatedWidth : 500.0;
-//       }
-//     }
-
-//     final containerWidth = calculateContainerWidth();
-
-//     return Scaffold(
-//       backgroundColor: const Color(0xFF0F1820),
-//       body: SafeArea(
-//         child: Center(
-//           child: SingleChildScrollView(
-//             padding: const EdgeInsets.symmetric(vertical: 20.0),
-//             child: Container(
-//               width: containerWidth,
-//               margin: EdgeInsets.all(isMobile ? 16.0 : 20.0),
-//               padding: EdgeInsets.all(isMobile ? 20.0 : 24.0),
-//               decoration: BoxDecoration(
-//                 color: Colors.white.withOpacity(0.03),
-//                 borderRadius: BorderRadius.circular(20),
-//                 border: Border.all(color: Colors.white12),
-//               ),
-//               child: Column(
-//                 mainAxisSize: MainAxisSize.min,
-//                 children: [
-//                   Icon(
-//                     Icons.delete_forever,
-//                     size: isMobile ? 50.0 : 60.0,
-//                     color: Colors.red.withOpacity(0.8),
-//                   ),
-//                   SizedBox(height: isMobile ? 16.0 : 20.0),
-//                   Text(
-//                     'Clear All Data',
-//                     style: TextStyle(
-//                       color: Colors.white,
-//                       fontSize: isMobile ? 22.0 : 24.0,
-//                       fontWeight: FontWeight.bold,
-//                     ),
-//                   ),
-//                   SizedBox(height: isMobile ? 12.0 : 16.0),
-//                   Text(
-//                     'This will remove all saved accounts, preferences, and login information from this device.',
-//                     textAlign: TextAlign.center,
-//                     style: TextStyle(
-//                       color: Colors.white.withOpacity(0.7),
-//                       fontSize: isMobile ? 14.0 : 16.0,
-//                     ),
-//                   ),
-//                   SizedBox(height: isMobile ? 24.0 : 32.0),
-//                   // Responsive button layout
-//                   if (isMobile) ...[
-//                     // Mobile: vertical buttons
-//                     Column(
-//                       children: [
-//                         SizedBox(
-//                           width: double.infinity,
-//                           child: OutlinedButton(
-//                             onPressed: () => context.go('/'),
-//                             style: OutlinedButton.styleFrom(
-//                               padding: const EdgeInsets.symmetric(
-//                                 vertical: 16.0,
-//                               ),
-//                               side: const BorderSide(color: Colors.white24),
-//                             ),
-//                             child: Text(
-//                               'Cancel',
-//                               style: TextStyle(
-//                                 color: Colors.white,
-//                                 fontSize: isMobile ? 15.0 : 16.0,
-//                               ),
-//                             ),
-//                           ),
-//                         ),
-//                         SizedBox(height: 12.0),
-//                         SizedBox(
-//                           width: double.infinity,
-//                           child: ElevatedButton(
-//                             onPressed: () async {
-//                               await SessionManager.clearAll();
-//                               final supabase = Supabase.instance.client;
-//                               await supabase.auth.signOut();
-//                               appState.refreshState();
-//                               context.go('/');
-//                             },
-//                             style: ElevatedButton.styleFrom(
-//                               padding: const EdgeInsets.symmetric(
-//                                 vertical: 16.0,
-//                               ),
-//                               backgroundColor: Colors.red,
-//                             ),
-//                             child: Text(
-//                               'Clear All',
-//                               style: TextStyle(
-//                                 color: Colors.white,
-//                                 fontWeight: FontWeight.bold,
-//                                 fontSize: isMobile ? 15.0 : 16.0,
-//                               ),
-//                             ),
-//                           ),
-//                         ),
-//                       ],
-//                     ),
-//                   ] else ...[
-//                     // Desktop/Web: horizontal buttons
-//                     Row(
-//                       children: [
-//                         Expanded(
-//                           child: OutlinedButton(
-//                             onPressed: () => context.go('/'),
-//                             style: OutlinedButton.styleFrom(
-//                               padding: const EdgeInsets.symmetric(
-//                                 vertical: 16.0,
-//                               ),
-//                               side: const BorderSide(color: Colors.white24),
-//                             ),
-//                             child: Text(
-//                               'Cancel',
-//                               style: TextStyle(
-//                                 color: Colors.white,
-//                                 fontSize: isMobile ? 15.0 : 16.0,
-//                               ),
-//                             ),
-//                           ),
-//                         ),
-//                         SizedBox(width: 16.0),
-//                         Expanded(
-//                           child: ElevatedButton(
-//                             onPressed: () async {
-//                               await SessionManager.clearAll();
-//                               final supabase = Supabase.instance.client;
-//                               await supabase.auth.signOut();
-//                               appState.refreshState();
-//                               context.go('/');
-//                             },
-//                             style: ElevatedButton.styleFrom(
-//                               padding: const EdgeInsets.symmetric(
-//                                 vertical: 16.0,
-//                               ),
-//                               backgroundColor: Colors.red,
-//                             ),
-//                             child: Text(
-//                               'Clear All',
-//                               style: TextStyle(
-//                                 color: Colors.white,
-//                                 fontWeight: FontWeight.bold,
-//                                 fontSize: isMobile ? 15.0 : 16.0,
-//                               ),
-//                             ),
-//                           ),
-//                         ),
-//                       ],
-//                     ),
-//                   ],
-//                   // Add extra bottom padding for mobile
-//                   if (isMobile) SizedBox(height: 8.0),
-//                 ],
-//               ),
-//             ),
-//           ),
-//         ),
-//       ),
-//     );
-//   }
-// }
 
 // ====================
 // ROUTE OBSERVER
