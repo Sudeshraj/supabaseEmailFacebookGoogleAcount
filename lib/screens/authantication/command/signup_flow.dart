@@ -53,7 +53,7 @@ class _SignupFlowState extends State<SignupFlow> {
               // Approach 3: Direct navigation
               else {
                 print('🔀 Directly going to /login');
-                GoRouter.of(context).go('/login');
+                GoRouter.of(context).go('/');
               }
             } catch (e) {
               print('❌ Error in back navigation: $e');

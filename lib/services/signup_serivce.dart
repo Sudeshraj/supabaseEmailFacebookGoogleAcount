@@ -21,8 +21,6 @@ class AuthService {
   // REGISTER NEW USER
   // =========================================================================================
 
-  // auth_service.dart - registerUser method
-  // auth_service.dart - registerUser method තුළ
   Future<void> registerUser({
     required BuildContext context,
     required String email,
@@ -49,7 +47,7 @@ class AuthService {
 
       // ✅ FIRST: Check if user already exists BEFORE trying to register
       try {
-        final existingUserResponse = await _supabase.auth.signInWithPassword(
+        await _supabase.auth.signInWithPassword(
           email: email.trim(),
           password: password.trim(),
         );
@@ -162,26 +160,26 @@ class AuthService {
         context.go('/verify-email');
 
         // ✅ Show success message
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                rememberMe
-                    ? 'Account created! Check your email for verification.'
-                    : 'Account created! Please verify your email.',
-              ),
-              duration: const Duration(seconds: 4),
-              backgroundColor: Colors.green,
-              action: SnackBarAction(
-                label: 'OK',
-                textColor: Colors.white,
-                onPressed: () {
-                  ScaffoldMessenger.of(context).hideCurrentSnackBar();
-                },
-              ),
-            ),
-          );
-        });
+        // WidgetsBinding.instance.addPostFrameCallback((_) {
+        //   ScaffoldMessenger.of(context).showSnackBar(
+        //     SnackBar(
+        //       content: Text(
+        //         rememberMe
+        //             ? 'Account created! Check your email for verification.'
+        //             : 'Account created! Please verify your email.',
+        //       ),
+        //       duration: const Duration(seconds: 4),
+        //       backgroundColor: Colors.green,
+        //       action: SnackBarAction(
+        //         label: 'OK',
+        //         textColor: Colors.white,
+        //         onPressed: () {
+        //           ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        //         },
+        //       ),
+        //     ),
+        //   );
+        // });
       }
     } catch (e) {
       developer.log('❌ Error in registration handler: $e', name: _tag);
@@ -311,78 +309,6 @@ class AuthService {
       }
     }
   }
-
-  // Future<void> _handleSuccessfulRegistration(
-  //   BuildContext context,
-  //   User? user,
-  //   String email,
-  //   bool rememberMe,
-  // ) async {
-  //   if (user == null) {
-  //     developer.log('Registration succeeded but user is null', name: _tag);
-  //     throw Exception('Registration failed - no user created');
-  //   }
-
-  //   try {
-  //     // ✅ Get current session from Supabase client (not from User object)
-  //     final supabase = Supabase.instance.client;
-  //     final currentSession = supabase.auth.currentSession;
-  //     final refreshToken = currentSession?.refreshToken;
-
-  //     // ✅ Save user profile
-  //     await SessionManager.saveUserProfile(
-  //       email: email,
-  //       userId: user.id,
-  //       name: email.split('@').first,
-  //       rememberMe: rememberMe,
-  //       refreshToken: refreshToken, // ✅ Pass the refresh token
-  //       termsAcceptedAt: DateTime.now(),
-  //       privacyAcceptedAt: DateTime.now(),
-  //     );
-
-  //     developer.log(
-  //       '✅ User registered: $email (Remember Me: $rememberMe)',
-  //       name: _tag,
-  //     );
-
-  //     if (refreshToken != null) {
-  //       developer.log('✅ Refresh token saved for auto-login', name: _tag);
-  //     }
-
-  //     // ✅ Refresh app state
-  //     appState.refreshState();
-
-  //     // ✅ Navigate to verify email
-  //     if (context.mounted) {
-  //       context.go('/verify-email');
-
-  //       // ✅ Show success message
-  //       WidgetsBinding.instance.addPostFrameCallback((_) {
-  //         ScaffoldMessenger.of(context).showSnackBar(
-  //           SnackBar(
-  //             content: Text(
-  //               rememberMe
-  //                   ? 'Account created! You will stay logged in.'
-  //                   : 'Account created! Please verify your email.',
-  //             ),
-  //             duration: const Duration(seconds: 3),
-  //             backgroundColor: Colors.green,
-  //           ),
-  //         );
-  //       });
-  //     }
-  //   } catch (e) {
-  //     developer.log('❌ Error in registration handler: $e', name: _tag);
-  //     if (context.mounted) {
-  //       await showCustomAlert(
-  //         context: context,
-  //         title: "Registration Error",
-  //         message: "Unable to save profile. Please try again.",
-  //         isError: true,
-  //       );
-  //     }
-  //   }
-  // }
 
   Future<void> _handleSuccessfulLogin(
     BuildContext context,
