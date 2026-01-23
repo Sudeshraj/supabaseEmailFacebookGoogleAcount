@@ -615,13 +615,14 @@ class _SignInScreenState extends State<SignInScreen>
                               // ✅ FORGOT PASSWORD
                               GestureDetector(
                                 onTap: () {
-                                  showResetPasswordDialog(context);
+                                  context.push('/reset-password');
                                 },
                                 child: const Text(
                                   'Forgotten password?',
                                   style: TextStyle(
                                     color: Colors.white70,
                                     fontSize: 15,
+                                    fontWeight: FontWeight.w500,
                                     decoration: TextDecoration.none,
                                   ),
                                 ),
