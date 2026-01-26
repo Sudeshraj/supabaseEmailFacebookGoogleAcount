@@ -154,7 +154,7 @@ Future<void> main() async {
       debug: kDebugMode,
     );
 
-    // ✅ SETUP AUTH STATE LISTENER FOR PASSWORD RESET
+    // ✅ SETUP AUTH STATE LISTENER
     _setupAuthStateListener();
 
     // ========== PHASE 4: SERVICES ==========
@@ -186,45 +186,36 @@ Future<void> main() async {
   }
 }
 
-// ✅ UPDATED: Setup auth state listener for all auth events
+// ✅ SIMPLIFIED: Setup auth state listener
 void _setupAuthStateListener() {
   final supabase = Supabase.instance.client;
-  
+
   supabase.auth.onAuthStateChange.listen((data) {
     final event = data.event;
     final session = data.session;
-    
+
     if (kDebugMode) {
       print('🔐 Auth State Change: $event');
     }
-    
+
     // Handle password recovery
     if (event == AuthChangeEvent.passwordRecovery) {
       print('✅ Password recovery detected!');
-      print('   User: ${session?.user.email}');
       
       // Navigate to password reset form
       WidgetsBinding.instance.addPostFrameCallback((_) {
         try {
           if (navigatorKey.currentContext != null) {
-            print('📍 Navigating to reset-password-form');
+            print('📍 Navigating to /reset-password-form');
             router.go('/reset-password-form');
-          } else {
-            print('⚠️ Context not ready, will retry...');
-            // Retry after delay
-            Future.delayed(const Duration(seconds: 1), () {
-              if (navigatorKey.currentContext != null) {
-                router.go('/reset-password-form');
-              }
-            });
           }
         } catch (e) {
           print('❌ Navigation error: $e');
         }
       });
     }
-    
-    // Handle other auth events (optional debugging)
+
+    // Debug other auth events
     if (kDebugMode) {
       switch (event) {
         case AuthChangeEvent.signedIn:
@@ -244,7 +235,7 @@ void _setupAuthStateListener() {
 }
 
 // ====================
-// ROUTER CONFIGURATION
+// SIMPLIFIED ROUTER CONFIGURATION
 // ====================
 GoRouter _createRouter() {
   return GoRouter(
@@ -272,7 +263,7 @@ GoRouter _createRouter() {
         '/reset-password',
         '/reset-password-confirm',
         '/reset-password-form',
-        '/auth/callback',
+        '/auth/callback',  // ✅ Important for password reset/email verification
       ];
 
       // Always allow public routes regardless of auth state
@@ -359,7 +350,7 @@ GoRouter _createRouter() {
     },
     routes: [
       GoRoute(path: '/', builder: (_, __) => const SplashScreen()),
-      
+
       // Login route
       GoRoute(
         path: '/login',
@@ -377,7 +368,7 @@ GoRouter _createRouter() {
           );
         },
       ),
-      
+
       GoRoute(path: '/signup', builder: (_, __) => const SignupFlow()),
       GoRoute(path: '/reg', builder: (_, __) => const RegistrationFlow()),
       GoRoute(
@@ -409,7 +400,7 @@ GoRouter _createRouter() {
       GoRoute(path: '/customer', builder: (_, __) => const CustomerHome()),
       GoRoute(path: '/employee', builder: (_, __) => const EmployeeDashboard()),
       GoRoute(path: '/owner', builder: (_, __) => const OwnerDashboard()),
-      
+
       // Policy screens
       GoRoute(
         path: '/privacy',
@@ -427,7 +418,7 @@ GoRouter _createRouter() {
           return PolicyScreen(isPrivacyPolicy: false, extraData: extra);
         },
       ),
-      
+
       // Data management
       GoRoute(
         path: '/clear-data',
@@ -449,27 +440,27 @@ GoRouter _createRouter() {
           );
         },
       ),
-      
-      // ✅ AUTH CALLBACK HANDLER - MOST IMPORTANT FOR PASSWORD RESET
+
+      // ✅ AUTH CALLBACK HANDLER - MOST IMPORTANT FOR PASSWORD RESET & OAuth
       GoRoute(
         path: '/auth/callback',
         name: 'auth-callback',
         builder: (_, __) => const AuthCallbackHandlerScreen(),
       ),
-      
+
       // ✅ PASSWORD RESET FLOW ROUTES
       GoRoute(
         path: '/reset-password',
         name: 'reset-password',
         builder: (_, __) => const ResetPasswordRequestScreen(),
       ),
-      
+
       GoRoute(
         path: '/reset-password-form',
         name: 'reset-password-form',
         builder: (_, __) => const ResetPasswordFormScreen(),
       ),
-      
+
       GoRoute(
         path: '/reset-password-confirm',
         name: 'reset-password-confirm',
@@ -530,7 +521,6 @@ class _MyAppState extends State<MyApp> {
   void initState() {
     super.initState();
     _initNetworkMonitoring();
-    _handleInitialDeepLink();
   }
 
   void _initNetworkMonitoring() {
@@ -540,64 +530,6 @@ class _MyAppState extends State<MyApp> {
         setState(() => _offline = !online);
       }
     });
-  }
-
-  void _handleInitialDeepLink() {
-    final uri = Uri.base;
-    
-    if (kDebugMode) {
-      print('🔗 Initial deep link: $uri');
-      print('   Path: ${uri.path}');
-      print('   Query: ${uri.queryParameters}');
-      print('   Full URL: ${uri.toString()}');
-    }
-    
-    // Check if this is an auth callback
-    final hasAuthPath = uri.path.contains('/auth/') || 
-                       uri.path.contains('auth/callback') ||
-                       uri.toString().contains('/auth/v1/');
-    
-    final hasAuthParams = uri.queryParameters.containsKey('type') ||
-                         uri.queryParameters.containsKey('token') ||
-                         uri.queryParameters.containsKey('error_code');
-    
-    // If it looks like an auth callback, let the AuthCallbackHandler handle it
-    if (hasAuthPath || hasAuthParams) {
-      print('✅ Auth-related deep link detected');
-      print('   Letting AuthCallbackHandlerScreen process it...');
-      return;
-    }
-    
-    // Handle email verification specifically
-    if (uri.toString().contains('verify-email')) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        String? errorCode = uri.queryParameters['error_code'];
-        String? error = uri.queryParameters['error'];
-        
-        // Check fragment too
-        if (uri.hasFragment) {
-          try {
-            final fragmentParams = Uri.splitQueryString(uri.fragment);
-            errorCode ??= fragmentParams['error_code'];
-            error ??= fragmentParams['error'];
-          } catch (e) {
-            print('⚠️ Error parsing fragment: $e');
-          }
-        }
-        
-        if (errorCode == 'otp_expired' || error == 'access_denied') {
-          router.go('/verify-invalid');
-        } else {
-          router.go('/');
-        }
-      });
-    }
-    
-    // Check for password reset links (additional check)
-    if (uri.queryParameters['type'] == 'recovery') {
-      print('🔗 Password reset link detected in initial URL');
-      // Auth state listener will handle this
-    }
   }
 
   @override

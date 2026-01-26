@@ -42,74 +42,84 @@ class _ResetPasswordRequestScreenState
     });
   }
 
-  Future<void> _sendResetEmail() async {
-    if (!_formKey.currentState!.validate()) return;
-    if (!_isValidEmail) return;
+Future<void> _sendResetEmail() async {
+  if (!_formKey.currentState!.validate()) return;
+  if (!_isValidEmail) return;
 
-    setState(() => _loading = true);
+  setState(() => _loading = true);
 
-    try {
-      final email = _emailController.text.trim();
+  try {
+    final email = _emailController.text.trim();
+    
+    print('📧 Sending password reset email to: $email');
+    
+    // Determine redirect URL based on platform
+    String redirectUrl;
+    
+    if (kIsWeb) {
+      // For web - use current origin
+      final currentOrigin = Uri.base.origin;
+      redirectUrl = '$currentOrigin/auth/callback';
       
-      print('📧 Sending password reset email to: $email');
-      
-      // For web: Use your actual domain
-      // For mobile: Use deep link
-      String redirectUrl;
-      
-      if (kIsWeb) {
-        final currentOrigin = Uri.base.origin;
-         if (currentOrigin.contains('localhost')) {
-        redirectUrl =  '${Uri.base.origin}/auth/callback';
-      } else {
-        redirectUrl = 'https://yourdomain.com/auth/callback';
+      // Local development check
+      if (kDebugMode) {
+        print('🌐 Web mode detected');
+        print('   Origin: $currentOrigin');
+        print('   Full URL: $redirectUrl');
       }
-       
-      } else {
-        // For Flutter apps | com.example.flutter_application_1
-        redirectUrl = 'com.example.flutter_application_1://auth/callback';
-        // redirectUrl = 'io.supabase.flutterquickstart://login-callback';
+    } else {
+      // For mobile - use deep link
+      // IMPORTANT: Make sure this matches your app's URL scheme
+      redirectUrl = 'myapp://auth/callback';
+      
+      if (kDebugMode) {
+        print('📱 Mobile mode detected');
+        print('   Deep link: $redirectUrl');
       }
-      
-      print('🔗 Redirect URL: $redirectUrl');
-      
-      await supabase.auth.resetPasswordForEmail(
-        email,
-        redirectTo: redirectUrl,
-      );
-
-      print('✅ Reset email sent successfully');
-      
-      // Navigate to confirmation screen
-      if (mounted) {
-        context.push(
-          '/reset-password-confirm',
-          extra: {'email': email},
-        );
-      }
-    } on AuthException catch (e) {
-      print('❌ Auth error: ${e.message}');
-      
-      String errorMessage = 'Failed to send reset email';
-      
-      if (e.message.toLowerCase().contains('user not found')) {
-        errorMessage = 'No account found with this email';
-      } else if (e.message.toLowerCase().contains('rate limit')) {
-        errorMessage = 'Too many attempts. Please try again later.';
-      }
-      
-      if (mounted) {
-        _showErrorSnackBar(errorMessage);
-      }
-    } catch (e) {
-      print('❌ Error: $e');
-      if (mounted) {
-        _showErrorSnackBar('An unexpected error occurred');
-      }
-    } finally {
-      if (mounted) setState(() => _loading = false);
     }
+    
+    print('🔗 Using redirect URL: $redirectUrl');
+    
+    // Send reset email
+    await supabase.auth.resetPasswordForEmail(
+      email,
+      redirectTo: redirectUrl,
+    );
+    
+    print('✅ Reset email sent successfully');
+
+    // Navigate to confirmation screen
+    if (mounted) {
+      context.go(
+        '/reset-password-confirm',
+        extra: {'email': email},
+      );
+    }
+  } on AuthException catch (e) {
+    print('❌ Auth error: ${e.message}');
+    
+    String errorMessage = 'Failed to send reset email';
+    
+    if (e.message.toLowerCase().contains('user not found')) {
+      errorMessage = 'No account found with this email';
+    } else if (e.message.toLowerCase().contains('rate limit')) {
+      errorMessage = 'Too many attempts. Please try again later.';
+    } else if (e.message.toLowerCase().contains('email')) {
+      errorMessage = 'Invalid email address';
+    }
+    
+    if (mounted) {
+      _showErrorSnackBar(errorMessage);
+    }
+  } catch (e) {
+    print('❌ Error: $e');
+    if (mounted) {
+      _showErrorSnackBar('An unexpected error occurred');
+    }
+  } finally {
+    if (mounted) setState(() => _loading = false);
   }
+}
 
   void _showErrorSnackBar(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
