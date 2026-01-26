@@ -28,18 +28,40 @@
               android:name="io.flutter.embedding.android.NormalTheme"
               android:resource="@style/NormalTheme"
               />
+                     <!-- Launcher -->
             <intent-filter>
-                <action android:name="android.intent.action.MAIN"/>
-                <category android:name="android.intent.category.LAUNCHER"/>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
 
-                <!--Deeflink-->
-                 <action android:name="android.intent.action.VIEW" />
-                 <category android:name="android.intent.category.DEFAULT" />
-                 <category android:name="android.intent.category.BROWSABLE" />                
-                  <!-- <data android:scheme="https" android:host="myapp.com" android:pathPrefix="/verify-email" /> live -->
+            <!-- Custom URL Scheme: myapp:// -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="myapp" />
+            </intent-filter>
 
-                   <data android:scheme="myapp" android:host="verify-email" /> <!-- test -->
-                 
+            <!-- Android App Links: https://yourdomain.com -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data 
+                    android:scheme="https"
+                    android:host="yourdomain.com"
+                    android:pathPrefix="/auth/callback" />
+            </intent-filter>
+
+            <!-- Local development -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data 
+                    android:scheme="https"
+                    android:host="localhost"
+                    android:pathPrefix="/auth/callback" />
             </intent-filter>
 
             <meta-data android:name="com.google.android.geo.API_KEY" android:value="AIzaSyAneT1e71a84MIL76EgSHjJ1LG3TIU9yMI"/> <!-- for map -->

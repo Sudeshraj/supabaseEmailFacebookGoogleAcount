@@ -272,11 +272,25 @@ class AuthService {
   // }
 
   String _getRedirectUrl() {
-    if (kIsWeb) {
-      return '${Uri.base.origin}/verify-email';
-    } else {
-      return 'myapp://verify-email';
-    }
+    // if (kIsWeb) {
+    //   return '${Uri.base.origin}/verify-email';
+    // } else {
+    //   return 'myapp://verify-email';
+    // }
+     if (kIsWeb) {
+        final currentOrigin = Uri.base.origin;
+         if (currentOrigin.contains('localhost')) {
+        return'${Uri.base.origin}/auth/callback';
+      } else {
+        return'https://yourdomain.com/auth/callback';
+      }
+       
+      } else {
+        // For Flutter apps | com.example.flutter_application_1
+        // redirectUrl = 'com.example.flutter_application_1://auth/callback';
+        return'myapp://auth/callback';
+        // redirectUrl = 'io.supabase.flutterquickstart://login-callback';
+      }
   }
 
   // auth_service.dart - _handleExistingUser method

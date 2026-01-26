@@ -49,15 +49,74 @@
 	<key>NSLocationWhenInUseUsageDescription</key>
     <string>We need your location to show your company position on the map.</string>
 
-	<key>CFBundleURLTypes</key>
-	<array>
-	<dict>
-		<key>CFBundleURLSchemes</key>
-		<array>
-		<string>myapp</string>
-		</array>
-	</dict>
-	</array>
+                                               <!-- NEW UPDATE -->
+	 <!-- Permissions -->
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <true/>
+    </dict>
+    
+    <!-- Local Network Permission (if needed) -->
+    <!--
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>App needs to connect to local servers</string>
+    -->
+    
+    <!-- URL Schemes for Deep Linking -->
+    <key>CFBundleURLTypes</key>
+    <array>
+        <!-- Custom URL Scheme: myapp:// -->
+        <dict>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>myapp</string>
+            </array>
+            <key>CFBundleURLName</key>
+            <string>com.example.flutter_application_1</string> <!-- ⚠️ CHANGE THIS -->
+        </dict>
+        
+        <!-- For OAuth (Google, Facebook) -->
+        <dict>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>com.googleusercontent.apps.YOUR_GOOGLE_CLIENT_ID</string> <!-- ⚠️ CHANGE FOR GOOGLE OAUTH -->
+                <string>fbYOUR_FACEBOOK_APP_ID</string> <!-- ⚠️ CHANGE FOR FACEBOOK OAUTH -->
+            </array>
+        </dict>
+    </array>
+    
+    <!-- Associated Domains for Universal Links -->
+    <key>com.apple.developer.associated-domains</key>
+    <array>
+        <!-- Universal Link for your domain -->
+        <string>applinks:yourdomain.com</string> <!-- ⚠️ CHANGE TO YOUR DOMAIN -->
+        
+        <!-- For local development -->
+        <string>applinks:localhost</string>
+    </array>
+    
+    <!-- Background Modes (if needed) -->
+    <!--
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>fetch</string>
+        <string>remote-notification</string>
+    </array>
+    -->
+    
+    <!-- Privacy Descriptions -->
+    <key>NSCameraUsageDescription</key>
+    <string>This app needs camera access</string>
+    
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>This app needs photo library access</string>
+    
+    <key>NSMicrophoneUsageDescription</key>
+    <string>This app needs microphone access</string>
+    
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>This app needs location access</string>
 
 
 
