@@ -50,6 +50,17 @@ late final EnvironmentManager environment;
 // ERROR HANDLER
 // ====================
 void setupErrorHandling() {
+       // Handle email verification errors
+    final uri = Uri.base;
+    if (uri.path.contains('auth/callback')) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final errorCode = uri.queryParameters['error_code'];
+        final error = uri.queryParameters['error'];
+        if (errorCode == 'otp_expired' || error == 'access_denied') {
+          router.go('/verify-invalid');
+        }
+      });
+    }
   FlutterError.onError = (details) {
     FlutterError.presentError(details);
     if (!kDebugMode) {
@@ -133,7 +144,7 @@ Future<void> main() async {
 
   print('🚀 ${DateTime.now()}: Starting application...');
 
-  try {
+   try {
     // ========== PHASE 1: ENVIRONMENT ==========
     environment = EnvironmentManager();
     await environment.init(flavor: kDebugMode ? 'development' : 'production');
