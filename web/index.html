@@ -36,6 +36,55 @@
       });
     }
   </script>
+
+ <!-- <script type="text/javascript">
+    // Flutter web URL strategy
+    if (window.location.hash && window.location.hash === '#/') {
+      window.location.hash = '';
+    }
+    
+    // Remove # from URLs
+    history.replaceState(null, null, ' ' + window.location.href.split('#')[0]);
+  </script> -->
+
+  <script type="text/javascript">
+  // Smart URL strategy that preserves auth callback fragments
+  (function() {
+    var url = window.location.href;
+    
+    // Check if this is an auth callback URL
+    var isAuthCallback = url.includes('/auth/callback');
+    var hasFragment = window.location.hash && window.location.hash.length > 1;
+    
+    if (isAuthCallback && hasFragment) {
+      console.log('🔐 Auth callback detected - preserving fragment');
+      
+      // For auth callbacks, convert fragment to query parameters
+      var fragment = window.location.hash.substring(1); // Remove # symbol
+      
+      if (fragment.includes('=')) {
+        // Build new URL with fragment as query params
+        var baseUrl = url.split('#')[0];
+        var separator = baseUrl.includes('?') ? '&' : '?';
+        var newUrl = baseUrl + separator + fragment;
+        
+        // Replace history without page reload
+        history.replaceState(null, null, newUrl);
+        console.log('✅ Converted fragment to query params:', newUrl);
+        return;
+      }
+    }
+    
+    // For non-auth URLs, remove # if it's just #/
+    if (window.location.hash && window.location.hash === '#/') {
+      window.location.hash = '';
+    }
+    
+    // Don't remove fragments for other URLs
+    console.log('🌐 Keeping URL as-is:', url);
+  })();
+</script>
+
 </head>
 
 <body>

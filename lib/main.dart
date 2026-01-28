@@ -12,6 +12,7 @@ import 'package:flutter_application_1/screens/authantication/command/reset_passw
 import 'package:flutter_application_1/screens/authantication/command/reset_password_request.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+// import 'package:url_strategy/url_strategy.dart';
 
 import 'firebase_options.dart';
 import 'config/environment_manager.dart';
@@ -50,17 +51,17 @@ late final EnvironmentManager environment;
 // ERROR HANDLER
 // ====================
 void setupErrorHandling() {
-       // Handle email verification errors
-    final uri = Uri.base;
-    if (uri.path.contains('auth/callback')) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        final errorCode = uri.queryParameters['error_code'];
-        final error = uri.queryParameters['error'];
-        if (errorCode == 'otp_expired' || error == 'access_denied') {
-          router.go('/verify-invalid');
-        }
-      });
-    }
+  // Handle email verification errors
+  // final uri = Uri.base;
+  // if (uri.path.contains('auth/callback')) {
+  //   WidgetsBinding.instance.addPostFrameCallback((_) {
+  //     final errorCode = uri.queryParameters['error_code'];
+  //     final error = uri.queryParameters['error'];
+  //     if (errorCode == 'otp_expired' || error == 'access_denied') {
+  //       router.go('/verify-invalid');
+  //     }
+  //   });
+  // }
   FlutterError.onError = (details) {
     FlutterError.presentError(details);
     if (!kDebugMode) {
@@ -139,12 +140,30 @@ Future<void> _validateSessionOnResume() async {
 // MAIN METHOD
 // ====================
 Future<void> main() async {
+  // Web සඳහා # ඉවත් කිරීමට
+  // if (kIsWeb) {
+  //    setPathUrlStrategy();
+  // }
+
+  final uri = Uri.base;
+  print('🚀 APP STARTING');
+  print('   Initial URI: ${uri.toString()}');
+  print('   Path: ${uri.path}');
+  print('   Query: ${uri.query}');
+  print('   Fragment: ${uri.fragment}');
+  print('   Query Params: ${uri.queryParameters}');
+
+  // Check if it's an auth callback
+  if (uri.toString().contains('/auth/callback')) {
+    print('🎯 AUTH CALLBACK DETECTED AT APP START!');
+  }
+
   WidgetsFlutterBinding.ensureInitialized();
   setupErrorHandling();
 
   print('🚀 ${DateTime.now()}: Starting application...');
 
-   try {
+  try {
     // ========== PHASE 1: ENVIRONMENT ==========
     environment = EnvironmentManager();
     await environment.init(flavor: kDebugMode ? 'development' : 'production');
@@ -212,7 +231,7 @@ void _setupAuthStateListener() {
     // Handle password recovery
     if (event == AuthChangeEvent.passwordRecovery) {
       print('✅ Password recovery detected!');
-      
+
       // Navigate to password reset form
       WidgetsBinding.instance.addPostFrameCallback((_) {
         try {
@@ -249,10 +268,14 @@ void _setupAuthStateListener() {
 // SIMPLIFIED ROUTER CONFIGURATION
 // ====================
 GoRouter _createRouter() {
+  // Get the initial location from the URL, not hardcoded '/'
+  final initialUri = Uri.base;
+  final initialLocation = initialUri.path.isEmpty ? '/' : initialUri.path;
   return GoRouter(
     navigatorKey: navigatorKey,
     refreshListenable: appState,
-    initialLocation: '/',
+    // initialLocation: '/',
+    initialLocation: initialLocation, // 🔥 Use actual URL path
     debugLogDiagnostics: kDebugMode,
     observers: [if (kDebugMode) MyRouteObserver()],
     redirect: (context, state) async {
@@ -274,7 +297,7 @@ GoRouter _createRouter() {
         '/reset-password',
         '/reset-password-confirm',
         '/reset-password-form',
-        '/auth/callback',  // ✅ Important for password reset/email verification
+        '/auth/callback', // ✅ Important for password reset/email verification
       ];
 
       // Always allow public routes regardless of auth state
@@ -456,7 +479,18 @@ GoRouter _createRouter() {
       GoRoute(
         path: '/auth/callback',
         name: 'auth-callback',
-        builder: (_, __) => const AuthCallbackHandlerScreen(),
+        pageBuilder: (context, state) {
+          // PageBuilder භාවිතා කරන්න transitions සඳහා
+          return MaterialPage(
+            key: state.pageKey,
+            child: AuthCallbackHandlerScreen(
+              code: state.uri.queryParameters['code'],
+              error: state.uri.queryParameters['error'],
+              errorCode: state.uri.queryParameters['error_code'],
+              errorDescription: state.uri.queryParameters['error_description'],
+            ),
+          );
+        },
       ),
 
       // ✅ PASSWORD RESET FLOW ROUTES

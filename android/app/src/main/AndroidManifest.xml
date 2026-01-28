@@ -62,6 +62,12 @@
                     android:scheme="https"
                     android:host="localhost"
                     android:pathPrefix="/auth/callback" />
+
+                     <!-- For HTTP links -->
+                <data 
+                    android:scheme="http"
+                    android:host="localhost"
+                    android:pathPrefix="/auth/callback" />
             </intent-filter>
 
             <meta-data android:name="com.google.android.geo.API_KEY" android:value="AIzaSyAneT1e71a84MIL76EgSHjJ1LG3TIU9yMI"/> <!-- for map -->
