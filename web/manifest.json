@@ -1,13 +1,72 @@
 {
-    "name": "flutter_application_1",
-    "short_name": "flutter_application_1",
-    "start_url": ".",
+    "name": "MySalon",
+    "short_name": "MySalon",
+    "start_url": "/",
+    "scope": "/",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#FF6B8B",
+    "theme_color": "#FF6B8B",
+    "description": "Salon booking and appointment management app for Sri Lanka. Book haircuts, facials, spa, and beauty services online.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
+    "categories": [
+        "lifestyle",
+        "beauty",
+        "business"
+    ],
+    "lang": "si",
+    "dir": "ltr",
+    "shortcuts": [
+        {
+            "name": "Book Appointment",
+            "short_name": "Book Now",
+            "description": "Book a new salon appointment",
+            "url": "/book",
+            "icons": [
+                {
+                    "src": "icons/shortcut-96.png",
+                    "sizes": "96x96"
+                }
+            ]
+        },
+        {
+            "name": "My Appointments",
+            "short_name": "Appointments",
+            "description": "View your booked appointments",
+            "url": "/appointments",
+            "icons": [
+                {
+                    "src": "icons/calendar-96.png",
+                    "sizes": "96x96"
+                }
+            ]
+        }
+    ],
+    "screenshots": [
+        {
+            "src": "screenshots/home-mobile.jpg",
+            "sizes": "1080x1920",
+            "type": "image/jpeg",
+            "form_factor": "narrow",
+            "label": "MySalon Home Screen"
+        },
+        {
+            "src": "screenshots/booking-mobile.jpg",
+            "sizes": "1080x1920",
+            "type": "image/jpeg",
+            "form_factor": "narrow",
+            "label": "Booking Screen"
+        }
+    ],
+    "share_target": {
+        "action": "/share",
+        "method": "GET",
+        "params": {
+            "title": "title",
+            "text": "text",
+            "url": "url"
+        }
+    },
     "icons": [
         {
             "src": "icons/Icon-192.png",

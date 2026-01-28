@@ -1,5 +1,5 @@
 name: flutter_application_1
-description: "A new Flutter project."
+description: "MySalon - Salon Booking App"
 publish_to: 'none'
 
 version: 1.0.0+1
@@ -35,12 +35,33 @@ dependencies:
   go_router: ^17.0.1
   flutter_dotenv: ^6.0.0
   url_strategy: ^0.3.0
+  flutter_launcher_icons: ^0.14.4
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
 
+# ========== FLUTTER LAUNCHER ICONS CONFIG meka use karanne icon auto genarate karagnna==========
+flutter_launcher_icons:
+  # Android icons
+  android: true
+  image_path_android: "assets/logo.png"
+  adaptive_icon_background: "#FF6B8B"
+  adaptive_icon_foreground: "assets/logo.png"
+  
+  # iOS icons  
+  ios: true
+  image_path_ios: "assets/logo.png"
+  remove_alpha_ios: true
+  
+  # Web icons
+  web:
+    generate: true
+    image_path: "assets/logo.png"
+    background_color: "#FF6B8B"
+
+# ========== FLUTTER CONFIG ==========
 flutter:
   uses-material-design: true
   assets:

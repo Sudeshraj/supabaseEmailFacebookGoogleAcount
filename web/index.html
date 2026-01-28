@@ -1,23 +1,186 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <base href="/" />
   <meta charset="UTF-8">
-  <!-- <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"> -->
-  <meta name="description" content="MySalon - Your beauty salon solution">
+  <!-- Simple viewport for Flutter compatibility -->
+  <meta name="viewport" content="width=device-width">
   
-  <!-- iOS meta tags & icons -->
+  <!-- ==================== SEO META TAGS ==================== -->
+  <title>SBooking</title>
+  <meta name="description" content="Book salon appointments online in Sri Lanka. Haircuts, facials, spa, manicure, and beauty services. Instant booking, reviews, and prices.">
+  <meta name="keywords" content="salon booking, online appointment, hair salon, beauty services, Sri Lanka salons, spa booking, beauty appointments">
+  <meta name="author" content="MySalon">
+  <meta name="robots" content="index, follow">
+  <meta name="language" content="English">
+  <meta name="geo.region" content="LK">
+  <meta name="geo.placename" content="Colombo">
+  
+  <!-- Open Graph for Social Media Sharing -->
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://mysalon.lk/">
+  <meta property="og:title" content="MySalon - Online Salon Booking App">
+  <meta property="og:description" content="Book salon appointments in seconds. View reviews, prices, and stylist availability.">
+  <meta property="og:image" content="https://mysalon.lk/images/og-image.jpg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:site" content="@MySalonLK">
+  <meta name="twitter:title" content="MySalon - Salon Booking App Sri Lanka">
+  <meta name="twitter:description" content="Book salon appointments instantly. View reviews, prices, and stylist availability.">
+  <meta name="twitter:image" content="https://mysalon.lk/images/twitter-image.jpg">
+  
+  <!-- ==================== STRUCTURED DATA FOR SEO ==================== -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebApplication",
+        "name": "MySalon - Salon Booking",
+        "url": "https://mysalon.lk",
+        "applicationCategory": "LifestyleApplication",
+        "operatingSystem": "Android, iOS, Web",
+        "description": "Online salon appointment booking system for customers in Sri Lanka",
+        "featureList": "Salon Search, Appointment Booking, Service Selection, Stylist Choice, Online Payments, Reviews & Ratings, Reminders",
+        "screenshot": "https://mysalon.lk/images/app-screenshot.jpg",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "LKR"
+        },
+        "author": {
+          "@type": "Organization",
+          "name": "MySalon"
+        }
+      },
+      {
+        "@type": "Service",
+        "serviceType": "Beauty Salon Appointment Booking",
+        "provider": {
+          "@type": "Organization",
+          "name": "MySalon",
+          "logo": "https://mysalon.lk/logo.png"
+        },
+        "areaServed": {
+          "@type": "Country",
+          "name": "Sri Lanka"
+        }
+      }
+    ]
+  }
+  </script>
+  
+  <!-- ==================== EXISTING PWA CONFIG (UNCHANGED) ==================== -->
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <meta name="apple-mobile-web-app-title" content="MySalon">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
   <link rel="icon" type="image/png" href="favicon.png">
-  <title>MySalon</title>
   <link rel="manifest" href="manifest.json">
   
-  <!-- Google Maps API -->
-  <!-- <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAneT1e71a84MIL76EgSHjJ1LG3TIU9yMI&libraries=places"></script> -->
+  <!-- ==================== HIDDEN SEO CONTENT STYLE ==================== -->
+  <style>
+    /* SEO content that's visible to search engines but hidden from users */
+    .seo-content {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+    
+    /* Simple loading indicator (optional) */
+    .loading-indicator {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: #ffffff;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 9999;
+      transition: opacity 0.3s ease;
+    }
+    
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #FF6B8B;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+
+<body>
+  <!-- ==================== HIDDEN SEO CONTENT ==================== -->
+  <div class="seo-content">
+    <h1>MySalon - #1 Salon Booking App in Sri Lanka</h1>
+    
+    <h2>Book Salon Services Online</h2>
+    <p>Book appointments at top salons in Colombo, Kandy, Galle, Negombo, and across Sri Lanka.</p>
+    
+    <h3>Available Services:</h3>
+    <ul>
+      <li>Haircut & Styling</li>
+      <li>Facial Treatments</li>
+      <li>Spa & Massage</li>
+      <li>Manicure & Pedicure</li>
+      <li>Waxing & Hair Removal</li>
+      <li>Bridal Makeup</li>
+      <li>Men's Grooming</li>
+    </ul>
+    
+    <h3>How It Works:</h3>
+    <ol>
+      <li>Search salons by location or name</li>
+      <li>Select preferred services and stylists</li>
+      <li>Choose date and time</li>
+      <li>Confirm booking (online payment or pay at salon)</li>
+      <li>Receive SMS/email reminders</li>
+    </ol>
+    
+    <h3>Benefits:</h3>
+    <ul>
+      <li>24/7 booking availability</li>
+      <li>Salon information and customer reviews</li>
+      <li>Special discounts and loyalty rewards</li>
+      <li>Booking history and repeat appointments</li>
+      <li>Service comparison across salons</li>
+    </ul>
+    
+    <h3>Contact Us:</h3>
+    <p>Support: <a href="tel:+94112345678">+94 11 234 5678</a> (24/7)</p>
+    <p>WhatsApp: <a href="https://wa.me/94771234567">+94 77 123 4567</a></p>
+    <p>Email: <a href="mailto:support@mysalon.lk">support@mysalon.lk</a></p>
+    
+    <p><strong>Partner Salons:</strong> Style & Smile Salon, Glamour Beauty, Urban Cuts, Herbal Spa, Royal Nail Studio, Men's Grooming Lounge, and 100+ salons across Sri Lanka.</p>
+    
+    <h3>Popular Salon Locations:</h3>
+    <p>Colombo Salon Booking | Kandy Beauty Services | Galle Spa Appointments | Negombo Hair Salons | Kurunegala Beauty Parlors | Jaffna Salon Services</p>
+  </div>
   
+  <!-- ==================== OPTIONAL LOADING INDICATOR ==================== -->
+  <div class="loading-indicator" id="app-loading">
+    <div class="spinner"></div>
+  </div>
+  
+  <!-- ==================== EXISTING CODE (UNCHANGED) ==================== -->
   <!-- Service Worker Registration -->
   <script>
     if ('serviceWorker' in navigator) {
@@ -59,15 +222,24 @@
       }
     })();
   </script>
-</head>
-
-<body>
+  
   <!-- Main Flutter bootstrap -->
   <script src="flutter_bootstrap.js" async></script>
   
   <!-- Optional: Custom Flutter configuration -->
   <script>
     window.addEventListener('load', function() {
+      // Hide loading indicator when Flutter app loads
+      setTimeout(function() {
+        var loading = document.getElementById('app-loading');
+        if (loading) {
+          loading.style.opacity = '0';
+          setTimeout(function() {
+            loading.style.display = 'none';
+          }, 300);
+        }
+      }, 1000);
+      
       // You can add custom configuration here if needed
       // _flutter.loader.load({ config: { renderer: 'html' } });
     });
