@@ -184,8 +184,11 @@ Future<void> main() async {
       debug: kDebugMode,
     );
 
-    // ✅ SETUP AUTH STATE LISTENER
+    // ✅ SETUP AUTH STATE LISTENER(listner inna nisa current app ekath redirect venava reset form ekata)
     _setupAuthStateListener();
+
+     // ========== PHASE 3.5: PLATFORM-SPECIFIC CONFIG ==========
+    await _setupPlatformSpecificConfig(); // 🔥 NEW
 
     // ========== PHASE 4: SERVICES ==========
     await SessionManager.init();
@@ -215,6 +218,80 @@ Future<void> main() async {
     runApp(_ErrorApp(error: e.toString()));
   }
 }
+
+// main.dart එකේ මෙම method එක එකතු කරන්න
+Future<void> _setupPlatformSpecificConfig() async {
+  print('🌐 Platform configuration...');
+  print('   Is Web: $kIsWeb');
+  print('   Initial URI: ${Uri.base.toString()}');
+  
+  if (kIsWeb) {
+    // Web-specific setup
+    await _setupWebConfig();
+  } else {
+    // Mobile-specific setup  
+    await _setupMobileConfig();
+  }
+}
+
+Future<void> _setupWebConfig() async {
+  print('   Configuring for Web');
+  
+  try {
+    // Use url_strategy package for web
+    // Uncomment after adding url_strategy to pubspec.yaml
+    // setPathUrlStrategy();
+    
+    // For now, handle URLs manually
+    final uri = Uri.base;
+    if (uri.toString().contains('/auth/callback')) {
+      print('   🔥 Web auth callback detected');
+    }
+  } catch (e) {
+    print('   ❌ Web config error: $e');
+  }
+}
+
+Future<void> _setupMobileConfig() async {
+  print('   Configuring for Mobile');
+  
+  // Mobile deep links setup
+  await _setupMobileDeepLinks();
+}
+
+/// 🔥 CRITICAL FIX: Mobile deep links setup
+Future<void> _setupMobileDeepLinks() async {
+  print('   🔗 Setting up mobile deep links...');
+  
+  // Note: To enable full mobile deep links, add these to pubspec.yaml:
+  // uni_links: ^0.5.1  # For deep links
+  // app_links: ^3.2.1  # Alternative
+  
+  // For now, we'll handle basic deep links
+  try {
+    // Check initial URI for mobile
+    final uri = Uri.base;
+    if (uri.toString().isNotEmpty && uri.toString() != '/') {
+      print('     Initial mobile URI: ${uri.toString()}');
+      
+      // Check if it's a deep link
+      if (uri.toString().contains('myapp://') || 
+          uri.toString().contains('/auth/callback')) {
+        print('     📱 Mobile deep link detected!');
+        
+        // Store for later processing
+        pendingDeepLink = uri.toString();
+      }
+    }
+  } catch (e) {
+    print('     ❌ Mobile deep link setup error: $e');
+  }
+  
+  print('   ✅ Mobile deep links configured (basic)');
+}
+
+// Add this global variable at the top of main.dart
+String? pendingDeepLink;
 
 // ✅ SIMPLIFIED: Setup auth state listener
 void _setupAuthStateListener() {
@@ -268,9 +345,22 @@ void _setupAuthStateListener() {
 // SIMPLIFIED ROUTER CONFIGURATION
 // ====================
 GoRouter _createRouter() {
-  // Get the initial location from the URL, not hardcoded '/'
-  final initialUri = Uri.base;
-  final initialLocation = initialUri.path.isEmpty ? '/' : initialUri.path;
+   String initialLocation = '/';
+  final uri = Uri.base;
+  
+  print('📍 Router creation - Initial URI: ${uri.toString()}');
+  
+  // Check for auth callback in URL
+  if (uri.toString().contains('/auth/callback')) {
+    initialLocation = '/auth/callback';
+    print('   🎯 Setting initial location to /auth/callback');
+  }
+  
+  // Check for pending mobile deep link
+  if (pendingDeepLink != null && pendingDeepLink!.contains('/auth/callback')) {
+    initialLocation = '/auth/callback';
+    print('   📱 Using mobile deep link as initial location');
+  }
   return GoRouter(
     navigatorKey: navigatorKey,
     refreshListenable: appState,
@@ -280,7 +370,33 @@ GoRouter _createRouter() {
     observers: [if (kDebugMode) MyRouteObserver()],
     redirect: (context, state) async {
       final path = state.matchedLocation;
-
+      final uriString = state.uri.toString();
+      final queryParams = state.uri.queryParameters;
+      
+      print('🔄 REDIRECT CHECK: $path');
+      print('   Full URL: $uriString');
+      print('   Query params: $queryParams');
+      
+      // 🔥🔥🔥 MOST CRITICAL FIX: NEVER redirect auth callbacks
+      if (path == '/auth/callback' || 
+          uriString.contains('/auth/callback') ||
+          queryParams.containsKey('code') ||
+          queryParams.containsKey('error') ||
+          queryParams.containsKey('access_token')) {
+        
+        print('   ✅ AUTH CALLBACK - SKIPPING ALL REDIRECTS');
+        return null; // NO REDIRECT FOR AUTH CALLBACKS
+      }
+      
+      // If app is still loading, wait
+      if (appState.loading) {
+        print('   ⏳ App loading, staying put');
+        return null;
+      }
+      
+      // Rest of your existing redirect logic...
+      // But auth callbacks will never reach here
+      
       // Public routes that should always be accessible
       final publicRoutes = [
         '/',

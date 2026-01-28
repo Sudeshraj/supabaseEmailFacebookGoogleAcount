@@ -2,92 +2,75 @@
 <html>
 <head>
   <base href="/" />
-
   <meta charset="UTF-8">
-  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-
+  <!-- <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"> -->
+  <meta name="description" content="MySalon - Your beauty salon solution">
+  
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="flutter_application_1">
+  <meta name="apple-mobile-web-app-title" content="MySalon">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
-
-  <!-- Favicon -->
-  <link rel="icon" type="image/png" href="favicon.png"/>
-
+  <link rel="icon" type="image/png" href="favicon.png">
   <title>MySalon</title>
   <link rel="manifest" href="manifest.json">
-
+  
   <!-- Google Maps API -->
-  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAneT1e71a84MIL76EgSHjJ1LG3TIU9yMI&libraries=places"></script>
-
-  <!-- Force HTML renderer to avoid CanvasKit errors -->
-  <script>
-    window.flutterWebRenderer = "html";
-  </script>
-
-  <!-- Flutter Service Worker for Full Offline Support -->
+  <!-- <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAneT1e71a84MIL76EgSHjJ1LG3TIU9yMI&libraries=places"></script> -->
+  
+  <!-- Service Worker Registration -->
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {
-        navigator.serviceWorker.register('flutter_service_worker.js?v=1');
+        // Auto-detect version from flutter_bootstrap.js
+        var scripts = document.getElementsByTagName('script');
+        for (var i = 0; i < scripts.length; i++) {
+          if (scripts[i].src.includes('flutter_bootstrap')) {
+            var url = new URL(scripts[i].src);
+            var version = url.searchParams.get('v') || Date.now();
+            navigator.serviceWorker.register('flutter_service_worker.js?v=' + version);
+            break;
+          }
+        }
       });
     }
   </script>
-
- <!-- <script type="text/javascript">
-    // Flutter web URL strategy
-    if (window.location.hash && window.location.hash === '#/') {
-      window.location.hash = '';
-    }
-    
-    // Remove # from URLs
-    history.replaceState(null, null, ' ' + window.location.href.split('#')[0]);
-  </script> -->
-
-  <script type="text/javascript">
-  // Smart URL strategy that preserves auth callback fragments
-  (function() {
-    var url = window.location.href;
-    
-    // Check if this is an auth callback URL
-    var isAuthCallback = url.includes('/auth/callback');
-    var hasFragment = window.location.hash && window.location.hash.length > 1;
-    
-    if (isAuthCallback && hasFragment) {
-      console.log('🔐 Auth callback detected - preserving fragment');
+  
+  <!-- Smart URL Strategy -->
+  <script>
+    (function() {
+      var url = window.location.href;
+      var isAuthCallback = url.includes('/auth/callback');
+      var hasFragment = window.location.hash && window.location.hash.length > 1;
       
-      // For auth callbacks, convert fragment to query parameters
-      var fragment = window.location.hash.substring(1); // Remove # symbol
-      
-      if (fragment.includes('=')) {
-        // Build new URL with fragment as query params
-        var baseUrl = url.split('#')[0];
-        var separator = baseUrl.includes('?') ? '&' : '?';
-        var newUrl = baseUrl + separator + fragment;
+      if (isAuthCallback && hasFragment) {
+        console.log('🔐 Auth callback detected');
+        var fragment = window.location.hash.substring(1);
         
-        // Replace history without page reload
-        history.replaceState(null, null, newUrl);
-        console.log('✅ Converted fragment to query params:', newUrl);
-        return;
+        if (fragment.includes('=')) {
+          var baseUrl = url.split('#')[0];
+          var separator = baseUrl.includes('?') ? '&' : '?';
+          var newUrl = baseUrl + separator + fragment;
+          history.replaceState(null, null, newUrl);
+          console.log('✅ Converted fragment to query params');
+        }
+      } else if (window.location.hash === '#/') {
+        window.location.hash = '';
       }
-    }
-    
-    // For non-auth URLs, remove # if it's just #/
-    if (window.location.hash && window.location.hash === '#/') {
-      window.location.hash = '';
-    }
-    
-    // Don't remove fragments for other URLs
-    console.log('🌐 Keeping URL as-is:', url);
-  })();
-</script>
-
+    })();
+  </script>
 </head>
 
 <body>
+  <!-- Main Flutter bootstrap -->
   <script src="flutter_bootstrap.js" async></script>
+  
+  <!-- Optional: Custom Flutter configuration -->
+  <script>
+    window.addEventListener('load', function() {
+      // You can add custom configuration here if needed
+      // _flutter.loader.load({ config: { renderer: 'html' } });
+    });
+  </script>
 </body>
 </html>
