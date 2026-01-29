@@ -292,24 +292,26 @@ class _SignInScreenState extends State<SignInScreen>
         case 'email_not_confirmed':
           // Save profile with remember me setting even if email not confirmed
           final email = _emailController.text.trim();
-          final user = supabase.auth.currentUser;
+          // final user = supabase.auth.currentUser;
 
-          if (user != null) {
-            final session = supabase.auth.currentSession;
-            final refreshToken = session?.refreshToken;
+          // if (user != null) {
+          final session = supabase.auth.currentSession;
+          final refreshToken = session?.refreshToken;
 
-            await SessionManager.saveUserProfile(
-              email: email,
-              userId: user.id,
-              name: email.split('@').first,
-              rememberMe: _rememberMe,
-              refreshToken: refreshToken,
-            );
-          }
+         
+          await SessionManager.saveUserProfile(
+            email: email,
+            // userId: user.id,
+            userId: '',
+            name: email.split('@').first,
+            rememberMe: _rememberMe,
+            refreshToken: refreshToken,
+          );
+          // }
           appState.emailVerifyerError();
           appState.refreshState();
           if (!mounted) return;
-          context.go('/');
+          context.go('/verify-email');
           break;
 
         case 'too_many_requests':

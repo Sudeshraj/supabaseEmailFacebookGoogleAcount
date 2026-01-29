@@ -517,6 +517,7 @@ Future<void> attemptAutoLogin() async {
   }
 
   Future<void> emailVerifyerError() async {   
+    print('awa');
     _setEmailVerified(false);   
   }
 }
