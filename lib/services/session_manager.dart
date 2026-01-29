@@ -32,6 +32,7 @@ class SessionManager {
     bool? marketingConsent,
     DateTime? marketingConsentAt,
   }) async {
+      print(rememberMe);
     try {
       final profiles = await getProfiles();
       final index = profiles.indexWhere((p) => p['email'] == email);

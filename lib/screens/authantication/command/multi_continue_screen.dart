@@ -58,262 +58,272 @@ class _ContinueScreenState extends State<ContinueScreen> {
     }
   }
 
-// ============================================================
-// SMART PASSWORD DIALOG WITH AUTO-SUBMIT (RESPONSIVE VERSION)
-// ============================================================
-Future<String?> _showPasswordDialog(String email) async {
-  final passwordController = TextEditingController();
-  bool obscurePassword = true;
+  // ============================================================
+  // SMART PASSWORD DIALOG WITH AUTO-SUBMIT (RESPONSIVE VERSION)
+  // ============================================================
+  Future<String?> _showPasswordDialog(String email) async {
+    final passwordController = TextEditingController();
+    bool obscurePassword = true;
 
-  return await showDialog<String?>(
-    context: context,
-    barrierDismissible: false,
-    builder: (context) {
-      // Check screen size for responsiveness
-      final isMobile = MediaQuery.of(context).size.width < 600;
-      final screenWidth = MediaQuery.of(context).size.width;
-      
-      // Calculate dialog width with proper double type
-      double calculateDialogWidth() {
-        if (isMobile) {
-          return screenWidth * 0.9; // 90% width on mobile
-        } else {
-          final calculatedWidth = screenWidth * 0.4;
-          return calculatedWidth < 500 ? calculatedWidth : 500.0;
+    return await showDialog<String?>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        // Check screen size for responsiveness
+        final isMobile = MediaQuery.of(context).size.width < 600;
+        final screenWidth = MediaQuery.of(context).size.width;
+
+        // Calculate dialog width with proper double type
+        double calculateDialogWidth() {
+          if (isMobile) {
+            return screenWidth * 0.9; // 90% width on mobile
+          } else {
+            final calculatedWidth = screenWidth * 0.4;
+            return calculatedWidth < 500 ? calculatedWidth : 500.0;
+          }
         }
-      }
-      
-      final dialogWidth = calculateDialogWidth();
 
-      return Dialog(
-        backgroundColor: const Color(0xFF1C1F26),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        insetPadding: EdgeInsets.symmetric(
-          horizontal: isMobile ? 16.0 : (screenWidth - dialogWidth) / 2,
-          vertical: 20.0,
-        ),
-        child: SizedBox(
-          width: dialogWidth, // Responsive width
-          child: StatefulBuilder(
-            builder: (context, setState) {
-              // Declare submit function FIRST
-              void submitPassword(String password) {
-                if (password.isEmpty) return;
-                
-                // Set submitting state
-                setState(() {});
-                
-                // Close dialog with password after short delay
-                Future.delayed(const Duration(milliseconds: 300), () {
-                  if (mounted) {
-                    Navigator.pop(context, password);
-                  }
-                });
-              }
+        final dialogWidth = calculateDialogWidth();
 
-              // Auto-submit function
-              void checkAutoSubmit(String value) {
-                if (value.length >= 6) {
-                  // Auto-submit after 0.5 seconds of no typing
-                  Future.delayed(const Duration(milliseconds: 500), () {
-                    if (mounted && passwordController.text.length >= 6) {
-                      submitPassword(passwordController.text.trim());
+        return Dialog(
+          backgroundColor: const Color(0xFF1C1F26),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          insetPadding: EdgeInsets.symmetric(
+            horizontal: isMobile ? 16.0 : (screenWidth - dialogWidth) / 2,
+            vertical: 20.0,
+          ),
+          child: SizedBox(
+            width: dialogWidth, // Responsive width
+            child: StatefulBuilder(
+              builder: (context, setState) {
+                // Declare submit function FIRST
+                void submitPassword(String password) {
+                  if (password.isEmpty) return;
+
+                  // Set submitting state
+                  setState(() {});
+
+                  // Close dialog with password after short delay
+                  Future.delayed(const Duration(milliseconds: 300), () {
+                    if (mounted) {
+                      Navigator.pop(context, password);
                     }
                   });
                 }
-              }
 
-              return Padding(
-                padding: EdgeInsets.all(isMobile ? 16.0 : 20.0),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Header - Responsive layout
-                    Row(
-                      children: [
-                        CircleAvatar(
-                          backgroundColor: Colors.blueAccent.withOpacity(0.2),
-                          radius: isMobile ? 18.0 : 20.0,
-                          child: Icon(
-                            Icons.person,
-                            color: Colors.blueAccent,
-                            size: isMobile ? 18.0 : 20.0,
+                // Auto-submit function
+                void checkAutoSubmit(String value) {
+                  if (value.length >= 6) {
+                    // Auto-submit after 0.5 seconds of no typing
+                    Future.delayed(const Duration(milliseconds: 500), () {
+                      if (mounted && passwordController.text.length >= 6) {
+                        submitPassword(passwordController.text.trim());
+                      }
+                    });
+                  }
+                }
+
+                return Padding(
+                  padding: EdgeInsets.all(isMobile ? 16.0 : 20.0),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Header - Responsive layout
+                      Row(
+                        children: [
+                          CircleAvatar(
+                            backgroundColor: Colors.blueAccent.withOpacity(0.2),
+                            radius: isMobile ? 18.0 : 20.0,
+                            child: Icon(
+                              Icons.person,
+                              color: Colors.blueAccent,
+                              size: isMobile ? 18.0 : 20.0,
+                            ),
+                          ),
+                          SizedBox(width: isMobile ? 10.0 : 12.0),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Enter Password',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: isMobile ? 15.0 : 16.0,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                Text(
+                                  email,
+                                  style: TextStyle(
+                                    color: Colors.white.withOpacity(0.7),
+                                    fontSize: isMobile ? 11.0 : 12.0,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                  maxLines: 2,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      SizedBox(height: isMobile ? 16.0 : 20.0),
+
+                      // Password Field
+                      TextField(
+                        controller: passwordController,
+                        obscureText: obscurePassword,
+                        autofocus: true,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: isMobile ? 15.0 : 16.0,
+                        ),
+                        decoration: InputDecoration(
+                          labelText: 'Password',
+                          labelStyle: const TextStyle(color: Colors.white70),
+                          filled: true,
+                          fillColor: Colors.white.withOpacity(0.08),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            borderSide: BorderSide.none,
+                          ),
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: isMobile ? 14.0 : 16.0,
+                            vertical: isMobile ? 12.0 : 14.0,
+                          ),
+                          suffixIcon: IconButton(
+                            icon: Icon(
+                              obscurePassword
+                                  ? Icons.visibility_off
+                                  : Icons.visibility,
+                              color: Colors.white70,
+                              size: isMobile ? 20.0 : 24.0,
+                            ),
+                            onPressed: () {
+                              setState(
+                                () => obscurePassword = !obscurePassword,
+                              );
+                            },
                           ),
                         ),
-                        SizedBox(width: isMobile ? 10.0 : 12.0),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                        textInputAction: TextInputAction.done,
+                        onChanged: (value) {
+                          checkAutoSubmit(value);
+                          setState(() {}); // Update UI for hints
+                        },
+                        onSubmitted: (value) {
+                          submitPassword(value.trim());
+                        },
+                      ),
+
+                      // Auto-submit hint
+                      if (passwordController.text.isNotEmpty &&
+                          passwordController.text.length < 6)
+                        Padding(
+                          padding: EdgeInsets.only(top: isMobile ? 6.0 : 8.0),
+                          child: Text(
+                            'Type ${6 - passwordController.text.length} more characters for auto-login',
+                            style: TextStyle(
+                              color: Colors.blueAccent.withOpacity(0.8),
+                              fontSize: isMobile ? 10.0 : 11.0,
+                            ),
+                          ),
+                        ),
+
+                      if (passwordController.text.length >= 6)
+                        Padding(
+                          padding: EdgeInsets.only(top: isMobile ? 6.0 : 8.0),
+                          child: Row(
                             children: [
-                              Text(
-                                'Enter Password',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: isMobile ? 15.0 : 16.0,
-                                  fontWeight: FontWeight.bold,
-                                ),
+                              Icon(
+                                Icons.auto_awesome,
+                                color: Colors.greenAccent,
+                                size: isMobile ? 12.0 : 14.0,
                               ),
+                              SizedBox(width: isMobile ? 4.0 : 6.0),
                               Text(
-                                email,
+                                'Auto-submit ready',
                                 style: TextStyle(
-                                  color: Colors.white.withOpacity(0.7),
-                                  fontSize: isMobile ? 11.0 : 12.0,
+                                  color: Colors.greenAccent,
+                                  fontSize: isMobile ? 10.0 : 11.0,
+                                  fontWeight: FontWeight.w500,
                                 ),
-                                overflow: TextOverflow.ellipsis,
-                                maxLines: 2,
                               ),
                             ],
                           ),
                         ),
-                      ],
-                    ),
-                    
-                    SizedBox(height: isMobile ? 16.0 : 20.0),
-                    
-                    // Password Field
-                    TextField(
-                      controller: passwordController,
-                      obscureText: obscurePassword,
-                      autofocus: true,
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: isMobile ? 15.0 : 16.0,
-                      ),
-                      decoration: InputDecoration(
-                        labelText: 'Password',
-                        labelStyle: const TextStyle(color: Colors.white70),
-                        filled: true,
-                        fillColor: Colors.white.withOpacity(0.08),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          borderSide: BorderSide.none,
-                        ),
-                        contentPadding: EdgeInsets.symmetric(
-                          horizontal: isMobile ? 14.0 : 16.0,
-                          vertical: isMobile ? 12.0 : 14.0,
-                        ),
-                        suffixIcon: IconButton(
-                          icon: Icon(
-                            obscurePassword ? Icons.visibility_off : Icons.visibility,
-                            color: Colors.white70,
-                            size: isMobile ? 20.0 : 24.0,
-                          ),
-                          onPressed: () {
-                            setState(() => obscurePassword = !obscurePassword);
-                          },
-                        ),
-                      ),
-                      textInputAction: TextInputAction.done,
-                      onChanged: (value) {
-                        checkAutoSubmit(value);
-                        setState(() {}); // Update UI for hints
-                      },
-                      onSubmitted: (value) {
-                        submitPassword(value.trim());
-                      },
-                    ),
-                    
-                    // Auto-submit hint
-                    if (passwordController.text.isNotEmpty && passwordController.text.length < 6)
-                      Padding(
-                        padding: EdgeInsets.only(top: isMobile ? 6.0 : 8.0),
-                        child: Text(
-                          'Type ${6 - passwordController.text.length} more characters for auto-login',
-                          style: TextStyle(
-                            color: Colors.blueAccent.withOpacity(0.8),
-                            fontSize: isMobile ? 10.0 : 11.0,
-                          ),
-                        ),
-                      ),
-                    
-                    if (passwordController.text.length >= 6)
-                      Padding(
-                        padding: EdgeInsets.only(top: isMobile ? 6.0 : 8.0),
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.auto_awesome,
-                              color: Colors.greenAccent,
-                              size: isMobile ? 12.0 : 14.0,
-                            ),
-                            SizedBox(width: isMobile ? 4.0 : 6.0),
-                            Text(
-                              'Auto-submit ready',
-                              style: TextStyle(
-                                color: Colors.greenAccent,
-                                fontSize: isMobile ? 10.0 : 11.0,
-                                fontWeight: FontWeight.w500,
+
+                      SizedBox(height: isMobile ? 16.0 : 20.0),
+
+                      // Buttons - Responsive layout
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(context, null),
+                            style: TextButton.styleFrom(
+                              padding: EdgeInsets.symmetric(
+                                horizontal: isMobile ? 14.0 : 16.0,
+                                vertical: isMobile ? 8.0 : 10.0,
                               ),
                             ),
-                          ],
-                        ),
+                            child: Text(
+                              'Cancel',
+                              style: TextStyle(
+                                color: Colors.white70,
+                                fontSize: isMobile ? 14.0 : 15.0,
+                              ),
+                            ),
+                          ),
+                          SizedBox(width: isMobile ? 8.0 : 10.0),
+                          ElevatedButton(
+                            onPressed: passwordController.text.isEmpty
+                                ? null
+                                : () {
+                                    submitPassword(
+                                      passwordController.text.trim(),
+                                    );
+                                  },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.blueAccent,
+                              foregroundColor: Colors.white,
+                              disabledBackgroundColor: Colors.blueAccent
+                                  .withOpacity(0.5),
+                              padding: EdgeInsets.symmetric(
+                                horizontal: isMobile ? 18.0 : 20.0,
+                                vertical: isMobile ? 10.0 : 12.0,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                            child: Text(
+                              'Login',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: isMobile ? 14.0 : 15.0,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                    
-                    SizedBox(height: isMobile ? 16.0 : 20.0),
-                    
-                    // Buttons - Responsive layout
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(context, null),
-                          style: TextButton.styleFrom(
-                            padding: EdgeInsets.symmetric(
-                              horizontal: isMobile ? 14.0 : 16.0,
-                              vertical: isMobile ? 8.0 : 10.0,
-                            ),
-                          ),
-                          child: Text(
-                            'Cancel',
-                            style: TextStyle(
-                              color: Colors.white70,
-                              fontSize: isMobile ? 14.0 : 15.0,
-                            ),
-                          ),
-                        ),
-                        SizedBox(width: isMobile ? 8.0 : 10.0),
-                        ElevatedButton(
-                          onPressed: passwordController.text.isEmpty
-                              ? null
-                              : () {
-                                  submitPassword(passwordController.text.trim());
-                                },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.blueAccent,
-                            foregroundColor: Colors.white,
-                            disabledBackgroundColor: Colors.blueAccent.withOpacity(0.5),
-                            padding: EdgeInsets.symmetric(
-                              horizontal: isMobile ? 18.0 : 20.0,
-                              vertical: isMobile ? 10.0 : 12.0,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                          ),
-                          child: Text(
-                            'Login',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w600,
-                              fontSize: isMobile ? 14.0 : 15.0,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    
-                    // Add some bottom padding on mobile for better UX
-                    if (isMobile) const SizedBox(height: 8.0),
-                  ],
-                ),
-              );
-            },
+
+                      // Add some bottom padding on mobile for better UX
+                      if (isMobile) const SizedBox(height: 8.0),
+                    ],
+                  ),
+                );
+              },
+            ),
           ),
-        ),
-      );
-    },
-  );
-}
+        );
+      },
+    );
+  }
 
   // ============================================================
   // DIRECT PASSWORD LOGIN (NO EXTRA CONFIRMATION DIALOG)
@@ -456,109 +466,6 @@ Future<String?> _showPasswordDialog(String email) async {
       }
     }
   }
-
-  // // ============================================================
-  // // COMPLIANCE CONFIRMATION DIALOG
-  // // ============================================================
-  // // ============================================================
-  // // SMART COMPLIANCE CONFIRMATION DIALOG
-  // // ============================================================
-  // Future<bool> _showComplianceConfirmation(String email) async {
-  //   return await showDialog<bool>(
-  //         context: context,
-  //         barrierDismissible: false,
-  //         builder: (context) {
-  //           return AlertDialog(
-  //             backgroundColor: const Color(0xFF1C1F26),
-  //             shape: RoundedRectangleBorder(
-  //               borderRadius: BorderRadius.circular(16),
-  //             ),
-  //             title: const Text(
-  //               'Continue to Login',
-  //               style: TextStyle(
-  //                 color: Colors.white,
-  //                 fontSize: 20,
-  //                 fontWeight: FontWeight.bold,
-  //               ),
-  //             ),
-  //             content: Column(
-  //               mainAxisSize: MainAxisSize.min,
-  //               crossAxisAlignment: CrossAxisAlignment.start,
-  //               children: [
-  //                 const Text(
-  //                   'You selected:',
-  //                   style: TextStyle(color: Colors.white70),
-  //                 ),
-  //                 const SizedBox(height: 8),
-  //                 Text(
-  //                   email,
-  //                   style: const TextStyle(
-  //                     color: Colors.blueAccent,
-  //                     fontWeight: FontWeight.w500,
-  //                   ),
-  //                 ),
-  //                 const SizedBox(height: 16),
-  //                 Container(
-  //                   padding: const EdgeInsets.all(12),
-  //                   decoration: BoxDecoration(
-  //                     color: Colors.blue.withOpacity(0.1),
-  //                     borderRadius: BorderRadius.circular(8),
-  //                     border: Border.all(
-  //                       color: Colors.blueAccent.withOpacity(0.3),
-  //                     ),
-  //                   ),
-  //                   child: const Column(
-  //                     crossAxisAlignment: CrossAxisAlignment.start,
-  //                     children: [
-  //                       Row(
-  //                         children: [
-  //                           Icon(
-  //                             Icons.auto_awesome,
-  //                             size: 16,
-  //                             color: Colors.blueAccent,
-  //                           ),
-  //                           SizedBox(width: 8),
-  //                           Text(
-  //                             'Auto-login attempted',
-  //                             style: TextStyle(
-  //                               color: Colors.white,
-  //                               fontSize: 12,
-  //                               fontWeight: FontWeight.w500,
-  //                             ),
-  //                           ),
-  //                         ],
-  //                       ),
-  //                       SizedBox(height: 8),
-  //                       Text(
-  //                         'Please enter your password to continue.',
-  //                         style: TextStyle(color: Colors.white70, fontSize: 12),
-  //                       ),
-  //                     ],
-  //                   ),
-  //                 ),
-  //               ],
-  //             ),
-  //             actions: [
-  //               TextButton(
-  //                 onPressed: () => Navigator.pop(context, false),
-  //                 child: const Text(
-  //                   'Cancel',
-  //                   style: TextStyle(color: Colors.white70),
-  //                 ),
-  //               ),
-  //               ElevatedButton(
-  //                 onPressed: () => Navigator.pop(context, true),
-  //                 style: ElevatedButton.styleFrom(
-  //                   backgroundColor: Colors.blueAccent,
-  //                 ),
-  //                 child: const Text('Enter Password'),
-  //               ),
-  //             ],
-  //           );
-  //         },
-  //       ) ??
-  //       false;
-  // }
 
   // ============================================================
   // PROCESS SUCCESSFUL LOGIN
