@@ -224,7 +224,7 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
           _hasError = true;
         });
         
-        await Future.delayed(const Duration(seconds: 2));
+        // await Future.delayed(const Duration(seconds: 2));
         
         if (mounted) {
           context.go('/login');
@@ -232,13 +232,13 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
       }
     } catch (e) {
       if (kDebugMode) print('❌ Default callback error: $e');
-      setState(() {
-        _status = 'Authentication failed';
-        _processing = false;
-        _hasError = true;
-      });
+      // setState(() {
+      //   _status = 'Authentication failed';
+      //   _processing = false;
+      //   _hasError = true;
+      // });
       
-      await Future.delayed(const Duration(seconds: 2));
+      // await Future.delayed(const Duration(seconds: 2));
       
       if (mounted) {
         context.go('/login');
@@ -308,7 +308,7 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
       await Future.delayed(const Duration(seconds: 2));
       
       if (mounted) {
-        context.go('/forgot-password');
+        context.go('/reset-password');
       }
     }
   }
@@ -419,7 +419,7 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
     Future.delayed(const Duration(seconds: 3), () {
       if (mounted) {
         if (errorCode == 'otp_expired' || error == 'access_denied') {
-          context.go('/verify-invalid');
+          // context.go('/verify-invalid');
         } else {
           context.go('/login', extra: {
             'error': message,
