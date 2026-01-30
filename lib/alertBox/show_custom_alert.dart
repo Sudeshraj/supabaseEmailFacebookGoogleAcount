@@ -1,11 +1,4 @@
-import 'dart:io' show Platform;
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher_string.dart';
-
-// ========================================================================
-// CUSTOM ALERT DIALOG (Production Ready)
-// ========================================================================
 
 /// Shows a custom alert dialog with optional actions
 Future<void> showCustomAlert({
@@ -17,6 +10,7 @@ Future<void> showCustomAlert({
   VoidCallback? onOk,
   VoidCallback? onClose,
   List<Widget>? customActions,
+  IconData? buttonIcon, // නව parameter එකක් button icon එකට
 }) async {
   // Prevent multiple dialogs
   if (ModalRoute.of(context)?.isCurrent != true) return;
@@ -34,6 +28,7 @@ Future<void> showCustomAlert({
         onOk: onOk,
         onClose: onClose,
         customActions: customActions,
+        buttonIcon: buttonIcon,
       );
     },
   );
@@ -51,6 +46,7 @@ class _CustomAlertDialog extends StatelessWidget {
   final VoidCallback? onOk;
   final VoidCallback? onClose;
   final List<Widget>? customActions;
+  final IconData? buttonIcon;
 
   const _CustomAlertDialog({
     required this.title,
@@ -60,6 +56,7 @@ class _CustomAlertDialog extends StatelessWidget {
     this.onOk,
     this.onClose,
     this.customActions,
+    this.buttonIcon,
   });
 
   @override
@@ -74,9 +71,6 @@ class _CustomAlertDialog extends StatelessWidget {
     final titleColor = isDark ? Colors.white : Colors.black87;
     final messageColor = isDark ? Colors.white70 : Colors.black54;
     final primaryColor = isError 
-        ? theme.colorScheme.error 
-        : theme.primaryColor;
-    final iconColor = isError 
         ? theme.colorScheme.error 
         : theme.colorScheme.primary;
 
@@ -122,7 +116,7 @@ class _CustomAlertDialog extends StatelessWidget {
                               isError 
                                   ? Icons.error_outline 
                                   : Icons.check_circle_outline,
-                              color: iconColor,
+                              color: primaryColor,
                               size: 36,
                             ),
                           ),
@@ -161,13 +155,12 @@ class _CustomAlertDialog extends StatelessWidget {
                           if (customActions != null) ...[
                             ...customActions!,
                           ] else ...[
-                            // Default OK button
+                            // Default Text Button (ElevatedButton වෙනුවට TextButton)
                             SizedBox(
                               width: double.infinity,
-                              child: ElevatedButton(
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: primaryColor,
-                                  foregroundColor: Colors.white,
+                              child: TextButton(
+                                style: TextButton.styleFrom(
+                                  foregroundColor: primaryColor,
                                   padding: const EdgeInsets.symmetric(
                                     vertical: 14,
                                     horizontal: 32,
@@ -175,18 +168,33 @@ class _CustomAlertDialog extends StatelessWidget {
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(12),
                                   ),
-                                  elevation: 0,
+                                  // අවශ්‍ය නම් background color එකක් දෙන්න
+                                  // backgroundColor: primaryColor.withOpacity(0.1),
                                 ),
                                 onPressed: () {
                                   Navigator.of(context).pop();
                                   onOk?.call();
                                 },
-                                child: Text(
-                                  buttonText,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 15,
-                                  ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    if (buttonIcon != null) ...[
+                                      Icon(
+                                        buttonIcon,
+                                        size: 20,
+                                        color: primaryColor,
+                                      ),
+                                      const SizedBox(width: 8),
+                                    ],
+                                    Text(
+                                      buttonText,
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 15,
+                                        color: primaryColor,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ),
@@ -229,4 +237,3 @@ class _CustomAlertDialog extends StatelessWidget {
     );
   }
 }
-
