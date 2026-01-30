@@ -293,9 +293,13 @@ Future<void> _setupMobileDeepLinks() async {
 // Add this global variable at the top of main.dart
 String? pendingDeepLink;
 
-// ✅ SIMPLIFIED: Setup auth state listener
+
+// ✅ CORRECTED: Setup auth state listener | current app eka update venne meken
 void _setupAuthStateListener() {
   final supabase = Supabase.instance.client;
+
+  // Store the last known email verification status
+  bool? lastKnownEmailVerified;
 
   supabase.auth.onAuthStateChange.listen((data) {
     final event = data.event;
@@ -303,6 +307,59 @@ void _setupAuthStateListener() {
 
     if (kDebugMode) {
       print('🔐 Auth State Change: $event');
+    }
+
+    // Handle sign in event
+    if (event == AuthChangeEvent.signedIn && session != null) {
+      final user = session.user;
+      final isEmailVerified = user.emailConfirmedAt != null;
+      
+      print('🎉 User signed in: ${user.email}');
+      print(isEmailVerified ? '📧 Email already verified' : '⚠️ Email not verified yet');
+
+      // Store the current verification status
+      lastKnownEmailVerified = isEmailVerified;
+
+      // If email is verified, navigate to home
+      if (isEmailVerified) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          try {
+            if (navigatorKey.currentContext != null) {
+              print('📍 Navigating to /home (email verified on sign in)');
+              router.go('/');
+            }
+          } catch (e) {
+            print('❌ Navigation error: $e');
+          }
+        });
+      }
+    }
+
+    // Handle user updated event - check for email verification
+    if (event == AuthChangeEvent.userUpdated && session != null) {
+      final user = session.user;
+      final isEmailVerified = user.emailConfirmedAt != null;
+      
+      print('📝 User updated - Email confirmed at: ${user.emailConfirmedAt}');
+
+      // Check if email was just verified (previously not verified, now verified)
+      if (!(lastKnownEmailVerified ?? false) && isEmailVerified) {
+        print('✅ Email just verified!');
+        
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          try {
+            if (navigatorKey.currentContext != null) {
+              print('📍 Navigating to /home after email verification');
+              router.go('/');
+            }
+          } catch (e) {
+            print('❌ Navigation error: $e');
+          }
+        });
+      }
+
+      // Update the last known status
+      lastKnownEmailVerified = isEmailVerified;
     }
 
     // Handle password recovery
@@ -322,23 +379,43 @@ void _setupAuthStateListener() {
       });
     }
 
-    // Debug other auth events
+    // Handle sign out
+    if (event == AuthChangeEvent.signedOut) {
+      print('👋 User signed out');
+      lastKnownEmailVerified = null;
+    }
+
+    // Debug other events
     if (kDebugMode) {
       switch (event) {
-        case AuthChangeEvent.signedIn:
-          print('🎉 User signed in: ${session?.user.email}');
+        case AuthChangeEvent.tokenRefreshed:
+          print('🔄 Token refreshed');
           break;
-        case AuthChangeEvent.signedOut:
-          print('👋 User signed out');
-          break;
-        case AuthChangeEvent.userUpdated:
-          print('📝 User updated');
+        case AuthChangeEvent.mfaChallengeVerified:
+          print('🔒 MFA challenge verified');
           break;
         default:
           break;
       }
     }
   });
+
+  // Initial check when the listener is set up
+  final currentUser = supabase.auth.currentUser;
+  if (currentUser != null) {
+    lastKnownEmailVerified = currentUser.emailConfirmedAt != null;
+    print('📱 Initial check - Email verified: $lastKnownEmailVerified');
+    
+    // If already verified, navigate to home
+    if (lastKnownEmailVerified == true) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (navigatorKey.currentContext != null) {
+          print('📍 Initial navigation to /home');
+          router.go('/');
+        }
+      });
+    }
+  }
 }
 
 // ====================
