@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 class EnvironmentManager {
@@ -26,14 +27,14 @@ class EnvironmentManager {
     
     try {
       await dotenv.load(fileName: envFile);
-      // print('✅ Loaded environment: $flavor from $envFile');
+      if (debugMode) print('✅ Loaded environment: $flavor from $envFile');
     } catch (e) {
       // Fallback to default .env
       try {
         await dotenv.load(fileName: '.env');
-        // print('⚠️  Using default .env file');
+        if (debugMode) print('⚠️  Using default .env file');
       } catch (e2) {
-        throw Exception('Failed to load any environment file');
+        throw Exception('Failed to load any environment file: $e2');
       }
     }
   }
@@ -49,7 +50,7 @@ class EnvironmentManager {
   }
 
   String get appName {
-    return dotenv.env['APP_NAME'] ?? 'AutoLogin App';
+    return dotenv.env['APP_NAME'] ?? 'MySalon App';
   }
 
   String get appVersion {
@@ -60,14 +61,115 @@ class EnvironmentManager {
     return dotenv.env['ENVIRONMENT'] ?? 'development';
   }
 
+  // ========== GOOGLE OAUTH CONFIGURATION ==========
+  
+  String get googleWebClientId {
+    return dotenv.env['GOOGLE_WEB_CLIENT_ID'] ?? '';
+  }
+
+  String get googleAndroidClientId {
+    return dotenv.env['GOOGLE_ANDROID_CLIENT_ID'] ?? googleWebClientId;
+  }
+
+  String get googleIosClientId {
+    return dotenv.env['GOOGLE_IOS_CLIENT_ID'] ?? googleWebClientId;
+  }
+
+  String get googleWebClientSecret {
+    return dotenv.env['GOOGLE_WEB_CLIENT_SECRET'] ?? '';
+  }
+
+  bool get enableGoogleOAuth {
+    return dotenv.env['ENABLE_GOOGLE_OAUTH'] != 'false' && 
+           googleWebClientId.isNotEmpty && 
+           googleWebClientSecret.isNotEmpty;
+  }
+
+  // ========== FACEBOOK OAUTH CONFIGURATION ==========
+  
+  String get facebookAppId {
+    return dotenv.env['FACEBOOK_APP_ID'] ?? '';
+  }
+
+  String get facebookClientToken {
+    return dotenv.env['FACEBOOK_CLIENT_TOKEN'] ?? '';
+  }
+
+  bool get enableFacebookOAuth {
+    return dotenv.env['ENABLE_FACEBOOK_OAUTH'] != 'false' && 
+           facebookAppId.isNotEmpty && 
+           facebookClientToken.isNotEmpty;
+  }
+
+  // ========== REDIRECT URL CONFIGURATION ==========
+  
+  String get webRedirectUrl {
+    final customUrl = dotenv.env['WEB_REDIRECT_URL'];
+    if (customUrl != null && customUrl.isNotEmpty) { // meka naththam vitharai pahala eva wada karanne
+      return customUrl;
+    }
+    
+    // Default URLs based on environment
+     
+    if (isProduction) { // mevarible ture venne ,evn eka anuwa
+      return 'https://yourdomain.com/auth/callback';
+    } else if (isStaging) {
+      return 'https://staging.yourdomain.com/auth/callback';
+    } else {
+       return'${Uri.base.origin}/auth/callback';     
+    }
+  }
+
+  String get mobileRedirectUrl {
+    return dotenv.env['MOBILE_REDIRECT_URL'] ?? 'myapp://auth/callback';
+  }
+
+  String get supabaseOAuthCallbackUrl {
+    return '$supabaseUrl/auth/v1/callback';
+  }
+
+  // Get platform-specific redirect URL
+  String getRedirectUrl() {
+    if (kIsWeb) {
+      return webRedirectUrl;
+    } else {
+      return mobileRedirectUrl;
+    }
+  }
+
+  // Get all required redirect URLs for OAuth providers
+  List<String> getRequiredRedirectUrls() {
+    final urls = <String>{
+      // Supabase OAuth callback
+      supabaseOAuthCallbackUrl,
+      
+      // Web development URLs
+      'http://localhost:3000/auth/callback',
+      'http://localhost:5000/auth/callback',
+      'http://127.0.0.1:3000/auth/callback',
+      'http://127.0.0.1:5000/auth/callback',
+      
+      // Mobile URLs
+      mobileRedirectUrl,
+      'com.example.mysalon://auth/callback',
+    };
+    
+    // Add production URL if configured
+    if (isProduction && dotenv.env['PRODUCTION_REDIRECT_URL'] != null) {
+      urls.add(dotenv.env['PRODUCTION_REDIRECT_URL']!);
+    }
+    
+    return urls.toList();
+  }
+
   // ========== OPTIONAL CONFIGURATION ==========
   
   bool get debugMode {
-    return dotenv.env['DEBUG'] == 'true';
+    return dotenv.env['DEBUG'] == 'true' || isDevelopment;
   }
 
   String get logLevel {
-    return dotenv.env['LOG_LEVEL'] ?? 'info';
+    return dotenv.env['LOG_LEVEL'] ?? (debugMode ? 'debug' : 'info');
   }
 
   int get apiTimeout {
@@ -84,6 +186,44 @@ class EnvironmentManager {
 
   String? get websiteUrl {
     return dotenv.env['WEBSITE_URL'];
+  }
+
+  // ========== OAUTH PROVIDER MANAGEMENT ==========
+  
+  List<String> get enabledOAuthProviders {
+    final providers = <String>[];
+    
+    if (enableGoogleOAuth) providers.add('google');
+    if (enableFacebookOAuth) providers.add('facebook');
+    
+    return providers;
+  }
+
+  bool isOAuthProviderEnabled(String provider) {
+    switch (provider.toLowerCase()) {
+      case 'google':
+        return enableGoogleOAuth;
+      case 'facebook':
+        return enableFacebookOAuth;
+      default:
+        return false;
+    }
+  }
+
+  bool hasValidOAuthConfiguration(String provider) {
+    switch (provider.toLowerCase()) {
+      case 'google':
+        return enableGoogleOAuth && 
+               googleWebClientId.isNotEmpty && 
+               googleWebClientSecret.isNotEmpty &&
+               googleWebClientId.endsWith('.apps.googleusercontent.com');
+      case 'facebook':
+        return enableFacebookOAuth && 
+               facebookAppId.isNotEmpty && 
+               facebookClientToken.isNotEmpty;
+      default:
+        return false;
+    }
   }
 
   // ========== FEATURE FLAGS ==========
@@ -103,7 +243,7 @@ class EnvironmentManager {
   // ========== ENVIRONMENT CHECKS ==========
   
   bool get isProduction => environment == 'production';
-  bool get isStaging => environment == 'staging';
+  bool get isStaging => environment == 'staging'; // production ekata kalin state eka
   bool get isDevelopment => environment == 'development';
   bool get isTest => environment == 'test';
 
@@ -130,8 +270,30 @@ class EnvironmentManager {
       errors.add('SUPABASE_URL must be a valid Supabase URL');
     }
     
+    // Validate OAuth configurations if enabled
+    if (enableGoogleOAuth) {
+      if (googleWebClientId.isEmpty || googleWebClientId.contains('your-client-id')) {
+        errors.add('GOOGLE_WEB_CLIENT_ID is invalid');
+      }
+      if (googleWebClientSecret.isEmpty || googleWebClientSecret.contains('your-client-secret')) {
+        errors.add('GOOGLE_WEB_CLIENT_SECRET is invalid');
+      }
+      if (!googleWebClientId.endsWith('.apps.googleusercontent.com')) {
+        errors.add('GOOGLE_WEB_CLIENT_ID must end with .apps.googleusercontent.com');
+      }
+    }
+    
+    if (enableFacebookOAuth) {
+      if (facebookAppId.isEmpty || facebookAppId.contains('your-app-id')) {
+        errors.add('FACEBOOK_APP_ID is invalid');
+      }
+      if (facebookClientToken.isEmpty || facebookClientToken.contains('your-client-token')) {
+        errors.add('FACEBOOK_CLIENT_TOKEN is invalid');
+      }
+    }
+    
     if (errors.isNotEmpty) {
-      throw Exception('Environment validation failed: ${errors.join(', ')}');
+      throw Exception('Environment validation failed:\n${errors.join('\n')}');
     }
   }
 
@@ -160,58 +322,140 @@ class EnvironmentManager {
     return value.toLowerCase() == 'true';
   }
 
+  double? getOptionalDouble(String key) {
+    final value = dotenv.env[key];
+    return value != null ? double.tryParse(value) : null;
+  }
+
   // ========== DEBUG INFO ==========
   
   void printInfo() {
-    // print('\n' + '=' * 60);
-    // print('🌍 ENVIRONMENT CONFIGURATION');
-    // print('=' * 60);
+    if (!debugMode) return;
     
-    // // App Info
-    // print('📱 App: $appName v$appVersion');
-    // print('🌐 Environment: $environment');
-    // print('🔧 Debug Mode: $debugMode');
-    // print('📝 Log Level: $logLevel');
+    print('\n' + '=' * 60);
+    print('🌍 ENVIRONMENT CONFIGURATION');
+    print('=' * 60);
     
-    // // Supabase Info (partial for security)
-    // final url = supabaseUrl;
-    // final displayUrl = url.length > 40 ? '${url.substring(0, 40)}...' : url;
-    // print('🔗 Supabase URL: $displayUrl');
-    // print('🔑 Supabase Key: ${supabaseAnonKey.length} chars');
+    // App Info
+    print('📱 App: $appName v$appVersion');
+    print('🌐 Environment: $environment');
+    print('🔧 Debug Mode: $debugMode');
+    print('📝 Log Level: $logLevel');
     
-    // // Feature Flags
-    // print('\n🚀 Feature Flags:');
-    // print('   • Biometrics: ${enableBiometrics ? '✅' : '❌'}');
-    // print('   • Dark Mode: ${enableDarkMode ? '✅' : '❌'}');
-    // print('   • Notifications: ${enableNotifications ? '✅' : '❌'}');
-    // print('   • Analytics: ${enableAnalytics ? '✅' : '❌'}');
+    // Supabase Info (partial for security)
+    final url = supabaseUrl;
+    final displayUrl = url.length > 40 ? '${url.substring(0, 40)}...' : url;
+    print('🔗 Supabase URL: $displayUrl');
+    print('🔑 Supabase Key: ${supabaseAnonKey.length} chars');
+    print('🔗 Supabase OAuth URL: $supabaseOAuthCallbackUrl');
+    
+    // OAuth Configuration
+    print('\n🔐 OAuth Configuration:');
+    
+    if (enableGoogleOAuth) {
+      print('   • Google OAuth: ✅ Enabled');
+      final googleId = googleWebClientId;
+      final displayGoogleId = googleId.length > 30 ? '${googleId.substring(0, 30)}...' : googleId;
+      print('     - Client ID: $displayGoogleId');
+      print('     - Valid: ${googleWebClientId.endsWith('.apps.googleusercontent.com') ? '✅' : '❌'}');
+    } else {
+      print('   • Google OAuth: ❌ Disabled');
+    }
+    
+    if (enableFacebookOAuth) {
+      print('   • Facebook OAuth: ✅ Enabled');
+      final fbId = facebookAppId;
+      final displayFbId = fbId.length > 15 ? '${fbId.substring(0, 15)}...' : fbId;
+      print('     - App ID: $displayFbId');
+    } else {
+      print('   • Facebook OAuth: ❌ Disabled');
+    }
+    
+    // Redirect URLs
+    print('\n🔄 Redirect URLs:');
+    print('   • Web: $webRedirectUrl');
+    print('   • Mobile: $mobileRedirectUrl');
+    print('   • Supabase: $supabaseOAuthCallbackUrl');
+    
+    // Feature Flags
+    print('\n🚀 Feature Flags:');
+    print('   • Biometrics: ${enableBiometrics ? '✅' : '❌'}');
+    print('   • Dark Mode: ${enableDarkMode ? '✅' : '❌'}');
+    print('   • Notifications: ${enableNotifications ? '✅' : '❌'}');
+    print('   • Analytics: ${enableAnalytics ? '✅' : '❌'}');
     
     // Optional Config
     if (supportEmail != null) {
-      // print('📧 Support: $supportEmail');
+      print('📧 Support: $supportEmail');
     }
     if (websiteUrl != null) {
-      // print('🌐 Website: $websiteUrl');
+      print('🌐 Website: $websiteUrl');
     }
     
-    // Show all variables in debug mode
-    if (debugMode) {
-    //   print('\n📋 All Environment Variables:');
-    //   print('-' * 30);
-    //   dotenv.env.forEach((key, value) {
-    //     final isSecret = key.contains('KEY') || 
-    //                     key.contains('SECRET') || 
-    //                     key.contains('PASSWORD') ||
-    //                     key.contains('TOKEN');
-        
-    //     if (isSecret) {
-    //       print('$key: [HIDDEN - ${value.length} chars]');
-    //     } else {
-    //       print('$key: $value');
-    //     }
-    //   });
-    }
+    // Show non-secret variables in debug mode
+    print('\n📋 Environment Variables:');
+    print('-' * 30);
+    dotenv.env.forEach((key, value) {
+      final isSecret = key.contains('KEY') || 
+                      key.contains('SECRET') || 
+                      key.contains('PASSWORD') ||
+                      key.contains('TOKEN') ||
+                      key.contains('PRIVATE');
+      
+      if (!isSecret) {
+        print('$key: $value');
+      } else if (debugMode && key == 'ENVIRONMENT') {
+        print('$key: $value');
+      }
+    });
     
-    // print('=' * 60 + '\n');
+    print('=' * 60 + '\n');
+  }
+  
+  // ========== OAUTH VALIDATION METHODS ==========
+  
+  Map<String, dynamic> validateOAuthConfigurations() {
+    final results = <String, dynamic>{};
+    
+    // Google OAuth
+    results['google'] = {
+      'enabled': enableGoogleOAuth,
+      'clientId': googleWebClientId.isNotEmpty,
+      'clientSecret': googleWebClientSecret.isNotEmpty,
+      'validFormat': googleWebClientId.endsWith('.apps.googleusercontent.com'),
+      'redirectUrls': getRequiredRedirectUrls(),
+    };
+    
+    // Facebook OAuth
+    results['facebook'] = {
+      'enabled': enableFacebookOAuth,
+      'appId': facebookAppId.isNotEmpty,
+      'clientToken': facebookClientToken.isNotEmpty,
+      'redirectUrls': getRequiredRedirectUrls(),
+    };
+    
+    return results;
+  }
+  
+  // Get OAuth provider configuration
+  Map<String, dynamic>? getOAuthProviderConfig(String provider) {
+    switch (provider.toLowerCase()) {
+      case 'google':
+        return {
+          'clientId': googleWebClientId,
+          'clientSecret': googleWebClientSecret,
+          'androidClientId': googleAndroidClientId,
+          'iosClientId': googleIosClientId,
+          'enabled': enableGoogleOAuth,
+        };
+      case 'facebook':
+        return {
+          'appId': facebookAppId,
+          'clientToken': facebookClientToken,
+          'enabled': enableFacebookOAuth,
+        };
+      default:
+        return null;
+    }
   }
 }

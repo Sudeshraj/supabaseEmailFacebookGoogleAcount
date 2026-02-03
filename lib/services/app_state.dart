@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:developer' as developer;
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -21,6 +22,8 @@ class AppState extends ChangeNotifier {
   String? _errorMessage;
   DateTime? _lastUpdateTime;
   bool _rememberMeEnabled = false;
+  String? _loginProvider;
+  String? _currentEmail;
 
   // ====================
   // PUBLIC GETTERS
@@ -35,6 +38,8 @@ class AppState extends ChangeNotifier {
   String? get errorMessage => _errorMessage;
   DateTime? get lastUpdateTime => _lastUpdateTime;
   bool get rememberMeEnabled => _rememberMeEnabled;
+  String? get loginProvider => _loginProvider;
+  String? get currentEmail => _currentEmail;
 
   // ====================
   // PRIVATE SETTERS
@@ -102,11 +107,25 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  void _setLoginProvider(String? value) {
+    if (_loginProvider != value) {
+      _loginProvider = value;
+      notifyListeners();
+    }
+  }
+
+  void _setCurrentEmail(String? value) {
+    if (_currentEmail != value) {
+      _currentEmail = value;
+      notifyListeners();
+    }
+  }
+
   // ====================
   // PUBLIC METHODS
   // ====================
 
-  /// 🚀 Initialize app state (call from main.dart)
+  /// 🚀 Initialize app state
   Future<void> initializeApp() async {
     _setLoading(true);
     _setErrorMessage(null);
@@ -114,7 +133,6 @@ class AppState extends ChangeNotifier {
     developer.log('🔄 AppState: Initializing...', name: 'AppState');
 
     try {
-      // 1. Check local profiles and remember me settings
       final hasProfiles = await SessionManager.hasProfile();
       final csc = await SessionManager.shouldShowContinueScreen();
       final rememberMe = await SessionManager.isRememberMeEnabled();
@@ -123,15 +141,17 @@ class AppState extends ChangeNotifier {
       _setContinueScreen(csc);
       _setRememberMeEnabled(rememberMe);
 
-      // 2. Check authentication state
       await _checkAuthenticationState();
-
-      // 3. Update user profile data
       await _updateUserProfile();
 
       _lastUpdateTime = DateTime.now();
 
       developer.log('✅ AppState: Initialization successful', name: 'AppState');
+      
+      if (!_loggedIn && hasProfiles && rememberMe) {
+        await attemptAutoLogin();
+      }
+      
     } catch (e, stackTrace) {
       _setErrorMessage('Initialization failed');
       developer.log(
@@ -140,19 +160,15 @@ class AppState extends ChangeNotifier {
         error: e,
         stackTrace: stackTrace,
       );
-
-      // Fallback to safe state
       _resetToSafeState();
     } finally {
       _setLoading(false);
     }
   }
 
-  /// 🔄 Refresh app state (call after login/logout)
+  /// 🔄 Refresh app state
   Future<void> refreshState({bool silent = false}) async {
-    if (!silent) {
-      _setLoading(true);
-    }
+    if (!silent) _setLoading(true);
 
     try {
       await _checkAuthenticationState();
@@ -176,96 +192,79 @@ class AppState extends ChangeNotifier {
         stackTrace: stackTrace,
       );
 
-      if (!silent) {
-        _setErrorMessage('Failed to refresh state');
-      }
+      if (!silent) _setErrorMessage('Failed to refresh state');
     } finally {
-      if (!silent) {
-        _setLoading(false);
-      }
+      if (!silent) _setLoading(false);
     }
   }
 
-/// 🚪 Logout user (full logout) - PRESERVE AUTO-LOGIN CAPABILITY
-Future<void> logout() async {
-  _setLoading(true);
-
-  try {
-    final supabase = Supabase.instance.client;
-    final user = supabase.auth.currentUser;
-    final email = user?.email;
-
-    if (user != null && email != null) {
-      // Get current session before logout
-      final currentSession = supabase.auth.currentSession;
-      final refreshToken = currentSession?.refreshToken;
-      
-      // Check if remember me is enabled
-      final rememberMe = await SessionManager.isRememberMeEnabled();
-      
-      if (rememberMe && refreshToken != null) {
-        // Save refresh token BEFORE logout for future auto-login
-        await SessionManager.saveUserProfile(
-          email: email,
-          userId: user.id,
-          name: user.userMetadata?['full_name'] ?? email.split('@').first,
-          rememberMe: rememberMe,
-          refreshToken: refreshToken, // Save token before logout
-        );
-        print('✅ Refresh token saved before logout for auto-login');
-      }
-    }
-
-    // Sign out from Supabase (this clears the session)
-    await supabase.auth.signOut();
-    print('✅ User signed out from Supabase');
-
-    // Update app state
-    _setLoggedIn(false);
-    _setEmailVerified(false);
-    _setProfileCompleted(false);
-    _setRole(null);
-
-    developer.log('✅ User logged out (auto-login capability preserved)', name: 'AppState');
-    
-  } catch (e, stackTrace) {
-    developer.log(
-      '❌ Logout error: $e',
-      name: 'AppState',
-      error: e,
-      stackTrace: stackTrace,
-    );
-
-    _setErrorMessage('Logout failed');
-    rethrow;
-  } finally {
-    _setLoading(false);
-  }
-}
-
-  /// 🔄 Logout for continue screen (keep profile)
-  Future<void> logoutForContinue() async {
+  /// 🚪 Logout user
+  Future<void> logout() async {
     _setLoading(true);
 
     try {
-      // Use SessionManager's logoutForContinue method
-      await SessionManager.logoutForContinue();
+      final supabase = Supabase.instance.client;
+      final user = supabase.auth.currentUser;
+      final email = user?.email;
+
+      if (user != null && email != null) {
+        final currentSession = supabase.auth.currentSession;
+        final refreshToken = currentSession?.refreshToken;
+        final rememberMe = await SessionManager.isRememberMeEnabled();
+        
+        if (rememberMe && refreshToken != null) {
+          final provider = _loginProvider ?? 
+                         user.userMetadata?['provider']?.toString().toLowerCase() ?? 
+                         'email';
+          
+          await SessionManager.saveUserProfile(
+            email: email,
+            userId: user.id,
+            name: user.userMetadata?['full_name'] ?? email.split('@').first,
+            rememberMe: rememberMe,
+            refreshToken: refreshToken,
+            provider: provider,
+          );
+        }
+      }
+
+      await supabase.auth.signOut();
       
-      // Update app state
       _setLoggedIn(false);
       _setEmailVerified(false);
       _setProfileCompleted(false);
       _setRole(null);
+      _setCurrentEmail(null);
+      _setLoginProvider(null);
+
+      developer.log('✅ User logged out', name: 'AppState');
+      
+    } catch (e, stackTrace) {
+      developer.log('❌ Logout error: $e', name: 'AppState', error: e, stackTrace: stackTrace);
+      _setErrorMessage('Logout failed');
+      rethrow;
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  /// 🔄 Logout for continue screen
+  Future<void> logoutForContinue() async {
+    _setLoading(true);
+
+    try {
+      await SessionManager.logoutForContinue();
+      
+      _setLoggedIn(false);
+      _setEmailVerified(false);
+      _setProfileCompleted(false);
+      _setRole(null);
+      _setCurrentEmail(null);
+      _setLoginProvider(null);
 
       developer.log('✅ User logged out for continue screen', name: 'AppState');
     } catch (e, stackTrace) {
-      developer.log(
-        '❌ Logout for continue error: $e',
-        name: 'AppState',
-        error: e,
-        stackTrace: stackTrace,
-      );
-
+      developer.log('❌ Logout for continue error: $e', name: 'AppState', error: e, stackTrace: stackTrace);
       _setErrorMessage('Logout failed');
       rethrow;
     } finally {
@@ -279,15 +278,9 @@ Future<void> logout() async {
 
     switch (route) {
       case '/owner':
-        return _loggedIn &&
-            _emailVerified &&
-            _profileCompleted &&
-            _role == 'business';
+        return _loggedIn && _emailVerified && _profileCompleted && _role == 'business';
       case '/employee':
-        return _loggedIn &&
-            _emailVerified &&
-            _profileCompleted &&
-            _role == 'employee';
+        return _loggedIn && _emailVerified && _profileCompleted && _role == 'employee';
       case '/customer':
         return _loggedIn && _emailVerified && _profileCompleted;
       case '/reg':
@@ -319,6 +312,7 @@ Future<void> logout() async {
       'emailVerified': _emailVerified,
       'profileCompleted': _profileCompleted,
       'rememberMeEnabled': _rememberMeEnabled,
+      'loginProvider': _loginProvider,
       'lastUpdate': _lastUpdateTime?.toIso8601String(),
     };
   }
@@ -334,66 +328,112 @@ Future<void> logout() async {
     _setRememberMeEnabled(enabled);
   }
 
-  // app_state.dart තුළ
-Future<void> attemptAutoLogin() async {
-  try {
-    print('🔄 AppState: Attempting auto-login...');
-    
-    // Check if auto-login is enabled globally
-    final rememberMeEnabled = await SessionManager.isRememberMeEnabled();
-    if (!rememberMeEnabled) {
-      print('⚠️ AppState: Auto-login disabled globally');
-      return;
-    }
-    
-    // Get most recent user
-    final recentProfile = await SessionManager.getMostRecentProfile();
-    if (recentProfile == null || recentProfile.isEmpty) {
-      print('⚠️ AppState: No recent profile found');
-      return;
-    }
-    
-    final email = recentProfile['email'] as String?;
-    if (email == null || email.isEmpty) {
-      print('⚠️ AppState: No email in recent profile');
-      return;
-    }
-    
-    // Check consent (App Store requirement)
-    final termsAccepted = recentProfile['termsAcceptedAt'] != null;
-    final privacyAccepted = recentProfile['privacyAcceptedAt'] != null;
-    
-    if (!termsAccepted || !privacyAccepted) {
-      print('⚠️ AppState: User consent not recorded - requiring re-login');
-      return;
-    }
-    
-    print('🔍 AppState: Attempting auto-login for $email');
-    
-    // Attempt auto-login with retry logic
-    bool success = false;
-    
-    for (int attempt = 1; attempt <= 3; attempt++) {
-      print('   - Attempt $attempt of 3');
-      success = await SessionManager.tryAutoLogin(email);
+  /// 🔐 Attempt auto-login
+  Future<void> attemptAutoLogin() async {
+    try {
+      print('🔄 AppState: Attempting auto-login...');
       
-      if (success) {
-        print('✅ AppState: Auto-login successful for $email');
-        refreshState();
+      final rememberMeEnabled = await SessionManager.isRememberMeEnabled();
+      if (!rememberMeEnabled) {
+        print('⚠️ AppState: Auto-login disabled globally');
         return;
       }
       
-      if (attempt < 3) {
-        await Future.delayed(const Duration(milliseconds: 500));
+      final recentProfile = await SessionManager.getMostRecentProfile();
+      if (recentProfile == null || recentProfile.isEmpty) {
+        print('⚠️ AppState: No recent profile found');
+        return;
       }
+      
+      final email = recentProfile['email'] as String?;
+      final provider = recentProfile['provider'] as String?;
+      
+      if (email == null || email.isEmpty) {
+        print('⚠️ AppState: No email in recent profile');
+        return;
+      }
+      
+      final termsAccepted = recentProfile['termsAcceptedAt'] != null;
+      final privacyAccepted = recentProfile['privacyAcceptedAt'] != null;
+      
+      if (!termsAccepted || !privacyAccepted) {
+        print('⚠️ AppState: User consent not recorded - requiring re-login');
+        return;
+      }
+      
+      print('🔍 AppState: Attempting auto-login for $email (provider: $provider)');
+      
+      if (provider != null && provider != 'email' && provider != 'email_password') {
+        print('⚠️ AppState: OAuth provider ($provider) requires manual login');
+        _setContinueScreen(true);
+        return;
+      }
+      
+      final refreshToken = recentProfile['refresh_token'] as String?;
+      if (refreshToken == null || refreshToken.isEmpty) {
+        print('⚠️ AppState: No refresh token available');
+        return;
+      }
+      
+      bool success = false;
+      
+      for (int attempt = 1; attempt <= 3; attempt++) {
+        print('   - Attempt $attempt of 3');
+        success = await _tryAutoLoginWithToken(refreshToken);
+        
+        if (success) {
+          print('✅ AppState: Auto-login successful for $email');
+          await refreshState();
+          return;
+        }
+        
+        if (attempt < 3) {
+          await Future.delayed(const Duration(milliseconds: 500));
+        }
+      }
+      
+      print('❌ AppState: Auto-login failed after 3 attempts');
+      
+    } catch (e) {
+      print('❌ AppState: Error during auto-login: $e');
     }
-    
-    print('❌ AppState: Auto-login failed after 3 attempts');
-    
-  } catch (e) {
-    print('❌ AppState: Error during auto-login: $e');
   }
-}
+
+  /// 📝 Update user profile after login
+  Future<void> updateUserProfileAfterLogin({
+    required String email,
+    required String userId,
+    String? name,
+    String? photo,
+    bool rememberMe = false,
+    String? provider,
+    String? accessToken,
+    String? refreshToken,
+    DateTime? termsAcceptedAt,
+    DateTime? privacyAcceptedAt,
+  }) async {
+    try {
+      await SessionManager.saveUserProfile(
+        email: email,
+        userId: userId,
+        name: name ?? email.split('@').first,
+        photo: photo,
+        rememberMe: rememberMe,
+        provider: provider ?? 'email',
+        accessToken: accessToken,
+        refreshToken: refreshToken,
+        termsAcceptedAt: termsAcceptedAt,
+        privacyAcceptedAt: privacyAcceptedAt,
+      );
+      
+      _setCurrentEmail(email);
+      _setLoginProvider(provider ?? 'email');
+      
+      print('✅ Profile updated for $email (provider: $provider)');
+    } catch (e) {
+      print('❌ Error updating profile: $e');
+    }
+  }
 
   // ====================
   // PRIVATE METHODS
@@ -406,12 +446,17 @@ Future<void> attemptAutoLogin() async {
 
     _setLoggedIn(session != null);
     _setEmailVerified(user?.emailConfirmedAt != null);
+    
+    if (user?.email != null) {
+      _setCurrentEmail(user!.email);
+    }
   }
 
   Future<void> _updateUserProfile() async {
     if (!_loggedIn) {
       _setProfileCompleted(false);
       _setRole(null);
+      _setLoginProvider(null);
       return;
     }
 
@@ -419,49 +464,66 @@ Future<void> attemptAutoLogin() async {
       final supabase = Supabase.instance.client;
       final user = supabase.auth.currentUser!;
       
-      // Save user profile only if remember me is enabled
+      final provider = user.userMetadata?['provider']?.toString().toLowerCase() ?? 'email';
+      _setLoginProvider(provider);
+      _setCurrentEmail(user.email);
+      
       final rememberMe = await SessionManager.isRememberMeEnabled();
       if (user.email != null && rememberMe) {
+        final session = supabase.auth.currentSession;
+        
         await SessionManager.saveUserProfile(
           email: user.email!,
           userId: user.id,
-          name: user.email!.split('@').first,
+          name: user.userMetadata?['full_name'] ?? user.email!.split('@').first,
+          photo: user.userMetadata?['avatar_url'] ?? user.userMetadata?['picture'],
           rememberMe: rememberMe,
+          provider: provider,
+          accessToken: session?.accessToken,
+          refreshToken: session?.refreshToken,
         );
       }
 
-      if (_loggedIn) {
-        final profile = await supabase
-            .from('profiles')
-            .select('id, is_blocked, is_active')
-            .eq('id', user.id)
-            .maybeSingle();
+      final profile = await supabase
+          .from('profiles')
+          .select('id, is_blocked, is_active, role')
+          .eq('id', user.id)
+          .maybeSingle();
 
-        _setProfileCompleted(profile != null);
+      _setProfileCompleted(profile != null);
 
-        if (_profileCompleted) {
-          String? userRole = await SessionManager.getUserRole();
-          _setRole(userRole);
-
-          if (userRole == null) {
-            // Fetch from database
-            await initializeUserRole(user.id);
-            return;
-          }         
-        } else {
-          _setRole(null);
-          _setProfileCompleted(false);
+      if (_profileCompleted) {
+        if (profile?['is_blocked'] == true) {
+          _setErrorMessage('Account blocked');
+          await logout();
+          return;
         }
 
-        developer.log(
-          '✅ Profile updated: role=$_role, profileCompleted=$_profileCompleted',
-          name: 'AppState',
-        );
+        if (profile?['is_active'] == false) {
+          _setErrorMessage('Account inactive');
+          await logout();
+          return;
+        }
+
+        String? userRole = await SessionManager.getUserRole();
+        _setRole(userRole);
+
+        if (userRole == null) {
+          await initializeUserRole(user.id);
+        }         
+      } else {
+        _setRole(null);
       }
+
+      developer.log(
+        '✅ Profile updated: role=$_role, provider=$provider, profileCompleted=$_profileCompleted',
+        name: 'AppState',
+      );
     } catch (e) {
       developer.log('❌ Profile update error: $e', name: 'AppState');
       _setProfileCompleted(false);
       _setRole(null);
+      _setLoginProvider(null);
     }
   }
 
@@ -470,7 +532,6 @@ Future<void> attemptAutoLogin() async {
     String? userRole = await SessionManager.getUserRole();
 
     try {
-      // 1. Database අයන්න
       final supabase = Supabase.instance.client;
       final result = await supabase
           .from('profiles')
@@ -479,17 +540,11 @@ Future<void> attemptAutoLogin() async {
           .single()
           .timeout(const Duration(seconds: 5));
 
-      // 2. Role එක ගන්න
-      final roleName =
-          (result['roles'] as List)
-                  .cast<Map<String, dynamic>>()
-                  .firstOrNull?['name']
-              as String?;
+      final roleName = (result['roles'] as List)
+          .cast<Map<String, dynamic>>()
+          .firstOrNull?['name'] as String?;
 
-      // 3. AuthGate එකට දෙන්න
       userRole = AuthGate.pickRole(roleName ?? defaultRole);
-
-      // 4. Save කරන්න
       await SessionManager.saveUserRole(userRole);
 
       print('User role initialized: $userRole');
@@ -507,6 +562,72 @@ Future<void> attemptAutoLogin() async {
     }
   }
 
+  /// 🔐 Try to auto-login using refresh token
+  Future<bool> _tryAutoLoginWithToken(String refreshToken) async {
+    try {
+      final supabase = Supabase.instance.client;
+      
+      // METHOD 1: Try to restore session
+      try {
+        // First, try to see if we already have a valid session
+        final currentSession = supabase.auth.currentSession;
+        if (currentSession != null) {
+          print('✅ Already has a valid session');
+          return true;
+        }
+      } catch (e) {
+        print('No existing session: $e');
+      }
+      
+      // METHOD 2: Try to refresh the session
+      // Note: This might require the user to be recently logged in
+      // Refresh tokens have limited lifespan
+      try {
+        // You might need to store and use the entire session JSON
+        // This is a simplified approach
+        final response = await supabase.auth.refreshSession();
+        
+        if (response.session != null && response.user != null) {
+          print('✅ Session refreshed successfully');
+          return true;
+        }
+      } catch (e) {
+        print('Failed to refresh session: $e');
+      }
+      
+      // METHOD 3: Manual token refresh (advanced)
+      // This requires making direct API calls
+      try {
+        final url = '${supabase.auth.currentSession?.accessToken}';
+        // This is complex and depends on your Supabase setup
+        print('Manual token refresh would be complex to implement');
+      } catch (e) {
+        print('Manual refresh failed: $e');
+      }
+      
+      return false;
+      
+    } catch (e) {
+      print('❌ Auto-login with token failed: $e');
+      return false;
+    }
+  }
+
+  /// 🔄 Alternative: Use stored credentials to login
+  Future<bool> _tryAutoLoginWithCredentials(String email, String password) async {
+    // Note: You should NEVER store passwords in plain text
+    // This is just for demonstration
+    try {
+      // Check if you have stored encrypted credentials
+      // If yes, decrypt and use them
+      // This is more secure than storing refresh tokens
+      return false; // Implement based on your security requirements
+    } catch (e) {
+      print('❌ Auto-login with credentials failed: $e');
+      return false;
+    }
+  }
+
   void _resetToSafeState() {
     _setLoggedIn(false);
     _setEmailVerified(false);
@@ -514,10 +635,14 @@ Future<void> attemptAutoLogin() async {
     _setRole(null);
     _setHasLocalProfile(false);
     _setRememberMeEnabled(false);
+    _setLoginProvider(null);
+    _setCurrentEmail(null);
   }
 
+  /// 📧 Email verification error handler
   Future<void> emailVerifyerError() async {   
-    print('awa');
-    _setEmailVerified(false);   
+    print('📧 Email verification error handler called');
+    _setEmailVerified(false);
+    notifyListeners();
   }
 }
