@@ -7,6 +7,7 @@ import 'package:flutter_application_1/services/session_manager.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter/foundation.dart' show kDebugMode;
+import 'package:cached_network_image/cached_network_image.dart';
 
 final supabase = Supabase.instance.client;
 
@@ -29,6 +30,11 @@ class _ContinueScreenState extends State<ContinueScreen> {
     super.initState();
     _loadProfiles();
     _checkCompliance();
+    
+    // Debug profiles
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _debugProfiles();
+    });
   }
 
   Future<void> _loadProfiles() async {
@@ -63,6 +69,25 @@ class _ContinueScreenState extends State<ContinueScreen> {
     }
   }
 
+  Future<void> _debugProfiles() async {
+    if (kDebugMode) {
+      print('🔍 === DEBUG PROFILES ===');
+      for (int i = 0; i < profiles.length; i++) {
+        final profile = profiles[i];
+        final email = profile['email'] as String? ?? 'Unknown';
+        final photo = profile['photo'] as String?;
+        final hasPhoto = photo != null && photo.isNotEmpty;
+        
+        print('Profile #${i + 1}: $email');
+        print('   - Has photo: $hasPhoto');
+        print('   - Photo URL: ${hasPhoto ? photo : "None"}');
+        print('   - Provider: ${profile['provider']}');
+        print('   - All keys: ${profile.keys.toList()}');
+        print('---');
+      }
+    }
+  }
+
   Future<void> _checkCompliance() async {
     final rememberMe = await SessionManager.isRememberMeEnabled();
     if (!rememberMe) {
@@ -74,43 +99,34 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
   // ✅ Get provider icon
   Widget _getProviderIcon(String? provider) {
-    switch (provider) {
+    switch (provider?.toLowerCase()) {
       case 'google':
         return Container(
-          width: 24,
-          height: 24,
-          decoration: BoxDecoration(
-            color: Colors.white,
-            shape: BoxShape.circle,
-            border: Border.all(color: Colors.grey.shade300),
-          ),
-          child: Center(
-            child: Text(
-              'G',
-              style: TextStyle(
-                color: const Color(0xFFDB4437),
-                fontWeight: FontWeight.bold,
-                fontSize: 14,
-              ),
+          width: 32,
+          height: 32,
+          alignment: Alignment.center,
+          child: Text(
+            'G',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              fontFamily: 'Roboto',
             ),
           ),
         );
       case 'facebook':
         return Container(
-          width: 24,
-          height: 24,
-          decoration: const BoxDecoration(
-            color: Color(0xFF1877F2),
-            shape: BoxShape.circle,
-          ),
-          child: const Center(
-            child: Text(
-              'f',
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                fontSize: 16,
-              ),
+          width: 32,
+          height: 32,
+          alignment: Alignment.center,
+          child: Text(
+            'f',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              fontFamily: 'Roboto',
             ),
           ),
         );
@@ -124,7 +140,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
         return const Icon(
           Icons.email,
           color: Colors.white,
-          size: 20,
+          size: 18,
         );
     }
   }
@@ -505,7 +521,41 @@ class _ContinueScreenState extends State<ContinueScreen> {
     );
   }
 
-  // ✅ Build profile item with OAuth support
+  // ✅ Get provider color
+  Color _getProviderColor(String? provider) {
+    switch (provider?.toLowerCase()) {
+      case 'google':
+        return const Color(0xFFDB4437);
+      case 'facebook':
+        return const Color(0xFF1877F2);
+      case 'apple':
+        return Colors.black;
+      default:
+        return Colors.blueAccent;
+    }
+  }
+
+  // ✅ NEW: Format last login time
+  String _formatLastLogin(String? lastLogin) {
+    if (lastLogin == null || lastLogin.isEmpty) return 'Never';
+    
+    try {
+      final loginTime = DateTime.parse(lastLogin);
+      final now = DateTime.now();
+      final difference = now.difference(loginTime);
+      
+      if (difference.inMinutes < 1) return 'Just now';
+      if (difference.inMinutes < 60) return '${difference.inMinutes}m ago';
+      if (difference.inHours < 24) return '${difference.inHours}h ago';
+      if (difference.inDays < 7) return '${difference.inDays}d ago';
+      
+      return '${difference.inDays ~/ 7}w ago';
+    } catch (e) {
+      return 'Recently';
+    }
+  }
+
+  // ✅ FIXED: Build profile item with proper photo handling
   Widget _buildProfileItem(Map<String, dynamic> profile, int index) {
     final email = profile['email'] as String? ?? 'Unknown';
     final provider = profile['provider'] as String? ?? 'email';
@@ -513,6 +563,25 @@ class _ContinueScreenState extends State<ContinueScreen> {
     final isSelected = _selectedEmail == email;
     final isLoading = _oauthLoadingStates[email] == true;
     final rememberMe = profile['rememberMe'] == true;
+    
+    // ✅ FIXED: Get name properly
+    final name = profile['name'] as String? ?? email.split('@').first;
+    
+    // ✅ FIXED: Get photo properly - check all possibilities
+    String? photoUrl;
+    
+    // Try different possible photo keys
+    if (profile['photo'] != null && (profile['photo'] as String).isNotEmpty) {
+      photoUrl = profile['photo'] as String;
+    } else if (profile['avatar_url'] != null && (profile['avatar_url'] as String).isNotEmpty) {
+      photoUrl = profile['avatar_url'] as String;
+    } else if (profile['picture'] != null && (profile['picture'] as String).isNotEmpty) {
+      photoUrl = profile['picture'] as String;
+    } else if (profile['image'] != null && (profile['image'] as String).isNotEmpty) {
+      photoUrl = profile['image'] as String;
+    }
+    
+    final hasPhoto = photoUrl != null && photoUrl.isNotEmpty;
 
     return GestureDetector(
       onTap: isLoading ? null : () {
@@ -538,25 +607,56 @@ class _ContinueScreenState extends State<ContinueScreen> {
         child: ListTile(
           leading: Stack(
             children: [
-              // Profile image or icon
-              CircleAvatar(
-                backgroundColor: isOAuth
-                    ? _getProviderColor(provider)
-                    : Colors.blueAccent.withOpacity(0.2),
-                backgroundImage: !isOAuth &&
-                        profile['photo'] != null &&
-                        (profile['photo'] as String).isNotEmpty
-                    ? NetworkImage(profile['photo'] as String)
-                    : null,
-                child: isOAuth
-                    ? _getProviderIcon(provider)
-                    : (profile['photo'] == null ||
-                            (profile['photo'] as String).isEmpty)
-                        ? const Icon(
-                            Icons.person,
-                            color: Colors.white,
-                          )
-                        : null,
+              // ✅ FIXED: Profile image with proper loading and error handling
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: isOAuth
+                      ? _getProviderColor(provider)
+                      : Colors.blueAccent.withOpacity(0.2),
+                ),
+                child: hasPhoto
+                    ? ClipRRect(
+                        borderRadius: BorderRadius.circular(24),
+                        child: CachedNetworkImage(
+                          imageUrl: photoUrl!,
+                          width: 48,
+                          height: 48,
+                          fit: BoxFit.cover,
+                          placeholder: (context, url) => Center(
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: _getProviderColor(provider),
+                            ),
+                          ),
+                          errorWidget: (context, url, error) => Center(
+                            child: isOAuth
+                                ? _getProviderIcon(provider)
+                                : Text(
+                                    name[0].toUpperCase(),
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 16,
+                                    ),
+                                  ),
+                          ),
+                        ),
+                      )
+                    : Center(
+                        child: isOAuth
+                            ? _getProviderIcon(provider)
+                            : Text(
+                                name[0].toUpperCase(),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
+                                ),
+                              ),
+                      ),
               ),
               
               // Remember me badge
@@ -583,7 +683,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
             children: [
               Expanded(
                 child: Text(
-                  profile['name'] as String? ?? email.split('@').first,
+                  name,
                   style: const TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.w500,
@@ -603,7 +703,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                     ),
                   ),
                   child: Text(
-                    provider.toUpperCase(),
+                    provider!.toUpperCase(),
                     style: TextStyle(
                       color: _getProviderColor(provider),
                       fontSize: 10,
@@ -624,6 +724,16 @@ class _ContinueScreenState extends State<ContinueScreen> {
                 ),
                 overflow: TextOverflow.ellipsis,
               ),
+              const SizedBox(height: 2),
+              // Last login time
+              if (profile['lastLogin'] != null)
+                Text(
+                  'Last login: ${_formatLastLogin(profile['lastLogin'] as String?)}',
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.4),
+                    fontSize: 10,
+                  ),
+                ),
               if (isOAuth && isLoading)
                 const SizedBox(height: 4),
               if (isOAuth && isLoading)
@@ -690,21 +800,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
     );
   }
 
-  // ✅ Get provider color
-  Color _getProviderColor(String? provider) {
-    switch (provider) {
-      case 'google':
-        return const Color(0xFFDB4437);
-      case 'facebook':
-        return const Color(0xFF1877F2);
-      case 'apple':
-        return Colors.black;
-      default:
-        return Colors.blueAccent;
-    }
-  }
-
-  // ✅ Delete confirmation (keep existing)
+  // ✅ Delete confirmation
   Future<void> _showDeleteConfirmation(Map<String, dynamic> profile) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -760,7 +856,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
     }
   }
 
-  // ✅ Clear all profiles (keep existing)
+  // ✅ Clear all profiles
   Future<void> clearAllProfiles() async {
     if (profiles.isEmpty) return;
 
@@ -1187,7 +1283,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
   }
 }
 
-// ✅ Security Compliant Password Dialog (existing)
+// ✅ Security Compliant Password Dialog
 class SecurityCompliantPasswordDialog extends StatefulWidget {
   final String email;
   const SecurityCompliantPasswordDialog({super.key, required this.email});

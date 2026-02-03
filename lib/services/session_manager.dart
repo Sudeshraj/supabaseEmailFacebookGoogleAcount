@@ -40,7 +40,7 @@ class SessionManager {
   }
 
   // ✅ SECURE: Save user profile with App Store compliance
-  // SessionManager.dart - FIXED saveUserProfile method
+  // SessionManager.dart - FIXED photo handling
   static Future<void> saveUserProfile({
     required String email,
     required String userId,
@@ -50,7 +50,7 @@ class SessionManager {
     bool rememberMe = true,
     String? refreshToken,
     String? accessToken,
-    String? provider, // ✅ OAuth provider (google, facebook, apple)
+    String? provider,
     DateTime? termsAcceptedAt,
     DateTime? privacyAcceptedAt,
     bool? marketingConsent,
@@ -58,7 +58,7 @@ class SessionManager {
     String? appVersion,
   }) async {
     print('💾 Saving profile for: $email');
-    print('💾 Saving profile for..............: $provider');
+    print('📸 Photo URL provided: ${photo ?? "NULL"}');
 
     try {
       final profiles = await getProfiles();
@@ -69,63 +69,65 @@ class SessionManager {
 
       final now = DateTime.now();
 
-      // ✅ FIXED: Priority for provider selection
+      // ✅ FIXED: Better photo handling logic
+      String? finalPhoto;
+
+      if (photo != null && photo.isNotEmpty) {
+        // 1. NEW photo always takes priority
+        finalPhoto = photo;
+        print('✅ Using new photo URL: $finalPhoto');
+      } else if (existingProfile['photo'] != null &&
+          existingProfile['photo'].toString().isNotEmpty) {
+        // 2. Keep existing photo if available
+        finalPhoto = existingProfile['photo'].toString();
+        print('✅ Keeping existing photo: $finalPhoto');
+      } else {
+        // 3. No photo - set empty string (not null)
+        finalPhoto = '';
+        print('⚠️ No photo available for $email');
+      }
+
+      // ✅ FIXED: Provider selection with better photo detection
       String actualProvider;
 
       if (provider != null && provider.isNotEmpty && provider != 'email') {
-        // 1. New OAuth provider takes priority
         actualProvider = provider;
-        print('✅ Using new OAuth provider: $actualProvider');
-      } else if (existingProfile['provider'] != null &&
-          existingProfile['provider'] != 'email') {
-        // 2. Keep existing OAuth provider
-        actualProvider = existingProfile['provider'] as String;
-        print('✅ Keeping existing OAuth provider: $actualProvider');
-      } else {
-        // 3. Default to 'email' only if truly email/password
-        actualProvider = 'email';
-        print('✅ Defaulting to email provider');
-      }
-
-      // ✅ Additional check: If this looks like OAuth but provider is 'email', fix it
-      if (actualProvider == 'email') {
-        // Check OAuth indicators
-        final hasOAuthToken =
-            (refreshToken != null && refreshToken.isNotEmpty) ||
-            (accessToken != null && accessToken.isNotEmpty);
-        final hasOAuthPhoto = photo != null && photo.isNotEmpty;
-        final hasOAuthMetadata = name != null && name.contains(' ');
-
-        if (hasOAuthToken && (hasOAuthPhoto || hasOAuthMetadata)) {
-          // Try to detect provider from photo URL
-          if (photo?.contains('googleusercontent.com') ?? false) {
-            actualProvider = 'google';
-            print('🔄 Detected Google from photo URL');
-          } else if (photo?.contains('fbcdn.net') ?? false) {
-            actualProvider = 'facebook';
-            print('🔄 Detected Facebook from photo URL');
-          } else if (provider != null && provider != 'email') {
-            // Use the passed provider if available
-            actualProvider = provider!;
-            print('🔄 Using passed provider: $actualProvider');
-          }
+        print('✅ Using provided provider: $actualProvider');
+      } else if (finalPhoto != null && finalPhoto.isNotEmpty) {
+        // Try to detect provider from photo URL
+        if (finalPhoto.contains('googleusercontent.com')) {
+          actualProvider = 'google';
+          print('🔍 Detected Google from photo URL');
+        } else if (finalPhoto.contains('fbcdn.net') ||
+            finalPhoto.contains('facebook.com')) {
+          actualProvider = 'facebook';
+          print('🔍 Detected Facebook from photo URL');
+        } else if (finalPhoto.contains('apple.com') ||
+            finalPhoto.contains('appleid.apple.com')) {
+          actualProvider = 'apple';
+          print('🔍 Detected Apple from photo URL');
+        } else {
+          actualProvider = existingProfile['provider'] as String? ?? 'email';
         }
+      } else {
+        actualProvider = existingProfile['provider'] as String? ?? 'email';
       }
 
       final profileData = <String, dynamic>{
         'email': email,
         'userId': userId,
         'name': name ?? existingProfile['name'] ?? email.split('@').first,
-        'photo': photo ?? existingProfile['photo'] ?? '',
+
+        // ✅ CRITICAL FIX: Always set photo (even if empty)
+        'photo': finalPhoto ?? '',
+
         'roles': roles ?? existingProfile['roles'] ?? <String>[],
         'lastLogin': now.toIso8601String(),
         'createdAt': existingProfile['createdAt'] ?? now.toIso8601String(),
         'rememberMe': rememberMe,
-
-        // ✅ FIXED: Always use determined provider
         'provider': actualProvider,
 
-        // App Store compliance data
+        // App Store compliance
         'termsAcceptedAt':
             termsAcceptedAt?.toIso8601String() ??
             existingProfile['termsAcceptedAt'] ??
@@ -151,64 +153,74 @@ class SessionManager {
             ? (marketingConsentAt ?? now).toIso8601String()
             : '',
 
-        // App info
         'appVersion': appVersion ?? '1.0.0',
       };
 
+      // ✅ DEBUG: Log photo info
       if (kDebugMode) {
-        print('📊 Profile Data:');
+        print('📊 PROFILE DATA SAVED:');
         print('   - Email: $email');
+        print('   - Photo: ${profileData['photo']}');
+        print('   - Photo type: ${profileData['photo'].runtimeType}');
+        print('   - Photo empty: ${(profileData['photo'] as String).isEmpty}');
         print('   - Provider: $actualProvider');
-        print('   - Remember Me: $rememberMe');
-        print(
-          '   - Has refresh token: ${refreshToken != null && refreshToken.isNotEmpty}',
-        );
-        print(
-          '   - Has access token: ${accessToken != null && accessToken.isNotEmpty}',
-        );
       }
 
-      // Save logic...
+      // Save or update profile
       if (index == -1) {
         if (rememberMe) {
           profiles.add(profileData);
-          print('✅ New profile saved: $email (Provider: $actualProvider)');
+          print('✅ New profile saved with photo');
         }
       } else {
         if (rememberMe) {
           profiles[index] = profileData;
-          print('✅ Profile updated: $email (Provider: $actualProvider)');
+          print('✅ Profile updated with photo');
         } else {
           profiles.removeAt(index);
-          print('✅ Profile removed: $email');
+          print('✅ Profile removed');
         }
       }
 
       await _prefs.setString(_keyProfiles, jsonEncode(profiles));
 
       // Set current user
-      // if (rememberMe) {
-      //   await setCurrentUser(email);
-      //   await _prefs.setBool(_showContinueKey, true);
-      // }
-
       if (rememberMe) {
         await setCurrentUser(email);
         await _prefs.setBool(_showContinueKey, true);
-        print('✅ Continue screen enabled for: $email');
+        print('✅ Continue screen enabled');
       } else {
-        // If rememberMe is false, remove from current user
         final currentEmail = await getCurrentUserEmail();
         if (currentEmail == email) {
           await _prefs.remove(_currentUserKey);
           await _prefs.setBool(_showContinueKey, false);
-          print('✅ User removed from continue screen (rememberMe: false)');
+          print('✅ User removed from continue screen');
         }
       }
 
       await setRememberMe(rememberMe);
-    } catch (e) {
+
+      // ✅ Save tokens if available
+      if (refreshToken != null && refreshToken.isNotEmpty) {
+        await _secureStorage.write(
+          key: '${userId}_refresh_token',
+          value: refreshToken,
+          aOptions: _getAndroidOptions(),
+          iOptions: _getIOSOptions(),
+        );
+      }
+
+      if (accessToken != null && accessToken.isNotEmpty) {
+        await _secureStorage.write(
+          key: '${userId}_access_token',
+          value: accessToken,
+          aOptions: _getAndroidOptions(),
+          iOptions: _getIOSOptions(),
+        );
+      }
+    } catch (e, stackTrace) {
       print('❌ Error saving profile: $e');
+      print('Stack trace: $stackTrace');
       rethrow;
     }
   }
