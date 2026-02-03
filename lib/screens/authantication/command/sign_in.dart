@@ -14,6 +14,19 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../utils/simple_toast.dart';
 
+// ✅ NEW: Separate class for returning user check
+class _ReturningUserCheck {
+  final String? email;
+  final bool hasConsent;
+  final bool hasAutoLoginSetting;
+
+  _ReturningUserCheck({
+    this.email,
+    this.hasConsent = false,
+    this.hasAutoLoginSetting = false,
+  });
+}
+
 class SignInScreen extends StatefulWidget {
   final String? prefilledEmail;
   final bool showMessage;
@@ -128,7 +141,7 @@ class _SignInScreenState extends State<SignInScreen>
       });
     } catch (e) {
       print('❌ Error loading remember me: $e');
-      setState(() => _rememberMe = false); // Default to false for safety
+      setState(() => _rememberMe = false);
     }
   }
 
@@ -173,6 +186,62 @@ class _SignInScreenState extends State<SignInScreen>
       }
     } catch (e) {
       if (kDebugMode) print('❌ Error loading consent: $e');
+    }
+  }
+
+  // ✅ Check if consent is required for this user
+  Future<bool> _shouldShowConsent(String email) async {
+    try {
+      final profiles = await SessionManager.getProfiles();
+      final userProfile = profiles.firstWhere(
+        (p) => p['email'] == email,
+        orElse: () => {},
+      );
+
+      // Check if user has already given consent
+      if (userProfile.isNotEmpty) {
+        final termsAccepted = userProfile['termsAcceptedAt'] != null;
+        final privacyAccepted = userProfile['privacyAcceptedAt'] != null;
+        return !(termsAccepted && privacyAccepted);
+      }
+
+      // New user - requires consent
+      return true;
+    } catch (e) {
+      if (kDebugMode) print('❌ Error checking consent status: $e');
+      return true; // Safe default - show consent
+    }
+  }
+
+  // ✅ Check if user is returning
+  Future<_ReturningUserCheck> _checkIfReturningUser(String provider) async {
+    try {
+      final profiles = await SessionManager.getProfiles();
+      if (profiles.isEmpty) {
+        return _ReturningUserCheck();
+      }
+
+      // Find profile with matching provider
+      for (var profile in profiles) {
+        final profileProvider = profile['provider']?.toString().toLowerCase();
+        if (profileProvider == provider.toLowerCase()) {
+          final email = profile['email']?.toString();
+          final termsAccepted = profile['termsAcceptedAt'] != null;
+          final privacyAccepted = profile['privacyAcceptedAt'] != null;
+          final hasRememberMe = profile['rememberMe'] == true;
+
+          return _ReturningUserCheck(
+            email: email,
+            hasConsent: termsAccepted && privacyAccepted,
+            hasAutoLoginSetting: hasRememberMe,
+          );
+        }
+      }
+
+      return _ReturningUserCheck();
+    } catch (e) {
+      if (kDebugMode) print('❌ Error checking returning user: $e');
+      return _ReturningUserCheck();
     }
   }
 
@@ -246,112 +315,123 @@ class _SignInScreenState extends State<SignInScreen>
       const AndroidOptions(encryptedSharedPreferences: true);
 
   IOSOptions _getIOSOptions() => const IOSOptions(
-    accessibility: KeychainAccessibility.unlocked,
-    synchronizable: true,
-  );
-
-  // ✅ COMPLIANT: Save OAuth profile with user choice
-  // SignInScreen.dart - ENHANCED _saveOAuthProfile
-  Future<void> _saveOAuthProfile({
-    required User user,
-    required String provider, // ✅ This should be 'google', 'facebook', 'apple'
-    required bool rememberMe,
-    String? accessToken,
-    String? refreshToken,
-  }) async {
-    try {
-      final email = user.email!;
-      final now = DateTime.now();
-
-      if (kDebugMode) {
-        print('💾 SAVING OAUTH PROFILE:');
-        print('   - Email: $email');
-        print('   - Provider: $provider');
-        print('   - Remember Me: $rememberMe');
-      }
-
-      // ✅ Get OAuth provider from user metadata
-      final userMetadata = user.userMetadata ?? {};
-      final actualProvider = userMetadata['provider'] ?? provider;
-
-      if (kDebugMode) {
-        print('   - Actual provider from metadata: $actualProvider');
-        print('   - Full metadata: $userMetadata');
-      }
-
-      // ✅ Save tokens to secure storage
-      if (accessToken != null && accessToken.isNotEmpty) {
-        await _secureStorage.write(
-          key: '${user.id}_access_token',
-          value: accessToken,
-          aOptions: _getAndroidOptions(),
-          iOptions: _getIOSOptions(),
-        );
-      }
-
-      if (refreshToken != null && refreshToken.isNotEmpty) {
-        await _secureStorage.write(
-          key: '${user.id}_refresh_token',
-          value: refreshToken,
-          aOptions: _getAndroidOptions(),
-          iOptions: _getIOSOptions(),
-        );
-      }
-
-      // ✅ Get user info
-      final name =
-          userMetadata['full_name'] ??
-          userMetadata['name'] ??
-          email.split('@').first;
-
-      final photo =
-          userMetadata['avatar_url'] ??
-          userMetadata['picture'] ??
-          userMetadata['photo'] ??
-          '';
-
-      // ✅ CRITICAL: Save with correct provider
-      await SessionManager.saveUserProfile(
-        email: email,
-        userId: user.id,
-        name: name,
-        photo: photo,
-        rememberMe: rememberMe,
-        refreshToken: refreshToken,
-        accessToken: accessToken,
-        provider: actualProvider, // ✅ Use actual provider
-        termsAcceptedAt: _termsAcceptedAt ?? now,
-        privacyAcceptedAt: _privacyAcceptedAt ?? now,
-        marketingConsent: false,
-        marketingConsentAt: null,
+        accessibility: KeychainAccessibility.unlocked,
+        synchronizable: true,
       );
 
-      // Set as current user
-      await SessionManager.setCurrentUser(email);
-      await SessionManager.setRememberMe(rememberMe);
-      await appState.setRememberMe(rememberMe);
+  // ✅ COMPLIANT: Save OAuth profile with user choice
+// SignInScreen.dart - FIXED _saveOAuthProfile method
+Future<void> _saveOAuthProfile({
+  required User user,
+  required String provider,
+  required bool rememberMe,
+  String? accessToken,
+  String? refreshToken,
+}) async {
+  try {
+    final email = user.email!;
+    final now = DateTime.now();
 
-      if (rememberMe) {
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setBool('show_continue_screen', true);
-      }
-
-      if (kDebugMode) {
-        print('✅ OAuth Profile Saved Successfully');
-        print('   - Provider saved as: $actualProvider');
-      }
-
-      setState(() {
-        _consentGiven = true;
-        _termsAcceptedAt = _termsAcceptedAt ?? now;
-        _privacyAcceptedAt = _privacyAcceptedAt ?? now;
-      });
-    } catch (e) {
-      print('❌ Error saving OAuth profile: $e');
+    if (kDebugMode) {
+      print('💾 SAVING OAUTH PROFILE:');
+      print('   - Email: $email');
+      print('   - Provider: $provider');
+      print('   - Remember Me: $rememberMe');
     }
-  }
 
-  // ✅ COMPLIANT: Login with user consent
+    final userMetadata = user.userMetadata ?? {};
+    final actualProvider = userMetadata['provider'] ?? provider;
+
+    if (kDebugMode) {
+      print('   - Actual provider from metadata: $actualProvider');
+      print('   - Full metadata: $userMetadata');
+    }
+
+    // ✅ FIXED: Get photo URL properly
+    String? photoUrl;
+
+    // Try different possible keys for photo URL
+    if (userMetadata['avatar_url'] != null && 
+        userMetadata['avatar_url'].toString().isNotEmpty) {
+      photoUrl = userMetadata['avatar_url'].toString();
+      print('📸 Got avatar_url: $photoUrl');
+    } else if (userMetadata['picture'] != null && 
+        userMetadata['picture'].toString().isNotEmpty) {
+      photoUrl = userMetadata['picture'].toString();
+      print('📸 Got picture: $photoUrl');
+    } else if (userMetadata['photo'] != null && 
+        userMetadata['photo'].toString().isNotEmpty) {
+      photoUrl = userMetadata['photo'].toString();
+      print('📸 Got photo: $photoUrl');
+    } else if (userMetadata['image'] != null && 
+        userMetadata['image'].toString().isNotEmpty) {
+      photoUrl = userMetadata['image'].toString();
+      print('📸 Got image: $photoUrl');
+    } else {
+      photoUrl = '';
+      print('📸 No photo URL found in metadata');
+    }
+
+    // ✅ FIXED: Get name properly
+    String name = email.split('@').first; // Default
+
+    if (userMetadata['full_name'] != null && 
+        userMetadata['full_name'].toString().isNotEmpty) {
+      name = userMetadata['full_name'].toString();
+    } else if (userMetadata['name'] != null && 
+        userMetadata['name'].toString().isNotEmpty) {
+      name = userMetadata['name'].toString();
+    } else if (userMetadata['given_name'] != null && 
+        userMetadata['given_name'].toString().isNotEmpty) {
+      name = userMetadata['given_name'].toString();
+    }
+
+    // ✅ FIXED: Save with proper photo URL
+    await SessionManager.saveUserProfile(
+      email: email,
+      userId: user.id,
+      name: name,
+      photo: photoUrl, // ✅ Now properly passed
+      rememberMe: rememberMe,
+      refreshToken: refreshToken,
+      accessToken: accessToken,
+      provider: actualProvider,
+      termsAcceptedAt: _termsAcceptedAt ?? now,
+      privacyAcceptedAt: _privacyAcceptedAt ?? now,
+      marketingConsent: false,
+      marketingConsentAt: null,
+    );
+
+    await SessionManager.setCurrentUser(email);
+    await SessionManager.setRememberMe(rememberMe);
+    await appState.setRememberMe(rememberMe);
+
+    if (rememberMe) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('show_continue_screen', true);
+    }
+
+    if (kDebugMode) {
+      print('✅ OAuth Profile Saved Successfully');
+      print('   - Provider: $actualProvider');
+      print('   - Photo saved: ${photoUrl.isNotEmpty}');
+      if (photoUrl.isNotEmpty) {
+        print('   - Photo URL: $photoUrl');
+      }
+    }
+
+    setState(() {
+      _consentGiven = true;
+      _termsAcceptedAt = _termsAcceptedAt ?? now;
+      _privacyAcceptedAt = _privacyAcceptedAt ?? now;
+    });
+  } catch (e, stackTrace) {
+    print('❌ Error saving OAuth profile: $e');
+    print('Stack trace: $stackTrace');
+  }
+}
+
+  // ✅ COMPLIANT: Login with user consent (FIRST TIME ONLY)
   Future<void> loginUser() async {
     if (_loading) return;
 
@@ -369,13 +449,16 @@ class _SignInScreenState extends State<SignInScreen>
         }
       }
 
-      // Check consent
-      if (!_consentGiven) {
+      // ✅ Check if consent needed (FIRST TIME ONLY)
+      final needsConsent = await _shouldShowConsent(email);
+      if (needsConsent) {
         final accepted = await _showConsentDialog(requireExplicit: true);
         if (!accepted) {
           setState(() => _loading = false);
           return;
         }
+      } else {
+        if (kDebugMode) print('   - Skipping consent (already given)');
       }
 
       final response = await supabase.auth.signInWithPassword(
@@ -390,7 +473,6 @@ class _SignInScreenState extends State<SignInScreen>
         throw Exception("Login failed. Please try again.");
       }
 
-      // ✅ Save user's remember me choice
       await SessionManager.setRememberMe(_rememberMe);
       await appState.setRememberMe(_rememberMe);
 
@@ -399,16 +481,14 @@ class _SignInScreenState extends State<SignInScreen>
         print('   - Remember Me: $_rememberMe');
       }
 
-      // Save profile
       await _saveOAuthProfile(
         user: user,
         provider: 'email',
-        rememberMe: _rememberMe, // User's checkbox choice
+        rememberMe: _rememberMe,
         accessToken: session?.accessToken,
         refreshToken: session?.refreshToken,
       );
 
-      // Check user profile
       final profile = await supabase
           .from('profiles')
           .select('*')
@@ -472,7 +552,7 @@ class _SignInScreenState extends State<SignInScreen>
       );
 
       if (e.code == 'email_not_confirmed') {
-        final email = _emailController.text.trim();
+        _emailController.text.trim();
         final session = supabase.auth.currentSession;
 
         await _saveOAuthProfile(
@@ -534,7 +614,7 @@ class _SignInScreenState extends State<SignInScreen>
         : error.toString();
   }
 
-  // ✅ COMPLIANT: Google OAuth with user consent
+  // ✅ COMPLIANT: Google OAuth with FIRST-TIME consent only
   Future<void> _signInWithGoogle() async {
     if (_loadingGoogle) return;
 
@@ -545,7 +625,19 @@ class _SignInScreenState extends State<SignInScreen>
         print('🔵 Google OAuth starting...');
       }
 
-      // ✅ 1. Show OAuth consent dialog
+      // ✅ 1. Check if this is a returning user
+      final returningUser = await _checkIfReturningUser('google');
+      bool needsConsent = true;
+
+      if (returningUser.email != null) {
+        needsConsent = await _shouldShowConsent(returningUser.email!);
+        if (kDebugMode) {
+          print('   - Returning user: ${returningUser.email}');
+          print('   - Needs consent: $needsConsent');
+        }
+      }
+
+      // ✅ 2. Show OAuth consent dialog (always required by platforms)
       final oauthConsent = await _showOAuthConsentDialog(
         provider: 'Google',
         scopes: ['email', 'profile'],
@@ -555,21 +647,27 @@ class _SignInScreenState extends State<SignInScreen>
         return;
       }
 
-      // ✅ 2. Show App Store compliant consent dialog
-      if (!_consentGiven) {
+      // ✅ 3. Show App Store compliant consent dialog (FIRST TIME ONLY)
+      if (needsConsent) {
         final accepted = await _showConsentDialog(requireExplicit: true);
         if (!accepted) {
           setState(() => _loadingGoogle = false);
           return;
         }
+      } else {
+        if (kDebugMode) print('   - Skipping consent dialog (already given)');
       }
 
-      // ✅ 3. Ask user about auto-login preference
-      final userWantsAutoLogin = await _showAutoLoginConsentDialog(
-        provider: 'Google',
-      );
+      // ✅ 4. Ask user about auto-login preference (first time or when changing)
+      bool userWantsAutoLogin = _rememberMe;
 
-      // ✅ 4. Set based on user's choice
+      if (needsConsent || !returningUser.hasAutoLoginSetting) {
+        userWantsAutoLogin = await _showAutoLoginConsentDialog(
+          provider: 'Google',
+        );
+      }
+
+      // ✅ 5. Set based on user's choice
       setState(() => _rememberMe = userWantsAutoLogin);
       await SessionManager.setRememberMe(userWantsAutoLogin);
       await appState.setRememberMe(userWantsAutoLogin);
@@ -591,7 +689,7 @@ class _SignInScreenState extends State<SignInScreen>
             await _saveOAuthProfile(
               user: user,
               provider: 'google',
-              rememberMe: userWantsAutoLogin, // User's choice
+              rememberMe: userWantsAutoLogin,
               accessToken: session?.accessToken,
               refreshToken: session?.refreshToken,
             );
@@ -629,7 +727,7 @@ class _SignInScreenState extends State<SignInScreen>
     }
   }
 
-  // ✅ COMPLIANT: Facebook OAuth
+  // ✅ COMPLIANT: Facebook OAuth with FIRST-TIME consent only
   Future<void> _signInWithFacebook() async {
     if (_loadingFacebook) return;
 
@@ -645,7 +743,19 @@ class _SignInScreenState extends State<SignInScreen>
         print('🔵 Facebook OAuth starting...');
       }
 
-      // ✅ OAuth consent
+      // ✅ 1. Check if returning user
+      final returningUser = await _checkIfReturningUser('facebook');
+      bool needsConsent = true;
+
+      if (returningUser.email != null) {
+        needsConsent = await _shouldShowConsent(returningUser.email!);
+        if (kDebugMode) {
+          print('   - Returning user: ${returningUser.email}');
+          print('   - Needs consent: $needsConsent');
+        }
+      }
+
+      // ✅ 2. OAuth consent
       final oauthConsent = await _showOAuthConsentDialog(
         provider: 'Facebook',
         scopes: ['email'],
@@ -655,19 +765,25 @@ class _SignInScreenState extends State<SignInScreen>
         return;
       }
 
-      // ✅ App consent
-      if (!_consentGiven) {
+      // ✅ 3. App consent (FIRST TIME ONLY)
+      if (needsConsent) {
         final accepted = await _showConsentDialog(requireExplicit: true);
         if (!accepted) {
           setState(() => _loadingFacebook = false);
           return;
         }
+      } else {
+        if (kDebugMode) print('   - Skipping consent (already given)');
       }
 
-      // ✅ Auto-login consent
-      final userWantsAutoLogin = await _showAutoLoginConsentDialog(
-        provider: 'Facebook',
-      );
+      // ✅ 4. Auto-login consent
+      bool userWantsAutoLogin = _rememberMe;
+
+      if (needsConsent || !returningUser.hasAutoLoginSetting) {
+        userWantsAutoLogin = await _showAutoLoginConsentDialog(
+          provider: 'Facebook',
+        );
+      }
 
       setState(() => _rememberMe = userWantsAutoLogin);
       await SessionManager.setRememberMe(userWantsAutoLogin);
@@ -732,7 +848,19 @@ class _SignInScreenState extends State<SignInScreen>
         print('🔵 Apple Sign In starting...');
       }
 
-      // ✅ Apple requires explicit consent
+      // ✅ 1. Check if returning user
+      final returningUser = await _checkIfReturningUser('apple');
+      bool needsConsent = true;
+
+      if (returningUser.email != null) {
+        needsConsent = await _shouldShowConsent(returningUser.email!);
+        if (kDebugMode) {
+          print('   - Returning user: ${returningUser.email}');
+          print('   - Needs consent: $needsConsent');
+        }
+      }
+
+      // ✅ 2. Apple requires explicit OAuth consent
       final oauthConsent = await _showOAuthConsentDialog(
         provider: 'Apple',
         scopes: ['email', 'name'],
@@ -742,19 +870,26 @@ class _SignInScreenState extends State<SignInScreen>
         return;
       }
 
-      if (!_consentGiven) {
+      // ✅ 3. App consent (FIRST TIME ONLY)
+      if (needsConsent) {
         final accepted = await _showConsentDialog(requireExplicit: true);
         if (!accepted) {
           setState(() => _loadingApple = false);
           return;
         }
+      } else {
+        if (kDebugMode) print('   - Skipping consent (already given)');
       }
 
-      // ✅ Apple is strict about auto-login - default to false
-      final userWantsAutoLogin = await _showAutoLoginConsentDialog(
-        provider: 'Apple',
-        defaultToFalse: true, // Apple guidelines
-      );
+      // ✅ 4. Apple is strict about auto-login
+      bool userWantsAutoLogin = _rememberMe;
+
+      if (needsConsent || !returningUser.hasAutoLoginSetting) {
+        userWantsAutoLogin = await _showAutoLoginConsentDialog(
+          provider: 'Apple',
+          defaultToFalse: true,
+        );
+      }
 
       setState(() => _rememberMe = userWantsAutoLogin);
       await SessionManager.setRememberMe(userWantsAutoLogin);
@@ -885,7 +1020,7 @@ $provider OAuth Configuration Required:
     }
   }
 
-  // ✅ NEW: OAuth consent dialog (App Store compliance)
+  // ✅ OAuth consent dialog (App Store compliance)
   Future<bool> _showOAuthConsentDialog({
     required String provider,
     required List<String> scopes,
@@ -939,7 +1074,7 @@ $provider OAuth Configuration Required:
         false;
   }
 
-  // ✅ NEW: Auto-login consent dialog (App Store compliance)
+  // ✅ Auto-login consent dialog (App Store compliance)
   Future<bool> _showAutoLoginConsentDialog({
     required String provider,
     bool defaultToFalse = false,
@@ -997,8 +1132,18 @@ $provider OAuth Configuration Required:
         false;
   }
 
-  // ✅ Consent dialog
+  // ✅ UPDATED: Consent dialog with FIRST-TIME ONLY logic
   Future<bool> _showConsentDialog({bool requireExplicit = false}) async {
+    // Check if user has already given consent
+    final email = _emailController.text.trim();
+    if (email.isNotEmpty) {
+      final hasConsent = !(await _shouldShowConsent(email));
+      if (hasConsent) {
+        if (kDebugMode) print('   - User already gave consent, skipping dialog');
+        return true;
+      }
+    }
+
     bool? marketingConsent = false;
 
     final result = await showDialog<bool>(
@@ -1435,14 +1580,14 @@ $provider OAuth Configuration Required:
                                   suffixIcon: _emailController.text.isEmpty
                                       ? null
                                       : _isValidEmail
-                                      ? const Icon(
-                                          Icons.check_circle,
-                                          color: Color(0xFF4CAF50),
-                                        )
-                                      : const Icon(
-                                          Icons.error_outline,
-                                          color: Colors.redAccent,
-                                        ),
+                                          ? const Icon(
+                                              Icons.check_circle,
+                                              color: Color(0xFF4CAF50),
+                                            )
+                                          : const Icon(
+                                              Icons.error_outline,
+                                              color: Colors.redAccent,
+                                            ),
                                   errorText: _emailError,
                                 ),
                               ),
@@ -1522,8 +1667,8 @@ $provider OAuth Configuration Required:
                                 child: ElevatedButton(
                                   onPressed:
                                       (_isValid && !_loading && !_coolDown)
-                                      ? loginUser
-                                      : null,
+                                          ? loginUser
+                                          : null,
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: const Color(0xFF1877F3),
                                     disabledBackgroundColor: Colors.white12,
@@ -1540,20 +1685,20 @@ $provider OAuth Configuration Required:
                                           color: Colors.white,
                                         )
                                       : _coolDown
-                                      ? const Text(
-                                          'Please wait...',
-                                          style: TextStyle(
-                                            fontSize: 16,
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        )
-                                      : const Text(
-                                          'Log in',
-                                          style: TextStyle(
-                                            fontSize: 17,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
+                                          ? const Text(
+                                              'Please wait...',
+                                              style: TextStyle(
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            )
+                                          : const Text(
+                                              'Log in',
+                                              style: TextStyle(
+                                                fontSize: 17,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
                                 ),
                               ),
                               const SizedBox(height: 12),
@@ -1730,7 +1875,7 @@ $provider OAuth Configuration Required:
   }
 }
 
-// Social Login Button Widget
+// ✅ NEW: Separate file or top-level class for Social Login Button
 class _SocialLoginButton extends StatelessWidget {
   final Color color;
   final Color backgroundColor;
@@ -1779,10 +1924,10 @@ class _SocialLoginButton extends StatelessWidget {
                 child: isGoogle
                     ? _GoogleLetterIcon(color: color)
                     : isFacebook
-                    ? _FacebookLetterIcon(color: color)
-                    : isApple
-                    ? _AppleIcon(color: color)
-                    : const SizedBox(),
+                        ? _FacebookLetterIcon(color: color)
+                        : isApple
+                            ? _AppleIcon(color: color)
+                            : const SizedBox(),
               ),
       ),
     );
@@ -1794,19 +1939,19 @@ class _GoogleLetterIcon extends StatelessWidget {
   const _GoogleLetterIcon({required this.color});
   @override
   Widget build(BuildContext context) => Container(
-    width: 26,
-    height: 26,
-    alignment: Alignment.center,
-    child: Text(
-      'G',
-      style: TextStyle(
-        color: color,
-        fontSize: 20,
-        fontWeight: FontWeight.w500,
-        fontFamily: 'Roboto',
-      ),
-    ),
-  );
+        width: 26,
+        height: 26,
+        alignment: Alignment.center,
+        child: Text(
+          'G',
+          style: TextStyle(
+            color: color,
+            fontSize: 20,
+            fontWeight: FontWeight.w500,
+            fontFamily: 'Roboto',
+          ),
+        ),
+      );
 }
 
 class _FacebookLetterIcon extends StatelessWidget {
@@ -1814,19 +1959,19 @@ class _FacebookLetterIcon extends StatelessWidget {
   const _FacebookLetterIcon({required this.color});
   @override
   Widget build(BuildContext context) => Container(
-    width: 26,
-    height: 26,
-    alignment: Alignment.center,
-    child: Text(
-      'f',
-      style: TextStyle(
-        color: color,
-        fontSize: 24,
-        fontWeight: FontWeight.w500,
-        fontFamily: 'Roboto',
-      ),
-    ),
-  );
+        width: 26,
+        height: 26,
+        alignment: Alignment.center,
+        child: Text(
+          'f',
+          style: TextStyle(
+            color: color,
+            fontSize: 24,
+            fontWeight: FontWeight.w500,
+            fontFamily: 'Roboto',
+          ),
+        ),
+      );
 }
 
 class _AppleIcon extends StatelessWidget {
