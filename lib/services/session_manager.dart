@@ -1,290 +1,35 @@
 import 'dart:convert';
-import 'package:flutter_application_1/services/supabase_persistence.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
+import 'dart:io' show Platform;
 
 class SessionManager {
+  // Keys
   static const String _keyProfiles = 'saved_profiles';
   static const String _currentUserKey = 'current_user';
   static const String _showContinueKey = 'show_continue_screen';
   static const String _rememberMeKey = 'remember_me_enabled';
 
+  // Secure storage
+  static final FlutterSecureStorage _secureStorage =
+      const FlutterSecureStorage();
   static late SharedPreferences _prefs;
 
+  // Current consent version (update when TOS/Privacy changes)
+  static const String _currentConsentVersion = '2.1';
+
+  // Initialize
   static Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
-    print('✅ SessionManager initialized');
+    print('✅ SessionManager initialized with secure storage');
   }
 
-  // ✅ Save user profile WITH REMEMBER ME OPTION
-  // SessionManager.dart - Best solution
-  // SessionManager.dart - saveUserProfile method
-  static Future<void> saveUserProfile({
-    required String email,
-    required String userId,
-    String? name,
-    String? photo,
-    List<String>? roles,
-    bool rememberMe = true,
-    String? refreshToken,
-    DateTime? termsAcceptedAt,
-    DateTime? privacyAcceptedAt,
-    bool? marketingConsent,
-    DateTime? marketingConsentAt,
-  }) async {
-      print(rememberMe);
-    try {
-      final profiles = await getProfiles();
-      final index = profiles.indexWhere((p) => p['email'] == email);
-
-      final existingProfile = index != -1
-          ? profiles[index]
-          : <String, dynamic>{};
-
-      final profileData = <String, dynamic>{
-        'email': email,
-        'userId': userId,
-        'name': name ?? existingProfile['name'] ?? email.split('@').first,
-        'photo': photo ?? existingProfile['photo'] ?? '',
-        'roles': roles ?? existingProfile['roles'] ?? <String>[],
-        'lastLogin': DateTime.now().toIso8601String(),
-        'createdAt':
-            existingProfile['createdAt'] ?? DateTime.now().toIso8601String(),
-        'rememberMe': rememberMe,
-
-        // Session tokens
-        'refreshToken': refreshToken ?? existingProfile['refreshToken'] ?? '',
-        'tokenSavedAt': refreshToken != null
-            ? DateTime.now().toIso8601String()
-            : existingProfile['tokenSavedAt'] ?? '',
-
-        // Required consents (App Store compliance)
-        'termsAcceptedAt':
-            termsAcceptedAt?.toIso8601String() ??
-            existingProfile['termsAcceptedAt'] ??
-            DateTime.now().toIso8601String(),
-
-        'privacyAcceptedAt':
-            privacyAcceptedAt?.toIso8601String() ??
-            existingProfile['privacyAcceptedAt'] ??
-            DateTime.now().toIso8601String(),
-
-        'dataConsentGiven': true,
-
-        // Optional marketing consent
-        'marketingConsent':
-            marketingConsent ?? existingProfile['marketingConsent'] ?? false,
-        'marketingConsentAt':
-            marketingConsentAt?.toIso8601String() ??
-            existingProfile['marketingConsentAt'] ??
-            (marketingConsent == true ? DateTime.now().toIso8601String() : ''),
-
-        // App version info for debugging
-        'appVersion': '1.0.0',
-        'consentVersion': '2.0',
-      };
-
-      if (index == -1) {
-        if (rememberMe) {
-          profiles.add(profileData);
-        }
-        print('✅ New profile saved: $email');
-      } else {
-        print('✅ Profile updated: $email');
-        if (rememberMe) {
-          profiles[index] = profileData;
-        } else {
-          profiles.removeAt(index);
-        }
-      }
-
-      await _prefs.setString(_keyProfiles, jsonEncode(profiles));
-      await setCurrentUser(email);
-
-      if (rememberMe) {
-        await _prefs.setBool(_showContinueKey, true);
-        print('✅ Continue screen enabled for: $email');
-      }
-
-      await setRememberMe(rememberMe);
-
-      // ✅ Log consent for App Store compliance
-      print('📊 Consent Data Saved:');
-      print('   - Terms accepted: ${profileData['termsAcceptedAt']}');
-      print('   - Privacy accepted: ${profileData['privacyAcceptedAt']}');
-      print('   - Marketing consent: ${profileData['marketingConsent']}');
-      print('   - Marketing consent at: ${profileData['marketingConsentAt']}');
-    } catch (e) {
-      print('❌ Error saving profile: $e');
-      rethrow;
-    }
-  }
-
-  // ✅ WORKING AUTO-LOGIN WITH PERSISTENCE CHECK
-  // SessionManager.dart - tryAutoLogin method
-  static Future<bool> tryAutoLogin(String email) async {
-    try {
-      print('🚀 ===== ATTEMPTING AUTO-LOGIN =====');
-      print('📧 Target email: $email');
-
-      // 1. Check if profile exists
-      final profile = await getProfileByEmail(email);
-      if (profile == null || profile.isEmpty) {
-        print('⚠️ Auto-login failed: No profile found');
-        return false;
-      }
-
-      // 2. Check if profile has remember me enabled
-      final profileRememberMe = profile['rememberMe'] ?? true;
-
-      if (!profileRememberMe) {
-        print('⚠️ Auto-login failed: User opted out of auto-login');
-        return false;
-      }
-
-      // 3. Check if user has given consent (App Store/Play Store requirement)
-      final termsAccepted = profile['termsAcceptedAt'] != null;
-      final privacyAccepted = profile['privacyAcceptedAt'] != null;
-      final dataConsentGiven = profile['dataConsentGiven'] == true;
-
-      if (!termsAccepted || !privacyAccepted || !dataConsentGiven) {
-        print('⚠️ Auto-login failed: User consent not recorded');
-        return false;
-      }
-
-      // 4. DEBUG: Check session persistence
-      await SupabasePersistenceHelper.debugSessionPersistence();
-
-      // 5. Get Supabase instance
-      final supabase = Supabase.instance.client;
-
-      // Wait for Supabase to initialize
-      await Future.delayed(const Duration(milliseconds: 500));
-
-      // METHOD 1: Check current session
-      final currentSession = supabase.auth.currentSession;
-      final currentUser = supabase.auth.currentUser;
-
-      print('🔍 Current session check:');
-      print('   - Current user: ${currentUser?.email}');
-      print('   - Has session: ${currentSession != null}');
-
-      if (currentSession != null && currentUser?.email == email) {
-        // ✅ Check if session is valid
-        if (_isSessionValid(currentSession)) {
-          print('✅ AUTO-LOGIN SUCCESS: Valid session found!');
-          await updateLastLogin(email);
-          return true;
-        } else {
-          print('⚠️ Session expired, trying to refresh...');
-        }
-      }
-
-      // METHOD 2: Try using refresh token
-      final refreshToken = profile['refreshToken'] as String?;
-      if (refreshToken != null && refreshToken.isNotEmpty) {
-        print('🔄 Found refresh token, attempting to restore session...');
-
-        try {
-          // ✅ CORRECT METHOD: Use setSession with refresh token
-          await supabase.auth.setSession(refreshToken);
-
-          // Wait for session to be set
-          await Future.delayed(const Duration(milliseconds: 300));
-
-          final newSession = supabase.auth.currentSession;
-          final newUser = supabase.auth.currentUser;
-
-          if (newSession != null && newUser?.email == email) {
-            print('✅ Session restored using refresh token!');
-            await updateLastLogin(email);
-            return true;
-          } else {
-            print('❌ Refresh token did not restore session');
-          }
-        } catch (e) {
-          print('❌ Refresh token error: $e');
-        }
-      }
-
-      // METHOD 3: Try to get current user directly
-      print('🔄 Attempting to get current user...');
-
-      try {
-        // ✅ Get current user directly
-        final user = supabase.auth.currentUser;
-
-        if (user != null && user.email == email) {
-          print('✅ Found authenticated user!');
-          await updateLastLogin(email);
-          return true;
-        }
-
-        // Try one more time after delay
-        await Future.delayed(const Duration(milliseconds: 800));
-
-        final userAfterDelay = supabase.auth.currentUser;
-        if (userAfterDelay != null && userAfterDelay.email == email) {
-          print('✅ User found after delay!');
-          await updateLastLogin(email);
-          return true;
-        }
-      } catch (e) {
-        print('❌ Error getting current user: $e');
-      }
-
-      // METHOD 4: Check session storage directly
-      print('🔄 Checking persisted storage...');
-
-      final hasPersistedSession =
-          await SupabasePersistenceHelper.hasPersistedSession();
-      if (hasPersistedSession) {
-        print('📊 Persisted session found in storage');
-
-        // Try multiple checks with delays
-        for (int i = 0; i < 3; i++) {
-          await Future.delayed(const Duration(milliseconds: 500));
-
-          final user = supabase.auth.currentUser;
-          final session = supabase.auth.currentSession;
-
-          print(
-            '   - Check ${i + 1}: User=${user?.email}, Session=${session != null}',
-          );
-
-          if (session != null && user?.email == email) {
-            print('✅ Session restored from persistence!');
-            await updateLastLogin(email);
-            return true;
-          }
-        }
-      }
-
-      // 6. Auto-login failed
-      print('❌ AUTO-LOGIN FAILED: Could not restore session');
-
-      // Log debug info
-      print('📊 Debug Information:');
-      print('   - Profile exists: Yes');
-      print('   - Remember Me enabled: $profileRememberMe');
-      print('   - Terms accepted: $termsAccepted');
-      print('   - Privacy accepted: $privacyAccepted');
-      print(
-        '   - Refresh token available: ${refreshToken != null && refreshToken.isNotEmpty}',
-      );
-
-      return false;
-    } catch (e, stackTrace) {
-      print('❌ AUTO-LOGIN ERROR: $e');
-      print('Stack: $stackTrace');
-      return false;
-    }
-  }
-
-  // ✅ Helper method to check session validity
-  static bool _isSessionValid(Session? session) {
+  // ✅ PUBLIC: Session validation method
+  static bool isSessionValid(Session? session) {
     if (session == null) return false;
-    if (session.expiresAt == null) return true; // Assume valid if no expiry
+    if (session.expiresAt == null) return true;
 
     final expiryTime = DateTime.fromMillisecondsSinceEpoch(session.expiresAt!);
     final now = DateTime.now();
@@ -294,79 +39,308 @@ class SessionManager {
     return timeUntilExpiry.inMinutes > 2;
   }
 
-  // ✅ Check if we have valid stored token
-  static Future<bool> hasValidStoredToken(String email) async {
+  // ✅ SECURE: Save user profile with App Store compliance
+  // SessionManager.dart - FIXED saveUserProfile method
+  static Future<void> saveUserProfile({
+    required String email,
+    required String userId,
+    String? name,
+    String? photo,
+    List<String>? roles,
+    bool rememberMe = true,
+    String? refreshToken,
+    String? accessToken,
+    String? provider, // ✅ OAuth provider (google, facebook, apple)
+    DateTime? termsAcceptedAt,
+    DateTime? privacyAcceptedAt,
+    bool? marketingConsent,
+    DateTime? marketingConsentAt,
+    String? appVersion,
+  }) async {
+    print('💾 Saving profile for: $email');
+    print('💾 Saving profile for..............: $provider');
+
     try {
-      final supabase = Supabase.instance.client;
-      final session = supabase.auth.currentSession;
+      final profiles = await getProfiles();
+      final index = profiles.indexWhere((p) => p['email'] == email);
+      final existingProfile = index != -1
+          ? profiles[index]
+          : <String, dynamic>{};
 
-      if (session != null) {
-        // Check if session is still valid
-        if (session.expiresAt != null) {
-          final expiryTime = DateTime.fromMillisecondsSinceEpoch(
-            session.expiresAt!,
-          );
-          final now = DateTime.now();
-          final timeUntilExpiry = expiryTime.difference(now);
+      final now = DateTime.now();
 
-          // Session is valid if it expires in more than 5 minutes
-          if (timeUntilExpiry.inMinutes > 5) {
-            print(
-              '✅ Valid session found (expires in ${timeUntilExpiry.inMinutes} minutes)',
-            );
-            return true;
-          } else {
-            print(
-              '⚠️ Session expires soon (in ${timeUntilExpiry.inMinutes} minutes)',
-            );
+      // ✅ FIXED: Priority for provider selection
+      String actualProvider;
+
+      if (provider != null && provider.isNotEmpty && provider != 'email') {
+        // 1. New OAuth provider takes priority
+        actualProvider = provider;
+        print('✅ Using new OAuth provider: $actualProvider');
+      } else if (existingProfile['provider'] != null &&
+          existingProfile['provider'] != 'email') {
+        // 2. Keep existing OAuth provider
+        actualProvider = existingProfile['provider'] as String;
+        print('✅ Keeping existing OAuth provider: $actualProvider');
+      } else {
+        // 3. Default to 'email' only if truly email/password
+        actualProvider = 'email';
+        print('✅ Defaulting to email provider');
+      }
+
+      // ✅ Additional check: If this looks like OAuth but provider is 'email', fix it
+      if (actualProvider == 'email') {
+        // Check OAuth indicators
+        final hasOAuthToken =
+            (refreshToken != null && refreshToken.isNotEmpty) ||
+            (accessToken != null && accessToken.isNotEmpty);
+        final hasOAuthPhoto = photo != null && photo.isNotEmpty;
+        final hasOAuthMetadata = name != null && name.contains(' ');
+
+        if (hasOAuthToken && (hasOAuthPhoto || hasOAuthMetadata)) {
+          // Try to detect provider from photo URL
+          if (photo?.contains('googleusercontent.com') ?? false) {
+            actualProvider = 'google';
+            print('🔄 Detected Google from photo URL');
+          } else if (photo?.contains('fbcdn.net') ?? false) {
+            actualProvider = 'facebook';
+            print('🔄 Detected Facebook from photo URL');
+          } else if (provider != null && provider != 'email') {
+            // Use the passed provider if available
+            actualProvider = provider!;
+            print('🔄 Using passed provider: $actualProvider');
           }
         }
       }
 
-      // Check if we have any stored profiles for this email
-      final profile = await getProfileByEmail(email);
-      return profile != null && profile.isNotEmpty;
+      final profileData = <String, dynamic>{
+        'email': email,
+        'userId': userId,
+        'name': name ?? existingProfile['name'] ?? email.split('@').first,
+        'photo': photo ?? existingProfile['photo'] ?? '',
+        'roles': roles ?? existingProfile['roles'] ?? <String>[],
+        'lastLogin': now.toIso8601String(),
+        'createdAt': existingProfile['createdAt'] ?? now.toIso8601String(),
+        'rememberMe': rememberMe,
+
+        // ✅ FIXED: Always use determined provider
+        'provider': actualProvider,
+
+        // App Store compliance data
+        'termsAcceptedAt':
+            termsAcceptedAt?.toIso8601String() ??
+            existingProfile['termsAcceptedAt'] ??
+            now.toIso8601String(),
+
+        'privacyAcceptedAt':
+            privacyAcceptedAt?.toIso8601String() ??
+            existingProfile['privacyAcceptedAt'] ??
+            now.toIso8601String(),
+
+        'consentVersion': _currentConsentVersion,
+
+        // GDPR compliance
+        'dataConsentGiven': true,
+        'dataDeletionRequested': false,
+        'dataRetentionDate': now
+            .add(const Duration(days: 730))
+            .toIso8601String(),
+
+        // Marketing consent
+        'marketingConsent': marketingConsent ?? false,
+        'marketingConsentAt': marketingConsent == true
+            ? (marketingConsentAt ?? now).toIso8601String()
+            : '',
+
+        // App info
+        'appVersion': appVersion ?? '1.0.0',
+      };
+
+      if (kDebugMode) {
+        print('📊 Profile Data:');
+        print('   - Email: $email');
+        print('   - Provider: $actualProvider');
+        print('   - Remember Me: $rememberMe');
+        print(
+          '   - Has refresh token: ${refreshToken != null && refreshToken.isNotEmpty}',
+        );
+        print(
+          '   - Has access token: ${accessToken != null && accessToken.isNotEmpty}',
+        );
+      }
+
+      // Save logic...
+      if (index == -1) {
+        if (rememberMe) {
+          profiles.add(profileData);
+          print('✅ New profile saved: $email (Provider: $actualProvider)');
+        }
+      } else {
+        if (rememberMe) {
+          profiles[index] = profileData;
+          print('✅ Profile updated: $email (Provider: $actualProvider)');
+        } else {
+          profiles.removeAt(index);
+          print('✅ Profile removed: $email');
+        }
+      }
+
+      await _prefs.setString(_keyProfiles, jsonEncode(profiles));
+
+      // Set current user
+      // if (rememberMe) {
+      //   await setCurrentUser(email);
+      //   await _prefs.setBool(_showContinueKey, true);
+      // }
+
+      if (rememberMe) {
+        await setCurrentUser(email);
+        await _prefs.setBool(_showContinueKey, true);
+        print('✅ Continue screen enabled for: $email');
+      } else {
+        // If rememberMe is false, remove from current user
+        final currentEmail = await getCurrentUserEmail();
+        if (currentEmail == email) {
+          await _prefs.remove(_currentUserKey);
+          await _prefs.setBool(_showContinueKey, false);
+          print('✅ User removed from continue screen (rememberMe: false)');
+        }
+      }
+
+      await setRememberMe(rememberMe);
     } catch (e) {
-      print('❌ Error checking token validity: $e');
+      print('❌ Error saving profile: $e');
+      rethrow;
+    }
+  }
+
+  // ✅ ENHANCED: AUTO-LOGIN with compliance checks
+  static Future<bool> tryAutoLogin(String email) async {
+    try {
+      print('🚀 ===== ATTEMPTING AUTO-LOGIN (COMPLIANT) =====');
+      print('📧 Target email: $email');
+
+      // 1. Check if profile exists
+      final profile = await getProfileByEmail(email);
+      if (profile == null || profile.isEmpty) {
+        print('⚠️ Auto-login failed: No profile found');
+        return false;
+      }
+
+      // 2. Check if user has valid session
+      final supabase = Supabase.instance.client;
+      final currentUser = supabase.auth.currentUser;
+      final currentSession = supabase.auth.currentSession;
+
+      // Check if already logged in
+      if (currentUser?.email == email && currentSession != null) {
+        if (isSessionValid(currentSession)) {
+          print('✅ AUTO-LOGIN SUCCESS: Already logged in');
+          await updateLastLogin(email);
+          return true;
+        }
+      }
+
+      // 3. Get refresh token from secure storage
+      final userId = profile['userId'] as String?;
+      if (userId == null) {
+        print('⚠️ Auto-login failed: No user ID found');
+        return false;
+      }
+
+      final refreshToken = await _secureStorage.read(
+        key: '${userId}_refresh_token',
+      );
+
+      if (refreshToken == null || refreshToken.isEmpty) {
+        print('⚠️ Auto-login failed: No secure refresh token found');
+        return false;
+      }
+
+      // 4. Try to restore session with refresh token
+      try {
+        print('🔄 Attempting to restore session with secure token...');
+        await supabase.auth.setSession(refreshToken);
+
+        // Wait for session restoration
+        await Future.delayed(const Duration(milliseconds: 500));
+
+        final restoredUser = supabase.auth.currentUser;
+        final restoredSession = supabase.auth.currentSession;
+
+        if (restoredUser?.email == email && restoredSession != null) {
+          print('✅ AUTO-LOGIN SUCCESS: Session restored securely');
+          await updateLastLogin(email);
+
+          // Update tokens in secure storage
+          await _updateSecureTokens(userId, restoredSession);
+
+          return true;
+        }
+      } catch (e) {
+        print('❌ Secure session restoration failed: $e');
+        await _cleanupInvalidSession(userId, email);
+      }
+
+      print('❌ AUTO-LOGIN FAILED: Could not restore session');
+      return false;
+    } catch (e, stackTrace) {
+      print('❌ AUTO-LOGIN ERROR: $e');
+      print('Stack: $stackTrace');
       return false;
     }
   }
 
-  // ✅ Save refresh token for auto-login
-  static Future<void> saveRefreshToken(
-    String email,
-    String? refreshToken,
-  ) async {
+  // ✅ NEW: Update marketing consent (SignInScreen needs this)
+  static Future<void> updateMarketingConsent({
+    required String email,
+    required bool consent,
+    required DateTime consentedAt,
+  }) async {
     try {
-      if (refreshToken != null && refreshToken.isNotEmpty) {
-        final profiles = await getProfiles();
-        final index = profiles.indexWhere((p) => p['email'] == email);
+      final profiles = await getProfiles();
+      final index = profiles.indexWhere((p) => p['email'] == email);
 
-        if (index != -1) {
-          profiles[index]['refreshToken'] = refreshToken;
-          profiles[index]['tokenSavedAt'] = DateTime.now().toIso8601String();
-          await _prefs.setString(_keyProfiles, jsonEncode(profiles));
-          print('✅ Refresh token saved for: $email');
-        }
+      if (index != -1) {
+        profiles[index]['marketingConsent'] = consent;
+        profiles[index]['marketingConsentAt'] = consent
+            ? consentedAt.toIso8601String()
+            : '';
+
+        await _prefs.setString(_keyProfiles, jsonEncode(profiles));
+        print('✅ Marketing consent updated for: $email');
       }
     } catch (e) {
-      print('❌ Error saving refresh token: $e');
+      print('❌ Error updating marketing consent: $e');
+      rethrow;
     }
   }
 
-  // ✅ Get stored refresh token
-  static Future<String?> getRefreshToken(String email) async {
+  // ✅ NEW: Update consent timestamps (SignInScreen needs this)
+  static Future<void> updateConsentTimestamps({
+    required String email,
+    required DateTime termsAcceptedAt,
+    required DateTime privacyAcceptedAt,
+  }) async {
     try {
-      final profile = await getProfileByEmail(email);
-      return profile?['refreshToken'] as String?;
+      final profiles = await getProfiles();
+      final index = profiles.indexWhere((p) => p['email'] == email);
+
+      if (index != -1) {
+        profiles[index]['termsAcceptedAt'] = termsAcceptedAt.toIso8601String();
+        profiles[index]['privacyAcceptedAt'] = privacyAcceptedAt
+            .toIso8601String();
+        profiles[index]['consentVersion'] = _currentConsentVersion;
+
+        await _prefs.setString(_keyProfiles, jsonEncode(profiles));
+        print('✅ Consent timestamps updated for: $email');
+      }
     } catch (e) {
-      print('❌ Error getting refresh token: $e');
-      return null;
+      print('❌ Error updating consent timestamps: $e');
+      rethrow;
     }
   }
 
-  // ✅ LOGOUT FOR CONTINUE SCREEN (Compliant version)
-  // ✅ ENHANCED LOGOUT FOR CONTINUE SCREEN - PRESERVE AUTO-LOGIN
+  // ✅ COMPLIANT LOGOUT FOR CONTINUE SCREEN
   static Future<void> logoutForContinue() async {
     try {
       final supabase = Supabase.instance.client;
@@ -375,18 +349,18 @@ class SessionManager {
       final rememberMe = await isRememberMeEnabled();
 
       if (user != null && email != null && email == user.email) {
-        // Get current session before logout
         final currentSession = supabase.auth.currentSession;
-        final refreshToken = currentSession?.refreshToken;
 
-        if (rememberMe && refreshToken != null) {
-          // Save refresh token BEFORE logout
+        if (rememberMe && currentSession != null) {
+          // Save refresh token before logout
           await saveUserProfile(
             email: email,
             userId: user.id,
             name: user.userMetadata?['full_name'] ?? email.split('@').first,
             rememberMe: rememberMe,
-            refreshToken: refreshToken, // Save token for future auto-login
+            refreshToken: currentSession.refreshToken,
+            accessToken: currentSession.accessToken,
+            provider: await _getUserProvider(email),
           );
           print('✅ Refresh token saved before continue logout');
         }
@@ -396,6 +370,7 @@ class SessionManager {
       await supabase.auth.signOut();
 
       // Save current user for continue screen if remember me is enabled
+      print('✅ User prepared for continue screen (Remember Me: $rememberMe)');
       if (email != null && rememberMe) {
         await setCurrentUser(email);
         await _prefs.setBool(_showContinueKey, true);
@@ -410,7 +385,56 @@ class SessionManager {
     }
   }
 
-  // Get all saved profiles
+  // ✅ SECURE: Save refresh token
+  static Future<void> saveRefreshToken(
+    String email,
+    String? refreshToken,
+  ) async {
+    try {
+      final profile = await getProfileByEmail(email);
+      final userId = profile?['userId'] as String?;
+
+      if (userId != null && refreshToken != null && refreshToken.isNotEmpty) {
+        await _secureStorage.write(
+          key: '${userId}_refresh_token',
+          value: refreshToken,
+          aOptions: _getAndroidOptions(),
+          iOptions: _getIOSOptions(),
+        );
+
+        // Update timestamp in profile
+        final profiles = await getProfiles();
+        final index = profiles.indexWhere((p) => p['email'] == email);
+
+        if (index != -1) {
+          profiles[index]['tokenSavedAt'] = DateTime.now().toIso8601String();
+          await _prefs.setString(_keyProfiles, jsonEncode(profiles));
+        }
+
+        print('✅ Refresh token saved securely for: $email');
+      }
+    } catch (e) {
+      print('❌ Error saving refresh token: $e');
+    }
+  }
+
+  // ✅ SECURE: Get refresh token
+  static Future<String?> getRefreshToken(String email) async {
+    try {
+      final profile = await getProfileByEmail(email);
+      final userId = profile?['userId'] as String?;
+
+      if (userId != null) {
+        return await _secureStorage.read(key: '${userId}_refresh_token');
+      }
+      return null;
+    } catch (e) {
+      print('❌ Error getting refresh token: $e');
+      return null;
+    }
+  }
+
+  // ✅ Get all saved profiles
   static Future<List<Map<String, dynamic>>> getProfiles() async {
     try {
       final jsonString = _prefs.getString(_keyProfiles) ?? '[]';
@@ -429,17 +453,17 @@ class SessionManager {
     }
   }
 
-  // Set current user
+  // ✅ Set current user
   static Future<void> setCurrentUser(String email) async {
     await _prefs.setString(_currentUserKey, email);
   }
 
-  // Get current user email
+  // ✅ Get current user email
   static Future<String?> getCurrentUserEmail() async {
     return _prefs.getString(_currentUserKey);
   }
 
-  // Save user role
+  // ✅ Save user role
   static Future<void> saveUserRole(String role) async {
     try {
       final email = await getCurrentUserEmail();
@@ -464,7 +488,7 @@ class SessionManager {
     }
   }
 
-  // Get user role
+  // ✅ Get user role
   static Future<String?> getUserRole() async {
     final email = await getCurrentUserEmail();
     if (email == null) return null;
@@ -476,14 +500,14 @@ class SessionManager {
     return roles.isNotEmpty ? roles.first : null;
   }
 
-  // Check if has any profiles
+  // ✅ Check if has any profiles
   static Future<bool> hasProfile() async {
     final profiles = await getProfiles();
     print('🔍 Checking profiles, count: ${profiles.length}');
     return profiles.isNotEmpty;
   }
 
-  // ✅ PUBLIC METHOD: Update last login time
+  // ✅ Update last login time
   static Future<void> updateLastLogin(String email) async {
     try {
       final profiles = await getProfiles();
@@ -499,7 +523,7 @@ class SessionManager {
     }
   }
 
-  // Remove a profile
+  // ✅ Remove a profile
   static Future<void> removeProfile(String email) async {
     try {
       final profiles = await getProfiles();
@@ -515,7 +539,15 @@ class SessionManager {
           await _prefs.remove(_currentUserKey);
         }
 
-        print('✅ Profile removed: $email');
+        // Clean up secure storage
+        final profile = await getProfileByEmail(email);
+        final userId = profile?['userId'] as String?;
+        if (userId != null) {
+          await _secureStorage.delete(key: '${userId}_refresh_token');
+          await _secureStorage.delete(key: '${userId}_access_token');
+        }
+
+        print('✅ Profile and secure data removed: $email');
       }
     } catch (e) {
       print('❌ Error removing profile: $e');
@@ -532,20 +564,20 @@ class SessionManager {
     return _prefs.getBool(_rememberMeKey) ?? false;
   }
 
-  // Check if should show continue screen
+  // ✅ Check if should show continue screen
   static Future<bool> shouldShowContinueScreen() async {
     final show = _prefs.getBool(_showContinueKey) ?? false;
     final rememberMe = await isRememberMeEnabled();
     return show && rememberMe;
   }
 
-  // Clear continue screen flag
+  // ✅ Clear continue screen flag
   static Future<void> clearContinueScreen() async {
     await _prefs.setBool(_showContinueKey, false);
     print('✅ Continue screen flag cleared');
   }
 
-  // Get profile by email
+  // ✅ Get profile by email
   static Future<Map<String, dynamic>?> getProfileByEmail(String email) async {
     try {
       final profiles = await getProfiles();
@@ -559,7 +591,7 @@ class SessionManager {
     }
   }
 
-  // Get most recent profile
+  // ✅ Get most recent profile
   static Future<Map<String, dynamic>?> getMostRecentProfile() async {
     try {
       final profiles = await getProfiles();
@@ -578,14 +610,18 @@ class SessionManager {
     }
   }
 
-  // Clear all sessions and profiles
+  // ✅ Clear all sessions and profiles
   static Future<void> clearAll() async {
     try {
       await _prefs.remove(_keyProfiles);
       await _prefs.remove(_currentUserKey);
       await _prefs.remove(_showContinueKey);
       await _prefs.remove(_rememberMeKey);
-      print('✅ All session data cleared');
+
+      // Clear secure storage
+      await _secureStorage.deleteAll();
+
+      print('✅ All session data cleared (including secure storage)');
     } catch (e) {
       print('❌ Error clearing all data: $e');
     }
@@ -610,7 +646,7 @@ class SessionManager {
     }
   }
 
-  // ✅ Get last added user (original functionality)
+  // ✅ Get last added user
   static Future<Map<String, dynamic>?> getLastUser() async {
     try {
       final profiles = await getProfiles();
@@ -622,7 +658,7 @@ class SessionManager {
     }
   }
 
-  // Check if user has valid Supabase session
+  // ✅ Check if user has valid Supabase session
   static Future<bool> hasValidSupabaseSession(String email) async {
     try {
       final supabase = Supabase.instance.client;
@@ -646,45 +682,12 @@ class SessionManager {
     }
   }
 
-  // SessionManager.dart - Add these helper methods
+  // ✅ Restore session from storage
   static Future<bool> restoreSessionFromStorage(String email) async {
-    try {
-      final supabase = Supabase.instance.client;
-
-      // Try to get the current session
-      final currentSession = supabase.auth.currentSession;
-      final currentUser = supabase.auth.currentUser;
-
-      // If already logged in with correct user, return success
-      if (currentSession != null && currentUser?.email == email) {
-        return true;
-      }
-
-      // Try to get profile and refresh token
-      final profile = await getProfileByEmail(email);
-      if (profile == null) return false;
-
-      final refreshToken = profile['refreshToken'] as String?;
-      if (refreshToken == null || refreshToken.isEmpty) {
-        return false;
-      }
-
-      // Try to set session with refresh token
-      await supabase.auth.setSession(refreshToken);
-
-      // Wait and check
-      await Future.delayed(const Duration(milliseconds: 800));
-
-      final newSession = supabase.auth.currentSession;
-      final newUser = supabase.auth.currentUser;
-
-      return newSession != null && newUser?.email == email;
-    } catch (e) {
-      print('❌ Error restoring session: $e');
-      return false;
-    }
+    return tryAutoLogin(email);
   }
 
+  // ✅ Validate and refresh session
   static Future<void> validateAndRefreshSession() async {
     try {
       final supabase = Supabase.instance.client;
@@ -695,7 +698,6 @@ class SessionManager {
         return;
       }
 
-      // Check if session is about to expire (less than 5 minutes)
       if (session.expiresAt != null) {
         final expiryTime = DateTime.fromMillisecondsSinceEpoch(
           session.expiresAt!,
@@ -709,8 +711,6 @@ class SessionManager {
           );
 
           try {
-            // Supabase automatically refreshes tokens when needed
-            // We just need to trigger a check
             await supabase.auth.getUser();
             print('✅ Session refresh triggered');
           } catch (e) {
@@ -720,6 +720,247 @@ class SessionManager {
       }
     } catch (e) {
       print('❌ Error validating session: $e');
+    }
+  }
+
+  // ✅ PRIVATE HELPER METHODS
+
+  static Future<void> _updateSecureTokens(
+    String userId,
+    Session session,
+  ) async {
+    try {
+      await _secureStorage.write(
+        key: '${userId}_refresh_token',
+        value: session.refreshToken,
+        aOptions: _getAndroidOptions(),
+        iOptions: _getIOSOptions(),
+      );
+
+      await _secureStorage.write(
+        key: '${userId}_access_token',
+        value: session.accessToken,
+        aOptions: _getAndroidOptions(),
+        iOptions: _getIOSOptions(),
+      );
+
+      print('✅ Secure tokens updated');
+    } catch (e) {
+      print('❌ Error updating secure tokens: $e');
+    }
+  }
+
+  static Future<void> _cleanupInvalidSession(
+    String userId,
+    String email,
+  ) async {
+    try {
+      print('🧹 Cleaning up invalid session for: $email');
+
+      await _secureStorage.delete(key: '${userId}_refresh_token');
+      await _secureStorage.delete(key: '${userId}_access_token');
+
+      // Update profile to remove token references
+      final profiles = await getProfiles();
+      final index = profiles.indexWhere((p) => p['email'] == email);
+
+      if (index != -1) {
+        profiles[index]['tokenSavedAt'] = '';
+        await _prefs.setString(_keyProfiles, jsonEncode(profiles));
+      }
+
+      print('✅ Invalid session cleaned up');
+    } catch (e) {
+      print('❌ Error cleaning up session: $e');
+    }
+  }
+
+  static Future<String?> _getUserProvider(String email) async {
+    final profile = await getProfileByEmail(email);
+    return profile?['provider'] as String?;
+  }
+
+  static String _getPlatformInfo() {
+    try {
+      if (Platform.isAndroid) return 'Android';
+      if (Platform.isIOS) return 'iOS';
+      if (Platform.isWindows) return 'Windows';
+      if (Platform.isMacOS) return 'macOS';
+      if (Platform.isLinux) return 'Linux';
+      return 'Unknown';
+    } catch (e) {
+      return 'Flutter';
+    }
+  }
+
+  static AndroidOptions _getAndroidOptions() =>
+      const AndroidOptions(encryptedSharedPreferences: true);
+
+  static IOSOptions _getIOSOptions() => const IOSOptions(
+    accessibility: KeychainAccessibility.unlocked,
+    synchronizable: true,
+  );
+
+  // ✅ NEW: GDPR Data Export
+  static Future<Map<String, dynamic>> exportUserData(String email) async {
+    try {
+      final profile = await getProfileByEmail(email);
+      if (profile == null) throw Exception('User not found');
+
+      // Remove sensitive information
+      final exportData = Map<String, dynamic>.from(profile);
+
+      // Exclude tokens and sensitive data
+      exportData.remove('refreshToken');
+      exportData.remove('tokenSavedAt');
+
+      // Add export metadata
+      exportData['exportedAt'] = DateTime.now().toIso8601String();
+      exportData['exportFormat'] = 'JSON';
+      exportData['dataTypesIncluded'] = [
+        'profile',
+        'preferences',
+        'consent_history',
+      ];
+
+      return exportData;
+    } catch (e) {
+      print('❌ Error exporting user data: $e');
+      rethrow;
+    }
+  }
+
+  // ✅ NEW: GDPR Data Deletion Request
+  static Future<void> requestDataDeletion(String email) async {
+    try {
+      final profiles = await getProfiles();
+      final index = profiles.indexWhere((p) => p['email'] == email);
+
+      if (index != -1) {
+        // Mark for deletion
+        profiles[index]['dataDeletionRequested'] = true;
+        profiles[index]['deletionRequestedAt'] = DateTime.now()
+            .toIso8601String();
+
+        await _prefs.setString(_keyProfiles, jsonEncode(profiles));
+
+        // Get user ID for secure storage cleanup
+        final userId = profiles[index]['userId'] as String?;
+        if (userId != null) {
+          await _secureStorage.delete(key: '${userId}_refresh_token');
+          await _secureStorage.delete(key: '${userId}_access_token');
+        }
+
+        print('✅ Data deletion requested for: $email');
+      }
+    } catch (e) {
+      print('❌ Error requesting data deletion: $e');
+    }
+  }
+
+  // ✅ NEW: Get user's consent status
+  static Future<Map<String, dynamic>> getConsentStatus(String email) async {
+    try {
+      final profile = await getProfileByEmail(email);
+      if (profile == null) throw Exception('User not found');
+
+      return {
+        'termsAcceptedAt': profile['termsAcceptedAt'],
+        'privacyAcceptedAt': profile['privacyAcceptedAt'],
+        'consentVersion': profile['consentVersion'] ?? _currentConsentVersion,
+        'marketingConsent': profile['marketingConsent'] ?? false,
+        'marketingConsentAt': profile['marketingConsentAt'],
+        'dataConsentGiven': profile['dataConsentGiven'] ?? false,
+        'dataDeletionRequested': profile['dataDeletionRequested'] ?? false,
+        'dataRetentionDate': profile['dataRetentionDate'],
+      };
+    } catch (e) {
+      print('❌ Error getting consent status: $e');
+      rethrow;
+    }
+  }
+
+  // ✅ NEW: Check if user needs to re-consent
+  static Future<bool> needsReconsent(String email) async {
+    try {
+      final profile = await getProfileByEmail(email);
+      if (profile == null) return true;
+
+      final consentVersion = profile['consentVersion'] as String?;
+      return consentVersion != _currentConsentVersion;
+    } catch (e) {
+      print('❌ Error checking reconsent: $e');
+      return true;
+    }
+  }
+
+  // ✅ NEW: Secure storage health check
+  static Future<bool> checkSecureStorageHealth() async {
+    try {
+      // Try to write and read a test value
+      const testKey = 'health_check_key';
+      const testValue = 'health_check_value';
+
+      await _secureStorage.write(
+        key: testKey,
+        value: testValue,
+        aOptions: _getAndroidOptions(),
+        iOptions: _getIOSOptions(),
+      );
+
+      final readValue = await _secureStorage.read(key: testKey);
+      await _secureStorage.delete(key: testKey);
+
+      return readValue == testValue;
+    } catch (e) {
+      print('❌ Secure storage health check failed: $e');
+      return false;
+    }
+  }
+
+  // ✅ NEW: Get active session count
+  static Future<int> getActiveSessionCount() async {
+    try {
+      final profiles = await getProfiles();
+      int count = 0;
+
+      for (var profile in profiles) {
+        final email = profile['email'] as String?;
+        if (email != null) {
+          if (await hasValidSupabaseSession(email)) {
+            count++;
+          }
+        }
+      }
+
+      return count;
+    } catch (e) {
+      print('❌ Error getting active session count: $e');
+      return 0;
+    }
+  }
+
+  // ✅ NEW: Clean up expired sessions
+  static Future<void> cleanupExpiredSessions() async {
+    try {
+      final profiles = await getProfiles();
+      final now = DateTime.now();
+
+      for (var profile in profiles) {
+        final retentionDate = profile['dataRetentionDate'] as String?;
+        if (retentionDate != null) {
+          final retention = DateTime.parse(retentionDate);
+          if (retention.isBefore(now)) {
+            final email = profile['email'] as String?;
+            if (email != null) {
+              await removeProfile(email);
+              print('✅ Cleaned up expired session for: $email');
+            }
+          }
+        }
+      }
+    } catch (e) {
+      print('❌ Error cleaning up expired sessions: $e');
     }
   }
 }
