@@ -621,7 +621,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                     ? ClipRRect(
                         borderRadius: BorderRadius.circular(24),
                         child: CachedNetworkImage(
-                          imageUrl: photoUrl!,
+                          imageUrl: photoUrl,
                           width: 48,
                           height: 48,
                           fit: BoxFit.cover,
@@ -703,7 +703,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                     ),
                   ),
                   child: Text(
-                    provider!.toUpperCase(),
+                    provider.toUpperCase(),
                     style: TextStyle(
                       color: _getProviderColor(provider),
                       fontSize: 10,
