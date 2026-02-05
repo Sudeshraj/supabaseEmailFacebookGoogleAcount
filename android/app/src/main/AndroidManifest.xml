@@ -47,6 +47,16 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
+
+               <!-- Scheme-based deep link -->
+                <data android:scheme="myapp" />
+                
+                <!-- Supabase callback URL -->
+                <data
+                    android:scheme="https"
+                    android:host="ifhenrgfpahandumdwmt.supabase.co"
+                    android:pathPrefix="/auth/v1/callback" />
+
                 <data 
                     android:scheme="https"
                     android:host="yourdomain.com"
@@ -67,7 +77,26 @@
                 <data 
                     android:scheme="http"
                     android:host="localhost"
-                    android:pathPrefix="/auth/callback" />
+                    android:pathPrefix="/auth/callback" />               
+
+            </intent-filter>
+
+             <!-- Add another intent filter for specific host -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="https"
+                    android:host="ifhenrgfpahandumdwmt.supabase.co"
+                    android:path="/auth/v1/callback" />
+            </intent-filter>
+
+             <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="myapp" android:host="auth" />
             </intent-filter>
 
             <meta-data android:name="com.google.android.geo.API_KEY" android:value="AIzaSyAneT1e71a84MIL76EgSHjJ1LG3TIU9yMI"/> <!-- for map -->
