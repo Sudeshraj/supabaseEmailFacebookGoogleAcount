@@ -59,6 +59,9 @@ class SessionManager {
   }) async {
     print('💾 Saving profile for: $email');
     print('📸 Photo URL provided: ${photo ?? "NULL"}');
+   
+      print('📸 Photo URL provided: $provider');
+  
 
     try {
       final profiles = await getProfiles();
@@ -93,13 +96,13 @@ class SessionManager {
       if (provider != null && provider.isNotEmpty && provider != 'email') {
         actualProvider = provider;
         print('✅ Using provided provider: $actualProvider');
-      } else if (finalPhoto != null && finalPhoto.isNotEmpty) {
+      } else if (finalPhoto.isNotEmpty) {
         // Try to detect provider from photo URL
         if (finalPhoto.contains('googleusercontent.com')) {
           actualProvider = 'google';
           print('🔍 Detected Google from photo URL');
         } else if (finalPhoto.contains('fbcdn.net') ||
-            finalPhoto.contains('facebook.com')) {
+            finalPhoto.contains('facebook.com') || finalPhoto.contains('platform-lookaside.fbsbx.com')) {
           actualProvider = 'facebook';
           print('🔍 Detected Facebook from photo URL');
         } else if (finalPhoto.contains('apple.com') ||
@@ -108,9 +111,11 @@ class SessionManager {
           print('🔍 Detected Apple from photo URL');
         } else {
           actualProvider = existingProfile['provider'] as String? ?? 'email';
+            print('✅ Using existing provider or defaulting to email');
         }
       } else {
         actualProvider = existingProfile['provider'] as String? ?? 'email';
+         print('✅ Using existing provider or defaulting to email2');
       }
 
       final profileData = <String, dynamic>{
@@ -119,7 +124,7 @@ class SessionManager {
         'name': name ?? existingProfile['name'] ?? email.split('@').first,
 
         // ✅ CRITICAL FIX: Always set photo (even if empty)
-        'photo': finalPhoto ?? '',
+        'photo': finalPhoto,
 
         'roles': roles ?? existingProfile['roles'] ?? <String>[],
         'lastLogin': now.toIso8601String(),
