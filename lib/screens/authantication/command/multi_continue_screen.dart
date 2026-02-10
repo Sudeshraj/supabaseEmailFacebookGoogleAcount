@@ -145,7 +145,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
     }
   }
 
-  // ✅ Handle OAuth login
+  // ✅ Handle OAuth login with improved error handling
   Future<void> _handleOAuthLogin(Map<String, dynamic> profile) async {
     final email = profile['email'] as String?;
     final provider = profile['provider'] as String?;
@@ -167,6 +167,12 @@ class _ContinueScreenState extends State<ContinueScreen> {
         print('🔄 Attempting OAuth login for: $email ($provider)');
       }
 
+      // ✅ Clear any existing session before starting new OAuth flow
+      await supabase.auth.signOut();
+
+      // ✅ Add delay to ensure storage is cleared
+      await Future.delayed(const Duration(milliseconds: 500));
+
       // ✅ Different handling for each provider
       switch (provider) {
         case 'google':
@@ -186,21 +192,36 @@ class _ContinueScreenState extends State<ContinueScreen> {
       print('❌ OAuth login error: $e');
       if (!mounted) return;
       
-      await showCustomAlert(
-        context: context,
-        title: "Login Failed",
-        message: "Unable to sign in with $provider. Please try again.",
-        isError: true,
-      );
+      // ✅ Check for specific code verifier error
+      if (e.toString().contains('Code verifier could not be found')) {
+        await showCustomAlert(
+          context: context,
+          title: "Authentication Error",
+          message: "Please try signing in again. Clearing browser cache may help.",
+          isError: true,
+        );
+      } else {
+        await showCustomAlert(
+          context: context,
+          title: "Login Failed",
+          message: "Unable to sign in with $provider. Please try again.",
+          isError: true,
+        );
+      }
+      
+      // ✅ Force reload after error
+      await _loadProfiles();
     } finally {
-      setState(() {
-        _oauthLoadingStates[email] = false;
-        _selectedEmail = null;
-      });
+      if (mounted) {
+        setState(() {
+          _oauthLoadingStates[email] = false;
+          _selectedEmail = null;
+        });
+      }
     }
   }
 
-  // ✅ Google OAuth login
+  // ✅ Google OAuth login with improved handling
   Future<void> _signInWithGoogle(String email) async {
     try {
       // Check if already logged in
@@ -217,13 +238,10 @@ class _ContinueScreenState extends State<ContinueScreen> {
         return;
       }
 
-      // Show loading indicator
-      if (!mounted) return;
-      
-      // Start OAuth flow
+      // Initialize OAuth flow with proper parameters
       await supabase.auth.signInWithOAuth(
         OAuthProvider.google,
-        redirectTo: _getRedirectUrl(),
+        redirectTo: _getRedirectUrl(),      
         scopes: 'email profile',
       );
 
@@ -256,7 +274,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
     }
   }
 
-  // ✅ Facebook OAuth login
+  // ✅ Facebook OAuth login with improved handling
   Future<void> _signInWithFacebook(String email) async {
     try {
       final currentUser = supabase.auth.currentUser;
@@ -273,7 +291,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
       await supabase.auth.signInWithOAuth(
         OAuthProvider.facebook,
-        redirectTo: _getRedirectUrl(),
+        redirectTo: _getRedirectUrl(),      
         scopes: 'email',
       );
 
@@ -304,7 +322,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
     }
   }
 
-  // ✅ Apple OAuth login
+  // ✅ Apple OAuth login with improved handling
   Future<void> _signInWithApple(String email) async {
     try {
       final currentUser = supabase.auth.currentUser;
@@ -321,7 +339,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
       await supabase.auth.signInWithOAuth(
         OAuthProvider.apple,
-        redirectTo: _getRedirectUrl(),
+        redirectTo: _getRedirectUrl(),      
         scopes: 'email name',
       );
 
@@ -509,7 +527,8 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
   // ✅ Redirect URL for OAuth
   String _getRedirectUrl() {
-    return 'com.yourcompany.mysalon://auth-callback';
+    // return 'com.yourcompany.mysalon://auth-callback';
+    return 'http://localhost:5000/auth/callback';
   }
 
   // ✅ Password dialog (existing)
@@ -535,7 +554,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
     }
   }
 
-  // ✅ NEW: Format last login time
+  // ✅ Format last login time
   String _formatLastLogin(String? lastLogin) {
     if (lastLogin == null || lastLogin.isEmpty) return 'Never';
     
@@ -555,7 +574,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
     }
   }
 
-  // ✅ FIXED: Build profile item with proper photo handling
+  // ✅ Build profile item with proper photo handling
   Widget _buildProfileItem(Map<String, dynamic> profile, int index) {
     final email = profile['email'] as String? ?? 'Unknown';
     final provider = profile['provider'] as String? ?? 'email';
@@ -564,10 +583,10 @@ class _ContinueScreenState extends State<ContinueScreen> {
     final isLoading = _oauthLoadingStates[email] == true;
     final rememberMe = profile['rememberMe'] == true;
     
-    // ✅ FIXED: Get name properly
+    // Get name properly
     final name = profile['name'] as String? ?? email.split('@').first;
     
-    // ✅ FIXED: Get photo properly - check all possibilities
+    // Get photo properly - check all possibilities
     String? photoUrl;
     
     // Try different possible photo keys
@@ -607,7 +626,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
         child: ListTile(
           leading: Stack(
             children: [
-              // ✅ FIXED: Profile image with proper loading and error handling
+              // Profile image with proper loading and error handling
               Container(
                 width: 48,
                 height: 48,
@@ -732,6 +751,16 @@ class _ContinueScreenState extends State<ContinueScreen> {
                   style: TextStyle(
                     color: Colors.white.withOpacity(0.4),
                     fontSize: 10,
+                  ),
+                ),
+              // Provider indicator
+              if (isOAuth)
+                Text(
+                  'Sign in with ${provider[0].toUpperCase()}${provider.substring(1)}',
+                  style: TextStyle(
+                    color: _getProviderColor(provider),
+                    fontSize: 10,
+                    fontWeight: FontWeight.w500,
                   ),
                 ),
               if (isOAuth && isLoading)
@@ -988,53 +1017,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
                   ),
 
                   const SizedBox(height: 20),
-
-                  // OAuth Info Banner
-                  if (profiles.any((p) => (p['provider'] as String? ?? 'email') != 'email'))
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      margin: const EdgeInsets.only(bottom: 16),
-                      decoration: BoxDecoration(
-                        color: Colors.green.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: Colors.greenAccent.withOpacity(0.3),
-                        ),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.security,
-                            color: Colors.greenAccent,
-                            size: 20,
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                  'Quick Sign In Available',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  'Tap on OAuth profiles for one-click sign in',
-                                  style: TextStyle(
-                                    color: Colors.white.withOpacity(0.7),
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
 
                   // Compliance Notice
                   if (_showComplianceDialog)
