@@ -7,7 +7,6 @@ import 'package:flutter_application_1/services/session_manager.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter/foundation.dart' show kDebugMode;
-import 'package:cached_network_image/cached_network_image.dart';
 
 final supabase = Supabase.instance.client;
 
@@ -22,7 +21,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
   List<Map<String, dynamic>> profiles = [];
   bool _loading = false;
   String? _selectedEmail;
-  bool _showComplianceDialog = false;
   final Map<String, bool> _oauthLoadingStates = {};
   bool _isGoogleImageRateLimited = false;
   DateTime? _lastGoogleImageError;
@@ -127,19 +125,24 @@ class _ContinueScreenState extends State<ContinueScreen> {
       // Check if already has size parameter
       final hasSizeParam =
           photoUrl.contains('=s96') ||
+          photoUrl.contains('=s') ||
           photoUrl.contains('?sz=') ||
           photoUrl.contains('/s96-c/');
 
       if (hasSizeParam) {
-        return photoUrl; // Already optimized
+        // Replace with larger size if needed
+        if (photoUrl.contains('=s96')) {
+          photoUrl = photoUrl.replaceAll('=s96', '=s200');
+        }
+        return photoUrl;
       }
 
       // Add size parameter if missing
       if (!photoUrl.contains('=s') && !photoUrl.contains('?sz=')) {
         if (photoUrl.contains('?')) {
-          return '$photoUrl&sz=96';
+          return '$photoUrl&sz=200';
         } else {
-          return '$photoUrl?sz=96';
+          return '$photoUrl?sz=200';
         }
       }
 
@@ -170,160 +173,19 @@ class _ContinueScreenState extends State<ContinueScreen> {
     }
 
     _lastGoogleImageError = now;
-
-    if (mounted) {
-      setState(() {});
-    }
   }
 
   Future<void> _checkCompliance() async {
     final rememberMe = await SessionManager.isRememberMeEnabled();
     if (!rememberMe) {
       setState(() {
-        _showComplianceDialog = true;
       });
     }
   }
 
   // Get provider icon with color
-  Widget _getProviderIcon(String? provider) {
-    switch (provider?.toLowerCase()) {
-      case 'google':
-        return Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: const Color(0xFFDB4437),
-          ),
-          child: Center(
-            child: Text(
-              'G',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                fontFamily: 'Roboto',
-              ),
-            ),
-          ),
-        );
-      case 'facebook':
-        return Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: const Color(0xFF1877F2),
-          ),
-          child: Center(
-            child: Text(
-              'f',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
-                fontFamily: 'Roboto',
-              ),
-            ),
-          ),
-        );
-      case 'apple':
-        return Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: Colors.black,
-          ),
-          child: const Center(
-            child: Icon(Icons.apple, color: Colors.white, size: 22),
-          ),
-        );
-      default:
-        return Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: Colors.blueAccent,
-          ),
-          child: const Center(
-            child: Icon(Icons.email, color: Colors.white, size: 20),
-          ),
-        );
-    }
-  }
 
   // Get provider icon small (for list)
-  Widget _getProviderIconSmall(String? provider) {
-    switch (provider?.toLowerCase()) {
-      case 'google':
-        return Container(
-          width: 20,
-          height: 20,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: const Color(0xFFDB4437),
-          ),
-          child: Center(
-            child: Text(
-              'G',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 10,
-                fontWeight: FontWeight.bold,
-                fontFamily: 'Roboto',
-              ),
-            ),
-          ),
-        );
-      case 'facebook':
-        return Container(
-          width: 20,
-          height: 20,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: const Color(0xFF1877F2),
-          ),
-          child: Center(
-            child: Text(
-              'f',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
-                fontFamily: 'Roboto',
-              ),
-            ),
-          ),
-        );
-      case 'apple':
-        return Container(
-          width: 20,
-          height: 20,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: Colors.black,
-          ),
-          child: const Center(
-            child: Icon(Icons.apple, color: Colors.white, size: 12),
-          ),
-        );
-      default:
-        return Container(
-          width: 20,
-          height: 20,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: Colors.blueAccent,
-          ),
-          child: const Center(
-            child: Icon(Icons.email, color: Colors.white, size: 10),
-          ),
-        );
-    }
-  }
 
   // Handle OAuth login with improved error handling
   Future<void> _handleOAuthLogin(Map<String, dynamic> profile) async {
@@ -377,7 +239,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
       debugPrint('OAuth login error: $e');
       if (!mounted) return;
 
-      // ✅ Check for specific code verifier error
       if (e.toString().contains('Code verifier could not be found')) {
         await showCustomAlert(
           context: context,
@@ -395,7 +256,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
         );
       }
 
-      // ✅ Force reload after error
       await _loadProfiles();
     } finally {
       if (mounted) {
@@ -410,28 +270,24 @@ class _ContinueScreenState extends State<ContinueScreen> {
   // Google OAuth login with improved handling
   Future<void> _signInWithGoogle(String email) async {
     try {
-      // Check if already logged in
       final currentUser = supabase.auth.currentUser;
       if (currentUser?.email == email) {
         await _processSuccessfulLogin(email);
         return;
       }
 
-      // Try auto-login first
       final autoSuccess = await SessionManager.tryAutoLogin(email);
       if (autoSuccess) {
         await _processSuccessfulLogin(email);
         return;
       }
 
-      // Initialize OAuth flow with proper parameters
       await supabase.auth.signInWithOAuth(
         OAuthProvider.google,
         redirectTo: _getRedirectUrl(),
         scopes: 'email profile',
       );
 
-      // Listen for auth state changes
       final completer = Completer<void>();
       final subscription = supabase.auth.onAuthStateChange.listen((data) async {
         if (data.event == AuthChangeEvent.signedIn) {
@@ -443,7 +299,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
         }
       });
 
-      // Wait for login with timeout
       await completer.future.timeout(const Duration(seconds: 30));
       subscription.cancel();
     } on TimeoutException {
@@ -553,7 +408,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
     }
   }
 
-  // Handle email login (existing password dialog)
+  // Handle email login
   Future<void> _handleEmailLogin(Map<String, dynamic> profile) async {
     if (_selectionMode) {
       _toggleProfileSelection(profile);
@@ -574,21 +429,18 @@ class _ContinueScreenState extends State<ContinueScreen> {
         return;
       }
 
-      // 1 Try auto-login
       final autoLoginSuccess = await SessionManager.tryAutoLogin(email);
       if (autoLoginSuccess) {
         await _processSuccessfulLogin(email);
         return;
       }
 
-      // 2️ Show password dialog
       final password = await _showPasswordDialog(email);
       if (password == null || password.isEmpty) {
         setState(() => _loading = false);
         return;
       }
 
-      // 3️ Manual login
       final response = await supabase.auth.signInWithPassword(
         email: email,
         password: password,
@@ -610,14 +462,12 @@ class _ContinueScreenState extends State<ContinueScreen> {
             isError: true,
           );
           break;
-
         case 'email_not_confirmed':
           appState.emailVerifyerError();
           appState.refreshState();
           if (!mounted) return;
           context.go('/verify-email');
           break;
-
         case 'too_many_requests':
           await showCustomAlert(
             context: context,
@@ -626,7 +476,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
             isError: true,
           );
           break;
-
         default:
           await showCustomAlert(
             context: context,
@@ -662,7 +511,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
       final user = supabase.auth.currentUser;
       if (user == null) return;
 
-      // Get profile from database
       final dbProfile = await supabase
           .from('profiles')
           .select('*')
@@ -675,19 +523,15 @@ class _ContinueScreenState extends State<ContinueScreen> {
         return;
       }
 
-      // Get role
       final role = AuthGate.pickRole(dbProfile['role'] ?? dbProfile['roles']);
 
-      // Save role
       await SessionManager.saveUserRole(role);
       await SessionManager.updateLastLogin(email);
 
-      // Update app state
       appState.refreshState();
 
       if (!mounted) return;
 
-      // Navigate based on role
       switch (role) {
         case 'business':
           context.go('/owner');
@@ -713,11 +557,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
   // Redirect URL for OAuth
   String _getRedirectUrl() {
-    // return 'com.yourcompany.mysalon://auth-callback';
     return 'http://localhost:5000/auth/callback';
   }
 
-  // ✅ Password dialog (existing)
   Future<String?> _showPasswordDialog(String email) async {
     return await showDialog<String?>(
       context: context,
@@ -726,7 +568,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
     );
   }
 
-  // Get provider color
   Color _getProviderColor(String? provider) {
     switch (provider?.toLowerCase()) {
       case 'google':
@@ -740,7 +581,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
     }
   }
 
-  // Format last login time
   String _formatLastLogin(String? lastLogin) {
     if (lastLogin == null || lastLogin.isEmpty) return 'Never';
 
@@ -760,8 +600,10 @@ class _ContinueScreenState extends State<ContinueScreen> {
     }
   }
 
-  // Build profile image with error handling
-  Widget _buildProfileImage(
+  // Build profile image with error handling - using Image.network
+
+  // Build larger profile image - using Image.network
+  Widget _buildLargeProfileImage(
     Map<String, dynamic> profile,
     String? provider,
     String? photoUrl,
@@ -772,53 +614,93 @@ class _ContinueScreenState extends State<ContinueScreen> {
     final isOAuth = provider != 'email';
     final isGoogle = provider == 'google';
 
-    // Check if we should use fallback due to rate limiting
     if (isGoogle && _isGoogleImageRateLimited && hasPhoto) {
       return _getFallbackAvatar(profile, provider);
     }
 
     if (hasPhoto) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(24),
-        child: CachedNetworkImage(
-          imageUrl: photoUrl!,
-          width: 56,
-          height: 56,
-          fit: BoxFit.cover,
-          placeholder: (context, url) => Center(
-            child: Container(
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: _getProviderColor(provider).withValues(alpha: 0.2),
-              ),
-              child: Center(
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: _getProviderColor(provider),
+      try {
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(35),
+          child: Image.network(
+            photoUrl!,
+            width: 70,
+            height: 70,
+            fit: BoxFit.cover,
+            loadingBuilder: (context, child, loadingProgress) {
+              if (loadingProgress == null) return child;
+              return Center(
+                child: Container(
+                  width: 70,
+                  height: 70,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: _getProviderColor(provider).withValues(alpha:0.2),
+                  ),
+                  child: Center(
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: _getProviderColor(provider),
+                    ),
+                  ),
                 ),
-              ),
-            ),
-          ),
-          errorWidget: (context, url, error) {
-            // Handle Google rate limiting errors
-            if (url.contains('googleusercontent.com')) {
-              _handleGoogleImageError();
+              );
+            },
+            errorBuilder: (context, error, stackTrace) {
+              debugPrint('Image error: $error');
+              if (photoUrl.contains('googleusercontent.com')) {
+                _handleGoogleImageError();
+              }
               return _getFallbackAvatar(profile, provider);
-            }
-            return _getFallbackAvatar(profile, provider);
-          },
-        ),
-      );
+            },
+          ),
+        );
+      } catch (e) {
+        debugPrint('Error loading image: $e');
+        return _getFallbackAvatar(profile, provider);
+      }
     } else {
       return Center(
         child: isOAuth
-            ? _getProviderIcon(provider)
-            : Container(
-                width: 56,
-                height: 56,
+            ? Container(
+                width: 70,
+                height: 70,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: Colors.blueAccent.withValues(alpha: 0.2),
+                  color: _getProviderColor(provider),
+                ),
+                child: Center(
+                  child: provider == 'google'
+                      ? Text(
+                          'G',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                            fontFamily: 'Roboto',
+                          ),
+                        )
+                      : provider == 'facebook'
+                      ? Text(
+                          'f',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 28,
+                            fontWeight: FontWeight.bold,
+                            fontFamily: 'Roboto',
+                          ),
+                        )
+                      : provider == 'apple'
+                      ? const Icon(Icons.apple, color: Colors.white, size: 28)
+                      : const Icon(Icons.email, color: Colors.white, size: 24),
+                ),
+              )
+            : Container(
+                width: 70,
+                height: 70,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.blueAccent.withValues(alpha:0.2),
                 ),
                 child: Center(
                   child: Text(
@@ -826,7 +708,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                     style: const TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.bold,
-                      fontSize: 20,
+                      fontSize: 24,
                     ),
                   ),
                 ),
@@ -908,7 +790,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
     return Container(
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: Colors.blueAccent.withValues(alpha: 0.2),
+        color: Colors.blueAccent.withValues(alpha:0.2),
       ),
       child: Center(
         child: Text(
@@ -923,7 +805,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
     );
   }
 
-  //Toggle profile selection
   void _toggleProfileSelection(Map<String, dynamic> profile) {
     final email = profile['email'] as String? ?? '';
     setState(() {
@@ -934,14 +815,12 @@ class _ContinueScreenState extends State<ContinueScreen> {
       }
       _selectedCount = _selectedProfiles.length;
 
-      // Exit selection mode if nothing selected
       if (_selectedCount == 0) {
         _selectionMode = false;
       }
     });
   }
 
-  // Select all profiles
   void _selectAllProfiles() {
     setState(() {
       _selectedProfiles = Set<String>.from(
@@ -953,7 +832,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
     });
   }
 
-  // Deselect all profiles
   void _deselectAllProfiles() {
     setState(() {
       _selectedProfiles.clear();
@@ -962,7 +840,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
     });
   }
 
-  // Remove selected profiles
   Future<void> _removeSelectedProfiles() async {
     if (_selectedProfiles.isEmpty) return;
 
@@ -1027,7 +904,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
     }
   }
 
-  // Remove single profile
   Future<void> _removeSingleProfile(String email) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -1084,7 +960,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
     }
   }
 
-  // Show remove profiles dialog (one by one)
   void _showRemoveProfilesDialog() {
     showDialog(
       context: context,
@@ -1125,17 +1000,17 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
                     return Container(
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.05),
+                        color: Colors.white.withValues(alpha:0.05),
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
-                          color: Colors.white.withOpacity(0.1),
+                          color: Colors.white.withValues(alpha:0.1),
                         ),
                       ),
                       child: ListTile(
                         leading: CircleAvatar(
                           backgroundColor: _getProviderColor(
                             provider,
-                          ).withOpacity(0.3),
+                          ).withValues(alpha:0.3),
                           child: Text(
                             name[0].toUpperCase(),
                             style: const TextStyle(
@@ -1154,7 +1029,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                         subtitle: Text(
                           email,
                           style: TextStyle(
-                            color: Colors.white.withOpacity(0.6),
+                            color: Colors.white.withValues(alpha:0.6),
                             fontSize: 12,
                           ),
                         ),
@@ -1183,7 +1058,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
     );
   }
 
-  // Start selection mode
   void _startSelectionMode() {
     setState(() {
       _selectionMode = true;
@@ -1192,20 +1066,15 @@ class _ContinueScreenState extends State<ContinueScreen> {
     });
   }
 
-  //Build profile item for selection mode
-  Widget _buildProfileItem(Map<String, dynamic> profile, int index) {
+
+  // Profile card for main list
+  Widget _buildProfileCard(Map<String, dynamic> profile, int index) {
     final email = profile['email'] as String? ?? 'Unknown';
     final provider = profile['provider'] as String? ?? 'email';
-    final isOAuth = provider != 'email';
     final isSelected = _selectedProfiles.contains(email);
     final isLoading = _oauthLoadingStates[email] == true;
-    final rememberMe = profile['rememberMe'] == true;
-
-    // Get name properly
-    final name = profile['name'] as String? ?? email.split('@').first;
-
-    // Get photo URL
     final photoUrl = profile['photo'] as String?;
+    final name = profile['name'] as String? ?? email.split('@').first;
     final hasPhoto = photoUrl != null && photoUrl.isNotEmpty;
 
     return GestureDetector(
@@ -1214,10 +1083,10 @@ class _ContinueScreenState extends State<ContinueScreen> {
           _toggleProfileSelection(profile);
         } else if (isLoading) {
           return;
-        } else if (isOAuth) {
-          _handleOAuthLogin(profile);
-        } else {
+        } else if (provider == 'email') {
           _handleEmailLogin(profile);
+        } else {
+          _handleOAuthLogin(profile);
         }
       },
       onLongPress: () {
@@ -1226,47 +1095,47 @@ class _ContinueScreenState extends State<ContinueScreen> {
           _toggleProfileSelection(profile);
         }
       },
-      child: Card(
-        color: isSelected
-            ? Colors.blue.withValues(alpha: 0.25)
-            : Colors.white.withValues(alpha: 0.06),
-        shape: RoundedRectangleBorder(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeInOut,
+        decoration: BoxDecoration(
+          color: isSelected
+              ? const Color(0xFF1877F2).withValues(alpha:0.2)
+              : Colors.white.withValues(alpha:0.03),
           borderRadius: BorderRadius.circular(16),
-          side: BorderSide(
-            color: isSelected ? Colors.blueAccent : Colors.transparent,
-            width: 2,
+          border: Border.all(
+            color: isLoading
+                ? Colors.blueAccent
+                : isSelected
+                ? const Color(0xFF1877F2)
+                : Colors.white.withValues(alpha:0.1),
+            width: isLoading ? 2 : 1.5,
           ),
+          boxShadow: isLoading
+              ? [
+                  BoxShadow(
+                    color: Colors.blueAccent.withValues(alpha:0.3),
+                    blurRadius: 8,
+                    spreadRadius: 1,
+                  ),
+                ]
+              : null,
         ),
-        child: Container(
-          padding: const EdgeInsets.all(12),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
           child: Row(
             children: [
-              // Selection Checkbox
-              if (_selectionMode)
-                Checkbox(
-                  value: isSelected,
-                  onChanged: (value) {
-                    _toggleProfileSelection(profile);
-                  },
-                  activeColor: Colors.blueAccent,
-                  checkColor: Colors.white,
-                ),
-
-              SizedBox(width: _selectionMode ? 8 : 0),
-
               // Profile Image
               Stack(
                 children: [
                   Container(
-                    width: 56,
-                    height: 56,
+                    width: 70,
+                    height: 70,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: isOAuth
-                          ? _getProviderColor(provider).withValues(alpha: 0.2)
-                          : Colors.blueAccent.withValues(alpha: 0.2),
+                      color: _getProviderColor(provider).withValues(alpha:0.2),
                     ),
-                    child: _buildProfileImage(
+                    child: _buildLargeProfileImage(
                       profile,
                       provider,
                       photoUrl,
@@ -1275,13 +1144,13 @@ class _ContinueScreenState extends State<ContinueScreen> {
                   ),
 
                   // Provider icon badge
-                  if (isOAuth && !_selectionMode)
+                  if (provider != 'email' && !_selectionMode && !isLoading)
                     Positioned(
                       right: 0,
                       bottom: 0,
                       child: Container(
-                        width: 20,
-                        height: 20,
+                        width: 24,
+                        height: 24,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
                           color: _getProviderColor(provider),
@@ -1290,7 +1159,39 @@ class _ContinueScreenState extends State<ContinueScreen> {
                             width: 2,
                           ),
                         ),
-                        child: Center(child: _getProviderIconSmall(provider)),
+                        child: Center(
+                          child: provider == 'google'
+                              ? Text(
+                                  'G',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                    fontFamily: 'Roboto',
+                                  ),
+                                )
+                              : provider == 'facebook'
+                              ? Text(
+                                  'f',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.bold,
+                                    fontFamily: 'Roboto',
+                                  ),
+                                )
+                              : provider == 'apple'
+                              ? const Icon(
+                                  Icons.apple,
+                                  color: Colors.white,
+                                  size: 14,
+                                )
+                              : const Icon(
+                                  Icons.email,
+                                  color: Colors.white,
+                                  size: 12,
+                                ),
+                        ),
                       ),
                     ),
 
@@ -1300,8 +1201,8 @@ class _ContinueScreenState extends State<ContinueScreen> {
                       right: 0,
                       bottom: 0,
                       child: Container(
-                        width: 20,
-                        height: 20,
+                        width: 24,
+                        height: 24,
                         decoration: const BoxDecoration(
                           shape: BoxShape.circle,
                           color: Colors.blueAccent,
@@ -1310,34 +1211,15 @@ class _ContinueScreenState extends State<ContinueScreen> {
                           child: Icon(
                             Icons.check,
                             color: Colors.white,
-                            size: 14,
+                            size: 16,
                           ),
-                        ),
-                      ),
-                    ),
-
-                  // Remember me badge
-                  if (rememberMe && !isOAuth && !_selectionMode)
-                    Positioned(
-                      right: 0,
-                      bottom: 0,
-                      child: Container(
-                        padding: const EdgeInsets.all(4),
-                        decoration: const BoxDecoration(
-                          color: Colors.green,
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(
-                          Icons.check,
-                          color: Colors.white,
-                          size: 10,
                         ),
                       ),
                     ),
                 ],
               ),
 
-              const SizedBox(width: 12),
+              const SizedBox(width: 16),
 
               // Profile Info
               Expanded(
@@ -1349,78 +1231,115 @@ class _ContinueScreenState extends State<ContinueScreen> {
                         Expanded(
                           child: Text(
                             name,
-                            style: TextStyle(
-                              color: isSelected ? Colors.white : Colors.white,
+                            style: const TextStyle(
+                              color: Colors.white,
                               fontWeight: FontWeight.w600,
-                              fontSize: 16,
+                              fontSize: 18,
                             ),
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
+                        // Simple loading text
                         if (isLoading)
-                          const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              valueColor: AlwaysStoppedAnimation<Color>(
-                                Colors.blueAccent,
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.blueAccent.withValues(alpha:0.2),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Text(
+                              'Logging in...',
+                              style: TextStyle(
+                                color: Colors.blueAccent,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
                               ),
                             ),
                           ),
                       ],
                     ),
 
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 6),
 
                     Text(
                       email,
                       style: TextStyle(
-                        color: isSelected
-                            ? Colors.white.withValues(alpha: 0.9)
-                            : Colors.white.withValues(alpha: 0.7),
-                        fontSize: 13,
+                        color: Colors.white.withValues(alpha:0.7),
+                        fontSize: 14,
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
 
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 8),
 
-                    // Provider and last login info
-                    if (!_selectionMode)
-                      Row(
-                        children: [
-                          // Last login time
-                          if (profile['lastLogin'] != null)
-                            Text(
-                              _formatLastLogin(profile['lastLogin'] as String?),
-                              style: TextStyle(
-                                color: Colors.white.withValues(alpha: 0.5),
-                                fontSize: 11,
-                              ),
+                    // Provider type and last login
+                    Row(
+                      children: [
+                        // Provider type badge
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: isLoading
+                                ? Colors.blueAccent.withValues(alpha:0.2)
+                                : _getProviderColor(provider).withValues(alpha:0.2),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            provider == 'email'
+                                ? 'EMAIL'
+                                : provider.toUpperCase(),
+                            style: TextStyle(
+                              color: isLoading
+                                  ? Colors.blueAccent
+                                  : _getProviderColor(provider),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
                             ),
-                        ],
-                      ),
+                          ),
+                        ),
+
+                        const SizedBox(width: 10),
+
+                        // Last login time
+                        if (profile['lastLogin'] != null && !isLoading)
+                          Text(
+                            _formatLastLogin(profile['lastLogin'] as String?),
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha:0.5),
+                              fontSize: 12,
+                            ),
+                          ),
+                      ],
+                    ),
 
                     // Role indicator
                     if (profile['roles'] != null &&
                         (profile['roles'] as List).isNotEmpty &&
-                        !_selectionMode)
+                        !_selectionMode &&
+                        !isLoading)
                       Container(
-                        margin: const EdgeInsets.only(top: 4),
+                        margin: const EdgeInsets.only(top: 8),
                         padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 2,
+                          horizontal: 10,
+                          vertical: 4,
                         ),
                         decoration: BoxDecoration(
-                          color: Colors.green.withValues(alpha: 0.2),
+                          color: Colors.green.withValues(alpha:0.2),
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Text(
-                          (profile['roles'] as List).first.toString(),
+                          (profile['roles'] as List).first
+                              .toString()
+                              .toUpperCase(),
                           style: const TextStyle(
                             color: Colors.greenAccent,
-                            fontSize: 10,
+                            fontSize: 11,
                             fontWeight: FontWeight.w500,
                           ),
                         ),
@@ -1429,12 +1348,15 @@ class _ContinueScreenState extends State<ContinueScreen> {
                 ),
               ),
 
-              // Arrow indicator (only when not in selection mode)
+              // Arrow indicator
               if (!_selectionMode && !isLoading)
-                Icon(
-                  isOAuth ? Icons.login : Icons.arrow_forward_ios_rounded,
-                  color: isOAuth ? Colors.greenAccent : Colors.white38,
-                  size: 18,
+                const Padding(
+                  padding: EdgeInsets.only(left: 8),
+                  child: Icon(
+                    Icons.chevron_right,
+                    color: Colors.white38,
+                    size: 24,
+                  ),
                 ),
             ],
           ),
@@ -1460,20 +1382,19 @@ class _ContinueScreenState extends State<ContinueScreen> {
               margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.03),
+                color: Colors.white.withValues(alpha:0.03),
                 borderRadius: BorderRadius.circular(20),
                 border: Border.all(color: Colors.white12),
               ),
               child: Column(
                 children: [
-                  // ✅ Logo at the top with Facebook-style design
+                  // Logo at the top with Facebook-style design
                   Stack(
                     children: [
                       // Center the logo container
                       Container(
                         margin: const EdgeInsets.only(top: 10, bottom: 25),
                         child: Center(
-                          // Center the logo
                           child: Column(
                             children: [
                               // Logo
@@ -1488,7 +1409,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                                   ),
                                   gradient: const LinearGradient(
                                     colors: [
-                                      Color(0xFF1877F2), // Facebook blue
+                                      Color(0xFF1877F2),
                                       Color(0xFF0A58CA),
                                     ],
                                     begin: Alignment.topCenter,
@@ -1498,7 +1419,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                                     BoxShadow(
                                       color: const Color(
                                         0xFF1877F2,
-                                      ).withOpacity(0.4),
+                                      ).withValues(alpha:0.4),
                                       blurRadius: 20,
                                       spreadRadius: 5,
                                     ),
@@ -1523,7 +1444,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                               ),
 
                               // App Name
-                              // const SizedBox(height: 10),
+                              const SizedBox(height: 10),
                               // const Text(
                               //   'MySalon',
                               //   style: TextStyle(
@@ -1534,11 +1455,11 @@ class _ContinueScreenState extends State<ContinueScreen> {
                               //   ),
                               // ),
 
-                              // // Tagline
+                              // Tagline
                               // Text(
                               //   'Continue to your account',
                               //   style: TextStyle(
-                              //     color: Colors.white.withOpacity(0.7),
+                              //     color: Colors.white.withValues(alpha:0.7),
                               //     fontSize: 14,
                               //   ),
                               // ),
@@ -1547,7 +1468,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                         ),
                       ),
 
-                      // ✅ 3-dot menu at top right corner (Facebook style)
+                      // 3-dot menu at top right corner (Facebook style)
                       if (profiles.isNotEmpty && !_selectionMode)
                         Positioned(
                           top: 0,
@@ -1557,14 +1478,14 @@ class _ContinueScreenState extends State<ContinueScreen> {
                             height: 40,
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              color: Colors.white.withOpacity(0.1),
+                              color: Colors.white.withValues(alpha:0.1),
                             ),
                             child: PopupMenuButton<String>(
                               color: const Color(0xFF1C1F26),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(12),
                                 side: BorderSide(
-                                  color: Colors.white.withOpacity(0.1),
+                                  color: Colors.white.withValues(alpha:0.1),
                                 ),
                               ),
                               icon: const Icon(
@@ -1574,7 +1495,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
                               ),
                               tooltip: 'Manage Profiles',
                               itemBuilder: (context) => [
-                                // Select Profiles Option
                                 PopupMenuItem<String>(
                                   value: 'select',
                                   child: Row(
@@ -1592,7 +1512,23 @@ class _ContinueScreenState extends State<ContinueScreen> {
                                     ],
                                   ),
                                 ),
-                              
+                                PopupMenuItem<String>(
+                                  value: 'remove',
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.delete_outline,
+                                        color: Colors.redAccent,
+                                        size: 20,
+                                      ),
+                                      const SizedBox(width: 12),
+                                      const Text(
+                                        'Remove Profiles',
+                                        style: TextStyle(color: Colors.white),
+                                      ),
+                                    ],
+                                  ),
+                                ),
                               ],
                               onSelected: (value) {
                                 if (value == 'select') {
@@ -1607,11 +1543,11 @@ class _ContinueScreenState extends State<ContinueScreen> {
                     ],
                   ),
 
-                  // ✅ Facebook-style Card for profiles
+                  // Facebook-style Card for profiles
                   Expanded(
                     child: Container(
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.05),
+                        color: Colors.white.withValues(alpha:0.05),
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(color: Colors.white10),
                       ),
@@ -1622,7 +1558,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                             Container(
                               padding: const EdgeInsets.all(16),
                               decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.03),
+                                color: Colors.white.withValues(alpha:0.03),
                                 borderRadius: const BorderRadius.only(
                                   topLeft: Radius.circular(16),
                                   topRight: Radius.circular(16),
@@ -1636,7 +1572,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
                           // Profiles List
                           Expanded(
-                            child: _loading
+                            child: _loading && _selectedEmail != null
                                 ? _buildLoadingState()
                                 : profiles.isEmpty
                                 ? _buildEmptyState()
@@ -1647,7 +1583,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                     ),
                   ),
 
-                  // ✅ Footer
+                  // Footer
                   if (!_selectionMode) _buildFooter(),
                 ],
               ),
@@ -1658,7 +1594,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
     );
   }
 
-  // Loading state
   Widget _buildLoadingState() {
     return Center(
       child: Column(
@@ -1678,7 +1613,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
               child: Text(
                 _selectedEmail!,
                 style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.6),
+                  color: Colors.white.withValues(alpha:0.6),
                   fontSize: 12,
                 ),
                 textAlign: TextAlign.center,
@@ -1689,7 +1624,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
     );
   }
 
-  // Empty state
   Widget _buildEmptyState() {
     return Center(
       child: Column(
@@ -1698,7 +1632,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
           Icon(
             Icons.person_add_disabled,
             size: 60,
-            color: Colors.white.withValues(alpha: 0.3),
+            color: Colors.white.withValues(alpha:0.3),
           ),
           const SizedBox(height: 15),
           const Text(
@@ -1714,7 +1648,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
             'Enable "Remember Me" during login\nto save your profile',
             textAlign: TextAlign.center,
             style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.6),
+              color: Colors.white.withValues(alpha:0.6),
               fontSize: 14,
             ),
           ),
@@ -1728,7 +1662,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
     );
   }
 
-  // Profiles list
   Widget _buildProfilesList() {
     return ListView.builder(
       shrinkWrap: true,
@@ -1742,409 +1675,15 @@ class _ContinueScreenState extends State<ContinueScreen> {
     );
   }
 
-  // Profile card
-// Profile card
-// Profile card
-Widget _buildProfileCard(Map<String, dynamic> profile, int index) {
-  final email = profile['email'] as String? ?? 'Unknown';
-  final provider = profile['provider'] as String? ?? 'email';
-  final isSelected = _selectedProfiles.contains(email);
-  final isLoading = _oauthLoadingStates[email] == true;
-  final photoUrl = profile['photo'] as String?;
-  final name = profile['name'] as String? ?? email.split('@').first;
-  final hasPhoto = photoUrl != null && photoUrl.isNotEmpty;
-  
-  return GestureDetector(
-    onTap: () {
-      if (_selectionMode) {
-        _toggleProfileSelection(profile);
-      } else if (isLoading) {
-        return;
-      } else if (provider == 'email') {
-        _handleEmailLogin(profile);
-      } else {
-        _handleOAuthLogin(profile);
-      }
-    },
-    onLongPress: () {
-      if (!_selectionMode) {
-        _startSelectionMode();
-        _toggleProfileSelection(profile);
-      }
-    },
-    child: AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeInOut,
-      decoration: BoxDecoration(
-        color: isSelected
-            ? const Color(0xFF1877F2).withOpacity(0.2)
-            : Colors.white.withOpacity(0.03),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: isLoading
-              ? Colors.blueAccent  // Simple blue border when loading
-              : isSelected
-                  ? const Color(0xFF1877F2)
-                  : Colors.white.withOpacity(0.1),
-          width: isLoading ? 2 : 1.5,
-        ),
-        boxShadow: isLoading
-            ? [
-                BoxShadow(
-                  color: Colors.blueAccent.withOpacity(0.3),
-                  blurRadius: 8,
-                  spreadRadius: 1,
-                ),
-              ]
-            : null,
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            // Profile Image
-            Stack(
-              children: [
-                Container(
-                  width: 70,
-                  height: 70,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: _getProviderColor(provider).withOpacity(0.2),
-                  ),
-                  child: _buildLargeProfileImage(profile, provider, photoUrl, hasPhoto),
-                ),
-                
-                // Provider icon badge
-                if (provider != 'email' && !_selectionMode && !isLoading)
-                  Positioned(
-                    right: 0,
-                    bottom: 0,
-                    child: Container(
-                      width: 24,
-                      height: 24,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: _getProviderColor(provider),
-                        border: Border.all(
-                          color: const Color(0xFF0F1820),
-                          width: 2,
-                        ),
-                      ),
-                      child: Center(
-                        child: provider == 'google'
-                            ? Text(
-                                'G',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold,
-                                  fontFamily: 'Roboto',
-                                ),
-                              )
-                            : provider == 'facebook'
-                            ? Text(
-                                'f',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.bold,
-                                  fontFamily: 'Roboto',
-                                ),
-                              )
-                            : provider == 'apple'
-                            ? const Icon(Icons.apple, color: Colors.white, size: 14)
-                            : const Icon(Icons.email, color: Colors.white, size: 12),
-                      ),
-                    ),
-                  ),
-                
-                // Selection check badge
-                if (isSelected && _selectionMode)
-                  Positioned(
-                    right: 0,
-                    bottom: 0,
-                    child: Container(
-                      width: 24,
-                      height: 24,
-                      decoration: const BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: Colors.blueAccent,
-                      ),
-                      child: const Center(
-                        child: Icon(
-                          Icons.check,
-                          color: Colors.white,
-                          size: 16,
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-            
-            const SizedBox(width: 16),
-            
-            // Profile Info
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          name,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w600,
-                            fontSize: 18,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      // Simple loading text
-                      if (isLoading)
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.blueAccent.withOpacity(0.2),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: const Text(
-                            'Logging in...',
-                            style: TextStyle(
-                              color: Colors.blueAccent,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                  
-                  const SizedBox(height: 6),
-                  
-                  Text(
-                    email,
-                    style: TextStyle(
-                      color: Colors.white.withOpacity(0.7),
-                      fontSize: 14,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  
-                  const SizedBox(height: 8),
-                  
-                  // Provider type and last login
-                  Row(
-                    children: [
-                      // Provider type badge
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: isLoading
-                              ? Colors.blueAccent.withOpacity(0.2)
-                              : _getProviderColor(provider).withOpacity(0.2),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          provider == 'email' ? 'EMAIL' : provider.toUpperCase(),
-                          style: TextStyle(
-                            color: isLoading
-                                ? Colors.blueAccent
-                                : _getProviderColor(provider),
-                            fontSize: 11,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ),
-                      
-                      const SizedBox(width: 10),
-                      
-                      // Last login time
-                      if (profile['lastLogin'] != null && !isLoading)
-                        Text(
-                          _formatLastLogin(profile['lastLogin'] as String?),
-                          style: TextStyle(
-                            color: Colors.white.withOpacity(0.5),
-                            fontSize: 12,
-                          ),
-                        ),
-                    ],
-                  ),
-                  
-                  // Role indicator
-                  if (profile['roles'] != null &&
-                      (profile['roles'] as List).isNotEmpty &&
-                      !_selectionMode &&
-                      !isLoading)
-                    Container(
-                      margin: const EdgeInsets.only(top: 8),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.green.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        (profile['roles'] as List).first.toString().toUpperCase(),
-                        style: const TextStyle(
-                          color: Colors.greenAccent,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            
-            // Arrow indicator
-            if (!_selectionMode && !isLoading)
-              const Padding(
-                padding: EdgeInsets.only(left: 8),
-                child: Icon(
-                  Icons.chevron_right,
-                  color: Colors.white38,
-                  size: 24,
-                ),
-              ),
-          ],
-        ),
-      ),
-    ),
-  );
-}
-
-  // Build larger profile image
-  Widget _buildLargeProfileImage(
-    Map<String, dynamic> profile,
-    String? provider,
-    String? photoUrl,
-    bool hasPhoto,
-  ) {
-    final email = profile['email'] as String? ?? 'Unknown';
-    final name = profile['name'] as String? ?? email.split('@').first;
-    final isOAuth = provider != 'email';
-    final isGoogle = provider == 'google';
-
-    // Check if we should use fallback due to rate limiting
-    if (isGoogle && _isGoogleImageRateLimited && hasPhoto) {
-      return _getFallbackAvatar(profile, provider);
-    }
-
-    if (hasPhoto) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(35),
-        child: CachedNetworkImage(
-          imageUrl: photoUrl!,
-          width: 70,
-          height: 70,
-          fit: BoxFit.cover,
-          placeholder: (context, url) => Center(
-            child: Container(
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: _getProviderColor(provider).withOpacity(0.2),
-              ),
-              child: Center(
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: _getProviderColor(provider),
-                ),
-              ),
-            ),
-          ),
-          errorWidget: (context, url, error) {
-            // Handle Google rate limiting errors
-            if (url.contains('googleusercontent.com')) {
-              _handleGoogleImageError();
-              return _getFallbackAvatar(profile, provider);
-            }
-            return _getFallbackAvatar(profile, provider);
-          },
-        ),
-      );
-    } else {
-      return Center(
-        child: isOAuth
-            ? Container(
-                width: 70,
-                height: 70,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: _getProviderColor(provider),
-                ),
-                child: Center(
-                  child: provider == 'google'
-                      ? Text(
-                          'G',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 24,
-                            fontWeight: FontWeight.bold,
-                            fontFamily: 'Roboto',
-                          ),
-                        )
-                      : provider == 'facebook'
-                      ? Text(
-                          'f',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 28,
-                            fontWeight: FontWeight.bold,
-                            fontFamily: 'Roboto',
-                          ),
-                        )
-                      : provider == 'apple'
-                      ? const Icon(Icons.apple, color: Colors.white, size: 28)
-                      : const Icon(Icons.email, color: Colors.white, size: 24),
-                ),
-              )
-            : Container(
-                width: 70,
-                height: 70,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: Colors.blueAccent.withOpacity(0.2),
-                ),
-                child: Center(
-                  child: Text(
-                    name[0].toUpperCase(),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 24,
-                    ),
-                  ),
-                ),
-              ),
-      );
-    }
-  }
-
-  // ✅ Build selection mode header
   Widget _buildSelectionModeHeader() {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        // Back button
         IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white, size: 24),
           onPressed: _deselectAllProfiles,
           tooltip: 'Cancel Selection',
         ),
-
-        // Selection count
         Column(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
@@ -2159,17 +1698,14 @@ Widget _buildProfileCard(Map<String, dynamic> profile, int index) {
             Text(
               'Tap to select/deselect',
               style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.7),
+                color: Colors.white.withValues(alpha:0.7),
                 fontSize: 12,
               ),
             ),
           ],
         ),
-
-        // Action buttons
         Row(
           children: [
-            // Select all button
             IconButton(
               icon: Icon(
                 _selectedCount == profiles.length
@@ -2185,7 +1721,6 @@ Widget _buildProfileCard(Map<String, dynamic> profile, int index) {
                   ? 'Deselect All'
                   : 'Select All',
             ),
-            // Delete selected button
             if (_selectedCount > 0)
               IconButton(
                 icon: const Icon(
@@ -2202,13 +1737,11 @@ Widget _buildProfileCard(Map<String, dynamic> profile, int index) {
     );
   }
 
-  // Updated footer for Facebook style
   Widget _buildFooter() {
     return Container(
       margin: const EdgeInsets.only(top: 20),
       child: Column(
         children: [
-          // Primary button
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
@@ -2230,7 +1763,6 @@ Widget _buildProfileCard(Map<String, dynamic> profile, int index) {
 
           const SizedBox(height: 16),
 
-          // Create new account
           SizedBox(
             width: double.infinity,
             child: OutlinedButton(
@@ -2254,7 +1786,6 @@ Widget _buildProfileCard(Map<String, dynamic> profile, int index) {
 
           const SizedBox(height: 20),
 
-          // Links
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
@@ -2291,7 +1822,7 @@ Widget _buildProfileCard(Map<String, dynamic> profile, int index) {
   }
 }
 
-// Security Compliant Password Dialog (Remains the same)
+// Security Compliant Password Dialog
 class SecurityCompliantPasswordDialog extends StatefulWidget {
   final String email;
   const SecurityCompliantPasswordDialog({super.key, required this.email});
@@ -2318,25 +1849,20 @@ class _SecurityCompliantPasswordDialogState
   void _onTextChanged() {
     final newLength = _controller.text.length;
 
-    // Update typed characters count
     if (newLength > _typedCharacters) {
       _typedCharacters = newLength;
     }
 
-    // Validate password
     setState(() {
       _isValid = newLength >= 6;
     });
 
-    // Handle auto-submit
     _handleAutoSubmit();
   }
 
   void _handleAutoSubmit() {
-    // Cancel previous timer
     _typingTimer?.cancel();
 
-    // Start auto-submit timer if conditions met
     if (_controller.text.length >= 6 && !_isSubmitting && mounted) {
       _typingTimer = Timer(const Duration(milliseconds: 2000), () {
         if (!_isSubmitting && mounted) {
@@ -2351,10 +1877,8 @@ class _SecurityCompliantPasswordDialogState
 
     setState(() => _isSubmitting = true);
 
-    // Clear any active timer
     _typingTimer?.cancel();
 
-    // Add small delay for smooth UX
     await Future.delayed(const Duration(milliseconds: 200));
 
     if (!mounted) return;
@@ -2402,7 +1926,6 @@ class _SecurityCompliantPasswordDialogState
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header
             Row(
               children: [
                 Expanded(
@@ -2430,8 +1953,6 @@ class _SecurityCompliantPasswordDialogState
                     ],
                   ),
                 ),
-
-                // Clear button
                 if (_controller.text.isNotEmpty && !_isSubmitting)
                   IconButton(
                     icon: const Icon(Icons.clear, size: 18),
@@ -2441,10 +1962,7 @@ class _SecurityCompliantPasswordDialogState
                   ),
               ],
             ),
-
             const SizedBox(height: 20),
-
-            // Password Field with Progress
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -2461,10 +1979,10 @@ class _SecurityCompliantPasswordDialogState
                         labelStyle: const TextStyle(color: Colors.white70),
                         hintText: 'Type at least 6 characters',
                         hintStyle: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.4),
+                          color: Colors.white.withValues(alpha:0.4),
                         ),
                         filled: true,
-                        fillColor: Colors.white.withValues(alpha: 0.08),
+                        fillColor: Colors.white.withValues(alpha:0.08),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(10),
                           borderSide: BorderSide.none,
@@ -2476,7 +1994,6 @@ class _SecurityCompliantPasswordDialogState
                         suffixIcon: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            // Visibility toggle
                             if (_controller.text.isNotEmpty)
                               IconButton(
                                 icon: Icon(
@@ -2494,8 +2011,6 @@ class _SecurityCompliantPasswordDialogState
                                         });
                                       },
                               ),
-
-                            // Auto-submit indicator
                             if (_isValid && !_isSubmitting)
                               Container(
                                 margin: const EdgeInsets.only(right: 8),
@@ -2516,13 +2031,11 @@ class _SecurityCompliantPasswordDialogState
                       textInputAction: TextInputAction.done,
                       onSubmitted: (value) => _submitPassword(),
                     ),
-
-                    // Loading overlay
                     if (_isSubmitting)
                       Positioned.fill(
                         child: Container(
                           decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.5),
+                            color: Colors.black.withValues(alpha:0.5),
                             borderRadius: BorderRadius.circular(10),
                           ),
                           child: const Center(
@@ -2535,8 +2048,6 @@ class _SecurityCompliantPasswordDialogState
                       ),
                   ],
                 ),
-
-                // Password strength indicator
                 if (_controller.text.isNotEmpty)
                   Container(
                     margin: const EdgeInsets.only(top: 8),
@@ -2545,9 +2056,7 @@ class _SecurityCompliantPasswordDialogState
                         Expanded(
                           child: LinearProgressIndicator(
                             value: _controller.text.length / 6,
-                            backgroundColor: Colors.white.withValues(
-                              alpha: 0.1,
-                            ),
+                            backgroundColor: Colors.white.withValues(alpha:0.1),
                             valueColor: AlwaysStoppedAnimation<Color>(
                               _controller.text.length >= 6
                                   ? Colors.greenAccent
@@ -2572,17 +2081,15 @@ class _SecurityCompliantPasswordDialogState
                   ),
               ],
             ),
-
-            // Auto-login info
             if (_isValid && !_isSubmitting)
               Container(
                 margin: const EdgeInsets.only(top: 12),
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: Colors.green.withValues(alpha: 0.1),
+                  color: Colors.green.withValues(alpha:0.1),
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(
-                    color: Colors.greenAccent.withValues(alpha: 0.3),
+                    color: Colors.greenAccent.withValues(alpha:0.3),
                   ),
                 ),
                 child: Row(
@@ -2611,10 +2118,7 @@ class _SecurityCompliantPasswordDialogState
                   ],
                 ),
               ),
-
             const SizedBox(height: 20),
-
-            // Action Buttons
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
@@ -2641,9 +2145,7 @@ class _SecurityCompliantPasswordDialogState
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.blueAccent,
                     foregroundColor: Colors.white,
-                    disabledBackgroundColor: Colors.blueAccent.withValues(
-                      alpha: 0.5,
-                    ),
+                    disabledBackgroundColor: Colors.blueAccent.withValues(alpha:0.5),
                     padding: const EdgeInsets.symmetric(
                       horizontal: 20,
                       vertical: 12,
