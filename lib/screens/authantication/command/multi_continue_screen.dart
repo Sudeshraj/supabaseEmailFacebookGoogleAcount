@@ -23,18 +23,20 @@ class _ContinueScreenState extends State<ContinueScreen> {
   bool _loading = false;
   String? _selectedEmail;
   bool _showComplianceDialog = false;
-  Map<String, bool> _oauthLoadingStates = {};
+  final Map<String, bool> _oauthLoadingStates = {};
+  bool _isGoogleImageRateLimited = false;
+  DateTime? _lastGoogleImageError;
+  
+  // Selection mode variables
+  bool _selectionMode = false;
+  Set<String> _selectedProfiles = {};
+  int _selectedCount = 0;
 
   @override
   void initState() {
     super.initState();
     _loadProfiles();
     _checkCompliance();
-    
-    // Debug profiles
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _debugProfiles();
-    });
   }
 
   Future<void> _loadProfiles() async {
@@ -55,36 +57,118 @@ class _ContinueScreenState extends State<ContinueScreen> {
         return 0;
       });
       
+      // Process and optimize profile images
+      for (var profile in rememberMeProfiles) {
+        await _optimizeProfileImage(profile);
+      }
+      
       if (!mounted) return;
       setState(() => profiles = rememberMeProfiles);
       
       if (kDebugMode) {
         print('📊 Loaded ${profiles.length} profiles for continue screen');
-        for (var profile in profiles) {
-          print('   - ${profile['email']} (${profile['provider']}) - Remember Me: ${profile['rememberMe']}');
-        }
       }
     } catch (e) {
       print('❌ Error loading profiles: $e');
     }
   }
 
-  Future<void> _debugProfiles() async {
-    if (kDebugMode) {
-      print('🔍 === DEBUG PROFILES ===');
-      for (int i = 0; i < profiles.length; i++) {
-        final profile = profiles[i];
-        final email = profile['email'] as String? ?? 'Unknown';
-        final photo = profile['photo'] as String?;
-        final hasPhoto = photo != null && photo.isNotEmpty;
-        
-        print('Profile #${i + 1}: $email');
-        print('   - Has photo: $hasPhoto');
-        print('   - Photo URL: ${hasPhoto ? photo : "None"}');
-        print('   - Provider: ${profile['provider']}');
-        print('   - All keys: ${profile.keys.toList()}');
-        print('---');
+  Future<void> _optimizeProfileImage(Map<String, dynamic> profile) async {
+    try {
+      // Try different possible photo keys
+      String? photoUrl;
+      
+      if (profile['photo'] != null && (profile['photo'] as String).isNotEmpty) {
+        photoUrl = profile['photo'] as String;
+      } else if (profile['avatar_url'] != null && (profile['avatar_url'] as String).isNotEmpty) {
+        photoUrl = profile['avatar_url'] as String;
+      } else if (profile['picture'] != null && (profile['picture'] as String).isNotEmpty) {
+        photoUrl = profile['picture'] as String;
+      } else if (profile['image'] != null && (profile['image'] as String).isNotEmpty) {
+        photoUrl = profile['image'] as String;
       }
+      
+      if (photoUrl != null && photoUrl.isNotEmpty) {
+        // Clean up URL
+        photoUrl = photoUrl.replaceAll('"', '').trim();
+        
+        // Ensure proper protocol
+        if (!photoUrl.startsWith('http')) {
+          photoUrl = 'https:$photoUrl';
+        }
+        
+        // Optimize Google URLs
+        if (photoUrl.contains('googleusercontent.com')) {
+          photoUrl = _optimizeGoogleProfileUrl(photoUrl) ?? photoUrl;
+        }
+        
+        // Update profile with optimized URL
+        profile['photo'] = photoUrl;
+      }
+    } catch (e) {
+      print('❌ Error optimizing profile image: $e');
+    }
+  }
+
+  String? _optimizeGoogleProfileUrl(String? photoUrl) {
+    if (photoUrl == null || !photoUrl.contains('googleusercontent.com')) {
+      return photoUrl;
+    }
+
+    try {
+      // Simple optimization for Google URLs
+      if (photoUrl.startsWith('//')) {
+        photoUrl = 'https:$photoUrl';
+      }
+      
+      // Check if already has size parameter
+      final hasSizeParam = photoUrl.contains('=s96') || 
+                          photoUrl.contains('?sz=') ||
+                          photoUrl.contains('/s96-c/');
+      
+      if (hasSizeParam) {
+        return photoUrl; // Already optimized
+      }
+      
+      // Add size parameter if missing
+      if (!photoUrl.contains('=s') && !photoUrl.contains('?sz=')) {
+        if (photoUrl.contains('?')) {
+          return '${photoUrl}&sz=96';
+        } else {
+          return '${photoUrl}?sz=96';
+        }
+      }
+      
+      return photoUrl;
+    } catch (e) {
+      print('❌ Error optimizing Google URL: $e');
+      return photoUrl;
+    }
+  }
+
+  void _handleGoogleImageError() {
+    final now = DateTime.now();
+    
+    if (_lastGoogleImageError != null) {
+      final difference = now.difference(_lastGoogleImageError!);
+      if (difference.inMinutes < 5) {
+        _isGoogleImageRateLimited = true;
+        
+        // Schedule reset
+        Future.delayed(const Duration(minutes: 5), () {
+          if (mounted) {
+            setState(() {
+              _isGoogleImageRateLimited = false;
+            });
+          }
+        });
+      }
+    }
+    
+    _lastGoogleImageError = now;
+    
+    if (mounted) {
+      setState(() {});
     }
   }
 
@@ -97,56 +181,169 @@ class _ContinueScreenState extends State<ContinueScreen> {
     }
   }
 
-  // ✅ Get provider icon
+  // ✅ Get provider icon with color
   Widget _getProviderIcon(String? provider) {
     switch (provider?.toLowerCase()) {
       case 'google':
         return Container(
-          width: 32,
-          height: 32,
-          alignment: Alignment.center,
-          child: Text(
-            'G',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              fontFamily: 'Roboto',
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: const Color(0xFFDB4437),
+          ),
+          child: Center(
+            child: Text(
+              'G',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                fontFamily: 'Roboto',
+              ),
             ),
           ),
         );
       case 'facebook':
         return Container(
-          width: 32,
-          height: 32,
-          alignment: Alignment.center,
-          child: Text(
-            'f',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              fontFamily: 'Roboto',
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: const Color(0xFF1877F2),
+          ),
+          child: Center(
+            child: Text(
+              'f',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
+                fontFamily: 'Roboto',
+              ),
             ),
           ),
         );
       case 'apple':
-        return const Icon(
-          Icons.apple,
-          color: Colors.white,
-          size: 20,
+        return Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: Colors.black,
+          ),
+          child: const Center(
+            child: Icon(
+              Icons.apple,
+              color: Colors.white,
+              size: 22,
+            ),
+          ),
         );
       default:
-        return const Icon(
-          Icons.email,
-          color: Colors.white,
-          size: 18,
+        return Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: Colors.blueAccent,
+          ),
+          child: const Center(
+            child: Icon(
+              Icons.email,
+              color: Colors.white,
+              size: 20,
+            ),
+          ),
+        );
+    }
+  }
+
+  // ✅ Get provider icon small (for list)
+  Widget _getProviderIconSmall(String? provider) {
+    switch (provider?.toLowerCase()) {
+      case 'google':
+        return Container(
+          width: 20,
+          height: 20,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: const Color(0xFFDB4437),
+          ),
+          child: Center(
+            child: Text(
+              'G',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+                fontFamily: 'Roboto',
+              ),
+            ),
+          ),
+        );
+      case 'facebook':
+        return Container(
+          width: 20,
+          height: 20,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: const Color(0xFF1877F2),
+          ),
+          child: Center(
+            child: Text(
+              'f',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                fontFamily: 'Roboto',
+              ),
+            ),
+          ),
+        );
+      case 'apple':
+        return Container(
+          width: 20,
+          height: 20,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: Colors.black,
+          ),
+          child: const Center(
+            child: Icon(
+              Icons.apple,
+              color: Colors.white,
+              size: 12,
+            ),
+          ),
+        );
+      default:
+        return Container(
+          width: 20,
+          height: 20,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: Colors.blueAccent,
+          ),
+          child: const Center(
+            child: Icon(
+              Icons.email,
+              color: Colors.white,
+              size: 10,
+            ),
+          ),
         );
     }
   }
 
   // ✅ Handle OAuth login with improved error handling
   Future<void> _handleOAuthLogin(Map<String, dynamic> profile) async {
+    if (_selectionMode) {
+      _toggleProfileSelection(profile);
+      return;
+    }
+
     final email = profile['email'] as String?;
     final provider = profile['provider'] as String?;
     
@@ -372,6 +569,11 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
   // ✅ Handle email login (existing password dialog)
   Future<void> _handleEmailLogin(Map<String, dynamic> profile) async {
+    if (_selectionMode) {
+      _toggleProfileSelection(profile);
+      return;
+    }
+
     if (_loading) return;
 
     setState(() {
@@ -574,269 +776,220 @@ class _ContinueScreenState extends State<ContinueScreen> {
     }
   }
 
-  // ✅ Build profile item with proper photo handling
-  Widget _buildProfileItem(Map<String, dynamic> profile, int index) {
+  // ✅ Build profile image with error handling
+  Widget _buildProfileImage(Map<String, dynamic> profile, String? provider, 
+                           String? photoUrl, bool hasPhoto) {
     final email = profile['email'] as String? ?? 'Unknown';
-    final provider = profile['provider'] as String? ?? 'email';
-    final isOAuth = provider != 'email';
-    final isSelected = _selectedEmail == email;
-    final isLoading = _oauthLoadingStates[email] == true;
-    final rememberMe = profile['rememberMe'] == true;
-    
-    // Get name properly
     final name = profile['name'] as String? ?? email.split('@').first;
+    final isOAuth = provider != 'email';
+    final isGoogle = provider == 'google';
     
-    // Get photo properly - check all possibilities
-    String? photoUrl;
-    
-    // Try different possible photo keys
-    if (profile['photo'] != null && (profile['photo'] as String).isNotEmpty) {
-      photoUrl = profile['photo'] as String;
-    } else if (profile['avatar_url'] != null && (profile['avatar_url'] as String).isNotEmpty) {
-      photoUrl = profile['avatar_url'] as String;
-    } else if (profile['picture'] != null && (profile['picture'] as String).isNotEmpty) {
-      photoUrl = profile['picture'] as String;
-    } else if (profile['image'] != null && (profile['image'] as String).isNotEmpty) {
-      photoUrl = profile['image'] as String;
+    // Check if we should use fallback due to rate limiting
+    if (isGoogle && _isGoogleImageRateLimited && hasPhoto) {
+      return _getFallbackAvatar(profile, provider);
     }
     
-    final hasPhoto = photoUrl != null && photoUrl.isNotEmpty;
-
-    return GestureDetector(
-      onTap: isLoading ? null : () {
-        if (isOAuth) {
-          _handleOAuthLogin(profile);
-        } else {
-          _handleEmailLogin(profile);
-        }
-      },
-      child: Card(
-        color: isSelected
-            ? Colors.blue.withOpacity(0.15)
-            : Colors.white.withOpacity(0.06),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-          side: BorderSide(
-            color: isSelected
-                ? Colors.blueAccent.withOpacity(0.5)
-                : Colors.transparent,
-            width: 1,
+    if (hasPhoto) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(24),
+        child: CachedNetworkImage(
+          imageUrl: photoUrl!,
+          width: 56,
+          height: 56,
+          fit: BoxFit.cover,
+          placeholder: (context, url) => Center(
+            child: Container(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: _getProviderColor(provider).withOpacity(0.2),
+              ),
+              child: Center(
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: _getProviderColor(provider),
+                ),
+              ),
+            ),
           ),
+          errorWidget: (context, url, error) {
+            // Handle Google rate limiting errors
+            if (url.contains('googleusercontent.com')) {
+              _handleGoogleImageError();
+              return _getFallbackAvatar(profile, provider);
+            }
+            return _getFallbackAvatar(profile, provider);
+          },
         ),
-        child: ListTile(
-          leading: Stack(
-            children: [
-              // Profile image with proper loading and error handling
-              Container(
-                width: 48,
-                height: 48,
+      );
+    } else {
+      return Center(
+        child: isOAuth
+            ? _getProviderIcon(provider)
+            : Container(
+                width: 56,
+                height: 56,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: isOAuth
-                      ? _getProviderColor(provider)
-                      : Colors.blueAccent.withOpacity(0.2),
+                  color: Colors.blueAccent.withOpacity(0.2),
                 ),
-                child: hasPhoto
-                    ? ClipRRect(
-                        borderRadius: BorderRadius.circular(24),
-                        child: CachedNetworkImage(
-                          imageUrl: photoUrl,
-                          width: 48,
-                          height: 48,
-                          fit: BoxFit.cover,
-                          placeholder: (context, url) => Center(
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: _getProviderColor(provider),
-                            ),
-                          ),
-                          errorWidget: (context, url, error) => Center(
-                            child: isOAuth
-                                ? _getProviderIcon(provider)
-                                : Text(
-                                    name[0].toUpperCase(),
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 16,
-                                    ),
-                                  ),
-                          ),
-                        ),
-                      )
-                    : Center(
-                        child: isOAuth
-                            ? _getProviderIcon(provider)
-                            : Text(
-                                name[0].toUpperCase(),
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 16,
-                                ),
-                              ),
-                      ),
-              ),
-              
-              // Remember me badge
-              if (rememberMe)
-                Positioned(
-                  right: 0,
-                  bottom: 0,
-                  child: Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: const BoxDecoration(
-                      color: Colors.green,
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.check,
-                      color: Colors.white,
-                      size: 10,
-                    ),
-                  ),
-                ),
-            ],
-          ),
-          title: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  name,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w500,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              if (isOAuth)
-                Container(
-                  margin: const EdgeInsets.only(left: 8),
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: _getProviderColor(provider).withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: _getProviderColor(provider).withOpacity(0.5),
-                    ),
-                  ),
+                child: Center(
                   child: Text(
-                    provider.toUpperCase(),
-                    style: TextStyle(
-                      color: _getProviderColor(provider),
-                      fontSize: 10,
+                    name[0].toUpperCase(),
+                    style: const TextStyle(
+                      color: Colors.white,
                       fontWeight: FontWeight.bold,
+                      fontSize: 20,
                     ),
                   ),
                 ),
-            ],
-          ),
-          subtitle: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                email,
-                style: TextStyle(
-                  color: Colors.white.withOpacity(0.6),
-                  fontSize: 12,
-                ),
-                overflow: TextOverflow.ellipsis,
               ),
-              const SizedBox(height: 2),
-              // Last login time
-              if (profile['lastLogin'] != null)
-                Text(
-                  'Last login: ${_formatLastLogin(profile['lastLogin'] as String?)}',
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.4),
-                    fontSize: 10,
-                  ),
-                ),
-              // Provider indicator
-              if (isOAuth)
-                Text(
-                  'Sign in with ${provider[0].toUpperCase()}${provider.substring(1)}',
-                  style: TextStyle(
-                    color: _getProviderColor(provider),
-                    fontSize: 10,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              if (isOAuth && isLoading)
-                const SizedBox(height: 4),
-              if (isOAuth && isLoading)
-                const LinearProgressIndicator(
-                  backgroundColor: Colors.transparent,
-                  valueColor: AlwaysStoppedAnimation<Color>(Colors.blueAccent),
-                  minHeight: 2,
-                ),
+      );
+    }
+  }
+
+  // ✅ Get fallback avatar
+  Widget _getFallbackAvatar(Map<String, dynamic> profile, String? provider) {
+    final email = profile['email'] as String? ?? 'Unknown';
+    final name = profile['name'] as String? ?? email.split('@').first;
+    final isOAuth = provider != 'email';
+    final isGoogle = provider == 'google';
+    
+    if (isGoogle) {
+      return Container(
+        decoration: const BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Color(0xFF4285F4),
+              Color(0xFF34A853),
+              Color(0xFFFBBC05),
+              Color(0xFFEA4335),
             ],
           ),
-          trailing: isLoading
-              ? const SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.blueAccent),
+        ),
+        child: Center(
+          child: Text(
+            name[0].toUpperCase(),
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              fontFamily: 'Roboto',
+            ),
+          ),
+        ),
+      );
+    }
+    
+    if (isOAuth) {
+      return Container(
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: _getProviderColor(provider),
+        ),
+        child: Center(
+          child: isGoogle
+              ? Text(
+                  'G',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    fontFamily: 'Roboto',
                   ),
                 )
-              : Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (profile['roles'] != null &&
-                        (profile['roles'] as List).isNotEmpty)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.green.withOpacity(0.2),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          (profile['roles'] as List).first.toString(),
-                          style: const TextStyle(
-                            color: Colors.greenAccent,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
+              : provider == 'facebook'
+                  ? Text(
+                      'f',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        fontFamily: 'Roboto',
                       ),
-                    const SizedBox(width: 8),
-                    IconButton(
-                      icon: const Icon(
-                        Icons.delete_outline,
-                        color: Colors.redAccent,
-                        size: 18,
-                      ),
-                      onPressed: () async {
-                        await _showDeleteConfirmation(profile);
-                      },
-                    ),
-                    const SizedBox(width: 4),
-                    Icon(
-                      isOAuth ? Icons.login : Icons.arrow_forward_ios_rounded,
-                      color: isOAuth ? Colors.greenAccent : Colors.white38,
-                      size: 16,
-                    ),
-                  ],
-                ),
+                    )
+                  : provider == 'apple'
+                      ? const Icon(
+                          Icons.apple,
+                          color: Colors.white,
+                          size: 22,
+                        )
+                      : const Icon(
+                          Icons.email,
+                          color: Colors.white,
+                          size: 20,
+                        ),
+        ),
+      );
+    }
+    
+    return Container(
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: Colors.blueAccent.withOpacity(0.2),
+      ),
+      child: Center(
+        child: Text(
+          name[0].toUpperCase(),
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+            fontSize: 20,
+          ),
         ),
       ),
     );
   }
 
-  // ✅ Delete confirmation
-  Future<void> _showDeleteConfirmation(Map<String, dynamic> profile) async {
+  // ✅ Toggle profile selection
+  void _toggleProfileSelection(Map<String, dynamic> profile) {
+    final email = profile['email'] as String? ?? '';
+    setState(() {
+      if (_selectedProfiles.contains(email)) {
+        _selectedProfiles.remove(email);
+      } else {
+        _selectedProfiles.add(email);
+      }
+      _selectedCount = _selectedProfiles.length;
+      
+      // Exit selection mode if nothing selected
+      if (_selectedCount == 0) {
+        _selectionMode = false;
+      }
+    });
+  }
+
+  // ✅ Select all profiles
+  void _selectAllProfiles() {
+    setState(() {
+      _selectedProfiles = Set<String>.from(
+        profiles.map((p) => p['email'] as String? ?? '').where((e) => e.isNotEmpty)
+      );
+      _selectedCount = _selectedProfiles.length;
+    });
+  }
+
+  // ✅ Deselect all profiles
+  void _deselectAllProfiles() {
+    setState(() {
+      _selectedProfiles.clear();
+      _selectedCount = 0;
+      _selectionMode = false;
+    });
+  }
+
+  // ✅ Remove selected profiles
+  Future<void> _removeSelectedProfiles() async {
+    if (_selectedProfiles.isEmpty) return;
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF1C1F26),
         title: const Text(
-          "Remove Account?",
+          "Remove Selected Profiles?",
           style: TextStyle(color: Colors.white),
         ),
         content: Column(
@@ -844,12 +997,12 @@ class _ContinueScreenState extends State<ContinueScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              "Remove ${profile['email']} from this device?",
+              "Remove $_selectedCount profile${_selectedCount == 1 ? '' : 's'} from this device?",
               style: const TextStyle(color: Colors.white70),
             ),
             const SizedBox(height: 8),
             const Text(
-              "This will not delete your account, only remove it from this device.",
+              "This will not delete your accounts, only remove them from this device.",
               style: TextStyle(color: Colors.grey, fontSize: 12),
             ),
           ],
@@ -872,21 +1025,314 @@ class _ContinueScreenState extends State<ContinueScreen> {
     );
 
     if (confirmed == true) {
-      await SessionManager.removeProfile(profile['email'] as String);
+      for (final email in _selectedProfiles) {
+        await SessionManager.removeProfile(email);
+      }
+
       await _loadProfiles();
+      _deselectAllProfiles();
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('${profile['email']} removed'),
+          content: Text('$_selectedCount profile${_selectedCount == 1 ? '' : 's'} removed'),
           backgroundColor: Colors.green,
+          duration: const Duration(seconds: 2),
         ),
       );
     }
   }
 
-  // ✅ Clear all profiles
-  Future<void> clearAllProfiles() async {
+  // ✅ Start selection mode
+  void _startSelectionMode() {
+    setState(() {
+      _selectionMode = true;
+      _selectedProfiles.clear();
+      _selectedCount = 0;
+    });
+  }
+
+  // ✅ Build profile item for selection mode
+  Widget _buildProfileItem(Map<String, dynamic> profile, int index) {
+    final email = profile['email'] as String? ?? 'Unknown';
+    final provider = profile['provider'] as String? ?? 'email';
+    final isOAuth = provider != 'email';
+    final isSelected = _selectedProfiles.contains(email);
+    final isLoading = _oauthLoadingStates[email] == true;
+    final rememberMe = profile['rememberMe'] == true;
+    
+    // Get name properly
+    final name = profile['name'] as String? ?? email.split('@').first;
+    
+    // Get photo URL
+    final photoUrl = profile['photo'] as String?;
+    final hasPhoto = photoUrl != null && photoUrl.isNotEmpty;
+
+    return GestureDetector(
+      onTap: () {
+        if (_selectionMode) {
+          _toggleProfileSelection(profile);
+        } else if (isLoading) {
+          return;
+        } else if (isOAuth) {
+          _handleOAuthLogin(profile);
+        } else {
+          _handleEmailLogin(profile);
+        }
+      },
+      onLongPress: () {
+        if (!_selectionMode) {
+          _startSelectionMode();
+          _toggleProfileSelection(profile);
+        }
+      },
+      child: Card(
+        color: isSelected
+            ? Colors.blue.withOpacity(0.25)
+            : Colors.white.withOpacity(0.06),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(
+            color: isSelected
+                ? Colors.blueAccent
+                : Colors.transparent,
+            width: 2,
+          ),
+        ),
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              // Selection Checkbox
+              if (_selectionMode)
+                Checkbox(
+                  value: isSelected,
+                  onChanged: (value) {
+                    _toggleProfileSelection(profile);
+                  },
+                  activeColor: Colors.blueAccent,
+                  checkColor: Colors.white,
+                ),
+              
+              SizedBox(width: _selectionMode ? 8 : 0),
+              
+              // Profile Image
+              Stack(
+                children: [
+                  Container(
+                    width: 56,
+                    height: 56,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: isOAuth
+                          ? _getProviderColor(provider).withOpacity(0.2)
+                          : Colors.blueAccent.withOpacity(0.2),
+                    ),
+                    child: _buildProfileImage(profile, provider, photoUrl, hasPhoto),
+                  ),
+                  
+                  // Provider icon badge
+                  if (isOAuth && !_selectionMode)
+                    Positioned(
+                      right: 0,
+                      bottom: 0,
+                      child: Container(
+                        width: 20,
+                        height: 20,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: _getProviderColor(provider),
+                          border: Border.all(
+                            color: const Color(0xFF0F1820),
+                            width: 2,
+                          ),
+                        ),
+                        child: Center(
+                          child: _getProviderIconSmall(provider),
+                        ),
+                      ),
+                    ),
+                  
+                  // Selection check badge
+                  if (isSelected && _selectionMode)
+                    Positioned(
+                      right: 0,
+                      bottom: 0,
+                      child: Container(
+                        width: 20,
+                        height: 20,
+                        decoration: const BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Colors.blueAccent,
+                        ),
+                        child: const Center(
+                          child: Icon(
+                            Icons.check,
+                            color: Colors.white,
+                            size: 14,
+                          ),
+                        ),
+                      ),
+                    ),
+                  
+                  // Remember me badge
+                  if (rememberMe && !isOAuth && !_selectionMode)
+                    Positioned(
+                      right: 0,
+                      bottom: 0,
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: const BoxDecoration(
+                          color: Colors.green,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.check,
+                          color: Colors.white,
+                          size: 10,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              
+              const SizedBox(width: 12),
+              
+              // Profile Info
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            name,
+                            style: TextStyle(
+                              color: isSelected ? Colors.white : Colors.white,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 16,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (isLoading)
+                          const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation<Color>(Colors.blueAccent),
+                            ),
+                          ),
+                      ],
+                    ),
+                    
+                    const SizedBox(height: 4),
+                    
+                    Text(
+                      email,
+                      style: TextStyle(
+                        color: isSelected 
+                            ? Colors.white.withOpacity(0.9)
+                            : Colors.white.withOpacity(0.7),
+                        fontSize: 13,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    
+                    const SizedBox(height: 4),
+                    
+                    // Provider and last login info
+                    if (!_selectionMode)
+                      Row(
+                        children: [
+                          // Provider indicator
+                          // if (isOAuth)
+                          //   Container(
+                          //     margin: const EdgeInsets.only(right: 8),
+                          //     padding: const EdgeInsets.symmetric(
+                          //       horizontal: 8,
+                          //       vertical: 2,
+                          //     ),
+                          //     decoration: BoxDecoration(
+                          //       color: _getProviderColor(provider).withOpacity(0.2),
+                          //       borderRadius: BorderRadius.circular(12),
+                          //       border: Border.all(
+                          //         color: _getProviderColor(provider).withOpacity(0.5),
+                          //       ),
+                          //     ),
+                          //     child: Row(
+                          //       mainAxisSize: MainAxisSize.min,
+                          //       children: [
+                          //         _getProviderIconSmall(provider),
+                          //         const SizedBox(width: 4),
+                          //         Text(
+                          //           provider.toUpperCase(),
+                          //           style: TextStyle(
+                          //             color: _getProviderColor(provider),
+                          //             fontSize: 10,
+                          //             fontWeight: FontWeight.bold,
+                          //           ),
+                          //         ),
+                          //       ],
+                          //     ),
+                          //   ),
+                          
+                          // Last login time
+                          if (profile['lastLogin'] != null)
+                            Text(
+                              _formatLastLogin(profile['lastLogin'] as String?),
+                              style: TextStyle(
+                                color: Colors.white.withOpacity(0.5),
+                                fontSize: 11,
+                              ),
+                            ),
+                        ],
+                      ),
+                    
+                    // Role indicator
+                    if (profile['roles'] != null &&
+                        (profile['roles'] as List).isNotEmpty && !_selectionMode)
+                      Container(
+                        margin: const EdgeInsets.only(top: 4),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.green.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          (profile['roles'] as List).first.toString(),
+                          style: const TextStyle(
+                            color: Colors.greenAccent,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              
+              // Arrow indicator (only when not in selection mode)
+              if (!_selectionMode && !isLoading)
+                Icon(
+                  isOAuth ? Icons.login : Icons.arrow_forward_ios_rounded,
+                  color: isOAuth ? Colors.greenAccent : Colors.white38,
+                  size: 18,
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ✅ Clear all profiles (original function)
+  Future<void> _clearAllProfiles() async {
     if (profiles.isEmpty) return;
 
     final confirmed = await showDialog<bool>(
@@ -976,50 +1422,16 @@ class _ContinueScreenState extends State<ContinueScreen> {
               ),
               child: Column(
                 children: [
-                  // Header
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Continue',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 24,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            profiles.isEmpty
-                                ? 'No saved profiles'
-                                : '${profiles.length} profile${profiles.length == 1 ? '' : 's'}',
-                            style: TextStyle(
-                              color: Colors.white.withOpacity(0.7),
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      ),
-                      if (profiles.isNotEmpty)
-                        IconButton(
-                          icon: const Icon(
-                            Icons.delete_sweep,
-                            color: Colors.redAccent,
-                            size: 24,
-                          ),
-                          onPressed: clearAllProfiles,
-                          tooltip: 'Clear All Profiles',
-                        ),
-                    ],
-                  ),
-
+                  // Header with selection mode
+                  if (_selectionMode)
+                    _buildSelectionModeHeader()
+                  else
+                    _buildNormalHeader(),
+                  
                   const SizedBox(height: 20),
 
                   // Compliance Notice
-                  if (_showComplianceDialog)
+                  if (_showComplianceDialog && !_selectionMode)
                     Container(
                       padding: const EdgeInsets.all(12),
                       margin: const EdgeInsets.only(bottom: 16),
@@ -1055,6 +1467,100 @@ class _ContinueScreenState extends State<ContinueScreen> {
                                   'Enable "Remember Me" during login to save profiles',
                                   style: TextStyle(
                                     color: Colors.white.withOpacity(0.7),
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                  // Rate limiting notice
+                  if (_isGoogleImageRateLimited && !_selectionMode)
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      margin: const EdgeInsets.only(bottom: 16),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: Colors.orangeAccent.withOpacity(0.3),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.warning_amber,
+                            color: Colors.orangeAccent,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Google Profile Images Limited',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Using fallback images to prevent rate limiting',
+                                  style: TextStyle(
+                                    color: Colors.white.withOpacity(0.7),
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                  // Selection instructions
+                  if (_selectionMode)
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      margin: const EdgeInsets.only(bottom: 16),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: Colors.blueAccent.withOpacity(0.3),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.check_circle_outline,
+                            color: Colors.blueAccent,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '$_selectedCount profile${_selectedCount == 1 ? '' : 's'} selected',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                const Text(
+                                  'Tap profiles to select/deselect',
+                                  style: TextStyle(
+                                    color: Colors.white,
                                     fontSize: 12,
                                   ),
                                 ),
@@ -1151,110 +1657,111 @@ class _ContinueScreenState extends State<ContinueScreen> {
                           ),
                   ),
 
-                  // Footer Buttons
-                  Padding(
-                    padding: const EdgeInsets.only(top: 20),
-                    child: Column(
-                      children: [
-                        // Login with another account
-                        SizedBox(
-                          width: double.infinity,
-                          child: OutlinedButton(
-                            onPressed: () {
-                              context.go('/login');
-                            },
-                            style: OutlinedButton.styleFrom(
-                              side: const BorderSide(color: Colors.white24),
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(14),
-                              ),
-                            ),
-                            child: const Text(
-                              'Login with another account',
-                              style: TextStyle(color: Colors.white70),
-                            ),
-                          ),
-                        ),
-
-                        const SizedBox(height: 12),
-
-                        // Clear all data button
-                        TextButton(
-                          onPressed: () => context.go('/clear-data'),
-                          child: const Text(
-                            'Clear All Data',
-                            style: TextStyle(
-                              color: Colors.redAccent,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ),
-
-                        const SizedBox(height: 12),
-
-                        // Privacy links
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            TextButton(
-                              onPressed: () => context.go('/privacy'),
-                              child: const Text(
-                                'Privacy Policy',
-                                style: TextStyle(
-                                  color: Colors.white70,
-                                  fontSize: 12,
+                  // Footer Buttons (only when not in selection mode)
+                  if (!_selectionMode)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 20),
+                      child: Column(
+                        children: [
+                          // Login with another account
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton(
+                              onPressed: () {
+                                context.go('/login');
+                              },
+                              style: OutlinedButton.styleFrom(
+                                side: const BorderSide(color: Colors.white24),
+                                padding: const EdgeInsets.symmetric(vertical: 14),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
                                 ),
                               ),
-                            ),
-                            const SizedBox(width: 8),
-                            Container(
-                              width: 1,
-                              height: 12,
-                              color: Colors.white30,
-                            ),
-                            const SizedBox(width: 8),
-                            TextButton(
-                              onPressed: () => context.go('/terms'),
                               child: const Text(
-                                'Terms of Service',
-                                style: TextStyle(
-                                  color: Colors.white70,
-                                  fontSize: 12,
-                                ),
+                                'Login with another account',
+                                style: TextStyle(color: Colors.white70),
                               ),
                             ),
-                          ],
-                        ),
+                          ),
 
-                        const SizedBox(height: 12),
+                          const SizedBox(height: 12),
 
-                        // Create new account
-                        SizedBox(
-                          width: double.infinity,
-                          child: OutlinedButton(
-                            onPressed: () {
-                              context.go('/signup');
-                            },
-                            style: OutlinedButton.styleFrom(
-                              side: const BorderSide(color: Color(0xFF1877F3)),
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(24),
-                              ),
-                            ),
+                          // Clear all data button
+                          TextButton(
+                            onPressed: () => context.go('/clear-data'),
                             child: const Text(
-                              'Create new account',
+                              'Clear All Data',
                               style: TextStyle(
-                                color: Color(0xFF1877F3),
-                                fontWeight: FontWeight.bold,
+                                color: Colors.redAccent,
+                                fontSize: 12,
                               ),
                             ),
                           ),
-                        ),
-                      ],
+
+                          const SizedBox(height: 12),
+
+                          // Privacy links
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              TextButton(
+                                onPressed: () => context.go('/privacy'),
+                                child: const Text(
+                                  'Privacy Policy',
+                                  style: TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Container(
+                                width: 1,
+                                height: 12,
+                                color: Colors.white30,
+                              ),
+                              const SizedBox(width: 8),
+                              TextButton(
+                                onPressed: () => context.go('/terms'),
+                                child: const Text(
+                                  'Terms of Service',
+                                  style: TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+
+                          const SizedBox(height: 12),
+
+                          // Create new account
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton(
+                              onPressed: () {
+                                context.go('/signup');
+                              },
+                              style: OutlinedButton.styleFrom(
+                                side: const BorderSide(color: Color(0xFF1877F3)),
+                                padding: const EdgeInsets.symmetric(vertical: 14),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(24),
+                                ),
+                              ),
+                              child: const Text(
+                                'Create new account',
+                                style: TextStyle(
+                                  color: Color(0xFF1877F3),
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
                 ],
               ),
             ),
@@ -1263,9 +1770,141 @@ class _ContinueScreenState extends State<ContinueScreen> {
       ),
     );
   }
+
+  // ✅ Build normal header
+  Widget _buildNormalHeader() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Column(
+          // crossAxisAlignment: CrossAxisAlignment.start,
+          // children: [
+          //   const Text(
+          //     'Continue',
+          //     style: TextStyle(
+          //       color: Colors.white,
+          //       fontSize: 24,
+          //       fontWeight: FontWeight.bold,
+          //     ),
+          //   ),
+          //   const SizedBox(height: 4),
+          //   Text(
+          //     profiles.isEmpty
+          //         ? 'No saved profiles'
+          //         : '${profiles.length} profile${profiles.length == 1 ? '' : 's'}',
+          //     style: TextStyle(
+          //       color: Colors.white.withOpacity(0.7),
+          //       fontSize: 12,
+          //     ),
+          //   ),
+          // ],
+        ),
+        if (profiles.isNotEmpty)
+          Row(
+            children: [
+              // Selection mode button
+              // IconButton(
+              //   icon: const Icon(
+              //     Icons.check_circle_outline,
+              //     color: Colors.blueAccent,
+              //     size: 24,
+              //   ),
+              //   onPressed: _startSelectionMode,
+              //   tooltip: 'Select Profiles',
+              // ),
+              // Delete all button
+              IconButton(
+                icon: const Icon(
+                  Icons.delete_sweep,
+                  color: Colors.redAccent,
+                  size: 24,
+                ),
+                // onPressed: _clearAllProfiles,
+                onPressed: _startSelectionMode,
+                tooltip: 'Clear All Profiles',
+              ),
+            ],
+          ),
+      ],
+    );
+  }
+
+  // ✅ Build selection mode header
+  Widget _buildSelectionModeHeader() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        // Back button
+        IconButton(
+          icon: const Icon(
+            Icons.arrow_back,
+            color: Colors.white,
+            size: 24,
+          ),
+          onPressed: _deselectAllProfiles,
+          tooltip: 'Cancel Selection',
+        ),
+        
+        // Selection count
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Text(
+              '$_selectedCount selected',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            Text(
+              'Tap to select/deselect',
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.7),
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ),
+        
+        // Action buttons
+        Row(
+          children: [
+            // Select all button
+            IconButton(
+              icon: Icon(
+                _selectedCount == profiles.length
+                    ? Icons.deselect
+                    : Icons.select_all,
+                color: Colors.blueAccent,
+                size: 24,
+              ),
+              onPressed: _selectedCount == profiles.length
+                  ? _deselectAllProfiles
+                  : _selectAllProfiles,
+              tooltip: _selectedCount == profiles.length
+                  ? 'Deselect All'
+                  : 'Select All',
+            ),
+            // Delete selected button
+            if (_selectedCount > 0)
+              IconButton(
+                icon: const Icon(
+                  Icons.delete_outline,
+                  color: Colors.redAccent,
+                  size: 24,
+                ),
+                onPressed: _removeSelectedProfiles,
+                tooltip: 'Remove Selected',
+              ),
+          ],
+        ),
+      ],
+    );
+  }
 }
 
-// ✅ Security Compliant Password Dialog
+// ✅ Security Compliant Password Dialog (Remains the same)
 class SecurityCompliantPasswordDialog extends StatefulWidget {
   final String email;
   const SecurityCompliantPasswordDialog({super.key, required this.email});
