@@ -1027,6 +1027,162 @@ class _ContinueScreenState extends State<ContinueScreen> {
     }
   }
 
+  // Remove single profile
+  Future<void> _removeSingleProfile(String email) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1C1F26),
+        title: const Text(
+          "Remove Profile?",
+          style: TextStyle(color: Colors.white),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              "Remove $email from this device?",
+              style: const TextStyle(color: Colors.white70),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              "This will not delete your account, only remove it from this device.",
+              style: TextStyle(color: Colors.grey, fontSize: 12),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text(
+              "Cancel",
+              style: TextStyle(color: Colors.white70),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text("Remove"),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await SessionManager.removeProfile(email);
+      await _loadProfiles();
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('$email removed'),
+          backgroundColor: Colors.green,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  // Show remove profiles dialog (one by one)
+  void _showRemoveProfilesDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1C1F26),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text(
+          'Remove Profiles',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        content: Container(
+          width: double.maxFinite,
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.5,
+          ),
+          child: profiles.isEmpty
+              ? const Center(
+                  child: Text(
+                    'No profiles to remove',
+                    style: TextStyle(color: Colors.white70),
+                  ),
+                )
+              : ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: profiles.length,
+                  separatorBuilder: (context, index) =>
+                      const SizedBox(height: 8),
+                  itemBuilder: (context, index) {
+                    final profile = profiles[index];
+                    final email = profile['email'] as String? ?? 'Unknown';
+                    final name =
+                        profile['name'] as String? ?? email.split('@').first;
+                    final provider = profile['provider'] as String? ?? 'email';
+
+                    return Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.05),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: Colors.white.withOpacity(0.1),
+                        ),
+                      ),
+                      child: ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: _getProviderColor(
+                            provider,
+                          ).withOpacity(0.3),
+                          child: Text(
+                            name[0].toUpperCase(),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        title: Text(
+                          name,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        subtitle: Text(
+                          email,
+                          style: TextStyle(
+                            color: Colors.white.withOpacity(0.6),
+                            fontSize: 12,
+                          ),
+                        ),
+                        trailing: IconButton(
+                          icon: const Icon(
+                            Icons.delete_outline,
+                            color: Colors.redAccent,
+                          ),
+                          onPressed: () {
+                            Navigator.pop(context);
+                            _removeSingleProfile(email);
+                          },
+                        ),
+                      ),
+                    );
+                  },
+                ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close', style: TextStyle(color: Colors.white70)),
+          ),
+        ],
+      ),
+    );
+  }
+
   // Start selection mode
   void _startSelectionMode() {
     setState(() {
@@ -1234,38 +1390,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
                     if (!_selectionMode)
                       Row(
                         children: [
-                          // Provider indicator
-                          // if (isOAuth)
-                          //   Container(
-                          //     margin: const EdgeInsets.only(right: 8),
-                          //     padding: const EdgeInsets.symmetric(
-                          //       horizontal: 8,
-                          //       vertical: 2,
-                          //     ),
-                          //     decoration: BoxDecoration(
-                          //       color: _getProviderColor(provider).withOpacity(0.2),
-                          //       borderRadius: BorderRadius.circular(12),
-                          //       border: Border.all(
-                          //         color: _getProviderColor(provider).withOpacity(0.5),
-                          //       ),
-                          //     ),
-                          //     child: Row(
-                          //       mainAxisSize: MainAxisSize.min,
-                          //       children: [
-                          //         _getProviderIconSmall(provider),
-                          //         const SizedBox(width: 4),
-                          //         Text(
-                          //           provider.toUpperCase(),
-                          //           style: TextStyle(
-                          //             color: _getProviderColor(provider),
-                          //             fontSize: 10,
-                          //             fontWeight: FontWeight.bold,
-                          //           ),
-                          //         ),
-                          //       ],
-                          //     ),
-                          //   ),
-
                           // Last login time
                           if (profile['lastLogin'] != null)
                             Text(
@@ -1319,74 +1443,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
     );
   }
 
-  // Clear all profiles (original function)
-  // Future<void> _clearAllProfiles() async {
-  //   if (profiles.isEmpty) return;
-
-  //   final confirmed = await showDialog<bool>(
-  //     context: context,
-  //     builder: (context) => AlertDialog(
-  //       backgroundColor: const Color(0xFF1C1F26),
-  //       title: const Text(
-  //         "Clear All Profiles?",
-  //         style: TextStyle(color: Colors.white),
-  //       ),
-  //       content: Column(
-  //         mainAxisSize: MainAxisSize.min,
-  //         crossAxisAlignment: CrossAxisAlignment.start,
-  //         children: [
-  //           Text(
-  //             "Remove all ${profiles.length} saved profiles from this device?",
-  //             style: const TextStyle(color: Colors.white70),
-  //           ),
-  //           const SizedBox(height: 8),
-  //           const Text(
-  //             "This will clear all saved login information and preferences.",
-  //             style: TextStyle(color: Colors.grey, fontSize: 12),
-  //           ),
-  //           const SizedBox(height: 8),
-  //           const Text(
-  //             "Your accounts will not be deleted, only removed from this device.",
-  //             style: TextStyle(color: Colors.grey, fontSize: 12),
-  //           ),
-  //         ],
-  //       ),
-  //       actions: [
-  //         TextButton(
-  //           onPressed: () => Navigator.pop(context, false),
-  //           child: const Text(
-  //             "Cancel",
-  //             style: TextStyle(color: Colors.white70),
-  //           ),
-  //         ),
-  //         TextButton(
-  //           onPressed: () => Navigator.pop(context, true),
-  //           style: TextButton.styleFrom(foregroundColor: Colors.red),
-  //           child: const Text("Clear All"),
-  //         ),
-  //       ],
-  //     ),
-  //   );
-
-  //   if (confirmed == true) {
-  //     for (final profile in profiles) {
-  //       await SessionManager.removeProfile(profile['email'] as String);
-  //     }
-
-  //     await SessionManager.clearContinueScreen();
-  //     await SessionManager.setRememberMe(false);
-  //     await _loadProfiles();
-
-  //     if (!mounted) return;
-  //     ScaffoldMessenger.of(context).showSnackBar(
-  //       const SnackBar(
-  //         content: Text('All profiles cleared'),
-  //         backgroundColor: Colors.green,
-  //       ),
-  //     );
-  //   }
-  // }
-
   @override
   Widget build(BuildContext context) {
     final Size screenSize = MediaQuery.of(context).size;
@@ -1410,354 +1466,189 @@ class _ContinueScreenState extends State<ContinueScreen> {
               ),
               child: Column(
                 children: [
-                  // Header with selection mode
-                  if (_selectionMode)
-                    _buildSelectionModeHeader()
-                  else
-                    _buildNormalHeader(),
-
-                  const SizedBox(height: 20),
-
-                  // Compliance Notice
-                  if (_showComplianceDialog && !_selectionMode)
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      margin: const EdgeInsets.only(bottom: 16),
-                      decoration: BoxDecoration(
-                        color: Colors.blue.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: Colors.blueAccent.withValues(alpha: 0.3),
-                        ),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.info_outline,
-                            color: Colors.blueAccent,
-                            size: 20,
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                  'Remember Me Disabled',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  'Enable "Remember Me" during login to save profiles',
-                                  style: TextStyle(
-                                    color: Colors.white.withValues(alpha: 0.7),
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                  // Rate limiting notice
-                  if (_isGoogleImageRateLimited && !_selectionMode)
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      margin: const EdgeInsets.only(bottom: 16),
-                      decoration: BoxDecoration(
-                        color: Colors.orange.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: Colors.orangeAccent.withValues(alpha: 0.3),
-                        ),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(
-                            Icons.warning_amber,
-                            color: Colors.orangeAccent,
-                            size: 20,
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                  'Google Profile Images Limited',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  'Using fallback images to prevent rate limiting',
-                                  style: TextStyle(
-                                    color: Colors.white.withValues(alpha: 0.7),
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                  // Selection instructions
-                  if (_selectionMode)
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      margin: const EdgeInsets.only(bottom: 16),
-                      decoration: BoxDecoration(
-                        color: Colors.blue.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: Colors.blueAccent.withValues(alpha: 0.3),
-                        ),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(
-                            Icons.check_circle_outline,
-                            color: Colors.blueAccent,
-                            size: 20,
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  '$_selectedCount profile${_selectedCount == 1 ? '' : 's'} selected',
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                const Text(
-                                  'Tap profiles to select/deselect',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                  // Profiles List
-                  Expanded(
-                    child: _loading
-                        ? Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const CircularProgressIndicator(
-                                  valueColor: AlwaysStoppedAnimation<Color>(
-                                    Colors.blueAccent,
-                                  ),
-                                ),
-                                const SizedBox(height: 15),
-                                const Text(
-                                  'Logging in...',
-                                  style: TextStyle(
-                                    color: Colors.white70,
-                                    fontSize: 14,
-                                  ),
-                                ),
-                                if (_selectedEmail != null)
-                                  Padding(
-                                    padding: const EdgeInsets.only(top: 8),
-                                    child: Text(
-                                      _selectedEmail!,
-                                      style: TextStyle(
-                                        color: Colors.white.withValues(
-                                          alpha: 0.6,
-                                        ),
-                                        fontSize: 12,
-                                      ),
-                                      textAlign: TextAlign.center,
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          )
-                        : profiles.isEmpty
-                        ? Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  Icons.person_add_disabled,
-                                  size: 60,
-                                  color: Colors.white.withValues(alpha: 0.3),
-                                ),
-                                const SizedBox(height: 15),
-                                const Text(
-                                  'No Saved Profiles',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  'Enable "Remember Me" during login\nto save your profile',
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                    color: Colors.white.withValues(alpha: 0.6),
-                                    fontSize: 14,
-                                  ),
-                                ),
-                                const SizedBox(height: 20),
-                                OutlinedButton(
-                                  onPressed: () => context.go('/login'),
-                                  child: const Text('Go to Login'),
-                                ),
-                              ],
-                            ),
-                          )
-                        : ListView.builder(
-                            shrinkWrap: true,
-                            itemCount: profiles.length,
-                            itemBuilder: (context, index) {
-                              return Padding(
-                                padding: const EdgeInsets.only(bottom: 12),
-                                child: _buildProfileItem(
-                                  profiles[index],
-                                  index,
-                                ),
-                              );
-                            },
-                          ),
-                  ),
-
-                  // Footer Buttons (only when not in selection mode)
-                  if (!_selectionMode)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 20),
-                      child: Column(
-                        children: [
-                          // Login with another account
-                          SizedBox(
-                            width: double.infinity,
-                            child: OutlinedButton(
-                              onPressed: () {
-                                context.go('/login');
-                              },
-                              style: OutlinedButton.styleFrom(
-                                side: const BorderSide(color: Colors.white24),
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 14,
-                                ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(14),
-                                ),
-                              ),
-                              child: const Text(
-                                'Login with another account',
-                                style: TextStyle(color: Colors.white70),
-                              ),
-                            ),
-                          ),
-
-                          const SizedBox(height: 12),
-
-                          // Clear all data button
-                          TextButton(
-                            onPressed: () => context.go('/clear-data'),
-                            child: const Text(
-                              'Clear All Data',
-                              style: TextStyle(
-                                color: Colors.redAccent,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ),
-
-                          const SizedBox(height: 12),
-
-                          // Privacy links
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
+                  // ✅ Logo at the top with Facebook-style design
+                  Stack(
+                    children: [
+                      // Center the logo container
+                      Container(
+                        margin: const EdgeInsets.only(top: 10, bottom: 25),
+                        child: Center(
+                          // Center the logo
+                          child: Column(
                             children: [
-                              TextButton(
-                                onPressed: () => context.go('/privacy'),
-                                child: const Text(
-                                  'Privacy Policy',
-                                  style: TextStyle(
-                                    color: Colors.white70,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
+                              // Logo
                               Container(
-                                width: 1,
-                                height: 12,
-                                color: Colors.white30,
-                              ),
-                              const SizedBox(width: 8),
-                              TextButton(
-                                onPressed: () => context.go('/terms'),
-                                child: const Text(
-                                  'Terms of Service',
-                                  style: TextStyle(
-                                    color: Colors.white70,
-                                    fontSize: 12,
+                                width: 80,
+                                height: 80,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: Colors.white24,
+                                    width: 2,
+                                  ),
+                                  gradient: const LinearGradient(
+                                    colors: [
+                                      Color(0xFF1877F2), // Facebook blue
+                                      Color(0xFF0A58CA),
+                                    ],
+                                    begin: Alignment.topCenter,
+                                    end: Alignment.bottomCenter,
+                                  ),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: const Color(
+                                        0xFF1877F2,
+                                      ).withOpacity(0.4),
+                                      blurRadius: 20,
+                                      spreadRadius: 5,
+                                    ),
+                                  ],
+                                ),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(40),
+                                  child: Image.asset(
+                                    'logo.png',
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (context, error, stackTrace) {
+                                      return Center(
+                                        child: Icon(
+                                          Icons.account_circle,
+                                          color: Colors.white,
+                                          size: 40,
+                                        ),
+                                      );
+                                    },
                                   ),
                                 ),
                               ),
+
+                              // App Name
+                              // const SizedBox(height: 10),
+                              // const Text(
+                              //   'MySalon',
+                              //   style: TextStyle(
+                              //     color: Colors.white,
+                              //     fontSize: 24,
+                              //     fontWeight: FontWeight.bold,
+                              //     letterSpacing: 0.5,
+                              //   ),
+                              // ),
+
+                              // // Tagline
+                              // Text(
+                              //   'Continue to your account',
+                              //   style: TextStyle(
+                              //     color: Colors.white.withOpacity(0.7),
+                              //     fontSize: 14,
+                              //   ),
+                              // ),
                             ],
                           ),
+                        ),
+                      ),
 
-                          const SizedBox(height: 12),
-
-                          // Create new account
-                          SizedBox(
-                            width: double.infinity,
-                            child: OutlinedButton(
-                              onPressed: () {
-                                context.go('/signup');
-                              },
-                              style: OutlinedButton.styleFrom(
-                                side: const BorderSide(
-                                  color: Color(0xFF1877F3),
-                                ),
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 14,
-                                ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(24),
-                                ),
-                              ),
-                              child: const Text(
-                                'Create new account',
-                                style: TextStyle(
-                                  color: Color(0xFF1877F3),
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
+                      // ✅ 3-dot menu at top right corner (Facebook style)
+                      if (profiles.isNotEmpty && !_selectionMode)
+                        Positioned(
+                          top: 0,
+                          right: 0,
+                          child: Container(
+                            width: 40,
+                            height: 40,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: Colors.white.withOpacity(0.1),
                             ),
+                            child: PopupMenuButton<String>(
+                              color: const Color(0xFF1C1F26),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                side: BorderSide(
+                                  color: Colors.white.withOpacity(0.1),
+                                ),
+                              ),
+                              icon: const Icon(
+                                Icons.more_vert,
+                                color: Colors.white,
+                                size: 20,
+                              ),
+                              tooltip: 'Manage Profiles',
+                              itemBuilder: (context) => [
+                                // Select Profiles Option
+                                PopupMenuItem<String>(
+                                  value: 'select',
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.check_circle_outline,
+                                        color: Colors.blueAccent,
+                                        size: 20,
+                                      ),
+                                      const SizedBox(width: 12),
+                                      const Text(
+                                        'Select Profiles',
+                                        style: TextStyle(color: Colors.white),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              
+                              ],
+                              onSelected: (value) {
+                                if (value == 'select') {
+                                  _startSelectionMode();
+                                } else if (value == 'remove') {
+                                  _showRemoveProfilesDialog();
+                                }
+                              },
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+
+                  // ✅ Facebook-style Card for profiles
+                  Expanded(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.05),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: Colors.white10),
+                      ),
+                      child: Column(
+                        children: [
+                          // Header with selection mode
+                          if (_selectionMode)
+                            Container(
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.03),
+                                borderRadius: const BorderRadius.only(
+                                  topLeft: Radius.circular(16),
+                                  topRight: Radius.circular(16),
+                                ),
+                                border: const Border(
+                                  bottom: BorderSide(color: Colors.white10),
+                                ),
+                              ),
+                              child: _buildSelectionModeHeader(),
+                            ),
+
+                          // Profiles List
+                          Expanded(
+                            child: _loading
+                                ? _buildLoadingState()
+                                : profiles.isEmpty
+                                ? _buildEmptyState()
+                                : _buildProfilesList(),
                           ),
                         ],
                       ),
                     ),
+                  ),
+
+                  // ✅ Footer
+                  if (!_selectionMode) _buildFooter(),
                 ],
               ),
             ),
@@ -1767,84 +1658,478 @@ class _ContinueScreenState extends State<ContinueScreen> {
     );
   }
 
-  // Build normal header
-  Widget _buildNormalHeader() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-         // Empty space on left to balance the row
-      Container(width: 48), // Same width as the button area on right
-      
-      // Logo in center
-      Center(
-        child: Container(
-          width: 60,
-          height: 60,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: Colors.transparent,
+  // Loading state
+  Widget _buildLoadingState() {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation<Color>(Colors.blueAccent),
           ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(30),
-            child: Image.asset(
-              'logo.png',
-              fit: BoxFit.cover,
+          const SizedBox(height: 15),
+          const Text(
+            'Logging in...',
+            style: TextStyle(color: Colors.white70, fontSize: 14),
+          ),
+          if (_selectedEmail != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                _selectedEmail!,
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.6),
+                  fontSize: 12,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  // Empty state
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.person_add_disabled,
+            size: 60,
+            color: Colors.white.withValues(alpha: 0.3),
+          ),
+          const SizedBox(height: 15),
+          const Text(
+            'No Saved Profiles',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.w500,
             ),
           ),
-        ),
+          const SizedBox(height: 8),
+          Text(
+            'Enable "Remember Me" during login\nto save your profile',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.6),
+              fontSize: 14,
+            ),
+          ),
+          const SizedBox(height: 20),
+          OutlinedButton(
+            onPressed: () => context.go('/login'),
+            child: const Text('Go to Login'),
+          ),
+        ],
       ),
+    );
+  }
 
-        // Column(
-        // crossAxisAlignment: CrossAxisAlignment.start,
-        // children: [
-        //   const Text(
-        //     'Continue',
-        //     style: TextStyle(
-        //       color: Colors.white,
-        //       fontSize: 24,
-        //       fontWeight: FontWeight.bold,
-        //     ),
-        //   ),
-        //   const SizedBox(height: 4),
-        //   Text(
-        //     profiles.isEmpty
-        //         ? 'No saved profiles'
-        //         : '${profiles.length} profile${profiles.length == 1 ? '' : 's'}',
-        //     style: TextStyle(
-        //       color: Colors.white.withOpacity(0.7),
-        //       fontSize: 12,
-        //     ),
-        //   ),
-        // ],
-        // ),
-        if (profiles.isNotEmpty)
-          Row(
-            children: [
-              // Selection mode button
-              // IconButton(
-              //   icon: const Icon(
-              //     Icons.check_circle_outline,
-              //     color: Colors.blueAccent,
-              //     size: 24,
-              //   ),
-              //   onPressed: _startSelectionMode,
-              //   tooltip: 'Select Profiles',
-              // ),
-              // Delete all button
-              IconButton(
-                icon: const Icon(
-                  Icons.delete_sweep,
-                  color: Colors.redAccent,
+  // Profiles list
+  Widget _buildProfilesList() {
+    return ListView.builder(
+      shrinkWrap: true,
+      itemCount: profiles.length,
+      itemBuilder: (context, index) {
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: _buildProfileCard(profiles[index], index),
+        );
+      },
+    );
+  }
+
+  // Profile card
+// Profile card
+// Profile card
+Widget _buildProfileCard(Map<String, dynamic> profile, int index) {
+  final email = profile['email'] as String? ?? 'Unknown';
+  final provider = profile['provider'] as String? ?? 'email';
+  final isSelected = _selectedProfiles.contains(email);
+  final isLoading = _oauthLoadingStates[email] == true;
+  final photoUrl = profile['photo'] as String?;
+  final name = profile['name'] as String? ?? email.split('@').first;
+  final hasPhoto = photoUrl != null && photoUrl.isNotEmpty;
+  
+  return GestureDetector(
+    onTap: () {
+      if (_selectionMode) {
+        _toggleProfileSelection(profile);
+      } else if (isLoading) {
+        return;
+      } else if (provider == 'email') {
+        _handleEmailLogin(profile);
+      } else {
+        _handleOAuthLogin(profile);
+      }
+    },
+    onLongPress: () {
+      if (!_selectionMode) {
+        _startSelectionMode();
+        _toggleProfileSelection(profile);
+      }
+    },
+    child: AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+      decoration: BoxDecoration(
+        color: isSelected
+            ? const Color(0xFF1877F2).withOpacity(0.2)
+            : Colors.white.withOpacity(0.03),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isLoading
+              ? Colors.blueAccent  // Simple blue border when loading
+              : isSelected
+                  ? const Color(0xFF1877F2)
+                  : Colors.white.withOpacity(0.1),
+          width: isLoading ? 2 : 1.5,
+        ),
+        boxShadow: isLoading
+            ? [
+                BoxShadow(
+                  color: Colors.blueAccent.withOpacity(0.3),
+                  blurRadius: 8,
+                  spreadRadius: 1,
+                ),
+              ]
+            : null,
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            // Profile Image
+            Stack(
+              children: [
+                Container(
+                  width: 70,
+                  height: 70,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: _getProviderColor(provider).withOpacity(0.2),
+                  ),
+                  child: _buildLargeProfileImage(profile, provider, photoUrl, hasPhoto),
+                ),
+                
+                // Provider icon badge
+                if (provider != 'email' && !_selectionMode && !isLoading)
+                  Positioned(
+                    right: 0,
+                    bottom: 0,
+                    child: Container(
+                      width: 24,
+                      height: 24,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: _getProviderColor(provider),
+                        border: Border.all(
+                          color: const Color(0xFF0F1820),
+                          width: 2,
+                        ),
+                      ),
+                      child: Center(
+                        child: provider == 'google'
+                            ? Text(
+                                'G',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  fontFamily: 'Roboto',
+                                ),
+                              )
+                            : provider == 'facebook'
+                            ? Text(
+                                'f',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                  fontFamily: 'Roboto',
+                                ),
+                              )
+                            : provider == 'apple'
+                            ? const Icon(Icons.apple, color: Colors.white, size: 14)
+                            : const Icon(Icons.email, color: Colors.white, size: 12),
+                      ),
+                    ),
+                  ),
+                
+                // Selection check badge
+                if (isSelected && _selectionMode)
+                  Positioned(
+                    right: 0,
+                    bottom: 0,
+                    child: Container(
+                      width: 24,
+                      height: 24,
+                      decoration: const BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Colors.blueAccent,
+                      ),
+                      child: const Center(
+                        child: Icon(
+                          Icons.check,
+                          color: Colors.white,
+                          size: 16,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            
+            const SizedBox(width: 16),
+            
+            // Profile Info
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          name,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 18,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      // Simple loading text
+                      if (isLoading)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.blueAccent.withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Text(
+                            'Logging in...',
+                            style: TextStyle(
+                              color: Colors.blueAccent,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  
+                  const SizedBox(height: 6),
+                  
+                  Text(
+                    email,
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.7),
+                      fontSize: 14,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  
+                  const SizedBox(height: 8),
+                  
+                  // Provider type and last login
+                  Row(
+                    children: [
+                      // Provider type badge
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: isLoading
+                              ? Colors.blueAccent.withOpacity(0.2)
+                              : _getProviderColor(provider).withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          provider == 'email' ? 'EMAIL' : provider.toUpperCase(),
+                          style: TextStyle(
+                            color: isLoading
+                                ? Colors.blueAccent
+                                : _getProviderColor(provider),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                      
+                      const SizedBox(width: 10),
+                      
+                      // Last login time
+                      if (profile['lastLogin'] != null && !isLoading)
+                        Text(
+                          _formatLastLogin(profile['lastLogin'] as String?),
+                          style: TextStyle(
+                            color: Colors.white.withOpacity(0.5),
+                            fontSize: 12,
+                          ),
+                        ),
+                    ],
+                  ),
+                  
+                  // Role indicator
+                  if (profile['roles'] != null &&
+                      (profile['roles'] as List).isNotEmpty &&
+                      !_selectionMode &&
+                      !isLoading)
+                    Container(
+                      margin: const EdgeInsets.only(top: 8),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.green.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        (profile['roles'] as List).first.toString().toUpperCase(),
+                        style: const TextStyle(
+                          color: Colors.greenAccent,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            
+            // Arrow indicator
+            if (!_selectionMode && !isLoading)
+              const Padding(
+                padding: EdgeInsets.only(left: 8),
+                child: Icon(
+                  Icons.chevron_right,
+                  color: Colors.white38,
                   size: 24,
                 ),
-                // onPressed: _clearAllProfiles,
-                onPressed: _startSelectionMode,
-                tooltip: 'Clear All Profiles',
               ),
-            ],
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+  // Build larger profile image
+  Widget _buildLargeProfileImage(
+    Map<String, dynamic> profile,
+    String? provider,
+    String? photoUrl,
+    bool hasPhoto,
+  ) {
+    final email = profile['email'] as String? ?? 'Unknown';
+    final name = profile['name'] as String? ?? email.split('@').first;
+    final isOAuth = provider != 'email';
+    final isGoogle = provider == 'google';
+
+    // Check if we should use fallback due to rate limiting
+    if (isGoogle && _isGoogleImageRateLimited && hasPhoto) {
+      return _getFallbackAvatar(profile, provider);
+    }
+
+    if (hasPhoto) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(35),
+        child: CachedNetworkImage(
+          imageUrl: photoUrl!,
+          width: 70,
+          height: 70,
+          fit: BoxFit.cover,
+          placeholder: (context, url) => Center(
+            child: Container(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: _getProviderColor(provider).withOpacity(0.2),
+              ),
+              child: Center(
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: _getProviderColor(provider),
+                ),
+              ),
+            ),
           ),
-      ],
-    );
+          errorWidget: (context, url, error) {
+            // Handle Google rate limiting errors
+            if (url.contains('googleusercontent.com')) {
+              _handleGoogleImageError();
+              return _getFallbackAvatar(profile, provider);
+            }
+            return _getFallbackAvatar(profile, provider);
+          },
+        ),
+      );
+    } else {
+      return Center(
+        child: isOAuth
+            ? Container(
+                width: 70,
+                height: 70,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: _getProviderColor(provider),
+                ),
+                child: Center(
+                  child: provider == 'google'
+                      ? Text(
+                          'G',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                            fontFamily: 'Roboto',
+                          ),
+                        )
+                      : provider == 'facebook'
+                      ? Text(
+                          'f',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 28,
+                            fontWeight: FontWeight.bold,
+                            fontFamily: 'Roboto',
+                          ),
+                        )
+                      : provider == 'apple'
+                      ? const Icon(Icons.apple, color: Colors.white, size: 28)
+                      : const Icon(Icons.email, color: Colors.white, size: 24),
+                ),
+              )
+            : Container(
+                width: 70,
+                height: 70,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.blueAccent.withOpacity(0.2),
+                ),
+                child: Center(
+                  child: Text(
+                    name[0].toUpperCase(),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 24,
+                    ),
+                  ),
+                ),
+              ),
+      );
+    }
   }
 
   // ✅ Build selection mode header
@@ -1914,6 +2199,94 @@ class _ContinueScreenState extends State<ContinueScreen> {
           ],
         ),
       ],
+    );
+  }
+
+  // Updated footer for Facebook style
+  Widget _buildFooter() {
+    return Container(
+      margin: const EdgeInsets.only(top: 20),
+      child: Column(
+        children: [
+          // Primary button
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: () => context.go('/login'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1877F2),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: const Text(
+                'Add Another Account',
+                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          // Create new account
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton(
+              onPressed: () => context.go('/signup'),
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: Color(0xFF1877F2)),
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: const Text(
+                'Create New Account',
+                style: TextStyle(
+                  color: Color(0xFF1877F2),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 20),
+
+          // Links
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              TextButton(
+                onPressed: () => context.go('/privacy'),
+                child: const Text(
+                  'Privacy',
+                  style: TextStyle(color: Colors.white70),
+                ),
+              ),
+              Container(width: 1, height: 12, color: Colors.white30),
+              const SizedBox(width: 8),
+              TextButton(
+                onPressed: () => context.go('/terms'),
+                child: const Text(
+                  'Terms',
+                  style: TextStyle(color: Colors.white70),
+                ),
+              ),
+              Container(width: 1, height: 12, color: Colors.white30),
+              const SizedBox(width: 8),
+              TextButton(
+                onPressed: () => context.go('/help'),
+                child: const Text(
+                  'Help',
+                  style: TextStyle(color: Colors.white70),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
@@ -2232,13 +2605,6 @@ class _SecurityCompliantPasswordDialogState
                               fontWeight: FontWeight.w500,
                             ),
                           ),
-                          // Text(
-                          //   'Login will proceed automatically',
-                          //   style: TextStyle(
-                          //     color: Colors.white.withOpacity(0.7),
-                          //     fontSize: 10,
-                          //   ),
-                          // ),
                         ],
                       ),
                     ),
