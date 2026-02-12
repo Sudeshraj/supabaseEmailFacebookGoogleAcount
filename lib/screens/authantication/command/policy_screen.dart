@@ -148,7 +148,7 @@ class PolicyScreen extends StatelessWidget {
       GoRouter.of(context).pop();
     } else {
       // Fallback navigation
-      context.go('/login');
+      context.go('/');
     }
   }
 
