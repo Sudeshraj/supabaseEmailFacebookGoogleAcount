@@ -90,6 +90,9 @@
                     android:scheme="https"
                     android:host="ifhenrgfpahandumdwmt.supabase.co"
                     android:path="/auth/v1/callback" />
+
+                <data android:scheme="mailto" />
+                <data android:scheme="tel" />
             </intent-filter>
 
              <intent-filter>
