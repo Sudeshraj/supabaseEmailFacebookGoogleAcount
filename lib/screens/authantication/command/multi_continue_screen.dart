@@ -178,8 +178,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
   Future<void> _checkCompliance() async {
     final rememberMe = await SessionManager.isRememberMeEnabled();
     if (!rememberMe) {
-      setState(() {
-      });
+      setState(() {});
     }
   }
 
@@ -635,7 +634,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                   height: 70,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: _getProviderColor(provider).withValues(alpha:0.2),
+                    color: _getProviderColor(provider).withValues(alpha: 0.2),
                   ),
                   child: Center(
                     child: CircularProgressIndicator(
@@ -700,7 +699,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                 height: 70,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: Colors.blueAccent.withValues(alpha:0.2),
+                  color: Colors.blueAccent.withValues(alpha: 0.2),
                 ),
                 child: Center(
                   child: Text(
@@ -790,7 +789,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
     return Container(
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: Colors.blueAccent.withValues(alpha:0.2),
+        color: Colors.blueAccent.withValues(alpha: 0.2),
       ),
       child: Center(
         child: Text(
@@ -1000,17 +999,17 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
                     return Container(
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha:0.05),
+                        color: Colors.white.withValues(alpha: 0.05),
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
-                          color: Colors.white.withValues(alpha:0.1),
+                          color: Colors.white.withValues(alpha: 0.1),
                         ),
                       ),
                       child: ListTile(
                         leading: CircleAvatar(
                           backgroundColor: _getProviderColor(
                             provider,
-                          ).withValues(alpha:0.3),
+                          ).withValues(alpha: 0.3),
                           child: Text(
                             name[0].toUpperCase(),
                             style: const TextStyle(
@@ -1029,7 +1028,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                         subtitle: Text(
                           email,
                           style: TextStyle(
-                            color: Colors.white.withValues(alpha:0.6),
+                            color: Colors.white.withValues(alpha: 0.6),
                             fontSize: 12,
                           ),
                         ),
@@ -1066,7 +1065,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
     });
   }
 
-
   // Profile card for main list
   Widget _buildProfileCard(Map<String, dynamic> profile, int index) {
     final email = profile['email'] as String? ?? 'Unknown';
@@ -1100,21 +1098,21 @@ class _ContinueScreenState extends State<ContinueScreen> {
         curve: Curves.easeInOut,
         decoration: BoxDecoration(
           color: isSelected
-              ? const Color(0xFF1877F2).withValues(alpha:0.2)
-              : Colors.white.withValues(alpha:0.03),
+              ? const Color(0xFF1877F2).withValues(alpha: 0.2)
+              : Colors.white.withValues(alpha: 0.03),
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
             color: isLoading
                 ? Colors.blueAccent
                 : isSelected
                 ? const Color(0xFF1877F2)
-                : Colors.white.withValues(alpha:0.1),
+                : Colors.white.withValues(alpha: 0.1),
             width: isLoading ? 2 : 1.5,
           ),
           boxShadow: isLoading
               ? [
                   BoxShadow(
-                    color: Colors.blueAccent.withValues(alpha:0.3),
+                    color: Colors.blueAccent.withValues(alpha: 0.3),
                     blurRadius: 8,
                     spreadRadius: 1,
                   ),
@@ -1133,7 +1131,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                     height: 70,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: _getProviderColor(provider).withValues(alpha:0.2),
+                      color: _getProviderColor(provider).withValues(alpha: 0.2),
                     ),
                     child: _buildLargeProfileImage(
                       profile,
@@ -1247,7 +1245,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                               vertical: 4,
                             ),
                             decoration: BoxDecoration(
-                              color: Colors.blueAccent.withValues(alpha:0.2),
+                              color: Colors.blueAccent.withValues(alpha: 0.2),
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: const Text(
@@ -1267,7 +1265,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                     Text(
                       email,
                       style: TextStyle(
-                        color: Colors.white.withValues(alpha:0.7),
+                        color: Colors.white.withValues(alpha: 0.7),
                         fontSize: 14,
                       ),
                       overflow: TextOverflow.ellipsis,
@@ -1286,8 +1284,10 @@ class _ContinueScreenState extends State<ContinueScreen> {
                           ),
                           decoration: BoxDecoration(
                             color: isLoading
-                                ? Colors.blueAccent.withValues(alpha:0.2)
-                                : _getProviderColor(provider).withValues(alpha:0.2),
+                                ? Colors.blueAccent.withValues(alpha: 0.2)
+                                : _getProviderColor(
+                                    provider,
+                                  ).withValues(alpha: 0.2),
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Text(
@@ -1311,7 +1311,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                           Text(
                             _formatLastLogin(profile['lastLogin'] as String?),
                             style: TextStyle(
-                              color: Colors.white.withValues(alpha:0.5),
+                              color: Colors.white.withValues(alpha: 0.5),
                               fontSize: 12,
                             ),
                           ),
@@ -1330,7 +1330,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                           vertical: 4,
                         ),
                         decoration: BoxDecoration(
-                          color: Colors.green.withValues(alpha:0.2),
+                          color: Colors.green.withValues(alpha: 0.2),
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Text(
@@ -1382,7 +1382,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
               margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha:0.03),
+                color: Colors.white.withValues(alpha: 0.03),
                 borderRadius: BorderRadius.circular(20),
                 border: Border.all(color: Colors.white12),
               ),
@@ -1419,7 +1419,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                                     BoxShadow(
                                       color: const Color(
                                         0xFF1877F2,
-                                      ).withValues(alpha:0.4),
+                                      ).withValues(alpha: 0.4),
                                       blurRadius: 20,
                                       spreadRadius: 5,
                                     ),
@@ -1478,14 +1478,14 @@ class _ContinueScreenState extends State<ContinueScreen> {
                             height: 40,
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              color: Colors.white.withValues(alpha:0.1),
+                              color: Colors.white.withValues(alpha: 0.1),
                             ),
                             child: PopupMenuButton<String>(
                               color: const Color(0xFF1C1F26),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(12),
                                 side: BorderSide(
-                                  color: Colors.white.withValues(alpha:0.1),
+                                  color: Colors.white.withValues(alpha: 0.1),
                                 ),
                               ),
                               icon: const Icon(
@@ -1547,7 +1547,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                   Expanded(
                     child: Container(
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha:0.05),
+                        color: Colors.white.withValues(alpha: 0.05),
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(color: Colors.white10),
                       ),
@@ -1558,7 +1558,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                             Container(
                               padding: const EdgeInsets.all(16),
                               decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha:0.03),
+                                color: Colors.white.withValues(alpha: 0.03),
                                 borderRadius: const BorderRadius.only(
                                   topLeft: Radius.circular(16),
                                   topRight: Radius.circular(16),
@@ -1613,7 +1613,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
               child: Text(
                 _selectedEmail!,
                 style: TextStyle(
-                  color: Colors.white.withValues(alpha:0.6),
+                  color: Colors.white.withValues(alpha: 0.6),
                   fontSize: 12,
                 ),
                 textAlign: TextAlign.center,
@@ -1632,7 +1632,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
           Icon(
             Icons.person_add_disabled,
             size: 60,
-            color: Colors.white.withValues(alpha:0.3),
+            color: Colors.white.withValues(alpha: 0.3),
           ),
           const SizedBox(height: 15),
           const Text(
@@ -1648,7 +1648,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
             'Enable "Remember Me" during login\nto save your profile',
             textAlign: TextAlign.center,
             style: TextStyle(
-              color: Colors.white.withValues(alpha:0.6),
+              color: Colors.white.withValues(alpha: 0.6),
               fontSize: 14,
             ),
           ),
@@ -1698,7 +1698,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
             Text(
               'Tap to select/deselect',
               style: TextStyle(
-                color: Colors.white.withValues(alpha:0.7),
+                color: Colors.white.withValues(alpha: 0.7),
                 fontSize: 12,
               ),
             ),
@@ -1979,10 +1979,10 @@ class _SecurityCompliantPasswordDialogState
                         labelStyle: const TextStyle(color: Colors.white70),
                         hintText: 'Type at least 6 characters',
                         hintStyle: TextStyle(
-                          color: Colors.white.withValues(alpha:0.4),
+                          color: Colors.white.withValues(alpha: 0.4),
                         ),
                         filled: true,
-                        fillColor: Colors.white.withValues(alpha:0.08),
+                        fillColor: Colors.white.withValues(alpha: 0.08),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(10),
                           borderSide: BorderSide.none,
@@ -2035,7 +2035,7 @@ class _SecurityCompliantPasswordDialogState
                       Positioned.fill(
                         child: Container(
                           decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha:0.5),
+                            color: Colors.black.withValues(alpha: 0.5),
                             borderRadius: BorderRadius.circular(10),
                           ),
                           child: const Center(
@@ -2056,7 +2056,9 @@ class _SecurityCompliantPasswordDialogState
                         Expanded(
                           child: LinearProgressIndicator(
                             value: _controller.text.length / 6,
-                            backgroundColor: Colors.white.withValues(alpha:0.1),
+                            backgroundColor: Colors.white.withValues(
+                              alpha: 0.1,
+                            ),
                             valueColor: AlwaysStoppedAnimation<Color>(
                               _controller.text.length >= 6
                                   ? Colors.greenAccent
@@ -2086,10 +2088,10 @@ class _SecurityCompliantPasswordDialogState
                 margin: const EdgeInsets.only(top: 12),
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: Colors.green.withValues(alpha:0.1),
+                  color: Colors.green.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(
-                    color: Colors.greenAccent.withValues(alpha:0.3),
+                    color: Colors.greenAccent.withValues(alpha: 0.3),
                   ),
                 ),
                 child: Row(
@@ -2145,7 +2147,9 @@ class _SecurityCompliantPasswordDialogState
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.blueAccent,
                     foregroundColor: Colors.white,
-                    disabledBackgroundColor: Colors.blueAccent.withValues(alpha:0.5),
+                    disabledBackgroundColor: Colors.blueAccent.withValues(
+                      alpha: 0.5,
+                    ),
                     padding: const EdgeInsets.symmetric(
                       horizontal: 20,
                       vertical: 12,
