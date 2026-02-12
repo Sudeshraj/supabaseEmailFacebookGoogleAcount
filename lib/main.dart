@@ -4,9 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_application_1/screens/authantication/command/auth_callback_handler.dart';
 import 'package:flutter_application_1/screens/authantication/command/clear_data_screen.dart';
+import 'package:flutter_application_1/screens/authantication/command/common_screen.dart';
 import 'package:flutter_application_1/screens/authantication/command/data_consent_screen.dart';
 import 'package:flutter_application_1/screens/authantication/command/finish_screen.dart';
-import 'package:flutter_application_1/screens/authantication/command/help_screen.dart';
+// import 'package:flutter_application_1/screens/authantication/command/help_screen.dart';
 import 'package:flutter_application_1/screens/authantication/command/policy_screen.dart';
 import 'package:flutter_application_1/screens/authantication/command/reset_password_confirm.dart';
 import 'package:flutter_application_1/screens/authantication/command/reset_password_form.dart';
@@ -484,6 +485,8 @@ GoRouter _createRouter() {
         '/signup',
         '/finish',
         '/help',
+        '/about',
+        '/contact',
         '/data-consent',
         '/continue',
         '/verify-email',
@@ -649,10 +652,31 @@ GoRouter _createRouter() {
           return PolicyScreen(isPrivacyPolicy: false, extraData: extra);
         },
       ),
+
+      // GoRoute(
+      //   path: '/help',
+      //   name: 'help',
+      //   builder: (context, state) => const HelpScreen(),
+      // ),
       GoRoute(
         path: '/help',
-        name: 'help',
-        builder: (context, state) => const HelpScreen(),
+        builder: (context, state) => const HelpScreen(screenType: 'help'),
+      ),
+      GoRoute(
+        path: '/contact',
+        builder: (context, state) => const HelpScreen(screenType: 'contact'),
+      ),
+      GoRoute(
+        path: '/about',
+        builder: (context, state) => const HelpScreen(screenType: 'about'),
+      ),
+      GoRoute(
+        path: '/contact',
+        builder: (context, state) => const HelpScreen(screenType: 'contact'),
+      ),
+      GoRoute(
+        path: '/about',
+        builder: (context, state) => const HelpScreen(screenType: 'about'),
       ),
 
       // Data management
