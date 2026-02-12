@@ -6,6 +6,7 @@ import 'package:flutter_application_1/screens/authantication/command/auth_callba
 import 'package:flutter_application_1/screens/authantication/command/clear_data_screen.dart';
 import 'package:flutter_application_1/screens/authantication/command/data_consent_screen.dart';
 import 'package:flutter_application_1/screens/authantication/command/finish_screen.dart';
+import 'package:flutter_application_1/screens/authantication/command/help_screen.dart';
 import 'package:flutter_application_1/screens/authantication/command/policy_screen.dart';
 import 'package:flutter_application_1/screens/authantication/command/reset_password_confirm.dart';
 import 'package:flutter_application_1/screens/authantication/command/reset_password_form.dart';
@@ -187,7 +188,7 @@ Future<void> main() async {
     // ✅ SETUP AUTH STATE LISTENER(listner inna nisa current app ekath redirect venava reset form ekata)
     _setupAuthStateListener();
 
-     // ========== PHASE 3.5: PLATFORM-SPECIFIC CONFIG ==========
+    // ========== PHASE 3.5: PLATFORM-SPECIFIC CONFIG ==========
     await _setupPlatformSpecificConfig(); // 🔥 NEW
 
     // ========== PHASE 4: SERVICES ==========
@@ -224,24 +225,24 @@ Future<void> _setupPlatformSpecificConfig() async {
   print('🌐 Platform configuration...');
   print('   Is Web: $kIsWeb');
   print('   Initial URI: ${Uri.base.toString()}');
-  
+
   if (kIsWeb) {
     // Web-specific setup
     await _setupWebConfig();
   } else {
-    // Mobile-specific setup  
+    // Mobile-specific setup
     await _setupMobileConfig();
   }
 }
 
 Future<void> _setupWebConfig() async {
   print('   Configuring for Web');
-  
+
   try {
     // Use url_strategy package for web
     // Uncomment after adding url_strategy to pubspec.yaml
     // setPathUrlStrategy();
-    
+
     // For now, handle URLs manually
     final uri = Uri.base;
     if (uri.toString().contains('/auth/callback')) {
@@ -254,7 +255,7 @@ Future<void> _setupWebConfig() async {
 
 Future<void> _setupMobileConfig() async {
   print('   Configuring for Mobile');
-  
+
   // Mobile deep links setup
   await _setupMobileDeepLinks();
 }
@@ -262,23 +263,23 @@ Future<void> _setupMobileConfig() async {
 /// 🔥 CRITICAL FIX: Mobile deep links setup
 Future<void> _setupMobileDeepLinks() async {
   print('   🔗 Setting up mobile deep links...');
-  
+
   // Note: To enable full mobile deep links, add these to pubspec.yaml:
   // uni_links: ^0.5.1  # For deep links
   // app_links: ^3.2.1  # Alternative
-  
+
   // For now, we'll handle basic deep links
   try {
     // Check initial URI for mobile
     final uri = Uri.base;
     if (uri.toString().isNotEmpty && uri.toString() != '/') {
       print('     Initial mobile URI: ${uri.toString()}');
-      
+
       // Check if it's a deep link
-      if (uri.toString().contains('myapp://') || 
+      if (uri.toString().contains('myapp://') ||
           uri.toString().contains('/auth/callback')) {
         print('     📱 Mobile deep link detected!');
-        
+
         // Store for later processing
         pendingDeepLink = uri.toString();
       }
@@ -286,13 +287,12 @@ Future<void> _setupMobileDeepLinks() async {
   } catch (e) {
     print('     ❌ Mobile deep link setup error: $e');
   }
-  
+
   print('   ✅ Mobile deep links configured (basic)');
 }
 
 // Add this global variable at the top of main.dart
 String? pendingDeepLink;
-
 
 // ✅ CORRECTED: Setup auth state listener | current app eka update venne meken
 void _setupAuthStateListener() {
@@ -313,9 +313,13 @@ void _setupAuthStateListener() {
     if (event == AuthChangeEvent.signedIn && session != null) {
       final user = session.user;
       final isEmailVerified = user.emailConfirmedAt != null;
-      
+
       print('🎉 User signed in: ${user.email}');
-      print(isEmailVerified ? '📧 Email already verified' : '⚠️ Email not verified yet');
+      print(
+        isEmailVerified
+            ? '📧 Email already verified'
+            : '⚠️ Email not verified yet',
+      );
 
       // Store the current verification status
       lastKnownEmailVerified = isEmailVerified;
@@ -339,13 +343,13 @@ void _setupAuthStateListener() {
     if (event == AuthChangeEvent.userUpdated && session != null) {
       final user = session.user;
       final isEmailVerified = user.emailConfirmedAt != null;
-      
+
       print('📝 User updated - Email confirmed at: ${user.emailConfirmedAt}');
 
       // Check if email was just verified (previously not verified, now verified)
       if (!(lastKnownEmailVerified ?? false) && isEmailVerified) {
         print('✅ Email just verified!');
-        
+
         WidgetsBinding.instance.addPostFrameCallback((_) {
           try {
             if (navigatorKey.currentContext != null) {
@@ -405,7 +409,7 @@ void _setupAuthStateListener() {
   if (currentUser != null) {
     lastKnownEmailVerified = currentUser.emailConfirmedAt != null;
     print('📱 Initial check - Email verified: $lastKnownEmailVerified');
-    
+
     // If already verified, navigate to home
     if (lastKnownEmailVerified == true) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -422,17 +426,17 @@ void _setupAuthStateListener() {
 // SIMPLIFIED ROUTER CONFIGURATION
 // ====================
 GoRouter _createRouter() {
-   String initialLocation = '/';
+  String initialLocation = '/';
   final uri = Uri.base;
-  
+
   print('📍 Router creation - Initial URI: ${uri.toString()}');
-  
+
   // Check for auth callback in URL
   if (uri.toString().contains('/auth/callback')) {
     initialLocation = '/auth/callback';
     print('   🎯 Setting initial location to /auth/callback');
   }
-  
+
   // Check for pending mobile deep link
   if (pendingDeepLink != null && pendingDeepLink!.contains('/auth/callback')) {
     initialLocation = '/auth/callback';
@@ -449,37 +453,37 @@ GoRouter _createRouter() {
       final path = state.matchedLocation;
       final uriString = state.uri.toString();
       final queryParams = state.uri.queryParameters;
-      
+
       print('🔄 REDIRECT CHECK: $path');
       print('   Full URL: $uriString');
       print('   Query params: $queryParams');
-      
+
       // 🔥🔥🔥 MOST CRITICAL FIX: NEVER redirect auth callbacks
-      if (path == '/auth/callback' || 
+      if (path == '/auth/callback' ||
           uriString.contains('/auth/callback') ||
           queryParams.containsKey('code') ||
           queryParams.containsKey('error') ||
           queryParams.containsKey('access_token')) {
-        
         print('   ✅ AUTH CALLBACK - SKIPPING ALL REDIRECTS');
         return null; // NO REDIRECT FOR AUTH CALLBACKS
       }
-      
+
       // If app is still loading, wait
       if (appState.loading) {
         print('   ⏳ App loading, staying put');
         return null;
       }
-      
+
       // Rest of your existing redirect logic...
       // But auth callbacks will never reach here
-      
+
       // Public routes that should always be accessible
       final publicRoutes = [
         '/',
         '/login',
         '/signup',
         '/finish',
+        '/help',
         '/data-consent',
         '/continue',
         '/verify-email',
@@ -644,6 +648,11 @@ GoRouter _createRouter() {
           final extra = state.extra as Map<String, dynamic>?;
           return PolicyScreen(isPrivacyPolicy: false, extraData: extra);
         },
+      ),
+      GoRoute(
+        path: '/help',
+        name: 'help',
+        builder: (context, state) => const HelpScreen(),
       ),
 
       // Data management

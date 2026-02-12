@@ -315,15 +315,14 @@ class _SignInScreenState extends State<SignInScreen>
       const AndroidOptions(encryptedSharedPreferences: true);
 
   IOSOptions _getIOSOptions() => const IOSOptions(
-        accessibility: KeychainAccessibility.unlocked,
-        synchronizable: true,
-      );
+    accessibility: KeychainAccessibility.unlocked,
+    synchronizable: true,
+  );
 
   // ✅ COMPLIANT: Save OAuth profile with user choice
-// SignInScreen.dart - FIXED _saveOAuthProfile method
 Future<void> _saveOAuthProfile({
   required User user,
-  required String provider,
+  required String providerToSave, // ← CHANGED: Clear parameter name
   required bool rememberMe,
   String? accessToken,
   String? refreshToken,
@@ -332,101 +331,101 @@ Future<void> _saveOAuthProfile({
     final email = user.email!;
     final now = DateTime.now();
 
-    if (kDebugMode) {
-      print('💾 SAVING OAUTH PROFILE:');
-      print('   - Email: $email');
-      print('   - Provider: $provider');
-      print('   - Remember Me: $rememberMe');
-    }
-
+    // ✅ EXTENSIVE DEBUGGING
+    print('=' * 60);
+    print('🔍 DEBUG: _saveOAuthProfile - Facebook Login');
+    print('=' * 60);
+    print('📧 User email: $email');
+    print('🎯 Provider parameter: "$providerToSave"');
+    print('   - Should be: "facebook" for Facebook login');
+    print('   - Is "facebook"? ${providerToSave == "facebook"}');
+    print('   - Is "email"? ${providerToSave == "email"}');
+    print('🆔 User ID: ${user.id}');
+    
     final userMetadata = user.userMetadata ?? {};
-    final actualProvider = userMetadata['provider'] ?? provider;
-
-    if (kDebugMode) {
-      print('   - Actual provider from metadata: $actualProvider');
-      print('   - Full metadata: $userMetadata');
+    final appMetadata = user.appMetadata ?? {};
+    
+    print('\n📊 Metadata Inspection:');
+    print('   - userMetadata: $userMetadata');
+    print('   - appMetadata: $appMetadata');
+    
+    // ✅ FIX: Check if we should override with metadata
+    String finalProvider = providerToSave;
+    
+    // Facebook OAuth should always use 'facebook' as provider
+    if (providerToSave == 'facebook') {
+      finalProvider = 'facebook';
+      print('✅ Confirmed: Using "facebook" as provider');
+    } 
+    // For email login, use 'email'
+    else if (providerToSave == 'email') {
+      finalProvider = 'email';
+      print('✅ Confirmed: Using "email" as provider');
     }
+    // Detect from metadata if needed
+    else {
+      if (appMetadata['provider'] != null) {
+        finalProvider = appMetadata['provider'].toString();
+        print('✅ Overriding with app_metadata provider: $finalProvider');
+      } else if (userMetadata['provider'] != null) {
+        finalProvider = userMetadata['provider'].toString();
+        print('✅ Overriding with user_metadata provider: $finalProvider');
+      }
+    }
+    
+    print('\n🎯 FINAL PROVIDER DECISION: "$finalProvider"');
+    print('=' * 60);
 
-    // ✅ FIXED: Get photo URL properly
+    // ✅ Get photo URL
     String? photoUrl;
-
-    // Try different possible keys for photo URL
     if (userMetadata['avatar_url'] != null && 
         userMetadata['avatar_url'].toString().isNotEmpty) {
       photoUrl = userMetadata['avatar_url'].toString();
-      print('📸 Got avatar_url: $photoUrl');
     } else if (userMetadata['picture'] != null && 
         userMetadata['picture'].toString().isNotEmpty) {
       photoUrl = userMetadata['picture'].toString();
-      print('📸 Got picture: $photoUrl');
     } else if (userMetadata['photo'] != null && 
         userMetadata['photo'].toString().isNotEmpty) {
       photoUrl = userMetadata['photo'].toString();
-      print('📸 Got photo: $photoUrl');
-    } else if (userMetadata['image'] != null && 
-        userMetadata['image'].toString().isNotEmpty) {
-      photoUrl = userMetadata['image'].toString();
-      print('📸 Got image: $photoUrl');
-    } else {
-      photoUrl = '';
-      print('📸 No photo URL found in metadata');
     }
 
-    // ✅ FIXED: Get name properly
-    String name = email.split('@').first; // Default
-
+    // ✅ Get name
+    String name = email.split('@').first;
     if (userMetadata['full_name'] != null && 
         userMetadata['full_name'].toString().isNotEmpty) {
       name = userMetadata['full_name'].toString();
     } else if (userMetadata['name'] != null && 
         userMetadata['name'].toString().isNotEmpty) {
       name = userMetadata['name'].toString();
-    } else if (userMetadata['given_name'] != null && 
-        userMetadata['given_name'].toString().isNotEmpty) {
-      name = userMetadata['given_name'].toString();
     }
 
-    // ✅ FIXED: Save with proper photo URL
+    print('\n💾 SAVING PROFILE:');
+    print('   - Email: $email');
+    print('   - Provider: $finalProvider'); // ← This should print "facebook"
+    print('   - Name: $name');
+    print('   - Photo: ${photoUrl ?? "No photo"}');
+    print('   - Remember Me: $rememberMe');
+
+    // ✅ Save with CORRECT provider
     await SessionManager.saveUserProfile(
       email: email,
       userId: user.id,
       name: name,
-      photo: photoUrl, // ✅ Now properly passed
+      photo: photoUrl ?? '',
       rememberMe: rememberMe,
       refreshToken: refreshToken,
       accessToken: accessToken,
-      provider: actualProvider,
+      provider: finalProvider, // ← Use finalProvider
       termsAcceptedAt: _termsAcceptedAt ?? now,
       privacyAcceptedAt: _privacyAcceptedAt ?? now,
       marketingConsent: false,
       marketingConsentAt: null,
     );
 
-    await SessionManager.setCurrentUser(email);
-    await SessionManager.setRememberMe(rememberMe);
-    await appState.setRememberMe(rememberMe);
-
-    if (rememberMe) {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('show_continue_screen', true);
-    }
-
-    if (kDebugMode) {
-      print('✅ OAuth Profile Saved Successfully');
-      print('   - Provider: $actualProvider');
-      print('   - Photo saved: ${photoUrl.isNotEmpty}');
-      if (photoUrl.isNotEmpty) {
-        print('   - Photo URL: $photoUrl');
-      }
-    }
-
-    setState(() {
-      _consentGiven = true;
-      _termsAcceptedAt = _termsAcceptedAt ?? now;
-      _privacyAcceptedAt = _privacyAcceptedAt ?? now;
-    });
+    print('✅ Profile saved with provider: $finalProvider');
+    
   } catch (e, stackTrace) {
-    print('❌ Error saving OAuth profile: $e');
+    print('❌ Error in _saveOAuthProfile: $e');
     print('Stack trace: $stackTrace');
   }
 }
@@ -483,7 +482,7 @@ Future<void> _saveOAuthProfile({
 
       await _saveOAuthProfile(
         user: user,
-        provider: 'email',
+        providerToSave: 'email',
         rememberMe: _rememberMe,
         accessToken: session?.accessToken,
         refreshToken: session?.refreshToken,
@@ -563,7 +562,7 @@ Future<void> _saveOAuthProfile({
             aud: '',
             createdAt: DateTime.now().toIso8601String(),
           ),
-          provider: 'email',
+          providerToSave: 'email',
           rememberMe: _rememberMe,
           refreshToken: session?.refreshToken,
         );
@@ -681,14 +680,13 @@ Future<void> _saveOAuthProfile({
           final session = supabase.auth.currentSession;
 
           if (user != null && user.email != null) {
-            if (kDebugMode) {
-              print('✅ Google OAuth User Signed In: ${user.email}');
-              print('   - User wants auto-login: $userWantsAutoLogin');
-            }
+            print('✅ Google OAuth User Signed In: ${user.email}');
+            print('   - User wants auto-login: $userWantsAutoLogin');
 
+            // ✅ FIXED: Pass hard-coded 'google'
             await _saveOAuthProfile(
               user: user,
-              provider: 'google',
+              providerToSave: 'google', // ← Hard coded, not from variable
               rememberMe: userWantsAutoLogin,
               accessToken: session?.accessToken,
               refreshToken: session?.refreshToken,
@@ -797,9 +795,12 @@ Future<void> _saveOAuthProfile({
           final session = supabase.auth.currentSession;
 
           if (user != null && user.email != null) {
+            print('✅ Facebook OAuth User Signed In: ${user.email}');
+
+            // ✅ FIXED: Pass hard-coded 'facebook'
             await _saveOAuthProfile(
               user: user,
-              provider: 'facebook',
+              providerToSave: 'facebook', // ← Hard coded, not from variable
               rememberMe: userWantsAutoLogin,
               accessToken: session?.accessToken,
               refreshToken: session?.refreshToken,
@@ -813,7 +814,8 @@ Future<void> _saveOAuthProfile({
       await supabase.auth.signInWithOAuth(
         OAuthProvider.facebook,
         redirectTo: _getRedirectUrl(),
-        scopes: 'email',
+        // scopes: 'email',
+        scopes: 'public_profile',
       );
     } on AuthException catch (e) {
       if (!mounted) return;
@@ -903,9 +905,12 @@ Future<void> _saveOAuthProfile({
           final session = supabase.auth.currentSession;
 
           if (user != null && user.email != null) {
+            print('✅ Apple OAuth User Signed In: ${user.email}');
+
+            // ✅ FIXED: Pass hard-coded 'apple'
             await _saveOAuthProfile(
               user: user,
-              provider: 'apple',
+              providerToSave: 'apple', // ← Hard coded, not from variable
               rememberMe: userWantsAutoLogin,
               accessToken: session?.accessToken,
               refreshToken: session?.refreshToken,
@@ -1016,7 +1021,7 @@ $provider OAuth Configuration Required:
       case 'network_error':
         return "Please check your internet connection";
       default:
-        return e.message ?? "Unable to sign in. Please try again.";
+        return e.message;
     }
   }
 
@@ -1139,7 +1144,8 @@ $provider OAuth Configuration Required:
     if (email.isNotEmpty) {
       final hasConsent = !(await _shouldShowConsent(email));
       if (hasConsent) {
-        if (kDebugMode) print('   - User already gave consent, skipping dialog');
+        if (kDebugMode)
+          print('   - User already gave consent, skipping dialog');
         return true;
       }
     }
@@ -1580,14 +1586,14 @@ $provider OAuth Configuration Required:
                                   suffixIcon: _emailController.text.isEmpty
                                       ? null
                                       : _isValidEmail
-                                          ? const Icon(
-                                              Icons.check_circle,
-                                              color: Color(0xFF4CAF50),
-                                            )
-                                          : const Icon(
-                                              Icons.error_outline,
-                                              color: Colors.redAccent,
-                                            ),
+                                      ? const Icon(
+                                          Icons.check_circle,
+                                          color: Color(0xFF4CAF50),
+                                        )
+                                      : const Icon(
+                                          Icons.error_outline,
+                                          color: Colors.redAccent,
+                                        ),
                                   errorText: _emailError,
                                 ),
                               ),
@@ -1667,8 +1673,8 @@ $provider OAuth Configuration Required:
                                 child: ElevatedButton(
                                   onPressed:
                                       (_isValid && !_loading && !_coolDown)
-                                          ? loginUser
-                                          : null,
+                                      ? loginUser
+                                      : null,
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: const Color(0xFF1877F3),
                                     disabledBackgroundColor: Colors.white12,
@@ -1685,20 +1691,20 @@ $provider OAuth Configuration Required:
                                           color: Colors.white,
                                         )
                                       : _coolDown
-                                          ? const Text(
-                                              'Please wait...',
-                                              style: TextStyle(
-                                                fontSize: 16,
-                                                fontWeight: FontWeight.w600,
-                                              ),
-                                            )
-                                          : const Text(
-                                              'Log in',
-                                              style: TextStyle(
-                                                fontSize: 17,
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                            ),
+                                      ? const Text(
+                                          'Please wait...',
+                                          style: TextStyle(
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        )
+                                      : const Text(
+                                          'Log in',
+                                          style: TextStyle(
+                                            fontSize: 17,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
                                 ),
                               ),
                               const SizedBox(height: 12),
@@ -1924,10 +1930,10 @@ class _SocialLoginButton extends StatelessWidget {
                 child: isGoogle
                     ? _GoogleLetterIcon(color: color)
                     : isFacebook
-                        ? _FacebookLetterIcon(color: color)
-                        : isApple
-                            ? _AppleIcon(color: color)
-                            : const SizedBox(),
+                    ? _FacebookLetterIcon(color: color)
+                    : isApple
+                    ? _AppleIcon(color: color)
+                    : const SizedBox(),
               ),
       ),
     );
@@ -1939,19 +1945,19 @@ class _GoogleLetterIcon extends StatelessWidget {
   const _GoogleLetterIcon({required this.color});
   @override
   Widget build(BuildContext context) => Container(
-        width: 26,
-        height: 26,
-        alignment: Alignment.center,
-        child: Text(
-          'G',
-          style: TextStyle(
-            color: color,
-            fontSize: 20,
-            fontWeight: FontWeight.w500,
-            fontFamily: 'Roboto',
-          ),
-        ),
-      );
+    width: 26,
+    height: 26,
+    alignment: Alignment.center,
+    child: Text(
+      'G',
+      style: TextStyle(
+        color: color,
+        fontSize: 20,
+        fontWeight: FontWeight.w500,
+        fontFamily: 'Roboto',
+      ),
+    ),
+  );
 }
 
 class _FacebookLetterIcon extends StatelessWidget {
@@ -1959,19 +1965,19 @@ class _FacebookLetterIcon extends StatelessWidget {
   const _FacebookLetterIcon({required this.color});
   @override
   Widget build(BuildContext context) => Container(
-        width: 26,
-        height: 26,
-        alignment: Alignment.center,
-        child: Text(
-          'f',
-          style: TextStyle(
-            color: color,
-            fontSize: 24,
-            fontWeight: FontWeight.w500,
-            fontFamily: 'Roboto',
-          ),
-        ),
-      );
+    width: 26,
+    height: 26,
+    alignment: Alignment.center,
+    child: Text(
+      'f',
+      style: TextStyle(
+        color: color,
+        fontSize: 24,
+        fontWeight: FontWeight.w500,
+        fontFamily: 'Roboto',
+      ),
+    ),
+  );
 }
 
 class _AppleIcon extends StatelessWidget {
