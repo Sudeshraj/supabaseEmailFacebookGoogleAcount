@@ -33,9 +33,9 @@ class _ResetPasswordFormScreenState extends State<ResetPasswordFormScreen> {
     final user = supabase.auth.currentUser;
     
     
-      print('🔍 Password Reset Session Check:');
-      print('   - Session: ${session != null}');
-      print('   - User: ${user?.email}');
+      debugPrint('🔍 Password Reset Session Check:');
+      debugPrint('   - Session: ${session != null}');
+      debugPrint('   - User: ${user?.email}');
     
     
     if (session == null || user == null) {
@@ -151,7 +151,7 @@ class _ResetPasswordFormScreenState extends State<ResetPasswordFormScreen> {
               Text(
                 'Verifying reset link...',
                 style: TextStyle(
-                  color: Colors.white.withOpacity(0.7),
+                  color: Colors.white.withValues(alpha:0.7),
                 ),
               ),
             ],
@@ -170,7 +170,7 @@ class _ResetPasswordFormScreenState extends State<ResetPasswordFormScreen> {
               margin: const EdgeInsets.all(24),
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.03),
+                color: Colors.white.withValues(alpha:0.03),
                 borderRadius: BorderRadius.circular(20),
                 border: Border.all(color: Colors.white12),
               ),
@@ -194,7 +194,7 @@ class _ResetPasswordFormScreenState extends State<ResetPasswordFormScreen> {
                     height: 80,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: const Color(0xFF1877F3).withOpacity(0.1),
+                      color: const Color(0xFF1877F3).withValues(alpha:0.1),
                       border: Border.all(color: const Color(0xFF1877F3)),
                     ),
                     child: const Icon(

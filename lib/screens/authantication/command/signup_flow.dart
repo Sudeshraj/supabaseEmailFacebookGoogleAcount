@@ -18,7 +18,7 @@ class _SignupFlowState extends State<SignupFlow> {
   // signup_flow.dart
   @override
   Widget build(BuildContext context) {
-    print('🏗️ SignupFlow building, isLoading: $_isLoading');
+    debugPrint('SignupFlow building, isLoading: $_isLoading');
 
     return Scaffold(
       backgroundColor: const Color(0xFF0F1820),
@@ -28,13 +28,13 @@ class _SignupFlowState extends State<SignupFlow> {
           initialPassword: _password,
           onNext: _handleNextPressed,
           isLoading: _isLoading,
-          // ✅ Add callback for when screen is popped
+          // Add callback for when screen is popped
           // signup_flow.dart
           onBack: () {
-            print('🔙 EmailPasswordScreen wants to go back');
+            debugPrint('EmailPasswordScreen wants to go back');
 
             if (_isLoading) {
-              print('⚠️ Cannot go back while loading');
+              debugPrint('Cannot go back while loading');
               return;
             }
 
@@ -42,21 +42,21 @@ class _SignupFlowState extends State<SignupFlow> {
             try {
               // Approach 1: Use Navigator instead of GoRouter
               if (Navigator.of(context).canPop()) {
-                print('⬅️ Using Navigator.pop()');
+                debugPrint('Using Navigator.pop()');
                 Navigator.of(context).pop();
               }
               // Approach 2: Use GoRouter
               else if (GoRouter.of(context).canPop()) {
-                print('⬅️ Using GoRouter.pop()');
+                debugPrint('Using GoRouter.pop()');
                 GoRouter.of(context).pop();
               }
               // Approach 3: Direct navigation
               else {
-                print('🔀 Directly going to /login');
+                debugPrint('Directly going to /login');
                 GoRouter.of(context).go('/');
               }
             } catch (e) {
-              print('❌ Error in back navigation: $e');
+              debugPrint('Error in back navigation: $e');
               GoRouter.of(context).go('/login');
             }
           },
@@ -67,11 +67,11 @@ class _SignupFlowState extends State<SignupFlow> {
 
   Future<void> _handleNextPressed(String email, String password) async {
     if (_isLoading) {
-      print('⚠️ Already loading, ignoring request');
+      debugPrint('Already loading, ignoring request');
       return;
     }
 
-    print('▶️ Next pressed with email: $email');
+    debugPrint('Next pressed with email: $email');
 
     setState(() {
       _isLoading = true;
@@ -83,7 +83,7 @@ class _SignupFlowState extends State<SignupFlow> {
       // Navigate to Data Consent Screen
       await _navigateToDataConsent(email, password);
     } catch (e) {
-      print('❌ Error in _handleNextPressed: $e');
+      debugPrint('Error in _handleNextPressed: $e');
       if (mounted) {
         setState(() {
           _isLoading = false;
@@ -95,7 +95,7 @@ class _SignupFlowState extends State<SignupFlow> {
   // signup_flow.dart
   // signup_flow.dart
   Future<void> _navigateToDataConsent(String email, String password) async {
-    print('📤 Navigating to DataConsentScreen...');
+    debugPrint('Navigating to DataConsentScreen...');
 
     try {
       // Use push (not pushNamed) to get better control
@@ -107,21 +107,21 @@ class _SignupFlowState extends State<SignupFlow> {
         extra: {'email': email, 'password': password},
       );
 
-      print('📥 Returned from DataConsentScreen: $result');
+      debugPrint('Returned from DataConsentScreen: $result');
 
-      // ✅ Check what happened
+      // Check what happened
       if (result != null && result['action'] == 'user_exists') {
-        print('⚠️ User exists - showing message');
+        debugPrint('User exists - showing message');
         _showUserExistsMessage();
       }
     } catch (e) {
-      print('❌ Navigation error: $e');
+      debugPrint('Navigation error: $e');
     } finally {
-      // ✅ ALWAYS reset loading state
+      // ALWAYS reset loading state
       if (mounted) {
         setState(() {
           _isLoading = false;
-          print('✅ SignupFlow: Loading state reset');
+          debugPrint('SignupFlow: Loading state reset');
         });
       }
     }

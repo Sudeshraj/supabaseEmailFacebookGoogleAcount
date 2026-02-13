@@ -48,7 +48,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
     super.dispose();
   }
 
-  /// 🔳 Role card widget (box frame like first image)
+  ///  Role card widget (box frame like first image)
   Widget _roleCard({
     required String image,
     required String title,
@@ -58,7 +58,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
     return GestureDetector(
       onTap: onTap,
       child: AspectRatio(
-        aspectRatio: 3 / 4, // ✅ KEY FIX
+        aspectRatio: 3 / 4, // KEY FIX
         child: Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(14),
@@ -81,7 +81,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                 Positioned.fill(
                   child: Image.asset(
                     image,
-                    fit: BoxFit.contain, // 🔥 IMPORTANT CHANGE
+                    fit: BoxFit.contain, // IMPORTANT CHANGE
                     alignment: Alignment.center,
                   ),
                 ),
@@ -219,10 +219,10 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                               vertical: 8,
                             ),
                             decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.05),
+                              color: Colors.white.withValues(alpha: 0.05),
                               borderRadius: BorderRadius.circular(20),
                               border: Border.all(
-                                color: Colors.white.withOpacity(0.1),
+                                color: Colors.white.withValues(alpha: 0.1),
                               ),
                             ),
                             child: Row(
@@ -231,13 +231,13 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                                 Icon(
                                   Icons.logout,
                                   size: 18,
-                                  color: Colors.white.withOpacity(0.7),
+                                  color: Colors.white.withValues(alpha: 0.7),
                                 ),
                                 const SizedBox(width: 6),
                                 Text(
                                   'Logout',
                                   style: TextStyle(
-                                    color: Colors.white.withOpacity(0.7),
+                                    color: Colors.white.withValues(alpha: 0.7),
                                     fontSize: 14,
                                   ),
                                 ),
@@ -262,7 +262,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                               ),
                               const SizedBox(height: 20),
 
-                              // 🖼️ Box framed images
+                              // Box framed images
                               Row(
                                 children: [
                                   Expanded(
@@ -305,7 +305,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                         ),
                       ),
 
-                      // 🔘 Buttons (color matched)
+                      // Buttons (color matched)
                       Column(
                         children: [
                           SizedBox(

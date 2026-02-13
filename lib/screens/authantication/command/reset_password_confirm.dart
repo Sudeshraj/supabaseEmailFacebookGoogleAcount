@@ -20,7 +20,7 @@ class ResetPasswordConfirmScreen extends StatelessWidget {
             margin: const EdgeInsets.all(24),
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.03),
+              color: Colors.white.withValues(alpha:0.03),
               borderRadius: BorderRadius.circular(20),
               border: Border.all(color: Colors.white12),
             ),
@@ -49,7 +49,7 @@ class ResetPasswordConfirmScreen extends StatelessWidget {
                 Text(
                   'We sent a password reset link to:',
                   style: TextStyle(
-                    color: Colors.white.withOpacity(0.7),
+                    color: Colors.white.withValues(alpha:0.7),
                   ),
                 ),
                 
@@ -70,7 +70,7 @@ class ResetPasswordConfirmScreen extends StatelessWidget {
                   'Click the link in the email to reset your password.',
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    color: Colors.white.withOpacity(0.7),
+                    color: Colors.white.withValues(alpha:0.7),
                   ),
                 ),
                 

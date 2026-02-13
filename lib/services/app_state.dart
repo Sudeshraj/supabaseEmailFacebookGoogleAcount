@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:developer' as developer;
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -7,7 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'session_manager.dart';
 import '../router/auth_gate.dart';
 
-/// 🚀 Production-ready App State Management
+///  Production-ready App State Management
 class AppState extends ChangeNotifier {
   // ====================
   // PRIVATE PROPERTIES
@@ -130,7 +129,7 @@ class AppState extends ChangeNotifier {
     _setLoading(true);
     _setErrorMessage(null);
 
-    developer.log('🔄 AppState: Initializing...', name: 'AppState');
+    developer.log(' AppState: Initializing...', name: 'AppState');
 
     try {
       final hasProfiles = await SessionManager.hasProfile();
@@ -146,7 +145,7 @@ class AppState extends ChangeNotifier {
 
       _lastUpdateTime = DateTime.now();
 
-      developer.log('✅ AppState: Initialization successful', name: 'AppState');
+      developer.log('AppState: Initialization successful', name: 'AppState');
       
       if (!_loggedIn && hasProfiles && rememberMe) {
         await attemptAutoLogin();
@@ -155,7 +154,7 @@ class AppState extends ChangeNotifier {
     } catch (e, stackTrace) {
       _setErrorMessage('Initialization failed');
       developer.log(
-        '❌ AppState Error: $e',
+        'AppState Error: $e',
         name: 'AppState',
         error: e,
         stackTrace: stackTrace,
@@ -166,7 +165,7 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// 🔄 Refresh app state
+  /// Refresh app state
   Future<void> refreshState({bool silent = false}) async {
     if (!silent) _setLoading(true);
 
@@ -183,10 +182,10 @@ class AppState extends ChangeNotifier {
       _lastUpdateTime = DateTime.now();
       _setErrorMessage(null);
 
-      developer.log('🔄 AppState: Refreshed', name: 'AppState');
+      developer.log('AppState: Refreshed', name: 'AppState');
     } catch (e, stackTrace) {
       developer.log(
-        '❌ State refresh error: $e',
+        'State refresh error: $e',
         name: 'AppState',
         error: e,
         stackTrace: stackTrace,
@@ -237,10 +236,10 @@ class AppState extends ChangeNotifier {
       _setCurrentEmail(null);
       _setLoginProvider(null);
 
-      developer.log('✅ User logged out', name: 'AppState');
+      developer.log('User logged out', name: 'AppState');
       
     } catch (e, stackTrace) {
-      developer.log('❌ Logout error: $e', name: 'AppState', error: e, stackTrace: stackTrace);
+      developer.log('Logout error: $e', name: 'AppState', error: e, stackTrace: stackTrace);
       _setErrorMessage('Logout failed');
       rethrow;
     } finally {
@@ -248,7 +247,7 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// 🔄 Logout for continue screen
+  /// Logout for continue screen
   Future<void> logoutForContinue() async {
     _setLoading(true);
 
@@ -262,9 +261,9 @@ class AppState extends ChangeNotifier {
       _setCurrentEmail(null);
       _setLoginProvider(null);
 
-      developer.log('✅ User logged out for continue screen', name: 'AppState');
+      developer.log(' User logged out for continue screen', name: 'AppState');
     } catch (e, stackTrace) {
-      developer.log('❌ Logout for continue error: $e', name: 'AppState', error: e, stackTrace: stackTrace);
+      developer.log('Logout for continue error: $e', name: 'AppState', error: e, stackTrace: stackTrace);
       _setErrorMessage('Logout failed');
       rethrow;
     } finally {
@@ -297,7 +296,7 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// 📊 Get user info
+  /// Get user info
   Map<String, dynamic>? getCurrentUserInfo() {
     if (!_loggedIn) return null;
 
@@ -317,12 +316,12 @@ class AppState extends ChangeNotifier {
     };
   }
 
-  /// 🎯 Clear error message
+  /// Clear error message
   void clearError() {
     _setErrorMessage(null);
   }
 
-  /// 💾 Enable/Disable Remember Me
+  /// Enable/Disable Remember Me
   Future<void> setRememberMe(bool enabled) async {
     await SessionManager.setRememberMe(enabled);
     _setRememberMeEnabled(enabled);
@@ -331,17 +330,17 @@ class AppState extends ChangeNotifier {
   /// 🔐 Attempt auto-login
   Future<void> attemptAutoLogin() async {
     try {
-      print('🔄 AppState: Attempting auto-login...');
+      debugPrint('AppState: Attempting auto-login...');
       
       final rememberMeEnabled = await SessionManager.isRememberMeEnabled();
       if (!rememberMeEnabled) {
-        print('⚠️ AppState: Auto-login disabled globally');
+        debugPrint('AppState: Auto-login disabled globally');
         return;
       }
       
       final recentProfile = await SessionManager.getMostRecentProfile();
       if (recentProfile == null || recentProfile.isEmpty) {
-        print('⚠️ AppState: No recent profile found');
+        debugPrint('AppState: No recent profile found');
         return;
       }
       
@@ -349,7 +348,7 @@ class AppState extends ChangeNotifier {
       final provider = recentProfile['provider'] as String?;
       
       if (email == null || email.isEmpty) {
-        print('⚠️ AppState: No email in recent profile');
+        debugPrint('AppState: No email in recent profile');
         return;
       }
       
@@ -357,32 +356,32 @@ class AppState extends ChangeNotifier {
       final privacyAccepted = recentProfile['privacyAcceptedAt'] != null;
       
       if (!termsAccepted || !privacyAccepted) {
-        print('⚠️ AppState: User consent not recorded - requiring re-login');
+        debugPrint('AppState: User consent not recorded - requiring re-login');
         return;
       }
       
-      print('🔍 AppState: Attempting auto-login for $email (provider: $provider)');
+      debugPrint('🔍 AppState: Attempting auto-login for $email (provider: $provider)');
       
       if (provider != null && provider != 'email' && provider != 'email_password') {
-        print('⚠️ AppState: OAuth provider ($provider) requires manual login');
+        debugPrint('AppState: OAuth provider ($provider) requires manual login');
         _setContinueScreen(true);
         return;
       }
       
       final refreshToken = recentProfile['refresh_token'] as String?;
       if (refreshToken == null || refreshToken.isEmpty) {
-        print('⚠️ AppState: No refresh token available');
+        debugPrint('AppState: No refresh token available');
         return;
       }
       
       bool success = false;
       
       for (int attempt = 1; attempt <= 3; attempt++) {
-        print('   - Attempt $attempt of 3');
+        debugPrint('   - Attempt $attempt of 3');
         success = await _tryAutoLoginWithToken(refreshToken);
         
         if (success) {
-          print('✅ AppState: Auto-login successful for $email');
+          debugPrint('✅ AppState: Auto-login successful for $email');
           await refreshState();
           return;
         }
@@ -392,10 +391,10 @@ class AppState extends ChangeNotifier {
         }
       }
       
-      print('❌ AppState: Auto-login failed after 3 attempts');
+      debugPrint('AppState: Auto-login failed after 3 attempts');
       
     } catch (e) {
-      print('❌ AppState: Error during auto-login: $e');
+      debugPrint('AppState: Error during auto-login: $e');
     }
   }
 
@@ -429,9 +428,9 @@ class AppState extends ChangeNotifier {
       _setCurrentEmail(email);
       _setLoginProvider(provider ?? 'email');
       
-      print('✅ Profile updated for $email (provider: $provider)');
+      debugPrint('Profile updated for $email (provider: $provider)');
     } catch (e) {
-      print('❌ Error updating profile: $e');
+      debugPrint(' Error updating profile: $e');
     }
   }
 
@@ -520,7 +519,7 @@ class AppState extends ChangeNotifier {
         name: 'AppState',
       );
     } catch (e) {
-      developer.log('❌ Profile update error: $e', name: 'AppState');
+      developer.log('Profile update error: $e', name: 'AppState');
       _setProfileCompleted(false);
       _setRole(null);
       _setLoginProvider(null);
@@ -547,15 +546,15 @@ class AppState extends ChangeNotifier {
       userRole = AuthGate.pickRole(roleName ?? defaultRole);
       await SessionManager.saveUserRole(userRole);
 
-      print('User role initialized: $userRole');
+      debugPrint('User role initialized: $userRole');
       _setRole(userRole);
     } on TimeoutException {
-      print('Database timeout, using default role');
+      debugPrint('Database timeout, using default role');
       userRole = defaultRole;
       await SessionManager.saveUserRole(userRole);
       _setRole(userRole);
     } catch (e) {
-      print('Failed to get user role: $e');
+      debugPrint('Failed to get user role: $e');
       userRole = defaultRole;
       await SessionManager.saveUserRole(userRole);
       _setRole(userRole);      
@@ -572,11 +571,11 @@ class AppState extends ChangeNotifier {
         // First, try to see if we already have a valid session
         final currentSession = supabase.auth.currentSession;
         if (currentSession != null) {
-          print('✅ Already has a valid session');
+          debugPrint('Already has a valid session');
           return true;
         }
       } catch (e) {
-        print('No existing session: $e');
+        debugPrint('No existing session: $e');
       }
       
       // METHOD 2: Try to refresh the session
@@ -588,45 +587,30 @@ class AppState extends ChangeNotifier {
         final response = await supabase.auth.refreshSession();
         
         if (response.session != null && response.user != null) {
-          print('✅ Session refreshed successfully');
+          debugPrint('Session refreshed successfully');
           return true;
         }
       } catch (e) {
-        print('Failed to refresh session: $e');
+        debugPrint('Failed to refresh session: $e');
       }
       
       // METHOD 3: Manual token refresh (advanced)
       // This requires making direct API calls
       try {
-        final url = '${supabase.auth.currentSession?.accessToken}';
         // This is complex and depends on your Supabase setup
-        print('Manual token refresh would be complex to implement');
+        debugPrint('Manual token refresh would be complex to implement');
       } catch (e) {
-        print('Manual refresh failed: $e');
+        debugPrint('Manual refresh failed: $e');
       }
       
       return false;
       
     } catch (e) {
-      print('❌ Auto-login with token failed: $e');
+      debugPrint(' Auto-login with token failed: $e');
       return false;
     }
   }
 
-  /// 🔄 Alternative: Use stored credentials to login
-  Future<bool> _tryAutoLoginWithCredentials(String email, String password) async {
-    // Note: You should NEVER store passwords in plain text
-    // This is just for demonstration
-    try {
-      // Check if you have stored encrypted credentials
-      // If yes, decrypt and use them
-      // This is more secure than storing refresh tokens
-      return false; // Implement based on your security requirements
-    } catch (e) {
-      print('❌ Auto-login with credentials failed: $e');
-      return false;
-    }
-  }
 
   void _resetToSafeState() {
     _setLoggedIn(false);
@@ -641,7 +625,7 @@ class AppState extends ChangeNotifier {
 
   /// 📧 Email verification error handler
   Future<void> emailVerifyerError() async {   
-    print('📧 Email verification error handler called');
+    debugPrint('Email verification error handler called');
     _setEmailVerified(false);
     notifyListeners();
   }

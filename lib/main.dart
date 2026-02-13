@@ -6,7 +6,6 @@ import 'package:flutter_application_1/screens/authantication/command/auth_callba
 import 'package:flutter_application_1/screens/authantication/command/clear_data_screen.dart';
 import 'package:flutter_application_1/screens/authantication/command/common_screen.dart';
 import 'package:flutter_application_1/screens/authantication/command/data_consent_screen.dart';
-import 'package:flutter_application_1/screens/authantication/command/finish_screen.dart';
 // import 'package:flutter_application_1/screens/authantication/command/help_screen.dart';
 import 'package:flutter_application_1/screens/authantication/command/policy_screen.dart';
 import 'package:flutter_application_1/screens/authantication/command/reset_password_confirm.dart';
@@ -614,21 +613,6 @@ GoRouter _createRouter() {
         builder: (_, __) => const VerifyInvalidScreen(),
       ),
       GoRoute(path: '/continue', builder: (_, __) => const ContinueScreen()),
-
-      // Signup completion
-      GoRoute(
-        path: '/finish',
-        pageBuilder: (context, state) {
-          final extra = state.extra as Map<String, dynamic>?;
-          return MaterialPage(
-            key: state.pageKey,
-            child: FinishScreen(
-              email: extra?['email'] ?? '',
-              password: extra?['password'] ?? '',
-            ),
-          );
-        },
-      ),
 
       // Home screens
       GoRoute(path: '/customer', builder: (_, __) => const CustomerHome()),

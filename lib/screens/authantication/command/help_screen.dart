@@ -153,7 +153,7 @@ class _HelpScreenState extends State<HelpScreen> {
     await _sendEmailMobile(email, subject, body);
   }
 
-  // 🌐 WEB VERSION
+  //  WEB VERSION
   Future<void> _sendEmailWeb(String email, String subject, String body) async {
     // Try Gmail first
     try {
@@ -208,7 +208,7 @@ class _HelpScreenState extends State<HelpScreen> {
     _showEmailCopyDialog(email);
   }
 
-  // 📱 MOBILE VERSION
+  // MOBILE VERSION
   Future<void> _sendEmailMobile(
     String email,
     String subject,
@@ -785,10 +785,10 @@ class _HelpScreenState extends State<HelpScreen> {
       await supabase.from('reports').insert(reportData);
 
       debugPrint(
-        '✅ Report saved successfully (User: ${user != null ? 'logged in' : 'anonymous'})',
+        'Report saved successfully (User: ${user != null ? 'logged in' : 'anonymous'})',
       );
     } catch (e) {
-      debugPrint('❌ Error saving report: $e');
+      debugPrint('Error saving report: $e');
     }
   }
 
