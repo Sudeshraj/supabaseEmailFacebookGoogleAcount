@@ -3,7 +3,6 @@ import 'package:flutter_application_1/main.dart';
 import 'package:flutter_application_1/screens/authantication/business_reg/company_name_screen.dart';
 import 'package:flutter_application_1/screens/authantication/customer_reg/name_screen.dart';
 import 'package:flutter_application_1/screens/authantication/command/welcome.dart';
-import 'package:flutter_application_1/screens/authantication/services/registration_service.dart';
 import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
 import 'package:flutter_application_1/screens/authantication/functions/loading_overlay.dart';
 
@@ -29,8 +28,7 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
   // ---- BUSINESS FIELD ----
   String? companyName;
 
-  final SaveUser _saveUserService = SaveUser();
-
+  
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -129,22 +127,22 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
 
       if (roles.contains('customer')) {
         // CUSTOMER REGISTRATION
-        await _saveUserService.registerUserWithRole(
-          context,
-          role: 'customer',
-          email: email!,
-          password: password!,
-          displayName: "${firstName ?? ''} ${lastName ?? ''}".trim(),
-        );
+        // await _saveUserService.registerUserWithRole(
+        //   context,
+        //   role: 'customer',
+        //   email: email!,
+        //   password: password!,
+        //   displayName: "${firstName ?? ''} ${lastName ?? ''}".trim(),
+        // );
       } else if (roles.contains('business')) {
         // BUSINESS REGISTRATION
-        await _saveUserService.registerUserWithRole(
-          context,
-          role: 'business',
-          email: email!,
-          password: password!,
-          displayName: companyName ?? "Business User",
-        );
+        // await _saveUserService.registerUserWithRole(
+        //   context,
+        //   role: 'business',
+        //   email: email!,
+        //   password: password!,
+        //   displayName: companyName ?? "Business User",
+        // );
       }
       if (!context.mounted) return;
     } catch (e) {

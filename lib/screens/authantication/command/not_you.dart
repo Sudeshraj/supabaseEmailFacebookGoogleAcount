@@ -1,8 +1,7 @@
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/screens/authantication/command/multi_continue_screen.dart';
-import 'package:flutter_application_1/screens/authantication/command/registration_flow.dart';
 import 'package:flutter_application_1/screens/authantication/command/sign_in.dart';
+import 'package:flutter_application_1/screens/authantication/command/signup_flow.dart';
 import 'package:flutter_application_1/screens/authantication/command/splash.dart';
 
 class NotYouScreen extends StatefulWidget {
@@ -57,11 +56,10 @@ class _NotYouScreenState extends State<NotYouScreen>
   }
 
   void _handleBackNavigation() {
-    Widget target;
-    FirebaseAuth.instance.signOut();
+    Widget target;   
     switch (widget.page) {    
       case 'signup':
-        target = const RegistrationFlow();
+        target = const SignupFlow();
         break;
       case 'cont':
         target = const ContinueScreen();
