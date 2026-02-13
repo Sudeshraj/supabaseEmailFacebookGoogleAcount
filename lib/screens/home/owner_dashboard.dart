@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import '../authantication/command/multi_continue_screen.dart';
 
 class OwnerDashboard extends StatelessWidget {
@@ -16,7 +15,7 @@ class OwnerDashboard extends StatelessWidget {
   Future<void> _logout(BuildContext context) async {
   try {
     // 🔴 1️⃣ Sign out from Firebase
-    await FirebaseAuth.instance.signOut();
+ 
 
     // 🔵 2️⃣ Keep saved profiles for "Continue as ..." feature
     //  — You can clear them by uncommenting this if you want a full logout:
@@ -63,8 +62,7 @@ class OwnerDashboard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final user = FirebaseAuth.instance.currentUser;
-    final display = user?.displayName ?? user?.email ?? 'User';
+   
 
     return Scaffold(
       appBar: AppBar(
@@ -77,7 +75,7 @@ class OwnerDashboard extends StatelessWidget {
         ],
       ),
       body: Center(
-        child: Text('Welcome, $display', style: const TextStyle(fontSize: 18)),
+        child: Text('Welcome, Owner', style: const TextStyle(fontSize: 18)),
       ),
     );
   }

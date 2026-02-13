@@ -4,18 +4,16 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   app_links
-  cloud_firestore
   connectivity_plus
   desktop_webview_window
-  firebase_auth
   firebase_core
   flutter_secure_storage_windows
-  geolocator_windows
   url_launcher_windows
   window_to_front
 )
 
 list(APPEND FLUTTER_FFI_PLUGIN_LIST
+  flutter_local_notifications_windows
 )
 
 set(PLUGIN_BUNDLED_LIBRARIES)

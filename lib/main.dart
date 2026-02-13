@@ -2,27 +2,28 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter_application_1/firebase_options.dart';
 import 'package:flutter_application_1/screens/authantication/command/auth_callback_handler.dart';
 import 'package:flutter_application_1/screens/authantication/command/clear_data_screen.dart';
 import 'package:flutter_application_1/screens/authantication/command/common_screen.dart';
 import 'package:flutter_application_1/screens/authantication/command/data_consent_screen.dart';
 // import 'package:flutter_application_1/screens/authantication/command/help_screen.dart';
 import 'package:flutter_application_1/screens/authantication/command/policy_screen.dart';
+import 'package:flutter_application_1/screens/authantication/command/registration_flow.dart';
 import 'package:flutter_application_1/screens/authantication/command/reset_password_confirm.dart';
 import 'package:flutter_application_1/screens/authantication/command/reset_password_form.dart';
 import 'package:flutter_application_1/screens/authantication/command/reset_password_request.dart';
+import 'package:flutter_application_1/services/notification_service.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 // import 'package:url_strategy/url_strategy.dart';
 
-import 'firebase_options.dart';
 import 'config/environment_manager.dart';
 
 // Screens
 import 'screens/authantication/command/splash.dart';
 import 'screens/authantication/command/sign_in.dart';
 import 'screens/authantication/command/signup_flow.dart';
-import 'screens/authantication/command/registration_flow.dart';
 import 'screens/authantication/command/email_verify_checker.dart';
 import 'screens/authantication/command/multi_continue_screen.dart';
 import 'screens/home/customer_home.dart';
@@ -174,9 +175,15 @@ Future<void> main() async {
     }
 
     // ========== PHASE 2: FIREBASE ==========
+    // Firebase initialize - web,mobile platform anuva initialize venava
     await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
+      options: DefaultFirebaseOptions
+          .currentPlatform, //fiebase_options.dart file එකේ තියෙන options use කරනවා
     );
+    // Notification service initialize karanna
+    // meken notification service eka initialize karanava, meken permission check karala denava,
+    // permission denawanam token gen karala denava, token gen karala nam firebase cloud messaging ekata register karala denava, meken notification receive karanna ready wenava
+    await NotificationService().init();
 
     // ========== PHASE 3: SUPABASE ==========
     await Supabase.initialize(
