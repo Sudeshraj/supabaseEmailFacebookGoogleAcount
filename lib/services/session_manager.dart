@@ -2,8 +2,7 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:flutter/foundation.dart' show kDebugMode;
-import 'dart:io' show Platform;
+import 'package:flutter/foundation.dart' show kDebugMode, debugPrint;
 
 class SessionManager {
   // Keys
@@ -23,10 +22,10 @@ class SessionManager {
   // Initialize
   static Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
-    print('✅ SessionManager initialized with secure storage');
+    debugPrint('SessionManager initialized with secure storage');
   }
 
-  // ✅ PUBLIC: Session validation method
+  //PUBLIC: Session validation method
   static bool isSessionValid(Session? session) {
     if (session == null) return false;
     if (session.expiresAt == null) return true;
@@ -39,7 +38,7 @@ class SessionManager {
     return timeUntilExpiry.inMinutes > 2;
   }
 
-  // ✅ SECURE: Save user profile with App Store compliance
+  //SECURE: Save user profile with App Store compliance
   // SessionManager.dart - FIXED photo handling
   static Future<void> saveUserProfile({
     required String email,
@@ -57,10 +56,9 @@ class SessionManager {
     DateTime? marketingConsentAt,
     String? appVersion,
   }) async {
-    print('💾 Saving profile for: $email');
-    print('📸 Photo URL provided: ${photo ?? "NULL"}');
-   
-      print('📸 Photo URL provided: $provider');
+    debugPrint('Saving profile for: $email');
+    debugPrint('Photo URL provided: ${photo ?? "NULL"}');   
+      debugPrint('Provider provided: $provider');
   
 
     try {
@@ -72,50 +70,50 @@ class SessionManager {
 
       final now = DateTime.now();
 
-      // ✅ FIXED: Better photo handling logic
+      // FIXED: Better photo handling logic
       String? finalPhoto;
 
       if (photo != null && photo.isNotEmpty) {
         // 1. NEW photo always takes priority
         finalPhoto = photo;
-        print('✅ Using new photo URL: $finalPhoto');
+        debugPrint('Using new photo URL: $finalPhoto');
       } else if (existingProfile['photo'] != null &&
           existingProfile['photo'].toString().isNotEmpty) {
         // 2. Keep existing photo if available
         finalPhoto = existingProfile['photo'].toString();
-        print('✅ Keeping existing photo: $finalPhoto');
+        debugPrint('Keeping existing photo: $finalPhoto');
       } else {
         // 3. No photo - set empty string (not null)
         finalPhoto = '';
-        print('⚠️ No photo available for $email');
+        debugPrint('No photo available for $email');
       }
 
-      // ✅ FIXED: Provider selection with better photo detection
+      // FIXED: Provider selection with better photo detection
       String actualProvider;
 
       if (provider != null && provider.isNotEmpty && provider != 'email') {
         actualProvider = provider;
-        print('✅ Using provided provider: $actualProvider');
+        debugPrint('Using provided provider: $actualProvider');
       } else if (finalPhoto.isNotEmpty) {
         // Try to detect provider from photo URL
         if (finalPhoto.contains('googleusercontent.com')) {
           actualProvider = 'google';
-          print('🔍 Detected Google from photo URL');
+          debugPrint('Detected Google from photo URL');
         } else if (finalPhoto.contains('fbcdn.net') ||
             finalPhoto.contains('facebook.com') || finalPhoto.contains('platform-lookaside.fbsbx.com')) {
           actualProvider = 'facebook';
-          print('🔍 Detected Facebook from photo URL');
+          debugPrint('Detected Facebook from photo URL');
         } else if (finalPhoto.contains('apple.com') ||
             finalPhoto.contains('appleid.apple.com')) {
           actualProvider = 'apple';
-          print('🔍 Detected Apple from photo URL');
+          debugPrint('Detected Apple from photo URL');
         } else {
           actualProvider = existingProfile['provider'] as String? ?? 'email';
-            print('✅ Using existing provider or defaulting to email');
+            debugPrint('Using existing provider or defaulting to email');
         }
       } else {
         actualProvider = existingProfile['provider'] as String? ?? 'email';
-         print('✅ Using existing provider or defaulting to email2');
+         debugPrint('Using existing provider or defaulting to email2');
       }
 
       final profileData = <String, dynamic>{
@@ -123,7 +121,7 @@ class SessionManager {
         'userId': userId,
         'name': name ?? existingProfile['name'] ?? email.split('@').first,
 
-        // ✅ CRITICAL FIX: Always set photo (even if empty)
+        // CRITICAL FIX: Always set photo (even if empty)
         'photo': finalPhoto,
 
         'roles': roles ?? existingProfile['roles'] ?? <String>[],
@@ -163,7 +161,7 @@ class SessionManager {
 
       // ✅ DEBUG: Log photo info
       if (kDebugMode) {
-        print('📊 PROFILE DATA SAVED:');
+        print('PROFILE DATA SAVED:');
         print('   - Email: $email');
         print('   - Photo: ${profileData['photo']}');
         print('   - Photo type: ${profileData['photo'].runtimeType}');
@@ -175,15 +173,15 @@ class SessionManager {
       if (index == -1) {
         if (rememberMe) {
           profiles.add(profileData);
-          print('✅ New profile saved with photo');
+          debugPrint('New profile saved with photo');
         }
       } else {
         if (rememberMe) {
           profiles[index] = profileData;
-          print('✅ Profile updated with photo');
+          debugPrint('Profile updated with photo');
         } else {
           profiles.removeAt(index);
-          print('✅ Profile removed');
+          debugPrint('Profile removed');
         }
       }
 
@@ -193,19 +191,19 @@ class SessionManager {
       if (rememberMe) {
         await setCurrentUser(email);
         await _prefs.setBool(_showContinueKey, true);
-        print('✅ Continue screen enabled');
+        debugPrint('Continue screen enabled');
       } else {
         final currentEmail = await getCurrentUserEmail();
         if (currentEmail == email) {
           await _prefs.remove(_currentUserKey);
           await _prefs.setBool(_showContinueKey, false);
-          print('✅ User removed from continue screen');
+          debugPrint('User removed from continue screen');
         }
       }
 
       await setRememberMe(rememberMe);
 
-      // ✅ Save tokens if available
+      // Save tokens if available
       if (refreshToken != null && refreshToken.isNotEmpty) {
         await _secureStorage.write(
           key: '${userId}_refresh_token',
@@ -224,8 +222,8 @@ class SessionManager {
         );
       }
     } catch (e, stackTrace) {
-      print('❌ Error saving profile: $e');
-      print('Stack trace: $stackTrace');
+      debugPrint(' Error saving profile: $e');
+      debugPrint('Stack trace: $stackTrace');
       rethrow;
     }
   }
@@ -233,13 +231,13 @@ class SessionManager {
   // ✅ ENHANCED: AUTO-LOGIN with compliance checks
   static Future<bool> tryAutoLogin(String email) async {
     try {
-      print('🚀 ===== ATTEMPTING AUTO-LOGIN (COMPLIANT) =====');
-      print('📧 Target email: $email');
+      debugPrint('===== ATTEMPTING AUTO-LOGIN (COMPLIANT) =====');
+      debugPrint('Target email: $email');
 
       // 1. Check if profile exists
       final profile = await getProfileByEmail(email);
       if (profile == null || profile.isEmpty) {
-        print('⚠️ Auto-login failed: No profile found');
+        debugPrint('Auto-login failed: No profile found');
         return false;
       }
 
@@ -251,7 +249,7 @@ class SessionManager {
       // Check if already logged in
       if (currentUser?.email == email && currentSession != null) {
         if (isSessionValid(currentSession)) {
-          print('✅ AUTO-LOGIN SUCCESS: Already logged in');
+          debugPrint('AUTO-LOGIN SUCCESS: Already logged in');
           await updateLastLogin(email);
           return true;
         }
@@ -260,7 +258,7 @@ class SessionManager {
       // 3. Get refresh token from secure storage
       final userId = profile['userId'] as String?;
       if (userId == null) {
-        print('⚠️ Auto-login failed: No user ID found');
+        debugPrint('Auto-login failed: No user ID found');
         return false;
       }
 
@@ -269,13 +267,13 @@ class SessionManager {
       );
 
       if (refreshToken == null || refreshToken.isEmpty) {
-        print('⚠️ Auto-login failed: No secure refresh token found');
+        debugPrint('Auto-login failed: No secure refresh token found');
         return false;
       }
 
       // 4. Try to restore session with refresh token
       try {
-        print('🔄 Attempting to restore session with secure token...');
+        debugPrint('Attempting to restore session with secure token...');
         await supabase.auth.setSession(refreshToken);
 
         // Wait for session restoration
@@ -285,7 +283,7 @@ class SessionManager {
         final restoredSession = supabase.auth.currentSession;
 
         if (restoredUser?.email == email && restoredSession != null) {
-          print('✅ AUTO-LOGIN SUCCESS: Session restored securely');
+          debugPrint('AUTO-LOGIN SUCCESS: Session restored securely');
           await updateLastLogin(email);
 
           // Update tokens in secure storage
@@ -294,20 +292,20 @@ class SessionManager {
           return true;
         }
       } catch (e) {
-        print('❌ Secure session restoration failed: $e');
+        debugPrint(' Secure session restoration failed: $e');
         await _cleanupInvalidSession(userId, email);
       }
 
-      print('❌ AUTO-LOGIN FAILED: Could not restore session');
+      debugPrint('AUTO-LOGIN FAILED: Could not restore session');
       return false;
     } catch (e, stackTrace) {
-      print('❌ AUTO-LOGIN ERROR: $e');
-      print('Stack: $stackTrace');
+      debugPrint('AUTO-LOGIN ERROR: $e');
+      debugPrint('Stack: $stackTrace');
       return false;
     }
   }
 
-  // ✅ NEW: Update marketing consent (SignInScreen needs this)
+  // NEW: Update marketing consent (SignInScreen needs this)
   static Future<void> updateMarketingConsent({
     required String email,
     required bool consent,
@@ -324,15 +322,15 @@ class SessionManager {
             : '';
 
         await _prefs.setString(_keyProfiles, jsonEncode(profiles));
-        print('✅ Marketing consent updated for: $email');
+        debugPrint('Marketing consent updated for: $email');
       }
     } catch (e) {
-      print('❌ Error updating marketing consent: $e');
+      debugPrint('Error updating marketing consent: $e');
       rethrow;
     }
   }
 
-  // ✅ NEW: Update consent timestamps (SignInScreen needs this)
+  // NEW: Update consent timestamps (SignInScreen needs this)
   static Future<void> updateConsentTimestamps({
     required String email,
     required DateTime termsAcceptedAt,
@@ -349,15 +347,15 @@ class SessionManager {
         profiles[index]['consentVersion'] = _currentConsentVersion;
 
         await _prefs.setString(_keyProfiles, jsonEncode(profiles));
-        print('✅ Consent timestamps updated for: $email');
+        debugPrint(' Consent timestamps updated for: $email');
       }
     } catch (e) {
-      print('❌ Error updating consent timestamps: $e');
+      debugPrint('Error updating consent timestamps: $e');
       rethrow;
     }
   }
 
-  // ✅ COMPLIANT LOGOUT FOR CONTINUE SCREEN
+  // COMPLIANT LOGOUT FOR CONTINUE SCREEN
   static Future<void> logoutForContinue() async {
     try {
       final supabase = Supabase.instance.client;
@@ -379,7 +377,7 @@ class SessionManager {
             accessToken: currentSession.accessToken,
             provider: await _getUserProvider(email),
           );
-          print('✅ Refresh token saved before continue logout');
+          debugPrint('Refresh token saved before continue logout');
         }
       }
 
@@ -387,22 +385,22 @@ class SessionManager {
       await supabase.auth.signOut();
 
       // Save current user for continue screen if remember me is enabled
-      print('✅ User prepared for continue screen (Remember Me: $rememberMe)');
+      debugPrint('User prepared for continue screen (Remember Me: $rememberMe)');
       if (email != null && rememberMe) {
         await setCurrentUser(email);
         await _prefs.setBool(_showContinueKey, true);
-        print('✅ User prepared for continue screen (Remember Me: $rememberMe)');
+        debugPrint(' User prepared for continue screen (Remember Me: $rememberMe)');
       } else {
         await _prefs.remove(_currentUserKey);
         await clearContinueScreen();
-        print('✅ User cleared for continue screen');
+        debugPrint(' User cleared for continue screen');
       }
     } catch (e) {
-      print('❌ Error during continue logout: $e');
+      debugPrint(' Error during continue logout: $e');
     }
   }
 
-  // ✅ SECURE: Save refresh token
+  // SECURE: Save refresh token
   static Future<void> saveRefreshToken(
     String email,
     String? refreshToken,
@@ -428,14 +426,14 @@ class SessionManager {
           await _prefs.setString(_keyProfiles, jsonEncode(profiles));
         }
 
-        print('✅ Refresh token saved securely for: $email');
+        debugPrint('Refresh token saved securely for: $email');
       }
     } catch (e) {
-      print('❌ Error saving refresh token: $e');
+      debugPrint('Error saving refresh token: $e');
     }
   }
 
-  // ✅ SECURE: Get refresh token
+  // SECURE: Get refresh token
   static Future<String?> getRefreshToken(String email) async {
     try {
       final profile = await getProfileByEmail(email);
@@ -446,12 +444,12 @@ class SessionManager {
       }
       return null;
     } catch (e) {
-      print('❌ Error getting refresh token: $e');
+      debugPrint('Error getting refresh token: $e');
       return null;
     }
   }
 
-  // ✅ Get all saved profiles
+  // Get all saved profiles
   static Future<List<Map<String, dynamic>>> getProfiles() async {
     try {
       final jsonString = _prefs.getString(_keyProfiles) ?? '[]';
@@ -465,22 +463,22 @@ class SessionManager {
         return map;
       }).toList();
     } catch (e) {
-      print('❌ Error getting profiles: $e');
+      debugPrint(' Error getting profiles: $e');
       return [];
     }
   }
 
-  // ✅ Set current user
+  // Set current user
   static Future<void> setCurrentUser(String email) async {
     await _prefs.setString(_currentUserKey, email);
   }
 
-  // ✅ Get current user email
+  // Get current user email
   static Future<String?> getCurrentUserEmail() async {
     return _prefs.getString(_currentUserKey);
   }
 
-  // ✅ Save user role
+  // Save user role
   static Future<void> saveUserRole(String role) async {
     try {
       final email = await getCurrentUserEmail();
@@ -498,14 +496,14 @@ class SessionManager {
         }
         profiles[index]['roles'] = roles;
         await _prefs.setString(_keyProfiles, jsonEncode(profiles));
-        print('✅ Role saved: $role for $email');
+        debugPrint(' Role saved: $role for $email');
       }
     } catch (e) {
-      print('❌ Error saving role: $e');
+      debugPrint('Error saving role: $e');
     }
   }
 
-  // ✅ Get user role
+  // Get user role
   static Future<String?> getUserRole() async {
     final email = await getCurrentUserEmail();
     if (email == null) return null;
@@ -517,14 +515,14 @@ class SessionManager {
     return roles.isNotEmpty ? roles.first : null;
   }
 
-  // ✅ Check if has any profiles
+  // Check if has any profiles
   static Future<bool> hasProfile() async {
     final profiles = await getProfiles();
-    print('🔍 Checking profiles, count: ${profiles.length}');
+    debugPrint('Checking profiles, count: ${profiles.length}');
     return profiles.isNotEmpty;
   }
 
-  // ✅ Update last login time
+  // Update last login time
   static Future<void> updateLastLogin(String email) async {
     try {
       final profiles = await getProfiles();
@@ -533,14 +531,14 @@ class SessionManager {
       if (index != -1) {
         profiles[index]['lastLogin'] = DateTime.now().toIso8601String();
         await _prefs.setString(_keyProfiles, jsonEncode(profiles));
-        print('✅ Last login updated for: $email');
+        debugPrint('Last login updated for: $email');
       }
     } catch (e) {
-      print('❌ Error updating last login: $e');
+      debugPrint('Error updating last login: $e');
     }
   }
 
-  // ✅ Remove a profile
+  //  Remove a profile
   static Future<void> removeProfile(String email) async {
     try {
       final profiles = await getProfiles();
@@ -564,37 +562,37 @@ class SessionManager {
           await _secureStorage.delete(key: '${userId}_access_token');
         }
 
-        print('✅ Profile and secure data removed: $email');
+        debugPrint(' Profile and secure data removed: $email');
       }
     } catch (e) {
-      print('❌ Error removing profile: $e');
+      debugPrint('Error removing profile: $e');
     }
   }
 
-  // ✅ Remember Me settings
+  // Remember Me settings
   static Future<void> setRememberMe(bool enabled) async {
     await _prefs.setBool(_rememberMeKey, enabled);
-    print('✅ Remember Me set to: $enabled');
+    debugPrint('Remember Me set to: $enabled');
   }
 
   static Future<bool> isRememberMeEnabled() async {
     return _prefs.getBool(_rememberMeKey) ?? false;
   }
 
-  // ✅ Check if should show continue screen
+  // Check if should show continue screen
   static Future<bool> shouldShowContinueScreen() async {
     final show = _prefs.getBool(_showContinueKey) ?? false;
     final rememberMe = await isRememberMeEnabled();
     return show && rememberMe;
   }
 
-  // ✅ Clear continue screen flag
+  // Clear continue screen flag
   static Future<void> clearContinueScreen() async {
     await _prefs.setBool(_showContinueKey, false);
-    print('✅ Continue screen flag cleared');
+    debugPrint('Continue screen flag cleared');
   }
 
-  // ✅ Get profile by email
+  // Get profile by email
   static Future<Map<String, dynamic>?> getProfileByEmail(String email) async {
     try {
       final profiles = await getProfiles();
@@ -603,12 +601,12 @@ class SessionManager {
         orElse: () => <String, dynamic>{},
       );
     } catch (e) {
-      print('❌ Error getting profile: $e');
+      debugPrint('Error getting profile: $e');
       return null;
     }
   }
 
-  // ✅ Get most recent profile
+  // Get most recent profile
   static Future<Map<String, dynamic>?> getMostRecentProfile() async {
     try {
       final profiles = await getProfiles();
@@ -622,7 +620,7 @@ class SessionManager {
 
       return profiles.first;
     } catch (e) {
-      print('❌ Error getting recent profile: $e');
+      debugPrint('Error getting recent profile: $e');
       return null;
     }
   }
@@ -638,13 +636,13 @@ class SessionManager {
       // Clear secure storage
       await _secureStorage.deleteAll();
 
-      print('✅ All session data cleared (including secure storage)');
+      debugPrint('All session data cleared (including secure storage)');
     } catch (e) {
-      print('❌ Error clearing all data: $e');
+      debugPrint('Error clearing all data: $e');
     }
   }
 
-  // ✅ Get most recent user based on lastLogin time
+  // Get most recent user based on lastLogin time
   static Future<Map<String, dynamic>?> getMostRecentUser() async {
     try {
       final profiles = await getProfiles();
@@ -658,19 +656,19 @@ class SessionManager {
 
       return profiles.first;
     } catch (e) {
-      print('❌ Error getting most recent user: $e');
+      debugPrint('Error getting most recent user: $e');
       return null;
     }
   }
 
-  // ✅ Get last added user
+  // Get last added user
   static Future<Map<String, dynamic>?> getLastUser() async {
     try {
       final profiles = await getProfiles();
       if (profiles.isEmpty) return null;
       return profiles.last;
     } catch (e) {
-      print('❌ Error getting last user: $e');
+      debugPrint('Error getting last user: $e');
       return null;
     }
   }
@@ -694,24 +692,24 @@ class SessionManager {
       }
       return false;
     } catch (e) {
-      print('❌ Error checking session validity: $e');
+      debugPrint('Error checking session validity: $e');
       return false;
     }
   }
 
-  // ✅ Restore session from storage
+  // Restore session from storage
   static Future<bool> restoreSessionFromStorage(String email) async {
     return tryAutoLogin(email);
   }
 
-  // ✅ Validate and refresh session
+  // Validate and refresh session
   static Future<void> validateAndRefreshSession() async {
     try {
       final supabase = Supabase.instance.client;
       final session = supabase.auth.currentSession;
 
       if (session == null) {
-        print('⚠️ No active session to validate');
+        debugPrint('No active session to validate');
         return;
       }
 
@@ -723,24 +721,24 @@ class SessionManager {
         final minutesUntilExpiry = expiryTime.difference(now).inMinutes;
 
         if (minutesUntilExpiry < 5) {
-          print(
-            '🔄 Session expiring soon ($minutesUntilExpiry minutes), attempting refresh...',
+          debugPrint(
+            'Session expiring soon ($minutesUntilExpiry minutes), attempting refresh...',
           );
 
           try {
             await supabase.auth.getUser();
-            print('✅ Session refresh triggered');
+            debugPrint('Session refresh triggered');
           } catch (e) {
-            print('❌ Session refresh failed: $e');
+            debugPrint(' Session refresh failed: $e');
           }
         }
       }
     } catch (e) {
-      print('❌ Error validating session: $e');
+      debugPrint('Error validating session: $e');
     }
   }
 
-  // ✅ PRIVATE HELPER METHODS
+  // PRIVATE HELPER METHODS
 
   static Future<void> _updateSecureTokens(
     String userId,
@@ -761,9 +759,9 @@ class SessionManager {
         iOptions: _getIOSOptions(),
       );
 
-      print('✅ Secure tokens updated');
+      debugPrint('Secure tokens updated');
     } catch (e) {
-      print('❌ Error updating secure tokens: $e');
+      debugPrint('Error updating secure tokens: $e');
     }
   }
 
@@ -772,7 +770,7 @@ class SessionManager {
     String email,
   ) async {
     try {
-      print('🧹 Cleaning up invalid session for: $email');
+      debugPrint('Cleaning up invalid session for: $email');
 
       await _secureStorage.delete(key: '${userId}_refresh_token');
       await _secureStorage.delete(key: '${userId}_access_token');
@@ -786,9 +784,9 @@ class SessionManager {
         await _prefs.setString(_keyProfiles, jsonEncode(profiles));
       }
 
-      print('✅ Invalid session cleaned up');
+      debugPrint(' Invalid session cleaned up');
     } catch (e) {
-      print('❌ Error cleaning up session: $e');
+      debugPrint(' Error cleaning up session: $e');
     }
   }
 
@@ -797,18 +795,6 @@ class SessionManager {
     return profile?['provider'] as String?;
   }
 
-  static String _getPlatformInfo() {
-    try {
-      if (Platform.isAndroid) return 'Android';
-      if (Platform.isIOS) return 'iOS';
-      if (Platform.isWindows) return 'Windows';
-      if (Platform.isMacOS) return 'macOS';
-      if (Platform.isLinux) return 'Linux';
-      return 'Unknown';
-    } catch (e) {
-      return 'Flutter';
-    }
-  }
 
   static AndroidOptions _getAndroidOptions() =>
       const AndroidOptions(encryptedSharedPreferences: true);
@@ -818,7 +804,7 @@ class SessionManager {
     synchronizable: true,
   );
 
-  // ✅ NEW: GDPR Data Export
+  // NEW: GDPR Data Export
   static Future<Map<String, dynamic>> exportUserData(String email) async {
     try {
       final profile = await getProfileByEmail(email);
@@ -842,12 +828,12 @@ class SessionManager {
 
       return exportData;
     } catch (e) {
-      print('❌ Error exporting user data: $e');
+      debugPrint('Error exporting user data: $e');
       rethrow;
     }
   }
 
-  // ✅ NEW: GDPR Data Deletion Request
+  // NEW: GDPR Data Deletion Request
   static Future<void> requestDataDeletion(String email) async {
     try {
       final profiles = await getProfiles();
@@ -868,14 +854,14 @@ class SessionManager {
           await _secureStorage.delete(key: '${userId}_access_token');
         }
 
-        print('✅ Data deletion requested for: $email');
+        debugPrint('Data deletion requested for: $email');
       }
     } catch (e) {
-      print('❌ Error requesting data deletion: $e');
+      debugPrint('Error requesting data deletion: $e');
     }
   }
 
-  // ✅ NEW: Get user's consent status
+  // NEW: Get user's consent status
   static Future<Map<String, dynamic>> getConsentStatus(String email) async {
     try {
       final profile = await getProfileByEmail(email);
@@ -892,12 +878,12 @@ class SessionManager {
         'dataRetentionDate': profile['dataRetentionDate'],
       };
     } catch (e) {
-      print('❌ Error getting consent status: $e');
+      debugPrint('Error getting consent status: $e');
       rethrow;
     }
   }
 
-  // ✅ NEW: Check if user needs to re-consent
+  //  NEW: Check if user needs to re-consent
   static Future<bool> needsReconsent(String email) async {
     try {
       final profile = await getProfileByEmail(email);
@@ -906,12 +892,12 @@ class SessionManager {
       final consentVersion = profile['consentVersion'] as String?;
       return consentVersion != _currentConsentVersion;
     } catch (e) {
-      print('❌ Error checking reconsent: $e');
+      debugPrint(' Error checking reconsent: $e');
       return true;
     }
   }
 
-  // ✅ NEW: Secure storage health check
+  // NEW: Secure storage health check
   static Future<bool> checkSecureStorageHealth() async {
     try {
       // Try to write and read a test value
@@ -930,12 +916,12 @@ class SessionManager {
 
       return readValue == testValue;
     } catch (e) {
-      print('❌ Secure storage health check failed: $e');
+      debugPrint('Secure storage health check failed: $e');
       return false;
     }
   }
 
-  // ✅ NEW: Get active session count
+  // NEW: Get active session count
   static Future<int> getActiveSessionCount() async {
     try {
       final profiles = await getProfiles();
@@ -952,12 +938,12 @@ class SessionManager {
 
       return count;
     } catch (e) {
-      print('❌ Error getting active session count: $e');
+      debugPrint(' Error getting active session count: $e');
       return 0;
     }
   }
 
-  // ✅ NEW: Clean up expired sessions
+  // NEW: Clean up expired sessions
   static Future<void> cleanupExpiredSessions() async {
     try {
       final profiles = await getProfiles();
@@ -971,13 +957,13 @@ class SessionManager {
             final email = profile['email'] as String?;
             if (email != null) {
               await removeProfile(email);
-              print('✅ Cleaned up expired session for: $email');
+              debugPrint('Cleaned up expired session for: $email');
             }
           }
         }
       }
     } catch (e) {
-      print('❌ Error cleaning up expired sessions: $e');
+      debugPrint('Error cleaning up expired sessions: $e');
     }
   }
 }

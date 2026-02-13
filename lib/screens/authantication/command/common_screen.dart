@@ -233,7 +233,7 @@ class _HelpScreenState extends State<HelpScreen> {
     String subject = '',
     String body = '',
   }) async {
-    debugPrint('📧 Sending email...');
+    debugPrint(' Sending email...');
 
     if (kIsWeb) {
       // Web - Gmail
@@ -713,9 +713,9 @@ class _HelpScreenState extends State<HelpScreen> {
         'status': 'pending',
         'created_at': DateTime.now().toIso8601String(),
       });
-      debugPrint('✅ Report saved');
+      debugPrint('Report saved');
     } catch (e) {
-      debugPrint('❌ Error: $e');
+      debugPrint(' Error: $e');
     }
   }
 

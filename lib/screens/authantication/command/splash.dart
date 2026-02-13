@@ -17,7 +17,7 @@ class _SplashScreenState extends State<SplashScreen> {
     // Add a minimum display time for splash screen
     Timer(const Duration(milliseconds: 2000), () {
       // Router will handle the redirect automatically
-      print('⏰ Splash screen minimum time completed');
+      debugPrint('Splash screen minimum time completed');
     });
   }
 

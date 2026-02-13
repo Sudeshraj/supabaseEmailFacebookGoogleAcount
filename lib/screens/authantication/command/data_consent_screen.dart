@@ -73,7 +73,7 @@ class _DataConsentScreenState extends State<DataConsentScreen>
     });
 
     try {
-      print('🚀 Starting registration for: ${widget.email}');
+      debugPrint('Starting registration for: ${widget.email}');
 
       // Call auth service
       await _authService.registerUser(
@@ -84,12 +84,12 @@ class _DataConsentScreenState extends State<DataConsentScreen>
         marketingConsent: _acceptedMarketing,
       );
 
-      print('✅ Registration completed');
+      debugPrint('Registration completed');
 
       // If we reach here, registration was successful
       // AuthService will handle navigation
     } catch (e) {
-      print('❌ Registration error: $e');
+      debugPrint('Registration error: $e');
 
       // Reset loading state
       if (mounted) {
@@ -131,7 +131,7 @@ class _DataConsentScreenState extends State<DataConsentScreen>
   void dispose() {
     _animationController.dispose();
     if (_isLoading) {
-      print('⚠️ DataConsentScreen disposing while still loading');
+      debugPrint('DataConsentScreen disposing while still loading');
     }
     super.dispose();
   }
@@ -160,7 +160,7 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                   ),
                   padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.03),
+                    color: Colors.white.withValues(alpha: 0.03),
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(color: Colors.white12),
                   ),
@@ -196,10 +196,10 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                       Container(
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: Colors.blue.withOpacity(0.1),
+                          color: Colors.blue.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(
-                            color: Colors.blue.withOpacity(0.3),
+                            color: Colors.blue.withValues(alpha: 0.3),
                           ),
                         ),
                         child: Row(
@@ -334,7 +334,7 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                               Container(
                                 padding: const EdgeInsets.all(16),
                                 decoration: BoxDecoration(
-                                  color: Colors.white.withOpacity(0.03),
+                                  color: Colors.white.withValues(alpha: 0.03),
                                   borderRadius: BorderRadius.circular(12),
                                   border: Border.all(color: Colors.white24),
                                 ),
@@ -370,8 +370,8 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                                           Text(
                                             'Recommended for faster access. Uncheck if using a shared device.',
                                             style: TextStyle(
-                                              color: Colors.white.withOpacity(
-                                                0.6,
+                                              color: Colors.white.withValues(
+                                                alpha: 0.6,
                                               ),
                                               fontSize: 13,
                                             ),
@@ -389,7 +389,7 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                               Container(
                                 padding: const EdgeInsets.all(16),
                                 decoration: BoxDecoration(
-                                  color: Colors.white.withOpacity(0.03),
+                                  color: Colors.white.withValues(alpha: 0.03),
                                   borderRadius: BorderRadius.circular(12),
                                   border: Border.all(color: Colors.white24),
                                 ),
@@ -426,8 +426,8 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                                           Text(
                                             'Receive updates, promotions, and news about our services. You can unsubscribe anytime.',
                                             style: TextStyle(
-                                              color: Colors.white.withOpacity(
-                                                0.6,
+                                              color: Colors.white.withValues(
+                                                alpha: 0.6,
                                               ),
                                               fontSize: 13,
                                             ),
@@ -445,10 +445,10 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                               Container(
                                 padding: const EdgeInsets.all(16),
                                 decoration: BoxDecoration(
-                                  color: Colors.green.withOpacity(0.1),
+                                  color: Colors.green.withValues(alpha: 0.1),
                                   borderRadius: BorderRadius.circular(12),
                                   border: Border.all(
-                                    color: Colors.green.withOpacity(0.3),
+                                    color: Colors.green.withValues(alpha: 0.3),
                                   ),
                                 ),
                                 child: Column(
@@ -504,10 +504,10 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                               Container(
                                 padding: const EdgeInsets.all(16),
                                 decoration: BoxDecoration(
-                                  color: Colors.orange.withOpacity(0.1),
+                                  color: Colors.orange.withValues(alpha: 0.1),
                                   borderRadius: BorderRadius.circular(12),
                                   border: Border.all(
-                                    color: Colors.orange.withOpacity(0.3),
+                                    color: Colors.orange.withValues(alpha: 0.3),
                                   ),
                                 ),
                                 child: const Column(
@@ -555,10 +555,10 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                           width: double.infinity,
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
-                            color: Colors.red.withOpacity(0.1),
+                            color: Colors.red.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(8),
                             border: Border.all(
-                              color: Colors.red.withOpacity(0.3),
+                              color: Colors.red.withValues(alpha: 0.3),
                             ),
                           ),
                           child: Row(
@@ -666,10 +666,10 @@ class _DataConsentScreenState extends State<DataConsentScreen>
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.03),
+        color: Colors.white.withValues(alpha: 0.03),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: value ? Colors.green.withOpacity(0.3) : Colors.white24,
+          color: value ? Colors.green.withValues(alpha: 0.3) : Colors.white24,
         ),
       ),
       child: Column(
@@ -714,7 +714,7 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                     Text(
                       description,
                       style: TextStyle(
-                        color: Colors.white.withOpacity(0.6),
+                        color: Colors.white.withValues(alpha: 0.6),
                         fontSize: 13,
                       ),
                     ),
@@ -733,7 +733,7 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                   horizontal: 16,
                   vertical: 6,
                 ),
-                side: BorderSide(color: Colors.blue.withOpacity(0.5)),
+                side: BorderSide(color: Colors.blue.withValues(alpha: 0.5)),
               ),
               child: const Text(
                 'View Details',

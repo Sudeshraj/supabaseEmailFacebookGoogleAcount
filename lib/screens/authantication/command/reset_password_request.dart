@@ -51,7 +51,7 @@ Future<void> _sendResetEmail() async {
   try {
     final email = _emailController.text.trim();
     
-    print('📧 Sending password reset email to: $email');
+    debugPrint('Sending password reset email to: $email');
     
     // Determine redirect URL based on platform
     String redirectUrl;
@@ -63,7 +63,7 @@ Future<void> _sendResetEmail() async {
       
       // Local development check
       if (kDebugMode) {
-        print('🌐 Web mode detected');
+        print('Web mode detected');
         print('   Origin: $currentOrigin');
         print('   Full URL: $redirectUrl');
       }
@@ -73,12 +73,12 @@ Future<void> _sendResetEmail() async {
       redirectUrl = 'myapp://auth/callback';
       
       if (kDebugMode) {
-        print('📱 Mobile mode detected');
+        print('Mobile mode detected');
         print('   Deep link: $redirectUrl');
       }
     }
     
-    print('🔗 Using redirect URL: $redirectUrl');
+    debugPrint('Using redirect URL: $redirectUrl');
     
     // Send reset email
     await supabase.auth.resetPasswordForEmail(
@@ -86,7 +86,7 @@ Future<void> _sendResetEmail() async {
       redirectTo: redirectUrl,
     );
     
-    print('✅ Reset email sent successfully');
+    debugPrint('Reset email sent successfully');
 
     // Navigate to confirmation screen
     if (mounted) {
@@ -96,7 +96,7 @@ Future<void> _sendResetEmail() async {
       );
     }
   } on AuthException catch (e) {
-    print('❌ Auth error: ${e.message}');
+    debugPrint('Auth error: ${e.message}');
     
     String errorMessage = 'Failed to send reset email';
     
@@ -112,7 +112,7 @@ Future<void> _sendResetEmail() async {
       _showErrorSnackBar(errorMessage);
     }
   } catch (e) {
-    print('❌ Error: $e');
+    debugPrint('Error: $e');
     if (mounted) {
       _showErrorSnackBar('An unexpected error occurred');
     }
@@ -149,7 +149,7 @@ Future<void> _sendResetEmail() async {
                 margin: const EdgeInsets.all(24),
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.03),
+                  color: Colors.white.withValues(alpha:0.03),
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(color: Colors.white12),
                 ),
@@ -177,7 +177,7 @@ Future<void> _sendResetEmail() async {
                       height: 80,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        color: const Color(0xFF1877F3).withOpacity(0.1),
+                        color: const Color(0xFF1877F3).withValues(alpha:0.1),
                         border: Border.all(
                           color: const Color(0xFF1877F3),
                           width: 2,
@@ -230,7 +230,7 @@ Future<void> _sendResetEmail() async {
                           hintText: 'you@example.com',
                           hintStyle: const TextStyle(color: Colors.white54),
                           filled: true,
-                          fillColor: Colors.white.withOpacity(0.05),
+                          fillColor: Colors.white.withValues(alpha:0.05),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
                             borderSide: BorderSide.none,
@@ -275,10 +275,10 @@ Future<void> _sendResetEmail() async {
                     Container(
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF1877F3).withOpacity(0.1),
+                        color: const Color(0xFF1877F3).withValues(alpha:0.1),
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
-                          color: const Color(0xFF1877F3).withOpacity(0.3),
+                          color: const Color(0xFF1877F3).withValues(alpha:0.3),
                         ),
                       ),
                       child: Row(
@@ -293,7 +293,7 @@ Future<void> _sendResetEmail() async {
                             child: Text(
                               'Check your spam folder if you don\'t see the email',
                               style: TextStyle(
-                                color: Colors.white.withOpacity(0.8),
+                                color: Colors.white.withValues(alpha:0.8),
                                 fontSize: 13,
                               ),
                             ),

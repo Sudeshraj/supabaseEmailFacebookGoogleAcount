@@ -128,7 +128,7 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
       LoadingOverlay.show(context, message: "Creating your account...");
 
       if (roles.contains('customer')) {
-        // ✅ CUSTOMER REGISTRATION
+        // CUSTOMER REGISTRATION
         await _saveUserService.registerUserWithRole(
           context,
           role: 'customer',
@@ -137,7 +137,7 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
           displayName: "${firstName ?? ''} ${lastName ?? ''}".trim(),
         );
       } else if (roles.contains('business')) {
-        // ✅ BUSINESS REGISTRATION
+        // BUSINESS REGISTRATION
         await _saveUserService.registerUserWithRole(
           context,
           role: 'business',

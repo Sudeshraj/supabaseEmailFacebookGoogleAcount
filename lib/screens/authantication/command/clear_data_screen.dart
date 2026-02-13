@@ -1,4 +1,3 @@
-// clear_data_screen.dart
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_application_1/services/session_manager.dart';
@@ -78,7 +77,7 @@ class _ClearDataScreenState extends State<ClearDataScreen>
                   ),
                   padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.03),
+                    color: Colors.white.withValues(alpha:0.03),
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(color: Colors.white12),
                   ),
@@ -108,7 +107,7 @@ class _ClearDataScreenState extends State<ClearDataScreen>
                               Icon(
                                 Icons.security,
                                 size: isMobile ? 50.0 : 60.0,
-                                color: Colors.blue.withOpacity(0.8),
+                                color: Colors.blue.withValues(alpha:0.8),
                               ),
                               SizedBox(height: isMobile ? 16.0 : 20.0),
                               const Text(
@@ -125,10 +124,10 @@ class _ClearDataScreenState extends State<ClearDataScreen>
                               Container(
                                 padding: const EdgeInsets.all(16),
                                 decoration: BoxDecoration(
-                                  color: Colors.blue.withOpacity(0.1),
+                                  color: Colors.blue.withValues(alpha:0.1),
                                   borderRadius: BorderRadius.circular(12),
                                   border: Border.all(
-                                    color: Colors.blue.withOpacity(0.3),
+                                    color: Colors.blue.withValues(alpha:0.3),
                                   ),
                                 ),
                                 child: Column(

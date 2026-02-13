@@ -42,7 +42,7 @@ class PolicyScreen extends StatelessWidget {
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(12),
-              color: Colors.blue.withOpacity(0.1),
+              color: Colors.blue.withValues(alpha:0.1),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -70,7 +70,7 @@ class PolicyScreen extends StatelessWidget {
                 child: Container(
                   padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.03),
+                    color: Colors.white.withValues(alpha:0.03),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
@@ -89,7 +89,7 @@ class PolicyScreen extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.05),
+                color: Colors.white.withValues(alpha:0.05),
                 border: Border(top: BorderSide(color: Colors.white24)),
               ),
               child: Column(
@@ -192,7 +192,7 @@ class PolicyScreen extends StatelessWidget {
 
   void _handleAccept(BuildContext context) {
     // Record acceptance
-    print('✅ ${isPrivacyPolicy ? 'Privacy Policy' : 'Terms of Service'} accepted');
+    debugPrint('${isPrivacyPolicy ? 'Privacy Policy' : 'Terms of Service'} accepted');
     
     // Go back to DataConsentScreen
     _handleBack(context);

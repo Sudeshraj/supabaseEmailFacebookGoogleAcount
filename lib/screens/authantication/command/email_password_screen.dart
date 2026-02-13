@@ -141,24 +141,24 @@ class _EmailPasswordScreenState extends State<EmailPasswordScreen>
   void didUpdateWidget(covariant EmailPasswordScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
 
-    print(
-      '📱 EmailPasswordScreen: isLoading changed from ${oldWidget.isLoading} to ${widget.isLoading}',
+    debugPrint(
+      'EmailPasswordScreen: isLoading changed from ${oldWidget.isLoading} to ${widget.isLoading}',
     );
 
-    // ✅ Sync with parent's loading state
+    // Sync with parent's loading state
     if (widget.isLoading != _isProcessing) {
       setState(() {
         _isProcessing = widget.isLoading;
       });
     }
 
-    // ✅ If parent just finished loading (true → false), also reset our state
+    // If parent just finished loading (true → false), also reset our state
     if (oldWidget.isLoading == true && widget.isLoading == false) {
       Future.delayed(const Duration(milliseconds: 100), () {
         if (mounted && _isProcessing) {
           setState(() {
             _isProcessing = false;
-            print('🔄 EmailPasswordScreen: Auto-reset processing state');
+            debugPrint('EmailPasswordScreen: Auto-reset processing state');
           });
         }
       });
@@ -199,7 +199,7 @@ class _EmailPasswordScreenState extends State<EmailPasswordScreen>
                   ),
                   padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.03),
+                    color: Colors.white.withValues(alpha: 0.03),
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(color: Colors.white12),
                   ),
@@ -255,7 +255,7 @@ class _EmailPasswordScreenState extends State<EmailPasswordScreen>
                           hintText: "Email address",
                           hintStyle: const TextStyle(color: Colors.white54),
                           filled: true,
-                          fillColor: Colors.white.withOpacity(0.05),
+                          fillColor: Colors.white.withValues(alpha: 0.05),
                           enabledBorder: OutlineInputBorder(
                             borderSide: BorderSide(
                               color: _emailError != null
@@ -298,7 +298,7 @@ class _EmailPasswordScreenState extends State<EmailPasswordScreen>
                           hintText: "Create a password",
                           hintStyle: const TextStyle(color: Colors.white54),
                           filled: true,
-                          fillColor: Colors.white.withOpacity(0.05),
+                          fillColor: Colors.white.withValues(alpha: 0.05),
                           enabledBorder: OutlineInputBorder(
                             borderSide: BorderSide(
                               color: _passwordError != null
@@ -361,7 +361,7 @@ class _EmailPasswordScreenState extends State<EmailPasswordScreen>
                           width: double.infinity,
                           height: 52,
                           decoration: BoxDecoration(
-                            color: Colors.blue.withOpacity(0.1),
+                            color: Colors.blue.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(25),
                           ),
                           child: const Center(

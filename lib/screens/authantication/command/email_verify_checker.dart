@@ -178,7 +178,7 @@ class _EmailVerifyCheckerState extends State<EmailVerifyChecker>
       appState.refreshState();
       context.go('/');
     } catch (e) {
-      print('❌ Logout error: $e');
+      debugPrint('Logout error: $e');
 
       // Check if widget is still mounted before using context
       if (!mounted) return;
