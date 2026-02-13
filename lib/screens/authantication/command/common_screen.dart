@@ -10,11 +10,8 @@ final supabase = Supabase.instance.client;
 
 class HelpScreen extends StatefulWidget {
   final String screenType; // 'help', 'contact', 'about'
-  
-  const HelpScreen({
-    super.key,
-    required this.screenType,
-  });
+
+  const HelpScreen({super.key, required this.screenType});
 
   @override
   State<HelpScreen> createState() => _HelpScreenState();
@@ -27,19 +24,40 @@ class _HelpScreenState extends State<HelpScreen> {
   final Map<String, Map<String, String>> _strings = {
     // ===== SHARED =====
     'en': {
-      'email': 'Email', 'call': 'Call', 'chat': 'Chat',
-      'version': 'Version', 'cancel': 'Cancel', 'submit': 'Submit',
-      'close': 'Close', 'ok': 'OK', 'success': 'Success', 'error': 'Error',
+      'email': 'Email',
+      'call': 'Call',
+      'chat': 'Chat',
+      'version': 'Version',
+      'cancel': 'Cancel',
+      'submit': 'Submit',
+      'close': 'Close',
+      'ok': 'OK',
+      'success': 'Success',
+      'error': 'Error',
     },
     'si': {
-      'email': 'ඊමේල්', 'call': 'ඇමතුම', 'chat': 'කතාබහ',
-      'version': 'සංස්කරණය', 'cancel': 'අවලංගු කරන්න', 'submit': 'ඉදිරිපත් කරන්න',
-      'close': 'වසන්න', 'ok': 'හරි', 'success': 'සාර්ථකයි', 'error': 'දෝෂය',
+      'email': 'ඊමේල්',
+      'call': 'ඇමතුම',
+      'chat': 'කතාබහ',
+      'version': 'සංස්කරණය',
+      'cancel': 'අවලංගු කරන්න',
+      'submit': 'ඉදිරිපත් කරන්න',
+      'close': 'වසන්න',
+      'ok': 'හරි',
+      'success': 'සාර්ථකයි',
+      'error': 'දෝෂය',
     },
     'ta': {
-      'email': 'மின்னஞ்சல்', 'call': 'அழைப்பு', 'chat': 'அரட்டை',
-      'version': 'பதிப்பு', 'cancel': 'ரத்து செய்', 'submit': 'சமர்ப்பிக்க',
-      'close': 'மூடு', 'ok': 'சரி', 'success': 'வெற்றி', 'error': 'பிழை',
+      'email': 'மின்னஞ்சல்',
+      'call': 'அழைப்பு',
+      'chat': 'அரட்டை',
+      'version': 'பதிப்பு',
+      'cancel': 'ரத்து செய்',
+      'submit': 'சமர்ப்பிக்க',
+      'close': 'மூடு',
+      'ok': 'சரி',
+      'success': 'வெற்றி',
+      'error': 'பிழை',
     },
 
     // ===== HELP SCREEN =====
@@ -185,58 +203,67 @@ class _HelpScreenState extends State<HelpScreen> {
   String t(String key) {
     String screen = widget.screenType;
     String lang = _selectedLanguage;
-    
+
     // Try screen-specific translation
     String screenKey = '${screen}_$lang';
-    if (_strings.containsKey(screenKey) && _strings[screenKey]!.containsKey(key)) {
+    if (_strings.containsKey(screenKey) &&
+        _strings[screenKey]!.containsKey(key)) {
       return _strings[screenKey]![key]!;
     }
-    
+
     // Try screen English
     String screenEnKey = '${screen}_en';
-    if (_strings.containsKey(screenEnKey) && _strings[screenEnKey]!.containsKey(key)) {
+    if (_strings.containsKey(screenEnKey) &&
+        _strings[screenEnKey]!.containsKey(key)) {
       return _strings[screenEnKey]![key]!;
     }
-    
+
     // Try shared
     if (_strings.containsKey(lang) && _strings[lang]!.containsKey(key)) {
       return _strings[lang]![key]!;
     }
-    
+
     // Fallback to English shared
     return _strings['en']?[key] ?? key;
   }
 
   // ============== EMAIL - 100% WORKING ==============
-  Future<void> _sendEmail({String email = 'support@mysalon.com', String subject = '', String body = ''}) async {
+  Future<void> _sendEmail({
+    String email = 'support@mysalon.com',
+    String subject = '',
+    String body = '',
+  }) async {
     debugPrint('📧 Sending email...');
-    
+
     if (kIsWeb) {
       // Web - Gmail
       try {
-        final url = 'https://mail.google.com/mail/?view=cm&fs=1&to=$email&su=${Uri.encodeComponent(subject)}&body=${Uri.encodeComponent(body)}';
+        final url =
+            'https://mail.google.com/mail/?view=cm&fs=1&to=$email&su=${Uri.encodeComponent(subject)}&body=${Uri.encodeComponent(body)}';
         await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
         _showSnackBar(t('success'), 'Opening Gmail...', Colors.green);
         return;
       } catch (e) {
         debugPrint('Gmail failed: $e');
       }
-      
+
       // Web - Outlook
       try {
-        final url = 'https://outlook.live.com/mail/0/deeplink/compose?to=$email&subject=${Uri.encodeComponent(subject)}&body=${Uri.encodeComponent(body)}';
+        final url =
+            'https://outlook.live.com/mail/0/deeplink/compose?to=$email&subject=${Uri.encodeComponent(subject)}&body=${Uri.encodeComponent(body)}';
         await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
         _showSnackBar(t('success'), 'Opening Outlook...', Colors.green);
         return;
       } catch (e) {
         debugPrint('Outlook failed: $e');
       }
-      
+
       _showEmailCopyDialog(email);
     } else {
       // Mobile
       try {
-        final url = 'mailto:$email?subject=${Uri.encodeComponent(subject)}&body=${Uri.encodeComponent(body)}';
+        final url =
+            'mailto:$email?subject=${Uri.encodeComponent(subject)}&body=${Uri.encodeComponent(body)}';
         await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
         _showSnackBar(t('success'), 'Opening email app...', Colors.green);
       } catch (e) {
@@ -249,12 +276,15 @@ class _HelpScreenState extends State<HelpScreen> {
   // ============== PHONE CALL - 100% WORKING ==============
   Future<void> _makePhoneCall(String phoneNumber) async {
     debugPrint('📞 Calling...');
-    
+
     if (kIsWeb) {
       _showWebCallDialog(phoneNumber);
     } else {
       try {
-        await launchUrl(Uri.parse('tel:$phoneNumber'), mode: LaunchMode.externalApplication);
+        await launchUrl(
+          Uri.parse('tel:$phoneNumber'),
+          mode: LaunchMode.externalApplication,
+        );
       } catch (e) {
         debugPrint('Call failed: $e');
         _showCallOptionsDialog(phoneNumber);
@@ -265,7 +295,10 @@ class _HelpScreenState extends State<HelpScreen> {
   // ============== WHATSAPP ==============
   Future<void> _openWhatsApp() async {
     try {
-      await launchUrl(Uri.parse('https://wa.me/1234567890'), mode: LaunchMode.externalApplication);
+      await launchUrl(
+        Uri.parse('https://wa.me/1234567890'),
+        mode: LaunchMode.externalApplication,
+      );
     } catch (e) {
       _showSnackBar(t('error'), 'Please install WhatsApp', Colors.orange);
     }
@@ -274,7 +307,10 @@ class _HelpScreenState extends State<HelpScreen> {
   // ============== MESSENGER ==============
   Future<void> _openMessenger() async {
     try {
-      await launchUrl(Uri.parse('https://m.me/mysalonapp'), mode: LaunchMode.externalApplication);
+      await launchUrl(
+        Uri.parse('https://m.me/mysalonapp'),
+        mode: LaunchMode.externalApplication,
+      );
     } catch (e) {
       _showSnackBar(t('error'), 'Cannot open Messenger', Colors.orange);
     }
@@ -283,7 +319,10 @@ class _HelpScreenState extends State<HelpScreen> {
   // ============== TELEGRAM ==============
   Future<void> _openTelegram() async {
     try {
-      await launchUrl(Uri.parse('https://t.me/mysalon_support'), mode: LaunchMode.externalApplication);
+      await launchUrl(
+        Uri.parse('https://t.me/mysalon_support'),
+        mode: LaunchMode.externalApplication,
+      );
     } catch (e) {
       _showSnackBar(t('error'), 'Cannot open Telegram', Colors.orange);
     }
@@ -296,12 +335,20 @@ class _HelpScreenState extends State<HelpScreen> {
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF1C1F26),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('📧 ${t('email')}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        title: Text(
+          '📧 ${t('email')}',
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              kIsWeb ? 'Cannot open email from web. Copy and send manually:' : 'Cannot open email app. Copy and send manually:',
+              kIsWeb
+                  ? 'Cannot open email from web. Copy and send manually:'
+                  : 'Cannot open email app. Copy and send manually:',
               style: const TextStyle(color: Colors.white70),
               textAlign: TextAlign.center,
             ),
@@ -311,16 +358,31 @@ class _HelpScreenState extends State<HelpScreen> {
               decoration: BoxDecoration(
                 color: Colors.white.withValues(alpha: 0.05),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.blueAccent.withValues(alpha: 0.3)),
+                border: Border.all(
+                  color: Colors.blueAccent.withValues(alpha: 0.3),
+                ),
               ),
-              child: SelectableText(email, style: const TextStyle(color: Colors.blueAccent, fontSize: 16), textAlign: TextAlign.center),
+              child: SelectableText(
+                email,
+                style: const TextStyle(color: Colors.blueAccent, fontSize: 16),
+                textAlign: TextAlign.center,
+              ),
             ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => context.pop(), child: Text(t('close'), style: const TextStyle(color: Colors.white70))),
+          TextButton(
+            onPressed: () => context.pop(),
+            child: Text(
+              t('close'),
+              style: const TextStyle(color: Colors.white70),
+            ),
+          ),
           ElevatedButton.icon(
-            onPressed: () { context.pop(); _showSnackBar(t('success'), 'Email copied', Colors.green); },
+            onPressed: () {
+              context.pop();
+              _showSnackBar(t('success'), 'Email copied', Colors.green);
+            },
             icon: const Icon(Icons.copy, size: 18),
             label: Text('Copy Email'),
             style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent),
@@ -331,7 +393,7 @@ class _HelpScreenState extends State<HelpScreen> {
   }
 
   void _showWebCallDialog(String phoneNumber) {
-    String message = _selectedLanguage == 'si' 
+    String message = _selectedLanguage == 'si'
         ? 'වෙබ් බ්‍රවුසරයෙන් කෙලින්ම ඇමතුමක් ගත නොහැක. අංකය පිටපත් කරගෙන අතින් අමතන්න:'
         : _selectedLanguage == 'ta'
         ? 'இணைய உலாவியில் நேரடியாக அழைக்க முடியாது. எண்ணை நகலெடுத்து கைமுறையாக அழைக்கவும்:'
@@ -341,11 +403,21 @@ class _HelpScreenState extends State<HelpScreen> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF1C1F26),
-        title: Text('📞 ${t('call')}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        title: Text(
+          '📞 ${t('call')}',
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(message, style: const TextStyle(color: Colors.white70), textAlign: TextAlign.center),
+            Text(
+              message,
+              style: const TextStyle(color: Colors.white70),
+              textAlign: TextAlign.center,
+            ),
             const SizedBox(height: 20),
             Container(
               padding: const EdgeInsets.all(16),
@@ -354,14 +426,30 @@ class _HelpScreenState extends State<HelpScreen> {
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: Colors.green.withValues(alpha: 0.3)),
               ),
-              child: SelectableText(phoneNumber, style: const TextStyle(color: Colors.green, fontSize: 18, fontWeight: FontWeight.bold)),
+              child: SelectableText(
+                phoneNumber,
+                style: const TextStyle(
+                  color: Colors.green,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => context.pop(), child: Text(t('close'), style: const TextStyle(color: Colors.white70))),
+          TextButton(
+            onPressed: () => context.pop(),
+            child: Text(
+              t('close'),
+              style: const TextStyle(color: Colors.white70),
+            ),
+          ),
           ElevatedButton.icon(
-            onPressed: () { context.pop(); _showSnackBar(t('success'), 'Number copied', Colors.green); },
+            onPressed: () {
+              context.pop();
+              _showSnackBar(t('success'), 'Number copied', Colors.green);
+            },
             icon: const Icon(Icons.copy, size: 18),
             label: Text('Copy Number'),
             style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
@@ -376,22 +464,60 @@ class _HelpScreenState extends State<HelpScreen> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF1C1F26),
-        title: Text('Call Options', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        title: Text(
+          'Call Options',
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: Colors.green.withValues(alpha: 0.1), shape: BoxShape.circle), child: const Icon(Icons.call, color: Colors.green, size: 24)),
-              title: const Text('Call Now', style: TextStyle(color: Colors.white)),
-              subtitle: Text(phoneNumber, style: TextStyle(color: Colors.white.withValues(alpha: 0.7))),
-              onTap: () { context.pop(); _makePhoneCall(phoneNumber); },
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.green.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.call, color: Colors.green, size: 24),
+              ),
+              title: const Text(
+                'Call Now',
+                style: TextStyle(color: Colors.white),
+              ),
+              subtitle: Text(
+                phoneNumber,
+                style: TextStyle(color: Colors.white.withValues(alpha: 0.7)),
+              ),
+              onTap: () {
+                context.pop();
+                _makePhoneCall(phoneNumber);
+              },
             ),
             const Divider(color: Colors.white24),
             ListTile(
-              leading: Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: Colors.blue.withValues(alpha: 0.1), shape: BoxShape.circle), child: const Icon(Icons.copy, color: Colors.blue, size: 24)),
-              title: const Text('Copy Number', style: TextStyle(color: Colors.white)),
-              subtitle: Text(phoneNumber, style: TextStyle(color: Colors.white.withValues(alpha: 0.7))),
-              onTap: () { context.pop(); _showSnackBar(t('success'), 'Number copied', Colors.green); },
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.blue.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.copy, color: Colors.blue, size: 24),
+              ),
+              title: const Text(
+                'Copy Number',
+                style: TextStyle(color: Colors.white),
+              ),
+              subtitle: Text(
+                phoneNumber,
+                style: TextStyle(color: Colors.white.withValues(alpha: 0.7)),
+              ),
+              onTap: () {
+                context.pop();
+                _showSnackBar(t('success'), 'Number copied', Colors.green);
+              },
             ),
           ],
         ),
@@ -405,29 +531,90 @@ class _HelpScreenState extends State<HelpScreen> {
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF1C1F26),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Contact Support', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        title: const Text(
+          'Contact Support',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            _buildChatOption(Icons.message, Colors.green, 'WhatsApp', 'Quick response', _openWhatsApp),
-            _buildChatOption(Icons.facebook, Colors.blue, 'Messenger', 'Facebook', _openMessenger),
-            _buildChatOption(Icons.telegram, Colors.lightBlue, 'Telegram', 'Secure chat', _openTelegram),
-            _buildChatOption(Icons.email, Colors.orange, t('email'), 'support@mysalon.com', () => _sendEmail()),
+            _buildChatOption(
+              Icons.message,
+              Colors.green,
+              'WhatsApp',
+              'Quick response',
+              _openWhatsApp,
+            ),
+            _buildChatOption(
+              Icons.facebook,
+              Colors.blue,
+              'Messenger',
+              'Facebook',
+              _openMessenger,
+            ),
+            _buildChatOption(
+              Icons.telegram,
+              Colors.lightBlue,
+              'Telegram',
+              'Secure chat',
+              _openTelegram,
+            ),
+            _buildChatOption(
+              Icons.email,
+              Colors.orange,
+              t('email'),
+              'support@mysalon.com',
+              () => _sendEmail(),
+            ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => context.pop(), child: Text(t('close'), style: const TextStyle(color: Colors.white70))),
+          TextButton(
+            onPressed: () => context.pop(),
+            child: Text(
+              t('close'),
+              style: const TextStyle(color: Colors.white70),
+            ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildChatOption(IconData icon, Color color, String title, String subtitle, VoidCallback onTap) {
+  Widget _buildChatOption(
+    IconData icon,
+    Color color,
+    String title,
+    String subtitle,
+    VoidCallback onTap,
+  ) {
     return ListTile(
-      leading: Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: color.withValues(alpha: 0.1), shape: BoxShape.circle), child: Icon(icon, color: color, size: 24)),
-      title: Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500)),
-      subtitle: Text(subtitle, style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 12)),
-      onTap: () { context.pop(); onTap(); },
+      leading: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.1),
+          shape: BoxShape.circle,
+        ),
+        child: Icon(icon, color: color, size: 24),
+      ),
+      title: Text(
+        title,
+        style: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+      subtitle: Text(
+        subtitle,
+        style: TextStyle(
+          color: Colors.white.withValues(alpha: 0.7),
+          fontSize: 12,
+        ),
+      ),
+      onTap: () {
+        context.pop();
+        onTap();
+      },
     );
   }
 
@@ -440,7 +627,13 @@ class _HelpScreenState extends State<HelpScreen> {
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF1C1F26),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(t('report_issue'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        title: Text(
+          t('report_issue'),
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -449,10 +642,15 @@ class _HelpScreenState extends State<HelpScreen> {
               style: const TextStyle(color: Colors.white),
               decoration: InputDecoration(
                 hintText: t('enter_title'),
-                hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.4)),
+                hintStyle: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.4),
+                ),
                 filled: true,
                 fillColor: Colors.white.withValues(alpha: 0.08),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide.none,
+                ),
               ),
             ),
             const SizedBox(height: 16),
@@ -462,22 +660,38 @@ class _HelpScreenState extends State<HelpScreen> {
               maxLines: 3,
               decoration: InputDecoration(
                 hintText: t('enter_description'),
-                hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.4)),
+                hintStyle: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.4),
+                ),
                 filled: true,
                 fillColor: Colors.white.withValues(alpha: 0.08),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide.none,
+                ),
               ),
             ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => context.pop(), child: Text(t('cancel'), style: const TextStyle(color: Colors.white70))),
+          TextButton(
+            onPressed: () => context.pop(),
+            child: Text(
+              t('cancel'),
+              style: const TextStyle(color: Colors.white70),
+            ),
+          ),
           ElevatedButton(
             onPressed: () {
-              if (titleController.text.isNotEmpty && descController.text.isNotEmpty) {
+              if (titleController.text.isNotEmpty &&
+                  descController.text.isNotEmpty) {
                 _saveReport(titleController.text, descController.text);
                 context.pop();
-                _showSnackBar(t('success'), t('report_submitted'), Colors.green);
+                _showSnackBar(
+                  t('success'),
+                  t('report_submitted'),
+                  Colors.green,
+                );
               }
             },
             style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent),
@@ -507,7 +721,12 @@ class _HelpScreenState extends State<HelpScreen> {
 
   void _showSnackBar(String title, String message, Color color) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('$title: $message'), backgroundColor: color, behavior: SnackBarBehavior.floating, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+      SnackBar(
+        content: Text('$title: $message'),
+        backgroundColor: color,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      ),
     );
   }
 
@@ -539,15 +758,28 @@ class _HelpScreenState extends State<HelpScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          color: isSelected ? Colors.blueAccent.withValues(alpha: 0.3) : Colors.transparent,
+          color: isSelected
+              ? Colors.blueAccent.withValues(alpha: 0.3)
+              : Colors.transparent,
           borderRadius: BorderRadius.circular(30),
         ),
-        child: Text(text, style: TextStyle(fontSize: kIsWeb ? 13 : 14, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal, color: isSelected ? Colors.white : Colors.white70)),
+        child: Text(
+          text,
+          style: TextStyle(
+            fontSize: kIsWeb ? 13 : 14,
+            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+            color: isSelected ? Colors.white : Colors.white70,
+          ),
+        ),
       ),
     );
   }
 
-  Widget _buildDivider() => Container(width: 1, height: 20, color: Colors.white.withValues(alpha: 0.2));
+  Widget _buildDivider() => Container(
+    width: 1,
+    height: 20,
+    color: Colors.white.withValues(alpha: 0.2),
+  );
 
   // ============== BUILD ==============
   @override
@@ -556,7 +788,7 @@ class _HelpScreenState extends State<HelpScreen> {
     Color screenColor = Colors.blue;
     IconData screenIcon = Icons.help_outline;
     String screenTitle = t('title');
-    
+
     if (widget.screenType == 'contact') {
       screenColor = Colors.purple;
       screenIcon = Icons.headset_mic;
@@ -570,9 +802,31 @@ class _HelpScreenState extends State<HelpScreen> {
       appBar: AppBar(
         backgroundColor: const Color(0xFF0F1820),
         elevation: 0,
-        leading: IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white), onPressed: () => context.pop()),
-        title: Text(screenTitle, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-        actions: [Padding(padding: const EdgeInsets.only(right: 16), child: _buildLanguageSelector())],
+        // leading: IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white), onPressed: () => context.pop()),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () {
+            // ✅ Go Router back navigation - safe version
+            if (context.canPop()) {
+              context.pop(); // පිටුපස screen එකක් තියෙනවා නම් ඒකට යන්න
+            } else {
+              context.go('/'); // නැත්නම් main screen එකට යන්න
+            }
+          },
+        ),
+        title: Text(
+          screenTitle,
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 16),
+            child: _buildLanguageSelector(),
+          ),
+        ],
       ),
       body: ListView(
         padding: const EdgeInsets.all(20),
@@ -617,17 +871,40 @@ class _HelpScreenState extends State<HelpScreen> {
   Widget _buildHeader(Color color, IconData icon) {
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(gradient: LinearGradient(colors: [color, color.withValues(alpha: 0.8)]), borderRadius: BorderRadius.circular(16)),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(colors: [color, color.withValues(alpha: 0.8)]),
+        borderRadius: BorderRadius.circular(16),
+      ),
       child: Row(
         children: [
-          Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), shape: BoxShape.circle), child: Icon(icon, color: Colors.white, size: 28)),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.2),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, color: Colors.white, size: 28),
+          ),
           const SizedBox(width: 16),
           Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(t('how_can_we_help'), style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 4),
-              Text(t('select_topic'), style: const TextStyle(color: Colors.white70, fontSize: 14)),
-            ]),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  t('how_can_we_help'),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  t('select_topic'),
+                  style: const TextStyle(color: Colors.white70, fontSize: 14),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -640,41 +917,139 @@ class _HelpScreenState extends State<HelpScreen> {
 
     if (widget.screenType == 'help') {
       actions = [
-        _buildActionCard(Icons.lock_reset, t('reset_password'), Colors.orange, () => context.push('/reset-password')),
-        _buildActionCard(Icons.report_problem, t('report_issue'), Colors.redAccent, _showReportDialog),
-        _buildActionCard(Icons.chat, t('live_chat'), Colors.green, _showChatDialog),
+        _buildActionCard(
+          Icons.lock_reset,
+          t('reset_password'),
+          Colors.orange,
+          () => context.push('/reset-password'),
+        ),
+        _buildActionCard(
+          Icons.report_problem,
+          t('report_issue'),
+          Colors.redAccent,
+          _showReportDialog,
+        ),
+        _buildActionCard(
+          Icons.chat,
+          t('live_chat'),
+          Colors.green,
+          _showChatDialog,
+        ),
       ];
     } else if (widget.screenType == 'contact') {
       actions = [
-        _buildActionCard(Icons.phone, t('call_us'), Colors.green, () => _makePhoneCall('+94112345678')),
-        _buildActionCard(Icons.email, t('email_us'), Colors.blue, () => _sendEmail()),
-        _buildActionCard(Icons.chat, t('chat_with_us'), Colors.orange, _showChatDialog),
+        _buildActionCard(
+          Icons.phone,
+          t('call_us'),
+          Colors.green,
+          () => _makePhoneCall('+94112345678'),
+        ),
+        _buildActionCard(
+          Icons.email,
+          t('email_us'),
+          Colors.blue,
+          () => _sendEmail(),
+        ),
+        _buildActionCard(
+          Icons.chat,
+          t('chat_with_us'),
+          Colors.orange,
+          _showChatDialog,
+        ),
       ];
     } else if (widget.screenType == 'about') {
       actions = [
-        _buildActionCard(Icons.privacy_tip, t('privacy'), Colors.blue, () => launchUrl(Uri.parse('https://mysalon.com/privacy'), mode: LaunchMode.externalApplication)),
-        _buildActionCard(Icons.description, t('terms'), Colors.orange, () => launchUrl(Uri.parse('https://mysalon.com/terms'), mode: LaunchMode.externalApplication)),
-        _buildActionCard(Icons.star, t('rate_us'), Colors.amber, () => launchUrl(Uri.parse('https://play.google.com/store/apps/details?id=com.mysalon.app'), mode: LaunchMode.externalApplication)),
+        _buildActionCard(
+          Icons.privacy_tip,
+          t('privacy'),
+          Colors.blue,
+          () => launchUrl(
+            Uri.parse('https://mysalon.com/privacy'),
+            mode: LaunchMode.externalApplication,
+          ),
+        ),
+        _buildActionCard(
+          Icons.description,
+          t('terms'),
+          Colors.orange,
+          () => launchUrl(
+            Uri.parse('https://mysalon.com/terms'),
+            mode: LaunchMode.externalApplication,
+          ),
+        ),
+        _buildActionCard(
+          Icons.star,
+          t('rate_us'),
+          Colors.amber,
+          () => launchUrl(
+            Uri.parse(
+              'https://play.google.com/store/apps/details?id=com.mysalon.app',
+            ),
+            mode: LaunchMode.externalApplication,
+          ),
+        ),
       ];
     }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(t('quick_actions'), style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+        Text(
+          t('quick_actions'),
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
         const SizedBox(height: 16),
-        Row(children: actions.map((e) => Expanded(child: Padding(padding: const EdgeInsets.only(right: 12), child: e))).toList()),
+        Row(
+          children: actions
+              .map(
+                (e) => Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(right: 12),
+                    child: e,
+                  ),
+                ),
+              )
+              .toList(),
+        ),
       ],
     );
   }
 
-  Widget _buildActionCard(IconData icon, String title, Color color, VoidCallback onTap) {
+  Widget _buildActionCard(
+    IconData icon,
+    String title,
+    Color color,
+    VoidCallback onTap,
+  ) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 16),
-        decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12), border: Border.all(color: color.withValues(alpha: 0.3))),
-        child: Column(children: [Icon(icon, color: color, size: 28), const SizedBox(height: 8), Text(title, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600), textAlign: TextAlign.center, maxLines: 2)]),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withValues(alpha: 0.3)),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: color, size: 28),
+            const SizedBox(height: 8),
+            Text(
+              title,
+              style: TextStyle(
+                color: color,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+              textAlign: TextAlign.center,
+              maxLines: 2,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -684,11 +1059,24 @@ class _HelpScreenState extends State<HelpScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(t('faq'), style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+        Text(
+          t('faq'),
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
         const SizedBox(height: 16),
-        _buildFaqItem('🔐 ${t('reset_password')}', 'Click "Reset Password" and enter your email'),
+        _buildFaqItem(
+          '🔐 ${t('reset_password')}',
+          'Click "Reset Password" and enter your email',
+        ),
         _buildFaqItem('📝 ${t('report_issue')}', t('report_submitted')),
-        _buildFaqItem('💬 ${t('live_chat')}', 'Click "Live Chat" to connect with our team'),
+        _buildFaqItem(
+          '💬 ${t('live_chat')}',
+          'Click "Live Chat" to connect with our team',
+        ),
       ],
     );
   }
@@ -696,12 +1084,26 @@ class _HelpScreenState extends State<HelpScreen> {
   Widget _buildFaqItem(String question, String answer) {
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(12),
+      ),
       child: ExpansionTile(
-        title: Text(question, style: const TextStyle(color: Colors.white, fontSize: 15)),
+        title: Text(
+          question,
+          style: const TextStyle(color: Colors.white, fontSize: 15),
+        ),
         collapsedIconColor: Colors.blueAccent,
         iconColor: Colors.blueAccent,
-        children: [Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 16), child: Text(answer, style: TextStyle(color: Colors.white.withValues(alpha: 0.7))))],
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: Text(
+              answer,
+              style: TextStyle(color: Colors.white.withValues(alpha: 0.7)),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -711,7 +1113,12 @@ class _HelpScreenState extends State<HelpScreen> {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        gradient: LinearGradient(colors: [Colors.blueAccent.withValues(alpha: 0.1), Colors.purpleAccent.withValues(alpha: 0.1)]),
+        gradient: LinearGradient(
+          colors: [
+            Colors.blueAccent.withValues(alpha: 0.1),
+            Colors.purpleAccent.withValues(alpha: 0.1),
+          ],
+        ),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Colors.blueAccent.withValues(alpha: 0.3)),
       ),
@@ -719,17 +1126,45 @@ class _HelpScreenState extends State<HelpScreen> {
         children: [
           const Icon(Icons.headset_mic, size: 48, color: Colors.blueAccent),
           const SizedBox(height: 12),
-          Text(t('still_need_help'), style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+          Text(
+            t('still_need_help'),
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
           const SizedBox(height: 8),
-          Text(t('support_247'), style: TextStyle(color: Colors.white.withValues(alpha: 0.8))),
+          Text(
+            t('support_247'),
+            style: TextStyle(color: Colors.white.withValues(alpha: 0.8)),
+          ),
           const SizedBox(height: 20),
           Row(
             children: [
-              Expanded(child: _buildOutlinedButton(Icons.email, t('email'), () => _sendEmail())),
+              Expanded(
+                child: _buildOutlinedButton(
+                  Icons.email,
+                  t('email'),
+                  () => _sendEmail(),
+                ),
+              ),
               const SizedBox(width: 12),
-              Expanded(child: _buildOutlinedButton(Icons.phone, t('call'), () => _makePhoneCall('+94112345678'))),
+              Expanded(
+                child: _buildOutlinedButton(
+                  Icons.phone,
+                  t('call'),
+                  () => _makePhoneCall('+94112345678'),
+                ),
+              ),
               const SizedBox(width: 12),
-              Expanded(child: _buildFilledButton(Icons.chat, t('chat'), _showChatDialog)),
+              Expanded(
+                child: _buildFilledButton(
+                  Icons.chat,
+                  t('chat'),
+                  _showChatDialog,
+                ),
+              ),
             ],
           ),
         ],
@@ -742,7 +1177,11 @@ class _HelpScreenState extends State<HelpScreen> {
       onPressed: onTap,
       icon: Icon(icon, size: 18),
       label: Text(label),
-      style: OutlinedButton.styleFrom(foregroundColor: Colors.white, side: BorderSide(color: Colors.white.withValues(alpha: 0.5)), padding: const EdgeInsets.symmetric(vertical: 12)),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: Colors.white,
+        side: BorderSide(color: Colors.white.withValues(alpha: 0.5)),
+        padding: const EdgeInsets.symmetric(vertical: 12),
+      ),
     );
   }
 
@@ -751,7 +1190,11 @@ class _HelpScreenState extends State<HelpScreen> {
       onPressed: onTap,
       icon: Icon(icon, size: 18),
       label: Text(label),
-      style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 12)),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: Colors.blueAccent,
+        foregroundColor: Colors.white,
+        padding: const EdgeInsets.symmetric(vertical: 12),
+      ),
     );
   }
 
@@ -759,18 +1202,36 @@ class _HelpScreenState extends State<HelpScreen> {
   Widget _buildOfficeHours() {
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.03), borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.03),
+        borderRadius: BorderRadius.circular(12),
+      ),
       child: Column(
         children: [
-          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            Text('Monday - Friday', style: TextStyle(color: Colors.white.withValues(alpha: 0.7))),
-            const Text('9:00 AM - 6:00 PM', style: TextStyle(color: Colors.white)),
-          ]),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Monday - Friday',
+                style: TextStyle(color: Colors.white.withValues(alpha: 0.7)),
+              ),
+              const Text(
+                '9:00 AM - 6:00 PM',
+                style: TextStyle(color: Colors.white),
+              ),
+            ],
+          ),
           const SizedBox(height: 8),
-          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            Text('Saturday - Sunday', style: TextStyle(color: Colors.white.withValues(alpha: 0.7))),
-            const Text('Closed', style: TextStyle(color: Colors.redAccent)),
-          ]),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Saturday - Sunday',
+                style: TextStyle(color: Colors.white.withValues(alpha: 0.7)),
+              ),
+              const Text('Closed', style: TextStyle(color: Colors.redAccent)),
+            ],
+          ),
         ],
       ),
     );
@@ -780,16 +1241,44 @@ class _HelpScreenState extends State<HelpScreen> {
   Widget _buildAddressCard() {
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.03), borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.03),
+        borderRadius: BorderRadius.circular(12),
+      ),
       child: Row(
         children: [
-          Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: Colors.purple.withValues(alpha: 0.1), shape: BoxShape.circle), child: const Icon(Icons.location_on, color: Colors.purple, size: 20)),
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: Colors.purple.withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.location_on,
+              color: Colors.purple,
+              size: 20,
+            ),
+          ),
           const SizedBox(width: 12),
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Text('Visit Us', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 4),
-            Text(t('address'), style: TextStyle(color: Colors.white.withValues(alpha: 0.7))),
-          ])),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Visit Us',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  t('address'),
+                  style: TextStyle(color: Colors.white.withValues(alpha: 0.7)),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -799,10 +1288,16 @@ class _HelpScreenState extends State<HelpScreen> {
   Widget _buildSocialMedia() {
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.03), borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.03),
+        borderRadius: BorderRadius.circular(12),
+      ),
       child: Column(
         children: [
-          const Text('Follow Us', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          const Text(
+            'Follow Us',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          ),
           const SizedBox(height: 12),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -824,7 +1319,14 @@ class _HelpScreenState extends State<HelpScreen> {
   Widget _buildSocialIcon(IconData icon, Color color, VoidCallback onTap) {
     return GestureDetector(
       onTap: onTap,
-      child: Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: color.withValues(alpha: 0.1), shape: BoxShape.circle), child: Icon(icon, color: color, size: 24)),
+      child: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.1),
+          shape: BoxShape.circle,
+        ),
+        child: Icon(icon, color: color, size: 24),
+      ),
     );
   }
 
@@ -836,28 +1338,94 @@ class _HelpScreenState extends State<HelpScreen> {
 
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.03), borderRadius: BorderRadius.circular(16)),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.03),
+        borderRadius: BorderRadius.circular(16),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(t('send_message'), style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+          Text(
+            t('send_message'),
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
           const SizedBox(height: 16),
-          TextField(controller: nameController, style: const TextStyle(color: Colors.white), decoration: InputDecoration(hintText: t('your_name'), hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.4)), filled: true, fillColor: Colors.white.withValues(alpha: 0.05), border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none))),
+          TextField(
+            controller: nameController,
+            style: const TextStyle(color: Colors.white),
+            decoration: InputDecoration(
+              hintText: t('your_name'),
+              hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.4)),
+              filled: true,
+              fillColor: Colors.white.withValues(alpha: 0.05),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide.none,
+              ),
+            ),
+          ),
           const SizedBox(height: 12),
-          TextField(controller: emailController, style: const TextStyle(color: Colors.white), decoration: InputDecoration(hintText: t('your_email'), hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.4)), filled: true, fillColor: Colors.white.withValues(alpha: 0.05), border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none))),
+          TextField(
+            controller: emailController,
+            style: const TextStyle(color: Colors.white),
+            decoration: InputDecoration(
+              hintText: t('your_email'),
+              hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.4)),
+              filled: true,
+              fillColor: Colors.white.withValues(alpha: 0.05),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide.none,
+              ),
+            ),
+          ),
           const SizedBox(height: 12),
-          TextField(controller: messageController, style: const TextStyle(color: Colors.white), maxLines: 3, decoration: InputDecoration(hintText: t('your_message'), hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.4)), filled: true, fillColor: Colors.white.withValues(alpha: 0.05), border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none))),
+          TextField(
+            controller: messageController,
+            style: const TextStyle(color: Colors.white),
+            maxLines: 3,
+            decoration: InputDecoration(
+              hintText: t('your_message'),
+              hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.4)),
+              filled: true,
+              fillColor: Colors.white.withValues(alpha: 0.05),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide.none,
+              ),
+            ),
+          ),
           const SizedBox(height: 16),
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
               onPressed: () {
-                _sendEmail(email: 'support@mysalon.com', subject: 'Contact Form: ${nameController.text}', body: 'Name: ${nameController.text}\nEmail: ${emailController.text}\nMessage: ${messageController.text}');
+                _sendEmail(
+                  email: 'support@mysalon.com',
+                  subject: 'Contact Form: ${nameController.text}',
+                  body:
+                      'Name: ${nameController.text}\nEmail: ${emailController.text}\nMessage: ${messageController.text}',
+                );
                 _showSnackBar(t('success'), t('message_sent'), Colors.green);
-                nameController.clear(); emailController.clear(); messageController.clear();
+                nameController.clear();
+                emailController.clear();
+                messageController.clear();
               },
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.purple, padding: const EdgeInsets.symmetric(vertical: 14)),
-              child: Text(t('send_message'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.purple,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+              child: Text(
+                t('send_message'),
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ),
           ),
         ],
@@ -869,17 +1437,51 @@ class _HelpScreenState extends State<HelpScreen> {
   Widget _buildAppInfoCard() {
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.03), borderRadius: BorderRadius.circular(16)),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.03),
+        borderRadius: BorderRadius.circular(16),
+      ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Container(width: 60, height: 60, decoration: const BoxDecoration(shape: BoxShape.circle, gradient: LinearGradient(colors: [Color(0xFF1877F2), Color(0xFF0A58CA)])), 
-            child: const Center(child: Text('MS', style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)))),
+          Container(
+            width: 60,
+            height: 60,
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(
+                colors: [Color(0xFF1877F2), Color(0xFF0A58CA)],
+              ),
+            ),
+            child: const Center(
+              child: Text(
+                'MS',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ),
           const SizedBox(width: 20),
-          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(t('app_name'), style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
-            Text('${t('version')} 1.0.0', style: const TextStyle(color: Colors.white54, fontSize: 14)),
-          ]),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                t('app_name'),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              Text(
+                '${t('version')} 1.0.0',
+                style: const TextStyle(color: Colors.white54, fontSize: 14),
+              ),
+            ],
+          ),
         ],
       ),
     );
@@ -889,14 +1491,29 @@ class _HelpScreenState extends State<HelpScreen> {
   Widget _buildMissionCard() {
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(color: Colors.blue.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.blue.withValues(alpha: 0.3))),
+      decoration: BoxDecoration(
+        color: Colors.blue.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.blue.withValues(alpha: 0.3)),
+      ),
       child: Column(
         children: [
           const Icon(Icons.rocket, color: Colors.blueAccent, size: 40),
           const SizedBox(height: 12),
-          Text(t('mission'), style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+          Text(
+            t('mission'),
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
           const SizedBox(height: 8),
-          Text(t('mission_text'), style: TextStyle(color: Colors.white.withValues(alpha: 0.8)), textAlign: TextAlign.center),
+          Text(
+            t('mission_text'),
+            style: TextStyle(color: Colors.white.withValues(alpha: 0.8)),
+            textAlign: TextAlign.center,
+          ),
         ],
       ),
     );
@@ -906,18 +1523,32 @@ class _HelpScreenState extends State<HelpScreen> {
   Widget _buildFeaturesCard() {
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.03), borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.03),
+        borderRadius: BorderRadius.circular(12),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(t('features'), style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+          Text(
+            t('features'),
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
           const SizedBox(height: 16),
-          Wrap(spacing: 12, runSpacing: 12, children: [
-            _buildFeatureChip(Icons.calendar_today, 'Easy booking'),
-            _buildFeatureChip(Icons.security, 'Secure payments'),
-            _buildFeatureChip(Icons.person, 'Professional staff'),
-            _buildFeatureChip(Icons.support_agent, '24/7 support'),
-          ]),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              _buildFeatureChip(Icons.calendar_today, 'Easy booking'),
+              _buildFeatureChip(Icons.security, 'Secure payments'),
+              _buildFeatureChip(Icons.person, 'Professional staff'),
+              _buildFeatureChip(Icons.support_agent, '24/7 support'),
+            ],
+          ),
         ],
       ),
     );
@@ -926,8 +1557,22 @@ class _HelpScreenState extends State<HelpScreen> {
   Widget _buildFeatureChip(IconData icon, String label) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(color: Colors.green.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.green.withValues(alpha: 0.3))),
-      child: Row(mainAxisSize: MainAxisSize.min, children: [Icon(icon, color: Colors.green, size: 16), const SizedBox(width: 6), Text(label, style: const TextStyle(color: Colors.green, fontSize: 12))]),
+      decoration: BoxDecoration(
+        color: Colors.green.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.green.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: Colors.green, size: 16),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: const TextStyle(color: Colors.green, fontSize: 12),
+          ),
+        ],
+      ),
     );
   }
 
@@ -935,17 +1580,49 @@ class _HelpScreenState extends State<HelpScreen> {
   Widget _buildFooter() {
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.03), borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.03),
+        borderRadius: BorderRadius.circular(12),
+      ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Container(width: 40, height: 40, decoration: const BoxDecoration(shape: BoxShape.circle, gradient: LinearGradient(colors: [Color(0xFF1877F2), Color(0xFF0A58CA)])), 
-            child: const Center(child: Text('MS', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)))),
+          Container(
+            width: 40,
+            height: 40,
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(
+                colors: [Color(0xFF1877F2), Color(0xFF0A58CA)],
+              ),
+            ),
+            child: const Center(
+              child: Text(
+                'MS',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ),
           const SizedBox(width: 12),
-          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Text('MySalon', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-            Text('${t('version')} 1.0.0', style: TextStyle(color: Colors.white54, fontSize: 12)),
-          ]),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'MySalon',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              Text(
+                '${t('version')} 1.0.0',
+                style: TextStyle(color: Colors.white54, fontSize: 12),
+              ),
+            ],
+          ),
         ],
       ),
     );
