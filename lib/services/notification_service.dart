@@ -3,8 +3,10 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:convert';
 import 'package:universal_platform/universal_platform.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class NotificationService {
   static final NotificationService _instance = NotificationService._internal();
@@ -14,48 +16,66 @@ class NotificationService {
   final FirebaseMessaging _firebaseMessaging = FirebaseMessaging.instance;
   final FlutterLocalNotificationsPlugin _localNotifications =
       FlutterLocalNotificationsPlugin();
+  
+  // Supabase client (lazy initialization)
+  SupabaseClient? _supabaseClient;
+  SupabaseClient get supabase {
+    _supabaseClient ??= Supabase.instance.client;
+    return _supabaseClient!;
+  }
 
   static final GlobalKey<NavigatorState> navigatorKey =
       GlobalKey<NavigatorState>();
   
-  // Web VAPID Key - ඔයාගේ Web Console එකෙන් ගත්ත දාන්න
+  // Web VAPID Key
   static const String _webVapidKey =
       'BFj7Eoc2BRmQQrXHBFvWXjcmeb3seAyHmOpVZEOLpKTpwbelZoo5tqci-o7KR-sr0hgO9yIYDRV1KP88vhV0l6k';
 
+  // Platform detection
+  bool get isWeb => UniversalPlatform.isWeb;
+  bool get isAndroid => UniversalPlatform.isAndroid;
+  bool get isIOS => UniversalPlatform.isIOS;
+
+  String get platformName {
+    if (isWeb) return 'web';
+    if (isAndroid) return 'android';
+    if (isIOS) return 'ios';
+    return 'unknown';
+  }
+
   // ============= MAIN INITIALIZATION =============
   Future<void> init() async {
-    if (UniversalPlatform.isWeb) {
+    print('📱 Initializing notifications for $platformName');
+    
+    if (isWeb) {
       await _initWebNotifications();
     } else {
       await _initMobileNotifications();
     }
 
-    await _getToken();
+    await _getTokenAndSave();
     _setupMessageListeners();
   }
 
-  // ============= 🌐 WEB PLATFORM - SILENT INIT =============
+  // ============= WEB INIT =============
   Future<void> _initWebNotifications() async {
     print('🌐 Web: Initializing silently...');
     
     try {
-      // 🔥 WEB: කිසිම permission එකක් අහන්නේ නෑ - token එක විතරක් ගන්නවා
       String? token = await _firebaseMessaging.getToken(
         vapidKey: _webVapidKey,
       );
       
       if (token != null) {
         print('✅ Web FCM Token: $token');
-        await _saveTokenToServer(token);
+        await _saveTokenToSupabase(token);
       }
       
-      // Token refresh listener
       _firebaseMessaging.onTokenRefresh.listen((newToken) {
         print('🔄 Web FCM Token refreshed: $newToken');
-        _saveTokenToServer(newToken);
+        _saveTokenToSupabase(newToken);
       });
       
-      // Web message listeners setup
       _setupWebMessageListeners();
       
     } catch (e) {
@@ -63,7 +83,15 @@ class NotificationService {
     }
   }
 
-  // ============= 🌐 WEB MESSAGE LISTENERS =============
+  // ============= MOBILE INIT =============
+  Future<void> _initMobileNotifications() async {
+    print('📱 Mobile: Initializing...');
+    
+    // Don't request permission here - let PermissionService handle it
+    await _initLocalNotifications();
+  }
+
+  // ============= WEB MESSAGE LISTENERS =============
   void _setupWebMessageListeners() {
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       print('📩 Web foreground message: ${message.messageId}');
@@ -83,96 +111,18 @@ class NotificationService {
     });
   }
 
-  // ============= 🌐 WEB FOREGROUND HANDLER =============
   void _handleWebForegroundMessage(RemoteMessage message) {
     RemoteNotification? notification = message.notification;
     if (notification != null) {
       print('🔔 Web Notification: ${notification.title}');
+      // Web in-app notification could be shown here
     }
   }
 
-  // ============= 🌐 WEB PERMISSION REQUEST (UI එකෙන් call කරන්න) =============
-  Future<bool> requestWebPermission() async {
-    try {
-      print('🔔 Web: Requesting permission...');
-      
-      NotificationSettings settings = await _firebaseMessaging.requestPermission(
-        alert: true,
-        badge: true,
-        sound: true,
-      );
-
-      if (settings.authorizationStatus == AuthorizationStatus.authorized) {
-        print('✅ Web permission granted');
-        
-        // Permission දුන්නාම නැවත token එක ගන්න
-        String? token = await _firebaseMessaging.getToken(
-          vapidKey: _webVapidKey,
-        );
-        print('✅ New Web FCM Token: $token');
-        
-        return true;
-      } else {
-        print('❌ Web permission denied');
-        return false;
-      }
-    } catch (e) {
-      print('❌ Web permission error: $e');
-      return false;
-    }
-  }
-
-  // ============= 📱 MOBILE PLATFORM - INSTALL TIME PERMISSION =============
-  Future<void> _initMobileNotifications() async {
-    print('📱 Mobile: Initializing with install-time permission...');
-    
-    // 🔥 MOBILE: Install වෙන ගමන්ම permission අහන්න
-    await _requestMobilePermissionAtInstall();
-    
-    // Local notifications initialize කරන්න (permission තියෙනවා නම්)
-    await _initLocalNotifications();
-  }
-
-  // ============= 📱 MOBILE INSTALL TIME PERMISSION =============
-  Future<bool> _requestMobilePermissionAtInstall() async {
-    try {
-      NotificationSettings settings;
-      
-      if (UniversalPlatform.isIOS) {
-        // 🔥🔥 iOS - PROVISIONAL (Popup නෑ, Notification Center එකට Quietly)
-        print('🍎 iOS: Requesting PROVISIONAL permission...');
-        settings = await _firebaseMessaging.requestPermission(
-          alert: true,
-          badge: true,
-          sound: true,
-          provisional: true,      // 👈 iOS වලදී popup එකක් නෑ!
-        );
-      } else {
-        // 🔥🔥 Android - NORMAL (Popup එකක් එනවා)
-        print('🤖 Android: Requesting permission...');
-        settings = await _firebaseMessaging.requestPermission(
-          alert: true,
-          badge: true,
-          sound: true,
-        );
-      }
-
-      if (settings.authorizationStatus == AuthorizationStatus.authorized ||
-          settings.authorizationStatus == AuthorizationStatus.provisional) {
-        print('✅ Mobile permission granted');
-        return true;
-      } else {
-        print('❌ Mobile permission denied');
-        return false;
-      }
-    } catch (e) {
-      print('❌ Mobile permission error: $e');
-      return false;
-    }
-  }
-
-  // ============= 📱 LOCAL NOTIFICATIONS =============
+  // ============= LOCAL NOTIFICATIONS (Mobile) =============
   Future<void> _initLocalNotifications() async {
+    if (isWeb) return; // Skip for web
+
     try {
       const AndroidInitializationSettings androidSettings =
           AndroidInitializationSettings('@mipmap/ic_launcher');
@@ -200,8 +150,7 @@ class NotificationService {
         },
       );
 
-      // Android notification channel එක create කරන්න
-      if (UniversalPlatform.isAndroid) {
+      if (isAndroid) {
         await _createAndroidNotificationChannel();
       }
       
@@ -211,7 +160,6 @@ class NotificationService {
     }
   }
 
-  // ============= 🤖 ANDROID NOTIFICATION CHANNEL =============
   Future<void> _createAndroidNotificationChannel() async {
     const AndroidNotificationChannel channel = AndroidNotificationChannel(
       'salon_channel',
@@ -232,8 +180,191 @@ class NotificationService {
     print('✅ Android notification channel created');
   }
 
-  // ============= 📱 SHOW MOBILE NOTIFICATION =============
+  // ============= PERMISSION METHODS =============
+  Future<bool> requestWebPermission() async {
+    try {
+      final settings = await _firebaseMessaging.requestPermission(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
+      return settings.authorizationStatus == AuthorizationStatus.authorized;
+    } catch (e) {
+      print('❌ Web permission error: $e');
+      return false;
+    }
+  }
+
+  Future<bool> requestIOSPermission() async {
+    try {
+      final settings = await _firebaseMessaging.requestPermission(
+        alert: true,
+        badge: true,
+        sound: true,
+        provisional: true,
+      );
+      return settings.authorizationStatus == AuthorizationStatus.authorized ||
+             settings.authorizationStatus == AuthorizationStatus.provisional;
+    } catch (e) {
+      print('❌ iOS permission error: $e');
+      return false;
+    }
+  }
+
+  Future<bool> requestAndroidPermission() async {
+    try {
+      final settings = await _firebaseMessaging.requestPermission(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
+      return settings.authorizationStatus == AuthorizationStatus.authorized;
+    } catch (e) {
+      print('❌ Android permission error: $e');
+      return false;
+    }
+  }
+
+  // ============= TOKEN MANAGEMENT =============
+  Future<String?> getToken() async {
+    try {
+      if (isWeb) {
+        return await _firebaseMessaging.getToken(vapidKey: _webVapidKey);
+      } else {
+        return await _firebaseMessaging.getToken();
+      }
+    } catch (e) {
+      print('❌ Get token error: $e');
+      return null;
+    }
+  }
+
+  Future<void> _getTokenAndSave() async {
+    String? token = await getToken();
+    if (token != null) {
+      await _saveTokenToSupabase(token);
+    }
+
+    _firebaseMessaging.onTokenRefresh.listen((newToken) {
+      print('🔄 Token refreshed: $newToken');
+      _saveTokenToSupabase(newToken);
+    });
+  }
+
+  Future<void> _saveTokenToSupabase(String token) async {
+    try {
+      // Check if Supabase is initialized and user is logged in
+      if (!_isSupabaseReady()) {
+        await _storeTokenLocally(token);
+        return;
+      }
+
+      final user = supabase.auth.currentUser;
+      if (user == null) {
+        await _storeTokenLocally(token);
+        return;
+      }
+
+      await supabase
+          .from('profiles')
+          .update({
+            'fcm_token': token,
+            'platform': platformName,
+            'updated_at': DateTime.now().toIso8601String(),
+          })
+          .eq('id', user.id);
+
+      print('✅ Token saved to Supabase');
+      await _clearStoredToken();
+      
+    } catch (e) {
+      print('❌ Error saving to Supabase: $e');
+      await _storeTokenLocally(token);
+    }
+  }
+
+  bool _isSupabaseReady() {
+    try {
+      final _ = Supabase.instance.client;
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  Future<void> _storeTokenLocally(String token) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('pending_fcm_token', token);
+      await prefs.setString('pending_platform', platformName);
+      print('💾 Token stored locally');
+    } catch (e) {
+      print('❌ Error storing token locally: $e');
+    }
+  }
+
+  Future<void> _clearStoredToken() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('pending_fcm_token');
+      await prefs.remove('pending_platform');
+    } catch (e) {
+      print('❌ Error clearing stored token: $e');
+    }
+  }
+
+  Future<void> saveTokenManually() async {
+    String? token = await getToken();
+    if (token != null) {
+      await _saveTokenToSupabase(token);
+    }
+  }
+
+  Future<void> syncPendingToken() async {
+    if (!_isSupabaseReady()) return;
+    
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('pending_fcm_token');
+      
+      if (token != null) {
+        print('🔄 Syncing pending token...');
+        await _saveTokenToSupabase(token);
+      }
+    } catch (e) {
+      print('❌ Error syncing token: $e');
+    }
+  }
+
+  // ============= MESSAGE HANDLING =============
+  void _setupMessageListeners() {
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      print('📨 Foreground message');
+      if (!isWeb) {
+        _showMobileNotification(message);
+      }
+    });
+
+    if (!isWeb) {
+      FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+    }
+
+    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+      print('👆 Message opened app');
+      _handleMessage(message);
+    });
+
+    FirebaseMessaging.instance.getInitialMessage().then((RemoteMessage? message) {
+      if (message != null) {
+        print('📬 Initial message');
+        _handleMessage(message);
+      }
+    });
+  }
+
   Future<void> _showMobileNotification(RemoteMessage message) async {
+    if (isWeb) return;
+
     try {
       RemoteNotification? notification = message.notification;
       if (notification == null) return;
@@ -242,7 +373,6 @@ class NotificationService {
         android: AndroidNotificationDetails(
           'salon_channel',
           'Salon Booking Notifications',
-          channelDescription: 'Notifications for salon booking updates',
           importance: Importance.high,
           priority: Priority.high,
           icon: '@mipmap/ic_launcher',
@@ -267,112 +397,7 @@ class NotificationService {
 
       print('✅ Mobile notification shown');
     } catch (e) {
-      print('❌ Show mobile notification error: $e');
-    }
-  }
-
-  // ============= 📱 BACKGROUND NOTIFICATION =============
-  Future<void> _showBackgroundNotification(RemoteMessage message) async {
-    try {
-      RemoteNotification? notification = message.notification;
-      if (notification == null) return;
-
-      NotificationDetails platformChannelSpecifics = NotificationDetails(
-        android: AndroidNotificationDetails(
-          'salon_channel',
-          'Salon Booking Notifications',
-          channelDescription: 'Notifications for salon booking updates',
-          importance: Importance.high,
-          priority: Priority.high,
-          icon: '@mipmap/ic_launcher',
-        ),
-      );
-
-      int notificationId = DateTime.now().millisecondsSinceEpoch.remainder(100000);
-
-      await _localNotifications.show(
-        id: notificationId,
-        title: notification.title,
-        body: notification.body,
-        notificationDetails: platformChannelSpecifics,
-        payload: jsonEncode(message.data),
-      );
-
-      print('✅ Background notification shown');
-    } catch (e) {
-      print('❌ Background notification error: $e');
-    }
-  }
-
-  // ============= 🔑 FCM TOKEN MANAGEMENT =============
-  Future<void> _getToken() async {
-    try {
-      String? token;
-      
-      if (UniversalPlatform.isWeb) {
-        token = await _firebaseMessaging.getToken(vapidKey: _webVapidKey);
-      } else {
-        token = await _firebaseMessaging.getToken();
-      }
-      
-      if (token != null) {
-        print('📱 FCM Token: $token');
-        await _saveTokenToServer(token);
-      }
-
-      _firebaseMessaging.onTokenRefresh.listen((newToken) {
-        print('🔄 FCM Token refreshed: $newToken');
-        _saveTokenToServer(newToken);
-      });
-    } catch (e) {
-      print('❌ Get token error: $e');
-    }
-  }
-
-  Future<void> _saveTokenToServer(String token) async {
-    String platform = UniversalPlatform.isWeb
-        ? 'web'
-        : UniversalPlatform.isAndroid
-        ? 'android'
-        : UniversalPlatform.isIOS
-        ? 'ios'
-        : 'unknown';
-    print('💾 Saving token for platform: $platform');
-  }
-
-  // ============= 📡 MESSAGE LISTENERS =============
-  void _setupMessageListeners() {
-    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-      print('📨 Foreground message');
-      _handleForegroundMessage(message);
-    });
-
-    if (!UniversalPlatform.isWeb) {
-      FirebaseMessaging.onBackgroundMessage(
-        _firebaseMessagingBackgroundHandler,
-      );
-    }
-
-    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
-      print('👆 Message opened app');
-      _handleMessage(message);
-    });
-
-    FirebaseMessaging.instance.getInitialMessage().then((
-      RemoteMessage? message,
-    ) {
-      if (message != null) {
-        print('📬 Initial message');
-        _handleMessage(message);
-      }
-    });
-  }
-
-  void _handleForegroundMessage(RemoteMessage message) {
-    if (UniversalPlatform.isWeb) {
-      _handleWebForegroundMessage(message);
-    } else {
-      _showMobileNotification(message);
+      print('❌ Show notification error: $e');
     }
   }
 
@@ -400,23 +425,33 @@ class NotificationService {
   }
 
   // ============= PUBLIC METHODS =============
-  Future<bool> requestWebPermissionFromUI() async {
-    if (UniversalPlatform.isWeb) {
-      return await requestWebPermission();
-    }
-    return false;
-  }
-
   Future<bool> hasPermission() async {
     NotificationSettings settings = await _firebaseMessaging.getNotificationSettings();
-    return settings.authorizationStatus == AuthorizationStatus.authorized;
+    return settings.authorizationStatus == AuthorizationStatus.authorized ||
+           settings.authorizationStatus == AuthorizationStatus.provisional;
+  }
+
+  Future<bool> requestPermission() async {
+    if (isWeb) {
+      return requestWebPermission();
+    } else if (isIOS) {
+      return requestIOSPermission();
+    } else {
+      return requestAndroidPermission();
+    }
   }
 }
 
-// ============= 📱 BACKGROUND HANDLER =============
+// ============= BACKGROUND HANDLER =============
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
+  print('📨 Background message: ${message.messageId}');
+  
+  // Handle background notification
   final notificationService = NotificationService();
-  await notificationService._showBackgroundNotification(message);
+  if (!notificationService.isWeb) {
+    // Show notification in background
+    await notificationService._showMobileNotification(message);
+  }
 }

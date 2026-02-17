@@ -40,6 +40,7 @@ dependencies:
   flutter_web_auth_2: ^5.0.1
   font_awesome_flutter: ^10.12.0
   firebase_core_web: ^3.4.0
+  app_settings: ^7.0.0
  
 
 dev_dependencies:
