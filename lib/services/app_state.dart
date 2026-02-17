@@ -23,6 +23,7 @@ class AppState extends ChangeNotifier {
   bool _rememberMeEnabled = false;
   String? _loginProvider;
   String? _currentEmail;
+  User? _currentUser;
 
   // ====================
   // PUBLIC GETTERS
@@ -39,6 +40,7 @@ class AppState extends ChangeNotifier {
   bool get rememberMeEnabled => _rememberMeEnabled;
   String? get loginProvider => _loginProvider;
   String? get currentEmail => _currentEmail;
+  User? get currentUser => _currentUser;
 
   // ====================
   // PRIVATE SETTERS
@@ -120,6 +122,13 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  void _setCurrentUser(User? value) {
+    if (_currentUser != value) {
+      _currentUser = value;
+      notifyListeners();
+    }
+  }
+
   // ====================
   // PUBLIC METHODS
   // ====================
@@ -139,6 +148,7 @@ class AppState extends ChangeNotifier {
       _setHasLocalProfile(hasProfiles);
       _setContinueScreen(csc);
       _setRememberMeEnabled(rememberMe);
+      _setCurrentUser(Supabase.instance.client.auth.currentUser);
 
       await _checkAuthenticationState();
       await _updateUserProfile();
@@ -146,11 +156,10 @@ class AppState extends ChangeNotifier {
       _lastUpdateTime = DateTime.now();
 
       developer.log('AppState: Initialization successful', name: 'AppState');
-      
+
       if (!_loggedIn && hasProfiles && rememberMe) {
         await attemptAutoLogin();
       }
-      
     } catch (e, stackTrace) {
       _setErrorMessage('Initialization failed');
       developer.log(
@@ -170,12 +179,13 @@ class AppState extends ChangeNotifier {
     if (!silent) _setLoading(true);
 
     try {
+      _setCurrentUser(Supabase.instance.client.auth.currentUser);
       await _checkAuthenticationState();
       await _updateUserProfile();
 
       final hasProfiles = await SessionManager.hasProfile();
       final rememberMe = await SessionManager.isRememberMeEnabled();
-      
+
       _setHasLocalProfile(hasProfiles);
       _setRememberMeEnabled(rememberMe);
 
@@ -210,12 +220,13 @@ class AppState extends ChangeNotifier {
         final currentSession = supabase.auth.currentSession;
         final refreshToken = currentSession?.refreshToken;
         final rememberMe = await SessionManager.isRememberMeEnabled();
-        
+
         if (rememberMe && refreshToken != null) {
-          final provider = _loginProvider ?? 
-                         user.userMetadata?['provider']?.toString().toLowerCase() ?? 
-                         'email';
-          
+          final provider =
+              _loginProvider ??
+              user.userMetadata?['provider']?.toString().toLowerCase() ??
+              'email';
+
           await SessionManager.saveUserProfile(
             email: email,
             userId: user.id,
@@ -228,7 +239,7 @@ class AppState extends ChangeNotifier {
       }
 
       await supabase.auth.signOut();
-      
+
       _setLoggedIn(false);
       _setEmailVerified(false);
       _setProfileCompleted(false);
@@ -237,9 +248,13 @@ class AppState extends ChangeNotifier {
       _setLoginProvider(null);
 
       developer.log('User logged out', name: 'AppState');
-      
     } catch (e, stackTrace) {
-      developer.log('Logout error: $e', name: 'AppState', error: e, stackTrace: stackTrace);
+      developer.log(
+        'Logout error: $e',
+        name: 'AppState',
+        error: e,
+        stackTrace: stackTrace,
+      );
       _setErrorMessage('Logout failed');
       rethrow;
     } finally {
@@ -253,7 +268,7 @@ class AppState extends ChangeNotifier {
 
     try {
       await SessionManager.logoutForContinue();
-      
+
       _setLoggedIn(false);
       _setEmailVerified(false);
       _setProfileCompleted(false);
@@ -263,7 +278,12 @@ class AppState extends ChangeNotifier {
 
       developer.log(' User logged out for continue screen', name: 'AppState');
     } catch (e, stackTrace) {
-      developer.log('Logout for continue error: $e', name: 'AppState', error: e, stackTrace: stackTrace);
+      developer.log(
+        'Logout for continue error: $e',
+        name: 'AppState',
+        error: e,
+        stackTrace: stackTrace,
+      );
       _setErrorMessage('Logout failed');
       rethrow;
     } finally {
@@ -277,9 +297,15 @@ class AppState extends ChangeNotifier {
 
     switch (route) {
       case '/owner':
-        return _loggedIn && _emailVerified && _profileCompleted && _role == 'business';
+        return _loggedIn &&
+            _emailVerified &&
+            _profileCompleted &&
+            _role == 'business';
       case '/employee':
-        return _loggedIn && _emailVerified && _profileCompleted && _role == 'employee';
+        return _loggedIn &&
+            _emailVerified &&
+            _profileCompleted &&
+            _role == 'employee';
       case '/customer':
         return _loggedIn && _emailVerified && _profileCompleted;
       case '/reg':
@@ -331,68 +357,73 @@ class AppState extends ChangeNotifier {
   Future<void> attemptAutoLogin() async {
     try {
       debugPrint('AppState: Attempting auto-login...');
-      
+
       final rememberMeEnabled = await SessionManager.isRememberMeEnabled();
       if (!rememberMeEnabled) {
         debugPrint('AppState: Auto-login disabled globally');
         return;
       }
-      
+
       final recentProfile = await SessionManager.getMostRecentProfile();
       if (recentProfile == null || recentProfile.isEmpty) {
         debugPrint('AppState: No recent profile found');
         return;
       }
-      
+
       final email = recentProfile['email'] as String?;
       final provider = recentProfile['provider'] as String?;
-      
+
       if (email == null || email.isEmpty) {
         debugPrint('AppState: No email in recent profile');
         return;
       }
-      
+
       final termsAccepted = recentProfile['termsAcceptedAt'] != null;
       final privacyAccepted = recentProfile['privacyAcceptedAt'] != null;
-      
+
       if (!termsAccepted || !privacyAccepted) {
         debugPrint('AppState: User consent not recorded - requiring re-login');
         return;
       }
-      
-      debugPrint('🔍 AppState: Attempting auto-login for $email (provider: $provider)');
-      
-      if (provider != null && provider != 'email' && provider != 'email_password') {
-        debugPrint('AppState: OAuth provider ($provider) requires manual login');
+
+      debugPrint(
+        '🔍 AppState: Attempting auto-login for $email (provider: $provider)',
+      );
+
+      if (provider != null &&
+          provider != 'email' &&
+          provider != 'email_password') {
+        debugPrint(
+          'AppState: OAuth provider ($provider) requires manual login',
+        );
         _setContinueScreen(true);
         return;
       }
-      
+
       final refreshToken = recentProfile['refresh_token'] as String?;
       if (refreshToken == null || refreshToken.isEmpty) {
         debugPrint('AppState: No refresh token available');
         return;
       }
-      
+
       bool success = false;
-      
+
       for (int attempt = 1; attempt <= 3; attempt++) {
         debugPrint('   - Attempt $attempt of 3');
         success = await _tryAutoLoginWithToken(refreshToken);
-        
+
         if (success) {
           debugPrint('✅ AppState: Auto-login successful for $email');
           await refreshState();
           return;
         }
-        
+
         if (attempt < 3) {
           await Future.delayed(const Duration(milliseconds: 500));
         }
       }
-      
+
       debugPrint('AppState: Auto-login failed after 3 attempts');
-      
     } catch (e) {
       debugPrint('AppState: Error during auto-login: $e');
     }
@@ -424,10 +455,10 @@ class AppState extends ChangeNotifier {
         termsAcceptedAt: termsAcceptedAt,
         privacyAcceptedAt: privacyAcceptedAt,
       );
-      
+
       _setCurrentEmail(email);
       _setLoginProvider(provider ?? 'email');
-      
+
       debugPrint('Profile updated for $email (provider: $provider)');
     } catch (e) {
       debugPrint(' Error updating profile: $e');
@@ -445,7 +476,7 @@ class AppState extends ChangeNotifier {
 
     _setLoggedIn(session != null);
     _setEmailVerified(user?.emailConfirmedAt != null);
-    
+
     if (user?.email != null) {
       _setCurrentEmail(user!.email);
     }
@@ -462,20 +493,22 @@ class AppState extends ChangeNotifier {
     try {
       final supabase = Supabase.instance.client;
       final user = supabase.auth.currentUser!;
-      
-      final provider = user.userMetadata?['provider']?.toString().toLowerCase() ?? 'email';
+
+      final provider =
+          user.userMetadata?['provider']?.toString().toLowerCase() ?? 'email';
       _setLoginProvider(provider);
       _setCurrentEmail(user.email);
-      
+
       final rememberMe = await SessionManager.isRememberMeEnabled();
       if (user.email != null && rememberMe) {
         final session = supabase.auth.currentSession;
-        
+
         await SessionManager.saveUserProfile(
           email: user.email!,
           userId: user.id,
           name: user.userMetadata?['full_name'] ?? user.email!.split('@').first,
-          photo: user.userMetadata?['avatar_url'] ?? user.userMetadata?['picture'],
+          photo:
+              user.userMetadata?['avatar_url'] ?? user.userMetadata?['picture'],
           rememberMe: rememberMe,
           provider: provider,
           accessToken: session?.accessToken,
@@ -483,9 +516,18 @@ class AppState extends ChangeNotifier {
         );
       }
 
+      // Get profile with role_id and join with roles table to get role name
       final profile = await supabase
           .from('profiles')
-          .select('id, is_blocked, is_active, role')
+          .select('''
+          id, 
+          is_blocked, 
+          is_active, 
+          role_id,
+          role:role_id (
+            name
+          )
+        ''')
           .eq('id', user.id)
           .maybeSingle();
 
@@ -505,19 +547,35 @@ class AppState extends ChangeNotifier {
         }
 
         String? userRole = await SessionManager.getUserRole();
+
+        // If no role in session, get it from profile
+        if (userRole == null) {
+          // Try to get role name from joined data first
+          if (profile != null &&
+              profile['role'] != null &&
+              profile['role'] is Map) {
+            userRole = profile['role']['name']?.toString().toLowerCase();
+          }
+
+          // If still no role, use initializeUserRole which will fetch using role_id
+          if (userRole == null) {
+            await initializeUserRole(user.id);
+            userRole = await SessionManager.getUserRole();
+          } else {
+            // Save the role we got from joined data
+            await SessionManager.saveUserRole(userRole!);
+          }
+        }
+
         _setRole(userRole);
 
-        if (userRole == null) {
-          await initializeUserRole(user.id);
-        }         
+        developer.log(
+          '✅ Profile updated: role=$userRole, provider=$provider, profileCompleted=$_profileCompleted',
+          name: 'AppState',
+        );
       } else {
         _setRole(null);
       }
-
-      developer.log(
-        '✅ Profile updated: role=$_role, provider=$provider, profileCompleted=$_profileCompleted',
-        name: 'AppState',
-      );
     } catch (e) {
       developer.log('Profile update error: $e', name: 'AppState');
       _setProfileCompleted(false);
@@ -532,18 +590,19 @@ class AppState extends ChangeNotifier {
 
     try {
       final supabase = Supabase.instance.client;
-      final result = await supabase
+
+      // Get the profile with role_id
+      final profile = await supabase
           .from('profiles')
-          .select('roles(name)')
+          .select('role_id')
           .eq('id', userId)
           .single()
           .timeout(const Duration(seconds: 5));
 
-      final roleName = (result['roles'] as List)
-          .cast<Map<String, dynamic>>()
-          .firstOrNull?['name'] as String?;
+      // Use the updated pickRole function (which handles UUID)
+      final role = await AuthGate.pickRole(profile['role_id']);
 
-      userRole = AuthGate.pickRole(roleName ?? defaultRole);
+      userRole = role;
       await SessionManager.saveUserRole(userRole);
 
       debugPrint('User role initialized: $userRole');
@@ -557,7 +616,7 @@ class AppState extends ChangeNotifier {
       debugPrint('Failed to get user role: $e');
       userRole = defaultRole;
       await SessionManager.saveUserRole(userRole);
-      _setRole(userRole);      
+      _setRole(userRole);
     }
   }
 
@@ -565,7 +624,7 @@ class AppState extends ChangeNotifier {
   Future<bool> _tryAutoLoginWithToken(String refreshToken) async {
     try {
       final supabase = Supabase.instance.client;
-      
+
       // METHOD 1: Try to restore session
       try {
         // First, try to see if we already have a valid session
@@ -577,7 +636,7 @@ class AppState extends ChangeNotifier {
       } catch (e) {
         debugPrint('No existing session: $e');
       }
-      
+
       // METHOD 2: Try to refresh the session
       // Note: This might require the user to be recently logged in
       // Refresh tokens have limited lifespan
@@ -585,7 +644,7 @@ class AppState extends ChangeNotifier {
         // You might need to store and use the entire session JSON
         // This is a simplified approach
         final response = await supabase.auth.refreshSession();
-        
+
         if (response.session != null && response.user != null) {
           debugPrint('Session refreshed successfully');
           return true;
@@ -593,7 +652,7 @@ class AppState extends ChangeNotifier {
       } catch (e) {
         debugPrint('Failed to refresh session: $e');
       }
-      
+
       // METHOD 3: Manual token refresh (advanced)
       // This requires making direct API calls
       try {
@@ -602,15 +661,13 @@ class AppState extends ChangeNotifier {
       } catch (e) {
         debugPrint('Manual refresh failed: $e');
       }
-      
+
       return false;
-      
     } catch (e) {
       debugPrint(' Auto-login with token failed: $e');
       return false;
     }
   }
-
 
   void _resetToSafeState() {
     _setLoggedIn(false);
@@ -624,7 +681,7 @@ class AppState extends ChangeNotifier {
   }
 
   /// 📧 Email verification error handler
-  Future<void> emailVerifyerError() async {   
+  Future<void> emailVerifyerError() async {
     debugPrint('Email verification error handler called');
     _setEmailVerified(false);
     notifyListeners();

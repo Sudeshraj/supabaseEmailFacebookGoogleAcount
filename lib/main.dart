@@ -7,7 +7,6 @@ import 'package:flutter_application_1/screens/authantication/command/auth_callba
 import 'package:flutter_application_1/screens/authantication/command/clear_data_screen.dart';
 import 'package:flutter_application_1/screens/authantication/command/common_screen.dart';
 import 'package:flutter_application_1/screens/authantication/command/data_consent_screen.dart';
-// import 'package:flutter_application_1/screens/authantication/command/help_screen.dart';
 import 'package:flutter_application_1/screens/authantication/command/policy_screen.dart';
 import 'package:flutter_application_1/screens/authantication/command/registration_flow.dart';
 import 'package:flutter_application_1/screens/authantication/command/reset_password_confirm.dart';
@@ -16,7 +15,6 @@ import 'package:flutter_application_1/screens/authantication/command/reset_passw
 import 'package:flutter_application_1/services/notification_service.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-// import 'package:url_strategy/url_strategy.dart';
 
 import 'config/environment_manager.dart';
 
@@ -48,27 +46,14 @@ final GlobalKey<ScaffoldMessengerState> messengerKey =
 late final GoRouter router;
 late final AppState appState;
 late final EnvironmentManager environment;
+String? pendingDeepLink;
 
 // ====================
 // ERROR HANDLER
 // ====================
 void setupErrorHandling() {
-  // Handle email verification errors
-  // final uri = Uri.base;
-  // if (uri.path.contains('auth/callback')) {
-  //   WidgetsBinding.instance.addPostFrameCallback((_) {
-  //     final errorCode = uri.queryParameters['error_code'];
-  //     final error = uri.queryParameters['error'];
-  //     if (errorCode == 'otp_expired' || error == 'access_denied') {
-  //       router.go('/verify-invalid');
-  //     }
-  //   });
-  // }
   FlutterError.onError = (details) {
     FlutterError.presentError(details);
-    if (!kDebugMode) {
-      // FirebaseCrashlytics.instance.recordFlutterError(details);
-    }
   };
 
   PlatformDispatcher.instance.onError = (error, stack) {
@@ -76,11 +61,6 @@ void setupErrorHandling() {
       print('❌ Uncaught error: $error');
       print('Stack: $stack');
     }
-
-    if (!kDebugMode) {
-      // FirebaseCrashlytics.instance.recordError(error, stack);
-    }
-
     return true;
   };
 }
@@ -89,27 +69,17 @@ void setupErrorHandling() {
 // APP LIFECYCLE
 // ====================
 class AppLifecycleObserver with WidgetsBindingObserver {
-  AppLifecycleObserver();
-
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     switch (state) {
       case AppLifecycleState.resumed:
-        // App came to foreground
         appState.refreshState(silent: true);
-
-        // ✅ Validate and refresh session if needed
         _validateSessionOnResume();
         break;
-
       case AppLifecycleState.paused:
-        // App went to background
-        print('📱 App backgrounded - saving session state');
+        print('📱 App backgrounded');
         break;
-
-      case AppLifecycleState.inactive:
-      case AppLifecycleState.detached:
-      case AppLifecycleState.hidden:
+      default:
         break;
     }
   }
@@ -117,24 +87,19 @@ class AppLifecycleObserver with WidgetsBindingObserver {
 
 Future<void> _validateSessionOnResume() async {
   try {
-    // Wait a moment for Supabase to initialize
     await Future.delayed(const Duration(milliseconds: 300));
-
-    // Validate and refresh session if needed
     await SessionManager.validateAndRefreshSession();
 
-    // Check if auto-login should be attempted
     final currentUser = Supabase.instance.client.auth.currentUser;
     if (currentUser == null) {
-      // No user logged in, check if we should auto-login
       final rememberMe = await SessionManager.isRememberMeEnabled();
       if (rememberMe) {
-        print('🔄 App resumed, attempting auto-login...');
+        print('🔄 Attempting auto-login...');
         await appState.attemptAutoLogin();
       }
     }
   } catch (e) {
-    print('❌ Error validating session on resume: $e');
+    print('❌ Error: $e');
   }
 }
 
@@ -142,24 +107,6 @@ Future<void> _validateSessionOnResume() async {
 // MAIN METHOD
 // ====================
 Future<void> main() async {
-  // Web සඳහා # ඉවත් කිරීමට
-  // if (kIsWeb) {
-  //    setPathUrlStrategy();
-  // }
-
-  final uri = Uri.base;
-  print('🚀 APP STARTING');
-  print('   Initial URI: ${uri.toString()}');
-  print('   Path: ${uri.path}');
-  print('   Query: ${uri.query}');
-  print('   Fragment: ${uri.fragment}');
-  print('   Query Params: ${uri.queryParameters}');
-
-  // Check if it's an auth callback
-  if (uri.toString().contains('/auth/callback')) {
-    print('🎯 AUTH CALLBACK DETECTED AT APP START!');
-  }
-
   WidgetsFlutterBinding.ensureInitialized();
   setupErrorHandling();
 
@@ -170,355 +117,349 @@ Future<void> main() async {
     environment = EnvironmentManager();
     await environment.init(flavor: kDebugMode ? 'development' : 'production');
 
-    if (kDebugMode) {
-      environment.printInfo();
-    }
-
-    // ========== PHASE 2: FIREBASE ==========
-    // Firebase initialize - web,mobile platform anuva initialize venava
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions
-          .currentPlatform, //fiebase_options.dart file එකේ තියෙන options use කරනවා
-    );
-    // Notification service initialize karanna
-    // meken notification service eka initialize karanava, meken permission check karala denava,
-    // permission denawanam token gen karala denava, token gen karala nam firebase cloud messaging ekata register karala denava, meken notification receive karanna ready wenava
-    await NotificationService().init();
-
-    // ========== PHASE 3: SUPABASE ==========
+    // ========== PHASE 2: SUPABASE ==========
     await Supabase.initialize(
       url: environment.supabaseUrl,
       anonKey: environment.supabaseAnonKey,
       debug: kDebugMode,
     );
 
-    // ✅ SETUP AUTH STATE LISTENER(listner inna nisa current app ekath redirect venava reset form ekata)
+    // ========== PHASE 3: FIREBASE ==========
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+
+    // ========== PHASE 4: NOTIFICATION SERVICE ==========
+    await NotificationService().init();
+
+    // ========== PHASE 5: AUTH LISTENER ==========
     _setupAuthStateListener();
 
-    // ========== PHASE 3.5: PLATFORM-SPECIFIC CONFIG ==========
-    await _setupPlatformSpecificConfig(); // 🔥 NEW
+    // ========== PHASE 6: PLATFORM CONFIG ==========
+    await _setupPlatformSpecificConfig();
 
-    // ========== PHASE 4: SERVICES ==========
+    // ========== PHASE 7: SERVICES ==========
     await SessionManager.init();
 
-    // ========== PHASE 5: APP STATE ==========
+    // ========== PHASE 8: APP STATE ==========
     appState = AppState();
     await appState.initializeApp();
 
-    // ========== PHASE 6: ROUTER ==========
+    // ========== PHASE 9: ROUTER ==========
     router = _createRouter();
 
-    // ========== PHASE 7: LIFECYCLE ==========
+    // ========== PHASE 10: LIFECYCLE ==========
     WidgetsBinding.instance.addObserver(AppLifecycleObserver());
 
-    // ========== PHASE 8: RUN APP ==========
     print('✅ ${DateTime.now()}: Initialization complete');
     runApp(MyApp());
   } catch (e, stackTrace) {
-    print('❌❌❌ CRITICAL ERROR DURING INITIALIZATION ❌❌❌');
-    print('Error: $e');
+    print('❌❌❌ CRITICAL ERROR: $e');
     print('Stack: $stackTrace');
-
-    if (!kDebugMode) {
-      // FirebaseCrashlytics.instance.recordError(e, stackTrace);
-    }
-
     runApp(_ErrorApp(error: e.toString()));
   }
 }
 
-// main.dart එකේ මෙම method එක එකතු කරන්න
-Future<void> _setupPlatformSpecificConfig() async {
-  print('🌐 Platform configuration...');
-  print('   Is Web: $kIsWeb');
-  print('   Initial URI: ${Uri.base.toString()}');
-
-  if (kIsWeb) {
-    // Web-specific setup
-    await _setupWebConfig();
-  } else {
-    // Mobile-specific setup
-    await _setupMobileConfig();
-  }
-}
-
-Future<void> _setupWebConfig() async {
-  print('   Configuring for Web');
-
-  try {
-    // Use url_strategy package for web
-    // Uncomment after adding url_strategy to pubspec.yaml
-    // setPathUrlStrategy();
-
-    // For now, handle URLs manually
-    final uri = Uri.base;
-    if (uri.toString().contains('/auth/callback')) {
-      print('   🔥 Web auth callback detected');
-    }
-  } catch (e) {
-    print('   ❌ Web config error: $e');
-  }
-}
-
-Future<void> _setupMobileConfig() async {
-  print('   Configuring for Mobile');
-
-  // Mobile deep links setup
-  await _setupMobileDeepLinks();
-}
-
-/// 🔥 CRITICAL FIX: Mobile deep links setup
-Future<void> _setupMobileDeepLinks() async {
-  print('   🔗 Setting up mobile deep links...');
-
-  // Note: To enable full mobile deep links, add these to pubspec.yaml:
-  // uni_links: ^0.5.1  # For deep links
-  // app_links: ^3.2.1  # Alternative
-
-  // For now, we'll handle basic deep links
-  try {
-    // Check initial URI for mobile
-    final uri = Uri.base;
-    if (uri.toString().isNotEmpty && uri.toString() != '/') {
-      print('     Initial mobile URI: ${uri.toString()}');
-
-      // Check if it's a deep link
-      if (uri.toString().contains('myapp://') ||
-          uri.toString().contains('/auth/callback')) {
-        print('     📱 Mobile deep link detected!');
-
-        // Store for later processing
-        pendingDeepLink = uri.toString();
-      }
-    }
-  } catch (e) {
-    print('     ❌ Mobile deep link setup error: $e');
-  }
-
-  print('   ✅ Mobile deep links configured (basic)');
-}
-
-// Add this global variable at the top of main.dart
-String? pendingDeepLink;
-
-// ✅ CORRECTED: Setup auth state listener | current app eka update venne meken
+// ====================
+// AUTH STATE LISTENER
+// ====================
 void _setupAuthStateListener() {
   final supabase = Supabase.instance.client;
-
-  // Store the last known email verification status
   bool? lastKnownEmailVerified;
+  bool _isRedirecting = false; // Prevent multiple redirects
 
   supabase.auth.onAuthStateChange.listen((data) {
     final event = data.event;
     final session = data.session;
 
-    if (kDebugMode) {
-      print('🔐 Auth State Change: $event');
-    }
+    if (kDebugMode) print('🔐 Auth State Change: $event');
 
-    // Handle sign in event
     if (event == AuthChangeEvent.signedIn && session != null) {
       final user = session.user;
       final isEmailVerified = user.emailConfirmedAt != null;
 
       print('🎉 User signed in: ${user.email}');
-      print(
-        isEmailVerified
-            ? '📧 Email already verified'
-            : '⚠️ Email not verified yet',
-      );
-
-      // Store the current verification status
       lastKnownEmailVerified = isEmailVerified;
 
-      // If email is verified, navigate to home
-      if (isEmailVerified) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (isEmailVerified && !_isRedirecting) {
+        _isRedirecting = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) async {
           try {
-            if (navigatorKey.currentContext != null) {
-              print('📍 Navigating to /home (email verified on sign in)');
-              router.go('/');
+            // Check if user has any profile (any role)
+            final profiles = await supabase
+                .from('profiles')
+                .select('role_id')
+                .eq('id', user.id)
+                .limit(1);
+
+            if (profiles.isEmpty) {
+              print('📍 First time login - redirecting to /reg');
+              _navigateTo('/reg', extra: user);
+            } else {
+              print('📍 Existing user with profile(s) - checking roles');
+
+              // Get user's roles
+              final userRoles = await supabase
+                  .from('profiles')
+                  .select('roles!inner(name)')
+                  .eq('id', user.id)
+                  .eq('is_active', true);
+
+              if (userRoles.isNotEmpty) {
+                // Navigate based on primary/most recent role
+                await _navigateBasedOnRoles(userRoles, user);
+              } else {
+                // No active roles, go to registration
+                _navigateTo('/reg', extra: user);
+              }
             }
           } catch (e) {
-            print('❌ Navigation error: $e');
+            print('❌ Error checking profile: $e');
+            _navigateTo('/reg', extra: user);
+          } finally {
+            _isRedirecting = false;
           }
         });
       }
     }
 
-    // Handle user updated event - check for email verification
     if (event == AuthChangeEvent.userUpdated && session != null) {
       final user = session.user;
       final isEmailVerified = user.emailConfirmedAt != null;
 
-      print('📝 User updated - Email confirmed at: ${user.emailConfirmedAt}');
-
-      // Check if email was just verified (previously not verified, now verified)
-      if (!(lastKnownEmailVerified ?? false) && isEmailVerified) {
+      if (!(lastKnownEmailVerified ?? false) &&
+          isEmailVerified &&
+          !_isRedirecting) {
         print('✅ Email just verified!');
+        _isRedirecting = true;
 
-        WidgetsBinding.instance.addPostFrameCallback((_) {
+        WidgetsBinding.instance.addPostFrameCallback((_) async {
           try {
-            if (navigatorKey.currentContext != null) {
-              print('📍 Navigating to /home after email verification');
-              router.go('/');
+            final profiles = await supabase
+                .from('profiles')
+                .select('role_id')
+                .eq('id', user.id)
+                .limit(1);
+
+            if (profiles.isEmpty) {
+              _navigateTo('/reg', extra: user);
+            } else {
+              final userRoles = await supabase
+                  .from('profiles')
+                  .select('roles!inner(name)')
+                  .eq('id', user.id)
+                  .eq('is_active', true);
+
+              if (userRoles.isNotEmpty) {
+                await _navigateBasedOnRoles(userRoles, user);
+              } else {
+                _navigateTo('/reg', extra: user);
+              }
             }
           } catch (e) {
-            print('❌ Navigation error: $e');
+            print('❌ Error: $e');
+            _navigateTo('/reg', extra: user);
+          } finally {
+            _isRedirecting = false;
           }
         });
       }
-
-      // Update the last known status
       lastKnownEmailVerified = isEmailVerified;
     }
 
-    // Handle password recovery
     if (event == AuthChangeEvent.passwordRecovery) {
-      print('✅ Password recovery detected!');
-
-      // Navigate to password reset form
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        try {
-          if (navigatorKey.currentContext != null) {
-            print('📍 Navigating to /reset-password-form');
-            router.go('/reset-password-form');
-          }
-        } catch (e) {
-          print('❌ Navigation error: $e');
-        }
+        _navigateTo('/reset-password-form');
       });
     }
 
-    // Handle sign out
     if (event == AuthChangeEvent.signedOut) {
       print('👋 User signed out');
       lastKnownEmailVerified = null;
-    }
-
-    // Debug other events
-    if (kDebugMode) {
-      switch (event) {
-        case AuthChangeEvent.tokenRefreshed:
-          print('🔄 Token refreshed');
-          break;
-        case AuthChangeEvent.mfaChallengeVerified:
-          print('🔒 MFA challenge verified');
-          break;
-        default:
-          break;
-      }
+      _isRedirecting = false;
     }
   });
 
-  // Initial check when the listener is set up
+  // Check current user on app start
   final currentUser = supabase.auth.currentUser;
-  if (currentUser != null) {
+  if (currentUser != null && !_isRedirecting) {
     lastKnownEmailVerified = currentUser.emailConfirmedAt != null;
-    print('📱 Initial check - Email verified: $lastKnownEmailVerified');
-
-    // If already verified, navigate to home
     if (lastKnownEmailVerified == true) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (navigatorKey.currentContext != null) {
-          print('📍 Initial navigation to /home');
-          router.go('/');
+      _isRedirecting = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        try {
+          final profiles = await supabase
+              .from('profiles')
+              .select('role_id')
+              .eq('id', currentUser.id)
+              .limit(1);
+
+          if (profiles.isNotEmpty) {
+            final userRoles = await supabase
+                .from('profiles')
+                .select('roles!inner(name)')
+                .eq('id', currentUser.id)
+                .eq('is_active', true);
+
+            if (userRoles.isNotEmpty) {
+              await _navigateBasedOnRoles(userRoles, currentUser);
+            } else {
+              _navigateTo('/reg', extra: currentUser);
+            }
+          } else {
+            _navigateTo('/reg', extra: currentUser);
+          }
+        } catch (e) {
+          print('❌ Error checking profile on start: $e');
+          _navigateTo('/reg', extra: currentUser);
+        } finally {
+          _isRedirecting = false;
         }
       });
     }
   }
 }
 
+// Helper method for navigation
+void _navigateTo(String location, {Object? extra}) {
+  if (router.canPop()) {
+    router.go(location, extra: extra);
+  } else {
+    router.pushReplacement(location, extra: extra);
+  }
+}
+
+// New helper method to navigate based on user roles
+Future<void> _navigateBasedOnRoles(List<dynamic> userRoles, User user) async {
+  // Extract role names
+  final roleNames = userRoles
+      .map((p) => p['roles']?['name'] as String?)
+      .where((name) => name != null)
+      .cast<String>()
+      .toList();
+
+  print('📋 User roles: $roleNames');
+
+  if (roleNames.isEmpty) {
+    _navigateTo('/reg', extra: user);
+    return;
+  }
+
+  // Priority based navigation
+  if (roleNames.contains('owner')) {
+    print('👑 Redirecting to owner dashboard');
+    _navigateTo('/owner', extra: user);
+  } else if (roleNames.contains('employee')) {
+    print('💇 Redirecting to employee dashboard');
+    _navigateTo('/employee', extra: user);
+  } else if (roleNames.contains('customer')) {
+    print('👤 Redirecting to customer home');
+    _navigateTo('/customer', extra: user);
+  } else {
+    // Unknown role, go to role selection
+    print('❓ Unknown role, redirecting to registration');
+    _navigateTo('/reg', extra: user);
+  }
+}
+
 // ====================
-// SIMPLIFIED ROUTER CONFIGURATION
+// PLATFORM CONFIG
+// ====================
+Future<void> _setupPlatformSpecificConfig() async {
+  if (kIsWeb) {
+    print('🌐 Configuring for Web');
+    final uri = Uri.base;
+    if (uri.toString().contains('/auth/callback')) {
+      print('   🔥 Web auth callback detected');
+    }
+  } else {
+    print('📱 Configuring for Mobile');
+    await _setupMobileDeepLinks();
+  }
+}
+
+Future<void> _setupMobileDeepLinks() async {
+  try {
+    final uri = Uri.base;
+    if (uri.toString().isNotEmpty && uri.toString() != '/') {
+      if (uri.toString().contains('myapp://') ||
+          uri.toString().contains('/auth/callback')) {
+        print('   📱 Mobile deep link detected!');
+        pendingDeepLink = uri.toString();
+      }
+    }
+  } catch (e) {
+    print('   ❌ Mobile deep link error: $e');
+  }
+}
+
+// ====================
+// ROUTER - FIXED VERSION
 // ====================
 GoRouter _createRouter() {
-  String initialLocation = '/';
-  final uri = Uri.base;
-
-  print('📍 Router creation - Initial URI: ${uri.toString()}');
-
-  // Check for auth callback in URL
-  if (uri.toString().contains('/auth/callback')) {
-    initialLocation = '/auth/callback';
-    print('   🎯 Setting initial location to /auth/callback');
-  }
-
-  // Check for pending mobile deep link
-  if (pendingDeepLink != null && pendingDeepLink!.contains('/auth/callback')) {
-    initialLocation = '/auth/callback';
-    print('   📱 Using mobile deep link as initial location');
-  }
   return GoRouter(
     navigatorKey: navigatorKey,
     refreshListenable: appState,
-    // initialLocation: '/',
-    initialLocation: initialLocation, // 🔥 Use actual URL path
+    initialLocation: '/',
     debugLogDiagnostics: kDebugMode,
     observers: [if (kDebugMode) MyRouteObserver()],
     redirect: (context, state) async {
       final path = state.matchedLocation;
-      final uriString = state.uri.toString();
       final queryParams = state.uri.queryParameters;
 
-      print('🔄 REDIRECT CHECK: $path');
-      print('   Full URL: $uriString');
-      print('   Query params: $queryParams');
-
-      // 🔥🔥🔥 MOST CRITICAL FIX: NEVER redirect auth callbacks
+      // 🔥 NEVER redirect auth callbacks
       if (path == '/auth/callback' ||
-          uriString.contains('/auth/callback') ||
           queryParams.containsKey('code') ||
-          queryParams.containsKey('error') ||
           queryParams.containsKey('access_token')) {
-        print('   ✅ AUTH CALLBACK - SKIPPING ALL REDIRECTS');
-        return null; // NO REDIRECT FOR AUTH CALLBACKS
-      }
-
-      // If app is still loading, wait
-      if (appState.loading) {
-        print('   ⏳ App loading, staying put');
         return null;
       }
 
-      // Rest of your existing redirect logic...
-      // But auth callbacks will never reach here
+      if (appState.loading) return null;
 
-      // Public routes that should always be accessible
       final publicRoutes = [
         '/',
         '/login',
         '/signup',
-        '/finish',
-        '/help',
-        '/about',
-        '/contact',
-        '/data-consent',
         '/continue',
         '/verify-email',
         '/verify-invalid',
         '/privacy',
         '/terms',
-        '/clear-data',
         '/reset-password',
-        '/reset-password-confirm',
         '/reset-password-form',
-        '/auth/callback', // ✅ Important for password reset/email verification
+        '/reset-password-confirm',
+        '/auth/callback',
+        '/help',
+        '/about',
+        '/contact',
+        '/data-consent',
       ];
 
-      // Always allow public routes regardless of auth state
-      if (publicRoutes.contains(path)) {
-        // Splash screen logic
-        if (path == '/') {
-          if (appState.loading) return null;
+      // 🔥 SPECIAL HANDLING FOR /reg - REMOVED FROM PUBLIC ROUTES
+      if (path == '/reg') {
+        final user = state.extra as User?;
+        if (user == null) {
+          print('⚠️ /reg accessed without user → redirecting to /login');
+          return '/login';
+        }
+        return null; // Allow /reg with user
+      }
 
+      if (publicRoutes.contains(path)) {
+        if (path == '/') {
           if (appState.loggedIn) {
             if (!appState.emailVerified) return '/verify-email';
-            if (!appState.profileCompleted) return '/reg';
+            if (!appState.profileCompleted) {
+              // 🔥 Get current user
+              final user = Supabase.instance.client.auth.currentUser;
+              if (user != null) {
+                return '/reg?user=${user.id}'; // Pass user ID via query
+              }
+              return '/reg';
+            }
 
-            print('✅ Profile completed: ${appState.profileCompleted}');
             switch (appState.role) {
-              case 'business':
+              case 'owner':
                 return '/owner';
               case 'employee':
                 return '/employee';
@@ -526,91 +467,58 @@ GoRouter _createRouter() {
                 return '/customer';
             }
           } else {
-            // Check if should show continue screen
-            final shouldShowContinue =
-                await SessionManager.shouldShowContinueScreen();
             final hasProfile = await SessionManager.hasProfile();
-
-            if (shouldShowContinue && hasProfile) {
+            if (hasProfile) {
               return '/continue';
             }
             return '/login';
           }
         }
-
-        // Other public routes don't need redirection
         return null;
       }
 
-      if (appState.loading) return '/';
-
-      // Continue screen logic - only for logged out users with profiles
       if (!appState.loggedIn) {
-        final shouldShowContinue =
-            await SessionManager.shouldShowContinueScreen();
         final hasProfile = await SessionManager.hasProfile();
-
-        if (shouldShowContinue && hasProfile && path != '/continue') {
+        if (hasProfile && path != '/continue') {
           return '/continue';
         }
-
-        // If not logged in and trying to access protected route, go to login
-        if (!publicRoutes.contains(path)) {
-          return '/login';
-        }
+        return '/login';
       }
 
-      // Authentication logic for logged in users
       if (appState.loggedIn) {
-        // Email verification check
         if (!appState.emailVerified && path != '/verify-email') {
           return '/verify-email';
         }
-
-        // Profile completion check
         if (!appState.profileCompleted && path != '/reg') {
           return '/reg';
         }
-
-        // Role-based routing
-        if (appState.profileCompleted) {
-          switch (appState.role) {
-            case 'business':
-              return path == '/owner' ? null : '/owner';
-            case 'employee':
-              return path == '/employee' ? null : '/employee';
-            default:
-              return path == '/customer' ? null : '/customer';
-          }
-        }
       }
 
-      // Default - allow access
       return null;
     },
     routes: [
       GoRoute(path: '/', builder: (_, __) => const SplashScreen()),
-
-      // Login route
       GoRoute(
         path: '/login',
-        name: 'login',
         builder: (context, state) {
           final extra = state.extra as Map<String, dynamic>?;
-          final prefilledEmail = extra?['prefilledEmail'] as String?;
-          final showMessage = extra?['showMessage'] as bool? ?? false;
-          final message = extra?['message'] as String?;
-
           return SignInScreen(
-            prefilledEmail: prefilledEmail,
-            showMessage: showMessage,
-            message: message,
+            prefilledEmail: extra?['prefilledEmail'] as String?,
+            showMessage: extra?['showMessage'] as bool? ?? false,
+            message: extra?['message'] as String?,
           );
         },
       ),
-
       GoRoute(path: '/signup', builder: (_, __) => const SignupFlow()),
-      GoRoute(path: '/reg', builder: (_, __) => const RegistrationFlow()),
+      GoRoute(
+        path: '/reg',
+        builder: (context, state) {
+          // AppState එකෙන් user ගන්න
+          final user = appState.currentUser;
+          print('📱 RegistrationFlow with user from AppState: ${user?.email}');
+          return RegistrationFlow(user: user);
+        },
+      ),
       GoRoute(
         path: '/verify-email',
         builder: (_, __) => const EmailVerifyChecker(),
@@ -620,16 +528,11 @@ GoRouter _createRouter() {
         builder: (_, __) => const VerifyInvalidScreen(),
       ),
       GoRoute(path: '/continue', builder: (_, __) => const ContinueScreen()),
-
-      // Home screens
       GoRoute(path: '/customer', builder: (_, __) => const CustomerHome()),
       GoRoute(path: '/employee', builder: (_, __) => const EmployeeDashboard()),
       GoRoute(path: '/owner', builder: (_, __) => const OwnerDashboard()),
-
-      // Policy screens
       GoRoute(
         path: '/privacy',
-        name: 'privacy',
         builder: (context, state) {
           final extra = state.extra as Map<String, dynamic>?;
           return PolicyScreen(isPrivacyPolicy: true, extraData: extra);
@@ -637,67 +540,38 @@ GoRouter _createRouter() {
       ),
       GoRoute(
         path: '/terms',
-        name: 'terms',
         builder: (context, state) {
           final extra = state.extra as Map<String, dynamic>?;
           return PolicyScreen(isPrivacyPolicy: false, extraData: extra);
         },
       ),
-
-      // GoRoute(
-      //   path: '/help',
-      //   name: 'help',
-      //   builder: (context, state) => const HelpScreen(),
-      // ),
       GoRoute(
         path: '/help',
-        builder: (context, state) => const HelpScreen(screenType: 'help'),
+        builder: (_, __) => const HelpScreen(screenType: 'help'),
       ),
       GoRoute(
         path: '/contact',
-        builder: (context, state) => const HelpScreen(screenType: 'contact'),
+        builder: (_, __) => const HelpScreen(screenType: 'contact'),
       ),
       GoRoute(
         path: '/about',
-        builder: (context, state) => const HelpScreen(screenType: 'about'),
+        builder: (_, __) => const HelpScreen(screenType: 'about'),
       ),
-      GoRoute(
-        path: '/contact',
-        builder: (context, state) => const HelpScreen(screenType: 'contact'),
-      ),
-      GoRoute(
-        path: '/about',
-        builder: (context, state) => const HelpScreen(screenType: 'about'),
-      ),
-
-      // Data management
-      GoRoute(
-        path: '/clear-data',
-        builder: (context, state) => const ClearDataScreen(),
-      ),
+      GoRoute(path: '/clear-data', builder: (_, __) => const ClearDataScreen()),
       GoRoute(
         path: '/data-consent',
-        name: 'data-consent',
         builder: (context, state) {
           final extra = state.extra as Map<String, dynamic>?;
-          final email = extra?['email'] as String? ?? '';
-          final password = extra?['password'] as String? ?? '';
-          final source = extra?['source'] as String?;
-
           return DataConsentScreen(
-            email: email,
-            password: password,
-            source: source,
+            email: extra?['email'] as String? ?? '',
+            password: extra?['password'] as String? ?? '',
+            source: extra?['source'] as String?,
           );
         },
       ),
-
-      // ✅ AUTH CALLBACK HANDLER - MOST IMPORTANT FOR PASSWORD RESET & OAuth
       GoRoute(
         path: '/auth/callback',
-        name: 'auth-callback',
         pageBuilder: (context, state) {
-          // PageBuilder භාවිතා කරන්න transitions සඳහා
           return MaterialPage(
             key: state.pageKey,
             child: AuthCallbackHandlerScreen(
@@ -709,63 +583,27 @@ GoRouter _createRouter() {
           );
         },
       ),
-
-      // ✅ PASSWORD RESET FLOW ROUTES
       GoRoute(
         path: '/reset-password',
-        name: 'reset-password',
         builder: (_, __) => const ResetPasswordRequestScreen(),
       ),
-
       GoRoute(
         path: '/reset-password-form',
-        name: 'reset-password-form',
         builder: (_, __) => const ResetPasswordFormScreen(),
       ),
-
       GoRoute(
         path: '/reset-password-confirm',
-        name: 'reset-password-confirm',
-        pageBuilder: (context, state) {
+        builder: (context, state) {
           final extra = state.extra as Map<String, dynamic>?;
-          final email = extra?['email'] ?? '';
-          return MaterialPage(
-            key: state.pageKey,
-            child: ResetPasswordConfirmScreen(email: email),
-          );
+          return ResetPasswordConfirmScreen(email: extra?['email'] ?? '');
         },
       ),
     ],
-    errorBuilder: (context, state) => Scaffold(
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.error_outline, size: 64, color: Colors.red),
-            const SizedBox(height: 20),
-            const Text(
-              'Page Not Found',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              'Route: ${state.uri.toString()}',
-              style: const TextStyle(color: Colors.grey),
-            ),
-            const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: () => context.go('/'),
-              child: const Text('Go Home'),
-            ),
-          ],
-        ),
-      ),
-    ),
   );
 }
 
 // ====================
-// MAIN APP WIDGET
+// MAIN APP
 // ====================
 class MyApp extends StatefulWidget {
   const MyApp({super.key});
@@ -788,9 +626,7 @@ class _MyAppState extends State<MyApp> {
   void _initNetworkMonitoring() {
     _networkService = NetworkService();
     _networkSub = _networkService.onStatusChange.listen((online) {
-      if (mounted) {
-        setState(() => _offline = !online);
-      }
+      if (mounted) setState(() => _offline = !online);
     });
   }
 
@@ -806,26 +642,14 @@ class _MyAppState extends State<MyApp> {
     return MaterialApp.router(
       routerConfig: router,
       scaffoldMessengerKey: messengerKey,
-      debugShowCheckedModeBanner: kDebugMode && environment.debugMode,
-      theme: environment.enableDarkMode ? ThemeData.dark() : ThemeData.light(),
+      debugShowCheckedModeBanner: false,
       builder: (context, child) {
         return Stack(
           children: [
-            // Main content
             AbsorbPointer(
               absorbing: _offline,
-              child: ColorFiltered(
-                colorFilter: _offline
-                    ? const ColorFilter.mode(Colors.grey, BlendMode.saturation)
-                    : const ColorFilter.mode(
-                        Colors.transparent,
-                        BlendMode.multiply,
-                      ),
-                child: child ?? const SizedBox(),
-              ),
+              child: child ?? const SizedBox(),
             ),
-
-            // Network status banner
             if (_offline)
               Positioned(
                 bottom: 0,
@@ -841,11 +665,10 @@ class _MyAppState extends State<MyApp> {
 }
 
 // ====================
-// ERROR APP (FALLBACK)
+// ERROR APP
 // ====================
 class _ErrorApp extends StatelessWidget {
   final String error;
-
   const _ErrorApp({required this.error});
 
   @override
@@ -854,7 +677,7 @@ class _ErrorApp extends StatelessWidget {
       home: Scaffold(
         body: Center(
           child: Padding(
-            padding: const EdgeInsets.all(20.0),
+            padding: const EdgeInsets.all(20),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -868,17 +691,11 @@ class _ErrorApp extends StatelessWidget {
                 Text(
                   error,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.grey, fontSize: 14),
+                  style: const TextStyle(color: Colors.grey),
                 ),
                 const SizedBox(height: 30),
                 ElevatedButton(
                   onPressed: () => main(),
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 30,
-                      vertical: 15,
-                    ),
-                  ),
                   child: const Text('Restart App'),
                 ),
               ],
@@ -896,29 +713,11 @@ class _ErrorApp extends StatelessWidget {
 class MyRouteObserver extends NavigatorObserver {
   @override
   void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
-    if (kDebugMode) {
-      debugPrint('🚀 Pushed route: ${_getRouteName(route)}');
-    }
+    if (kDebugMode) debugPrint('🚀 Pushed: ${route.settings.name}');
   }
 
   @override
   void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
-    if (kDebugMode) {
-      debugPrint('🔙 Popped route: ${_getRouteName(route)}');
-    }
-  }
-
-  @override
-  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
-    if (kDebugMode) {
-      debugPrint(
-        '🔄 Replaced route: ${_getRouteName(oldRoute)} -> ${_getRouteName(newRoute)}',
-      );
-    }
-  }
-
-  String _getRouteName(Route<dynamic>? route) {
-    if (route == null) return 'null';
-    return route.settings.name ?? route.runtimeType.toString();
+    if (kDebugMode) debugPrint('🔙 Popped: ${route.settings.name}');
   }
 }

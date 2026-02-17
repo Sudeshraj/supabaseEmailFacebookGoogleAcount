@@ -272,7 +272,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                                       accentColor: const Color(
                                         0xFF43A047,
                                       ), // green
-                                      onTap: () => widget.onNext('customer'),
+                                      onTap: () => widget.onNext('employee'),
                                     ),
                                   ),
                                   const SizedBox(width: 12),
@@ -283,7 +283,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                                       accentColor: const Color(
                                         0xFF1E88E5,
                                       ), // blue
-                                      onTap: () => widget.onNext('business'),
+                                      onTap: () => widget.onNext('owner'),
                                     ),
                                   ),
                                 ],
@@ -311,7 +311,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                           SizedBox(
                             width: double.infinity,
                             child: OutlinedButton(
-                              onPressed: () => widget.onNext('customer'),
+                              onPressed: () => widget.onNext('employee'),
                               style: OutlinedButton.styleFrom(
                                 backgroundColor: const Color(
                                   0xFF43A047,
@@ -339,7 +339,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                           SizedBox(
                             width: double.infinity,
                             child: OutlinedButton(
-                              onPressed: () => widget.onNext('business'),
+                              onPressed: () => widget.onNext('owner'),
                               style: OutlinedButton.styleFrom(
                                 backgroundColor: const Color(
                                   0xFF1E88E5,

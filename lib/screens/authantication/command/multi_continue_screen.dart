@@ -505,54 +505,55 @@ class _ContinueScreenState extends State<ContinueScreen> {
   }
 
   // Process successful login
-  Future<void> _processSuccessfulLogin(String email) async {
-    try {
-      final user = supabase.auth.currentUser;
-      if (user == null) return;
+Future<void> _processSuccessfulLogin(String email) async {
+  try {
+    final user = supabase.auth.currentUser;
+    if (user == null) return;
 
-      final dbProfile = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', user.id)
-          .maybeSingle();
+    final dbProfile = await supabase
+        .from('profiles')
+        .select('*, roles!inner(*)')  // Join with roles table
+        .eq('id', user.id)
+        .maybeSingle();
 
-      if (dbProfile == null) {
-        if (!mounted) return;
-        context.go('/reg');
-        return;
-      }
-
-      final role = AuthGate.pickRole(dbProfile['role'] ?? dbProfile['roles']);
-
-      await SessionManager.saveUserRole(role);
-      await SessionManager.updateLastLogin(email);
-
-      appState.refreshState();
-
+    if (dbProfile == null) {
       if (!mounted) return;
-
-      switch (role) {
-        case 'business':
-          context.go('/owner');
-          break;
-        case 'employee':
-          context.go('/employee');
-          break;
-        default:
-          context.go('/customer');
-      }
-    } catch (e) {
-      debugPrint('Error processing successful login: $e');
-      if (!mounted) return;
-
-      await showCustomAlert(
-        context: context,
-        title: "Error",
-        message: "Unable to complete login. Please try again.",
-        isError: true,
-      );
+      context.go('/reg');
+      return;
     }
+
+    // Pass the role data to pickRole
+    final role = await AuthGate.pickRole(dbProfile['role_id']);
+
+    await SessionManager.saveUserRole(role);
+    await SessionManager.updateLastLogin(email);
+
+    appState.refreshState();
+
+    if (!mounted) return;
+
+    switch (role) {
+      case 'business':
+        context.go('/owner');
+        break;
+      case 'employee':
+        context.go('/employee');
+        break;
+      default:
+        context.go('/customer');
+    }
+  } catch (e) {
+    debugPrint('Error processing successful login: $e');
+    if (!mounted) return;
+
+    await showCustomAlert(
+      context: context,
+      title: "Error",
+      message: "Unable to complete login. Please try again.",
+      isError: true,
+    );
   }
+}
 
   // Redirect URL for OAuth
   String _getRedirectUrl() {
