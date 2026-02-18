@@ -505,55 +505,55 @@ class _ContinueScreenState extends State<ContinueScreen> {
   }
 
   // Process successful login
-Future<void> _processSuccessfulLogin(String email) async {
-  try {
-    final user = supabase.auth.currentUser;
-    if (user == null) return;
+  Future<void> _processSuccessfulLogin(String email) async {
+    try {
+      final user = supabase.auth.currentUser;
+      if (user == null) return;
 
-    final dbProfile = await supabase
-        .from('profiles')
-        .select('*, roles!inner(*)')  // Join with roles table
-        .eq('id', user.id)
-        .maybeSingle();
+      final dbProfile = await supabase
+          .from('profiles')
+          .select('*, roles!inner(*)') // Join with roles table
+          .eq('id', user.id)
+          .maybeSingle();
 
-    if (dbProfile == null) {
+      if (dbProfile == null) {
+        if (!mounted) return;
+        context.go('/reg');
+        return;
+      }
+
+      // Pass the role data to pickRole
+      final role = await AuthGate.pickRole(dbProfile['role_id']);
+
+      await SessionManager.saveUserRole(role);
+      await SessionManager.updateLastLogin(email);
+
+      appState.refreshState();
+
       if (!mounted) return;
-      context.go('/reg');
-      return;
+
+      switch (role) {
+        case 'business':
+          context.go('/owner');
+          break;
+        case 'employee':
+          context.go('/employee');
+          break;
+        default:
+          context.go('/customer');
+      }
+    } catch (e) {
+      debugPrint('Error processing successful login: $e');
+      if (!mounted) return;
+
+      await showCustomAlert(
+        context: context,
+        title: "Error",
+        message: "Unable to complete login. Please try again.",
+        isError: true,
+      );
     }
-
-    // Pass the role data to pickRole
-    final role = await AuthGate.pickRole(dbProfile['role_id']);
-
-    await SessionManager.saveUserRole(role);
-    await SessionManager.updateLastLogin(email);
-
-    appState.refreshState();
-
-    if (!mounted) return;
-
-    switch (role) {
-      case 'business':
-        context.go('/owner');
-        break;
-      case 'employee':
-        context.go('/employee');
-        break;
-      default:
-        context.go('/customer');
-    }
-  } catch (e) {
-    debugPrint('Error processing successful login: $e');
-    if (!mounted) return;
-
-    await showCustomAlert(
-      context: context,
-      title: "Error",
-      message: "Unable to complete login. Please try again.",
-      isError: true,
-    );
   }
-}
 
   // Redirect URL for OAuth
   String _getRedirectUrl() {
@@ -1225,6 +1225,7 @@ Future<void> _processSuccessfulLogin(String email) async {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // Row for name and loading indicator
                     Row(
                       children: [
                         Expanded(
@@ -1263,6 +1264,7 @@ Future<void> _processSuccessfulLogin(String email) async {
 
                     const SizedBox(height: 6),
 
+                    // Email
                     Text(
                       email,
                       style: TextStyle(
@@ -1274,38 +1276,36 @@ Future<void> _processSuccessfulLogin(String email) async {
 
                     const SizedBox(height: 8),
 
-                    // Provider type and last login
+                    // Provider type, last login and role in the same row
                     Row(
                       children: [
-                        // Provider type badge
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: isLoading
-                                ? Colors.blueAccent.withValues(alpha: 0.2)
-                                : _getProviderColor(
-                                    provider,
-                                  ).withValues(alpha: 0.2),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Text(
-                            provider == 'email'
-                                ? 'EMAIL'
-                                : provider.toUpperCase(),
-                            style: TextStyle(
-                              color: isLoading
-                                  ? Colors.blueAccent
-                                  : _getProviderColor(provider),
-                              fontSize: 11,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
-
-                        const SizedBox(width: 10),
+                        // Provider type badge - Commented out
+                        // Container(
+                        //   padding: const EdgeInsets.symmetric(
+                        //     horizontal: 10,
+                        //     vertical: 4,
+                        //   ),
+                        //   decoration: BoxDecoration(
+                        //     color: isLoading
+                        //         ? Colors.blueAccent.withValues(alpha: 0.2)
+                        //         : _getProviderColor(
+                        //             provider,
+                        //           ).withValues(alpha: 0.2),
+                        //     borderRadius: BorderRadius.circular(12),
+                        //   ),
+                        //   child: Text(
+                        //     provider == 'email'
+                        //         ? 'EMAIL'
+                        //         : provider.toUpperCase(),
+                        //     style: TextStyle(
+                        //       color: isLoading
+                        //           ? Colors.blueAccent
+                        //           : _getProviderColor(provider),
+                        //       fontSize: 11,
+                        //       fontWeight: FontWeight.w500,
+                        //     ),
+                        //   ),
+                        // ),
 
                         // Last login time
                         if (profile['lastLogin'] != null && !isLoading)
@@ -1316,35 +1316,41 @@ Future<void> _processSuccessfulLogin(String email) async {
                               fontSize: 12,
                             ),
                           ),
+
+                        // Role indicator - moved to same row as last login
+                        if (profile['roles'] != null &&
+                            (profile['roles'] as List).isNotEmpty &&
+                            !_selectionMode &&
+                            !isLoading)
+                          Row(
+                            children: [
+                              const SizedBox(
+                                width: 10,
+                              ), // Space between last login and role
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 4,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.green.withValues(alpha: 0.2),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  (profile['roles'] as List).first
+                                      .toString()
+                                      .toUpperCase(),
+                                  style: const TextStyle(
+                                    color: Colors.greenAccent,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
                       ],
                     ),
-
-                    // Role indicator
-                    if (profile['roles'] != null &&
-                        (profile['roles'] as List).isNotEmpty &&
-                        !_selectionMode &&
-                        !isLoading)
-                      Container(
-                        margin: const EdgeInsets.only(top: 8),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.green.withValues(alpha: 0.2),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          (profile['roles'] as List).first
-                              .toString()
-                              .toUpperCase(),
-                          style: const TextStyle(
-                            color: Colors.greenAccent,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ),
                   ],
                 ),
               ),
