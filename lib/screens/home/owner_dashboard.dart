@@ -1,12 +1,14 @@
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_application_1/screens/authantication/command/multi_continue_screen.dart';
+import 'package:flutter_application_1/alertBox/show_logout_conf.dart';
+import 'package:flutter_application_1/main.dart';
 import 'package:flutter_application_1/services/notification_service.dart';
 import 'package:flutter_application_1/services/permission_service.dart';
 import 'package:flutter_application_1/services/permission_manager.dart';
+import 'package:flutter_application_1/services/session_manager.dart';
 import 'package:flutter_application_1/widgets/permission_card.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:go_router/go_router.dart';
 
 class OwnerDashboard extends StatefulWidget {
   const OwnerDashboard({super.key});
@@ -19,11 +21,11 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
   final NotificationService _notificationService = NotificationService();
   final PermissionService _permissionService = PermissionService();
   final PermissionManager _permissionManager = PermissionManager();
-  
+
   bool _hasPermission = false;
   bool _showPermissionCard = false;
   bool _isLoading = true;
-  
+
   // Sample booking data
   int _pendingBookings = 3;
   int _todayAppointments = 8;
@@ -32,40 +34,42 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
   @override
   void initState() {
     super.initState();
-    
+
     // Small delay to ensure everything is loaded
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadData();
     });
-    
+
     _setupNotificationListeners();
   }
 
   // 🔥 Load initial data with proper error handling
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
-    
+
     try {
       print('📱 _loadData started');
-      
+
       // Check permission status
       _hasPermission = await _notificationService.hasPermission();
       print('📱 hasPermission from system: $_hasPermission');
-      
+
       // Check if should show permission card
       if (!_hasPermission) {
         // IMPORTANT: Use correct screen name
-        _showPermissionCard = await _permissionManager.shouldShowPermissionCard('owner_dashboard');
+        _showPermissionCard = await _permissionManager.shouldShowPermissionCard(
+          'owner_dashboard',
+        );
         print('📱 shouldShowPermissionCard: $_showPermissionCard');
       } else {
         _showPermissionCard = false;
         print('📱 Already has permission - hiding card');
       }
-      
+
       // Get permission stats for debugging
       final stats = await _permissionManager.getPermissionStats();
       print('📊 Permission Stats: $stats');
-      
+
       if (mounted) {
         setState(() => _isLoading = false);
       }
@@ -73,7 +77,7 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
       print('❌ Error loading data: $e');
       if (mounted) {
         setState(() => _isLoading = false);
-        
+
         // Show error message
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -91,17 +95,17 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
       // Listen for new booking notifications
       FirebaseMessaging.onMessage.listen((RemoteMessage message) {
         print('📨 Received message: ${message.data}');
-        
+
         if (message.data['type'] == 'new_booking') {
           _showNewBookingAlert(message);
-          
+
           // Update pending bookings count
           setState(() {
             _pendingBookings++;
           });
         }
       });
-      
+
       print('📱 Notification listeners setup complete');
     } catch (e) {
       print('❌ Error setting up notification listeners: $e');
@@ -111,7 +115,7 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
   // 🔥 Show new booking alert
   void _showNewBookingAlert(RemoteMessage message) {
     if (!mounted) return;
-    
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -137,7 +141,8 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
             Text(message.notification?.title ?? 'New Appointment'),
             const SizedBox(height: 8),
             Text(
-              message.notification?.body ?? 'A customer has booked an appointment',
+              message.notification?.body ??
+                  'A customer has booked an appointment',
               style: TextStyle(color: Colors.grey[600]),
             ),
           ],
@@ -165,60 +170,65 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
   // 🔥 Enable notifications with proper flow
   Future<void> _enableNotifications() async {
     print('🔔 _enableNotifications called');
-    
+
     setState(() => _showPermissionCard = false);
-    
+
     try {
       // Check if we can ask for system permission
       final canAsk = await _permissionManager.canAskSystemPermission();
       print('🔍 canAskSystemPermission: $canAsk');
-      
+
       if (!canAsk) {
         // Show settings dialog
         _showSettingsDialog();
         return;
       }
-      
+
       await _permissionService.requestPermissionAtAction(
         context: context,
         action: 'owner_dashboard',
         customTitle: '🔔 Get Booking Alerts',
-        customMessage: 'Get instant notifications when customers book appointments',
+        customMessage:
+            'Get instant notifications when customers book appointments',
         onGranted: () async {
           print('✅ User granted permission');
-          
+
           // Mark as granted in PermissionManager
           await _permissionManager.markPermissionGranted();
-          
+
           setState(() {
             _hasPermission = true;
             _showPermissionCard = false;
           });
-          
+
           // Show success message
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text('✅ Notifications enabled! You\'ll get booking alerts'),
+                content: Text(
+                  '✅ Notifications enabled! You\'ll get booking alerts',
+                ),
                 backgroundColor: Colors.green,
                 duration: Duration(seconds: 3),
               ),
             );
           }
-          
+
           // Send test notification after permission granted
           _sendWelcomeNotification();
         },
         onDenied: () async {
           print('❌ User denied permission');
-          
+
           // Mark as denied
           await _permissionManager.markPermissionDenied(permanent: false);
-          
+
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text('You can enable notifications later from settings'),
+                content: Text(
+                  'You can enable notifications later from settings',
+                ),
                 backgroundColor: Colors.orange,
               ),
             );
@@ -227,13 +237,10 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
       );
     } catch (e) {
       print('❌ Error enabling notifications: $e');
-      
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: $e'),
-            backgroundColor: Colors.red,
-          ),
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
         );
       }
     }
@@ -247,7 +254,7 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
         title: const Text('🔔 Notifications Disabled'),
         content: const Text(
           'You have denied notifications multiple times. '
-          'To enable notifications, please go to your device settings.'
+          'To enable notifications, please go to your device settings.',
         ),
         actions: [
           TextButton(
@@ -276,7 +283,9 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('📨 Welcome! You\'ll now receive booking notifications'),
+            content: Text(
+              '📨 Welcome! You\'ll now receive booking notifications',
+            ),
             backgroundColor: Colors.blue,
           ),
         );
@@ -287,10 +296,10 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
   // 🔥 Handle not now
   Future<void> _handleNotNow() async {
     print('👋 User clicked Not Now');
-    
+
     setState(() => _showPermissionCard = false);
     await _permissionManager.markPermissionShown('owner_dashboard');
-    
+
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -304,7 +313,7 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
   // 🔥 View bookings
   void _viewBookings() {
     print('📅 Navigating to bookings');
-    
+
     // Navigate to bookings screen
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
@@ -312,7 +321,7 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
         duration: Duration(seconds: 1),
       ),
     );
-    
+
     // TODO: Add actual navigation
     // Navigator.push(context, MaterialPageRoute(builder: (_) => const BookingsScreen()));
   }
@@ -321,13 +330,13 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
   Future<void> _sendTestNotification() async {
     print('🔍 Sending test notification...');
     print('🔍 hasPermission: $_hasPermission');
-    
+
     if (!_hasPermission) {
       // Show permission card if not enabled
       setState(() {
         _showPermissionCard = true;
       });
-      
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Please enable notifications first'),
@@ -353,7 +362,9 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
           context: context,
           builder: (context) => AlertDialog(
             title: const Text('📨 Test Notification'),
-            content: const Text('This is how notifications will appear when customers book.'),
+            content: const Text(
+              'This is how notifications will appear when customers book.',
+            ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context),
@@ -369,9 +380,9 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
   // 🔥 Show permission stats
   Future<void> _showPermissionStats() async {
     final stats = await _permissionManager.getPermissionStats();
-    
+
     if (!mounted) return;
-    
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -381,15 +392,27 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              _buildStatRow('System Permission', stats['has_system_permission']),
-                  _buildStatRow('Stored Permission', stats['has_stored_permission']),
+              _buildStatRow(
+                'System Permission',
+                stats['has_system_permission'],
+              ),
+              _buildStatRow(
+                'Stored Permission',
+                stats['has_stored_permission'],
+              ),
               const Divider(),
               _buildStatRow('Last Screen', stats['last_screen'] ?? 'none'),
-              _buildStatRow('Last Denied', stats['last_denied']?.toString() ?? 'never'),
+              _buildStatRow(
+                'Last Denied',
+                stats['last_denied']?.toString() ?? 'never',
+              ),
               _buildStatRow('User Action', stats['user_action'] ?? 'none'),
               _buildStatRow('Permanent Deny', stats['permanent_deny']),
               const Divider(),
-              const Text('Screen Counts:', style: TextStyle(fontWeight: FontWeight.bold)),
+              const Text(
+                'Screen Counts:',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
               ...(stats['screen_counts'] as Map<String, int>).entries.map(
                 (e) => _buildStatRow(e.key, e.value),
               ),
@@ -425,16 +448,21 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
         children: [
           Expanded(
             flex: 2,
-            child: Text('$label:', style: const TextStyle(fontWeight: FontWeight.w500)),
+            child: Text(
+              '$label:',
+              style: const TextStyle(fontWeight: FontWeight.w500),
+            ),
           ),
           Expanded(
             flex: 3,
             child: Text(
               value?.toString() ?? 'null',
               style: TextStyle(
-                color: value == true ? Colors.green : 
-                       value == false ? Colors.red : 
-                       Colors.blue,
+                color: value == true
+                    ? Colors.green
+                    : value == false
+                    ? Colors.red
+                    : Colors.blue,
               ),
             ),
           ),
@@ -445,55 +473,55 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
 
   // 🔥 Logout
   Future<void> _logout(BuildContext context) async {
-    try {
-      print('🚪 Logging out...');
-      
-      // Show loading indicator
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => const Center(
-          child: CircularProgressIndicator(),
-        ),
-      );
-      
-      await Future.delayed(const Duration(milliseconds: 500));
-
-      if (!context.mounted) return;
-
-      Navigator.pop(context); // Close loading dialog
-      Navigator.pushAndRemoveUntil(
-        context,
-        MaterialPageRoute(builder: (_) => const ContinueScreen()),
-        (route) => false,
-      );
-    } catch (e) {
-      if (!context.mounted) return;
-      
-      Navigator.pop(context); // Close loading dialog if open
-      
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          backgroundColor: const Color(0xFF1E2732),
-          title: const Text(
-            'Logout Failed 😕',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-          ),
-          content: Text(
-            e.toString(),
-            style: const TextStyle(color: Colors.white70),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('OK', style: TextStyle(color: Color(0xFF1877F3))),
+    showLogoutConfirmation(
+      context,
+      onLogoutConfirmed: () async {
+        // Show loading dialog
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => const Dialog(
+            backgroundColor: Colors.transparent,
+            insetPadding: EdgeInsets.all(0),
+            child: Center(
+              child: CircularProgressIndicator(color: Colors.white),
             ),
-          ],
-        ),
-      );
-    }
+          ),
+        );
+
+        try {
+          // Call your logout function
+          await SessionManager.logoutForContinue();
+
+          // Close loading dialog
+          if (context.mounted) Navigator.pop(context);
+
+          // Navigate to login/splash screen using GoRouter
+          if (context.mounted) {
+            appState.refreshState();
+            context.go('/');
+            // OR if you have a specific route for login:
+            // context.go('/login');
+            // OR to clear all routes and start fresh:
+            // context.go('/');
+          }
+        } catch (e) {
+          // Close loading dialog
+          if (context.mounted) Navigator.pop(context);
+
+          // Show error message
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Logout failed: ${e.toString()}'),
+                backgroundColor: Colors.red,
+                duration: const Duration(seconds: 3),
+              ),
+            );
+          }
+        }
+      },
+    );
   }
 
   @override
@@ -511,7 +539,7 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
               onPressed: _showPermissionStats,
               tooltip: 'Permission Stats',
             ),
-          
+
           // 🔔 Notification bell with badge
           Stack(
             children: [
@@ -546,7 +574,7 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
                 ),
             ],
           ),
-          
+
           // Test notification button (debug only)
           if (kDebugMode)
             IconButton(
@@ -554,7 +582,7 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
               onPressed: _sendTestNotification,
               tooltip: 'Send test notification',
             ),
-          
+
           IconButton(
             onPressed: () => _logout(context),
             icon: const Icon(Icons.logout),
@@ -577,10 +605,11 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
                         onEnable: _enableNotifications,
                         onNotNow: _handleNotNow,
                         title: '🔔 Get Booking Alerts',
-                        message: 'Get instant notifications when customers book appointments',
+                        message:
+                            'Get instant notifications when customers book appointments',
                         compact: false,
                       ),
-                    
+
                     // Stats Cards
                     Padding(
                       padding: const EdgeInsets.all(16),
@@ -620,7 +649,7 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
                         ],
                       ),
                     ),
-                    
+
                     // Recent Bookings Section
                     Padding(
                       padding: const EdgeInsets.all(16),
@@ -644,16 +673,22 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
                             ],
                           ),
                           const SizedBox(height: 12),
-                          ...List.generate(3, (index) => _buildBookingTile(index)),
+                          ...List.generate(
+                            3,
+                            (index) => _buildBookingTile(index),
+                          ),
                         ],
                       ),
                     ),
-                    
+
                     // Permission status indicator
                     if (_hasPermission)
                       Container(
                         margin: const EdgeInsets.only(bottom: 16),
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
                         decoration: BoxDecoration(
                           color: Colors.green.withOpacity(0.1),
                           borderRadius: BorderRadius.circular(20),
@@ -733,13 +768,7 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
             ],
           ),
           const SizedBox(height: 8),
-          Text(
-            title,
-            style: TextStyle(
-              fontSize: 12,
-              color: Colors.grey[600],
-            ),
-          ),
+          Text(title, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
         ],
       ),
     );
@@ -752,13 +781,11 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
     final services = ['Hair Cut', 'Facial', 'Massage'];
     final status = ['Confirmed', 'Pending', 'Completed'];
     final statusColors = [Colors.green, Colors.orange, Colors.blue];
-    
+
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       elevation: 1,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: ListTile(
         leading: CircleAvatar(
           backgroundColor: const Color(0xFFFF6B8B).withOpacity(0.1),
