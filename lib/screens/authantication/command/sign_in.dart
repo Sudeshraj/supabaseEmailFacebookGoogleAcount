@@ -311,13 +311,7 @@ class _SignInScreenState extends State<SignInScreen>
     return 'com.yourcompany.mysalon.staging://auth-callback';
   }
 
-  AndroidOptions _getAndroidOptions() =>
-      const AndroidOptions(encryptedSharedPreferences: true);
 
-  IOSOptions _getIOSOptions() => const IOSOptions(
-    accessibility: KeychainAccessibility.unlocked,
-    synchronizable: true,
-  );
 
   // ✅ COMPLIANT: Save OAuth profile with user choice
 Future<void> _saveOAuthProfile({

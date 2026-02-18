@@ -563,7 +563,7 @@ class AppState extends ChangeNotifier {
             userRole = await SessionManager.getUserRole();
           } else {
             // Save the role we got from joined data
-            await SessionManager.saveUserRole(userRole!);
+            await SessionManager.saveUserRole(userRole);
           }
         }
 
