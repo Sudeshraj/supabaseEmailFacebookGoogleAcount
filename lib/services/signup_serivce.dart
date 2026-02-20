@@ -21,6 +21,98 @@ class AuthService {
   // REGISTER NEW USER
   // =========================================================================================
 
+  // Future<void> registerUser({
+  //   required BuildContext context,
+  //   required String email,
+  //   required String password,
+  //   bool rememberMe = true,
+  //   bool marketingConsent = false,
+  // }) async {
+  //   try {
+  //     // Validate inputs
+  //     if (!_isValidEmail(email)) {
+  //       _showErrorAlert(context, 'Invalid email format');
+  //       return;
+  //     }
+
+  //     if (!_isValidPassword(password)) {
+  //       _showErrorAlert(context, 'Password must be at least 6 characters');
+  //       return;
+  //     }
+
+  //     // Show loading overlay
+  //     LoadingOverlay.show(context, message: "Creating account...");
+
+  //     final now = DateTime.now().toIso8601String();
+
+  //     // ✅ FIRST: Check if user already exists BEFORE trying to register
+  //     try {
+  //       await _supabase.auth.signInWithPassword(
+  //         email: email.trim(),
+  //         password: password.trim(),
+  //       );
+
+  //       // If sign in succeeds, user exists
+  //       LoadingOverlay.hide();
+  //       await _handleExistingUser(context, email);
+  //       return;
+  //     } on AuthException catch (e) {
+  //       // Expected - user doesn't exist or wrong password
+  //       // Continue with registration
+  //       print('🔍 User check: ${e.message}');
+  //     } catch (e) {
+  //       // Other errors, continue with registration
+  //       print('🔍 User check error: $e');
+  //     }
+
+  //     // Perform registration
+  //     final response = await _supabase.auth.signUp(
+  //       email: email.trim(),
+  //       password: password.trim(),
+  //       emailRedirectTo: _getRedirectUrl(),
+  //       data: {
+  //         'created_at': now,
+  //         'email': email.trim(),
+  //         'terms_accepted_at': now,
+  //         'privacy_accepted_at': now,
+  //         'data_consent_given': true,
+  //         'marketing_consent': marketingConsent,
+  //         'marketing_consent_at': marketingConsent ? now : null,
+  //         'remember_me_enabled': rememberMe,
+  //         'app_version': '1.0.0',
+  //         'platform': 'mobile',
+  //       },
+  //     );
+
+  //     final user = response.user;
+
+  //     // ✅ BETTER check for existing user
+  //     if (user?.identities?.isEmpty ?? true) {
+  //       // User already exists in auth but might not have confirmed email
+  //       LoadingOverlay.hide();
+  //       await _handleExistingUser(context, email);
+  //       return;
+  //     }
+
+  //     // Handle successful registration
+  //     LoadingOverlay.hide();
+  //     await _handleSuccessfulRegistration(
+  //       context,
+  //       user!,
+  //       email,
+  //       rememberMe,
+  //       response.session?.refreshToken,
+  //       marketingConsent,
+  //     );
+  //   } on AuthException catch (e) {
+  //     LoadingOverlay.hide();
+  //     await _handleAuthException(context, e, 'Registration');
+  //   } catch (e, stackTrace) {
+  //     LoadingOverlay.hide();
+  //     await _handleGenericException(context, e, stackTrace, 'Registration');
+  //   }
+  // }
+
   Future<void> registerUser({
     required BuildContext context,
     required String email,
@@ -58,7 +150,6 @@ class AuthService {
         return;
       } on AuthException catch (e) {
         // Expected - user doesn't exist or wrong password
-        // Continue with registration
         print('🔍 User check: ${e.message}');
       } catch (e) {
         // Other errors, continue with registration
@@ -81,24 +172,37 @@ class AuthService {
           'remember_me_enabled': rememberMe,
           'app_version': '1.0.0',
           'platform': 'mobile',
+          'registration_complete': false, // 👈 Track if profile created
+          'role': null, // 👈 Will be set later
+          'role_id': null, // 👈 Will be set later
         },
       );
 
       final user = response.user;
 
-      // ✅ BETTER check for existing user
+      // ✅ Check if user already exists (identities empty)
       if (user?.identities?.isEmpty ?? true) {
-        // User already exists in auth but might not have confirmed email
         LoadingOverlay.hide();
         await _handleExistingUser(context, email);
         return;
       }
 
-      // Handle successful registration
+      // ✅ If user is null, throw error
+      if (user == null) {
+        throw Exception('Failed to create user');
+      }
+
+      print('✅ User created: ${user.id}');
+      print('📝 Initial metadata: ${user.userMetadata}');
+
+      // ✅ IMPORTANT: Navigate to profile creation screen
       LoadingOverlay.hide();
+
+      if (!context.mounted) return;
+
       await _handleSuccessfulRegistration(
         context,
-        user!,
+        user,
         email,
         rememberMe,
         response.session?.refreshToken,
@@ -277,20 +381,19 @@ class AuthService {
     // } else {
     //   return 'myapp://verify-email';
     // }
-     if (kIsWeb) {
-        final currentOrigin = Uri.base.origin;
-         if (currentOrigin.contains('localhost')) {
-        return'${Uri.base.origin}/auth/callback';
+    if (kIsWeb) {
+      final currentOrigin = Uri.base.origin;
+      if (currentOrigin.contains('localhost')) {
+        return '${Uri.base.origin}/auth/callback';
       } else {
-        return'https://yourdomain.com/auth/callback';
+        return 'https://yourdomain.com/auth/callback';
       }
-       
-      } else {
-        // For Flutter apps | com.example.flutter_application_1
-        // redirectUrl = 'com.example.flutter_application_1://auth/callback';
-        return'myapp://auth/callback';
-        // redirectUrl = 'io.supabase.flutterquickstart://login-callback';
-      }
+    } else {
+      // For Flutter apps | com.example.flutter_application_1
+      // redirectUrl = 'com.example.flutter_application_1://auth/callback';
+      return 'myapp://auth/callback';
+      // redirectUrl = 'io.supabase.flutterquickstart://login-callback';
+    }
   }
 
   // auth_service.dart - _handleExistingUser method

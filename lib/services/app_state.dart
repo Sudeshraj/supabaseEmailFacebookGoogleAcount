@@ -6,7 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'session_manager.dart';
 import '../router/auth_gate.dart';
 
-///  Production-ready App State Management
+/// Production-ready App State Management with Multiple Role Support
 class AppState extends ChangeNotifier {
   // ====================
   // PRIVATE PROPERTIES
@@ -17,7 +17,11 @@ class AppState extends ChangeNotifier {
   bool _profileCompleted = false;
   bool _hasLocalProfile = false;
   bool _continueSc = false;
-  String? _role;
+
+  // ✅ FIXED: Multiple roles support
+  List<String> _roles = []; // All user roles
+  String? _currentRole; // Currently selected role
+
   String? _errorMessage;
   DateTime? _lastUpdateTime;
   bool _rememberMeEnabled = false;
@@ -34,7 +38,13 @@ class AppState extends ChangeNotifier {
   bool get profileCompleted => _profileCompleted;
   bool get hasLocalProfile => _hasLocalProfile;
   bool get continueSc => _continueSc;
-  String? get role => _role;
+
+  // ✅ FIXED: Role getters
+  List<String> get roles => List.unmodifiable(_roles);
+  String? get role => _currentRole; // Keep for backward compatibility
+  String? get currentRole => _currentRole;
+  bool get hasMultipleRoles => _roles.length > 1;
+
   String? get errorMessage => _errorMessage;
   DateTime? get lastUpdateTime => _lastUpdateTime;
   bool get rememberMeEnabled => _rememberMeEnabled;
@@ -43,7 +53,7 @@ class AppState extends ChangeNotifier {
   User? get currentUser => _currentUser;
 
   // ====================
-  // PRIVATE SETTERS
+  // PRIVATE SETTERS (UPDATED)
   // ====================
   void _setLoading(bool value) {
     if (_loading != value) {
@@ -80,9 +90,18 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  void _setRole(String? value) {
-    if (_role != value) {
-      _role = value;
+  // ✅ FIXED: Set all roles
+  void _setRoles(List<String> roles) {
+    if (!listEquals(_roles, roles)) {
+      _roles = List.from(roles);
+      notifyListeners();
+    }
+  }
+
+  // ✅ FIXED: Set current role
+  void _setCurrentRole(String? role) {
+    if (_currentRole != role) {
+      _currentRole = role;
       notifyListeners();
     }
   }
@@ -138,7 +157,7 @@ class AppState extends ChangeNotifier {
     _setLoading(true);
     _setErrorMessage(null);
 
-    developer.log(' AppState: Initializing...', name: 'AppState');
+    developer.log('AppState: Initializing...', name: 'AppState');
 
     try {
       final hasProfiles = await SessionManager.hasProfile();
@@ -192,7 +211,10 @@ class AppState extends ChangeNotifier {
       _lastUpdateTime = DateTime.now();
       _setErrorMessage(null);
 
-      developer.log('AppState: Refreshed', name: 'AppState');
+      developer.log(
+        'AppState: Refreshed - Roles: $_roles, Current: $_currentRole',
+        name: 'AppState',
+      );
     } catch (e, stackTrace) {
       developer.log(
         'State refresh error: $e',
@@ -243,7 +265,8 @@ class AppState extends ChangeNotifier {
       _setLoggedIn(false);
       _setEmailVerified(false);
       _setProfileCompleted(false);
-      _setRole(null);
+      _setRoles([]); // Clear all roles
+      _setCurrentRole(null); // Clear current role
       _setCurrentEmail(null);
       _setLoginProvider(null);
 
@@ -272,11 +295,12 @@ class AppState extends ChangeNotifier {
       _setLoggedIn(false);
       _setEmailVerified(false);
       _setProfileCompleted(false);
-      _setRole(null);
+      _setRoles([]);
+      _setCurrentRole(null);
       _setCurrentEmail(null);
       _setLoginProvider(null);
 
-      developer.log(' User logged out for continue screen', name: 'AppState');
+      developer.log('User logged out for continue screen', name: 'AppState');
     } catch (e, stackTrace) {
       developer.log(
         'Logout for continue error: $e',
@@ -291,6 +315,20 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  /// ✅ FIXED: Set current role (call this after role selection)
+  Future<void> setCurrentRole(String role) async {
+    if (_roles.contains(role)) {
+      _setCurrentRole(role);
+      await SessionManager.saveCurrentRole(role);
+      developer.log('Current role set to: $role', name: 'AppState');
+    } else {
+      developer.log(
+        'Cannot set role: $role not in user roles',
+        name: 'AppState',
+      );
+    }
+  }
+
   /// 🔍 Check if user can access a route
   bool canAccessRoute(String route) {
     if (_loading) return false;
@@ -300,23 +338,38 @@ class AppState extends ChangeNotifier {
         return _loggedIn &&
             _emailVerified &&
             _profileCompleted &&
-            _role == 'business';
+            _currentRole == 'owner'; // FIXED: 'owner' not 'business'
+
       case '/employee':
         return _loggedIn &&
             _emailVerified &&
             _profileCompleted &&
-            _role == 'employee';
+            _currentRole == 'employee';
+
       case '/customer':
-        return _loggedIn && _emailVerified && _profileCompleted;
+        return _loggedIn &&
+            _emailVerified &&
+            _profileCompleted &&
+            (_currentRole == 'customer' || _currentRole == null);
+
       case '/reg':
         return _loggedIn && _emailVerified && !_profileCompleted;
+
       case '/verify-email':
         return _loggedIn && !_emailVerified;
+
+      case '/role-selector':
+        return _loggedIn &&
+            _emailVerified &&
+            _profileCompleted &&
+            _roles.length > 1; // Only show if multiple roles
+
       case '/login':
       case '/signup':
       case '/continue':
       case '/clear-data':
         return !_loggedIn;
+
       default:
         return true;
     }
@@ -333,7 +386,8 @@ class AppState extends ChangeNotifier {
       'email': user?.email,
       'id': user?.id,
       'name': user?.userMetadata?['full_name'],
-      'role': _role,
+      'roles': _roles, // All roles
+      'currentRole': _currentRole, // Current role
       'emailVerified': _emailVerified,
       'profileCompleted': _profileCompleted,
       'rememberMeEnabled': _rememberMeEnabled,
@@ -387,7 +441,7 @@ class AppState extends ChangeNotifier {
       }
 
       debugPrint(
-        '🔍 AppState: Attempting auto-login for $email (provider: $provider)',
+        'AppState: Attempting auto-login for $email (provider: $provider)',
       );
 
       if (provider != null &&
@@ -441,6 +495,7 @@ class AppState extends ChangeNotifier {
     String? refreshToken,
     DateTime? termsAcceptedAt,
     DateTime? privacyAcceptedAt,
+    List<String>? roles, // ✅ NEW: Add roles parameter
   }) async {
     try {
       await SessionManager.saveUserProfile(
@@ -456,12 +511,19 @@ class AppState extends ChangeNotifier {
         privacyAcceptedAt: privacyAcceptedAt,
       );
 
+      if (roles != null) {
+        await SessionManager.saveUserRoles(email: email, roles: roles);
+        _setRoles(roles);
+      }
+
       _setCurrentEmail(email);
       _setLoginProvider(provider ?? 'email');
 
-      debugPrint('Profile updated for $email (provider: $provider)');
+      debugPrint(
+        'Profile updated for $email (provider: $provider, roles: $roles)',
+      );
     } catch (e) {
-      debugPrint(' Error updating profile: $e');
+      debugPrint('Error updating profile: $e');
     }
   }
 
@@ -482,10 +544,12 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  // ✅ FIXED: Update user profile with multiple roles
   Future<void> _updateUserProfile() async {
     if (!_loggedIn) {
       _setProfileCompleted(false);
-      _setRole(null);
+      _setRoles([]);
+      _setCurrentRole(null);
       _setLoginProvider(null);
       return;
     }
@@ -493,20 +557,21 @@ class AppState extends ChangeNotifier {
     try {
       final supabase = Supabase.instance.client;
       final user = supabase.auth.currentUser!;
+      final email = user.email!;
 
       final provider =
           user.userMetadata?['provider']?.toString().toLowerCase() ?? 'email';
       _setLoginProvider(provider);
-      _setCurrentEmail(user.email);
+      _setCurrentEmail(email);
 
       final rememberMe = await SessionManager.isRememberMeEnabled();
-      if (user.email != null && rememberMe) {
+      if (rememberMe) {
         final session = supabase.auth.currentSession;
 
         await SessionManager.saveUserProfile(
-          email: user.email!,
+          email: email,
           userId: user.id,
-          name: user.userMetadata?['full_name'] ?? user.email!.split('@').first,
+          name: user.userMetadata?['full_name'] ?? email.split('@').first,
           photo:
               user.userMetadata?['avatar_url'] ?? user.userMetadata?['picture'],
           rememberMe: rememberMe,
@@ -516,107 +581,120 @@ class AppState extends ChangeNotifier {
         );
       }
 
-      // Get profile with role_id and join with roles table to get role name
-      final profile = await supabase
+      // ✅ Get ALL profiles for this user (multiple roles)
+      final profiles = await supabase
           .from('profiles')
           .select('''
-          id, 
-          is_blocked, 
-          is_active, 
-          role_id,
-          role:role_id (
-            name
-          )
-        ''')
-          .eq('id', user.id)
-          .maybeSingle();
+            id, 
+            is_blocked, 
+            is_active, 
+            role_id,
+            roles!inner (
+              name
+            )
+          ''')
+          .eq('id', user.id);
 
-      _setProfileCompleted(profile != null);
+      _setProfileCompleted(profiles.isNotEmpty);
 
       if (_profileCompleted) {
-        if (profile?['is_blocked'] == true) {
+        // Check if any profile is blocked/inactive
+        final hasBlocked = profiles.any((p) => p['is_blocked'] == true);
+        final hasInactive = profiles.any((p) => p['is_active'] == false);
+
+        if (hasBlocked) {
           _setErrorMessage('Account blocked');
           await logout();
           return;
         }
 
-        if (profile?['is_active'] == false) {
+        if (hasInactive) {
           _setErrorMessage('Account inactive');
           await logout();
           return;
         }
 
-        String? userRole = await SessionManager.getUserRole();
-
-        // If no role in session, get it from profile
-        if (userRole == null) {
-          // Try to get role name from joined data first
-          if (profile != null &&
-              profile['role'] != null &&
-              profile['role'] is Map) {
-            userRole = profile['role']['name']?.toString().toLowerCase();
-          }
-
-          // If still no role, use initializeUserRole which will fetch using role_id
-          if (userRole == null) {
-            await initializeUserRole(user.id);
-            userRole = await SessionManager.getUserRole();
-          } else {
-            // Save the role we got from joined data
-            await SessionManager.saveUserRole(userRole);
+        // ✅ Extract ALL role names
+        final List<String> roleNames = [];
+        for (var profile in profiles) {
+          final role = profile['roles'] as Map?;
+          if (role != null && role['name'] != null) {
+            roleNames.add(role['name'].toString());
           }
         }
 
-        _setRole(userRole);
+        // Remove duplicates (just in case)
+        final uniqueRoles = roleNames.toSet().toList();
+        _setRoles(uniqueRoles);
+
+        // ✅ Get current role from SessionManager
+        String? savedCurrentRole = await SessionManager.getCurrentRole();
+
+        // If saved role is valid, use it
+        if (savedCurrentRole != null &&
+            uniqueRoles.contains(savedCurrentRole)) {
+          _setCurrentRole(savedCurrentRole);
+        }
+        // Otherwise, use first role or default to 'customer'
+        else {
+          final defaultRole = uniqueRoles.isNotEmpty
+              ? uniqueRoles.first
+              : 'customer';
+          _setCurrentRole(defaultRole);
+          await SessionManager.saveCurrentRole(defaultRole);
+        }
 
         developer.log(
-          '✅ Profile updated: role=$userRole, provider=$provider, profileCompleted=$_profileCompleted',
+          '✅ Profile updated: roles=$uniqueRoles, current=$_currentRole, provider=$provider',
           name: 'AppState',
         );
       } else {
-        _setRole(null);
+        _setRoles([]);
+        _setCurrentRole(null);
       }
     } catch (e) {
       developer.log('Profile update error: $e', name: 'AppState');
       _setProfileCompleted(false);
-      _setRole(null);
+      _setRoles([]);
+      _setCurrentRole(null);
       _setLoginProvider(null);
     }
   }
 
   Future<void> initializeUserRole(String userId) async {
-    const defaultRole = 'customer';
-    String? userRole = await SessionManager.getUserRole();
-
     try {
       final supabase = Supabase.instance.client;
 
-      // Get the profile with role_id
-      final profile = await supabase
+      final profiles = await supabase
           .from('profiles')
-          .select('role_id')
-          .eq('id', userId)
-          .single()
-          .timeout(const Duration(seconds: 5));
+          .select('''
+            role_id,
+            roles!inner (
+              name
+            )
+          ''')
+          .eq('id', userId);
 
-      // Use the updated pickRole function (which handles UUID)
-      final role = await AuthGate.pickRole(profile['role_id']);
+      final List<String> roleNames = [];
+      for (var profile in profiles) {
+        final role = profile['roles'] as Map?;
+        if (role != null && role['name'] != null) {
+          roleNames.add(role['name'].toString());
+        }
+      }
 
-      userRole = role;
-      await SessionManager.saveUserRole(userRole);
+      _setRoles(roleNames);
 
-      debugPrint('User role initialized: $userRole');
-      _setRole(userRole);
-    } on TimeoutException {
-      debugPrint('Database timeout, using default role');
-      userRole = defaultRole;
-      await SessionManager.saveUserRole(userRole);
-      _setRole(userRole);
+      final currentRole = roleNames.isNotEmpty ? roleNames.first : 'customer';
+      _setCurrentRole(currentRole);
+
+      await SessionManager.saveCurrentRole(currentRole);
+
+      debugPrint('User roles initialized: $roleNames, current: $currentRole');
     } catch (e) {
-      debugPrint('Failed to get user role: $e');
-      userRole = defaultRole;
-      await SessionManager.saveUserRole(userRole);
-      _setRole(userRole);
+      debugPrint('Failed to get user roles: $e');
+      _setRoles([]);
+      _setCurrentRole('customer');
     }
   }
 
@@ -625,24 +703,15 @@ class AppState extends ChangeNotifier {
     try {
       final supabase = Supabase.instance.client;
 
-      // METHOD 1: Try to restore session
-      try {
-        // First, try to see if we already have a valid session
-        final currentSession = supabase.auth.currentSession;
-        if (currentSession != null) {
-          debugPrint('Already has a valid session');
-          return true;
-        }
-      } catch (e) {
-        debugPrint('No existing session: $e');
+      // Check existing session
+      final currentSession = supabase.auth.currentSession;
+      if (currentSession != null) {
+        debugPrint('Already has a valid session');
+        return true;
       }
 
-      // METHOD 2: Try to refresh the session
-      // Note: This might require the user to be recently logged in
-      // Refresh tokens have limited lifespan
+      // Try to refresh session
       try {
-        // You might need to store and use the entire session JSON
-        // This is a simplified approach
         final response = await supabase.auth.refreshSession();
 
         if (response.session != null && response.user != null) {
@@ -653,18 +722,9 @@ class AppState extends ChangeNotifier {
         debugPrint('Failed to refresh session: $e');
       }
 
-      // METHOD 3: Manual token refresh (advanced)
-      // This requires making direct API calls
-      try {
-        // This is complex and depends on your Supabase setup
-        debugPrint('Manual token refresh would be complex to implement');
-      } catch (e) {
-        debugPrint('Manual refresh failed: $e');
-      }
-
       return false;
     } catch (e) {
-      debugPrint(' Auto-login with token failed: $e');
+      debugPrint('Auto-login with token failed: $e');
       return false;
     }
   }
@@ -673,7 +733,8 @@ class AppState extends ChangeNotifier {
     _setLoggedIn(false);
     _setEmailVerified(false);
     _setProfileCompleted(false);
-    _setRole(null);
+    _setRoles([]);
+    _setCurrentRole(null);
     _setHasLocalProfile(false);
     _setRememberMeEnabled(false);
     _setLoginProvider(null);

@@ -182,10 +182,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
     }
   }
 
-  // Get provider icon with color
-
-  // Get provider icon small (for list)
-
   // Handle OAuth login with improved error handling
   Future<void> _handleOAuthLogin(Map<String, dynamic> profile) async {
     if (_selectionMode) {
@@ -292,6 +288,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
         if (data.event == AuthChangeEvent.signedIn) {
           final user = supabase.auth.currentUser;
           if (user?.email == email) {
+            await _updateUserMetadataAfterOAuth(user!);
             await _processSuccessfulLogin(email);
             completer.complete();
           }
@@ -310,6 +307,66 @@ class _ContinueScreenState extends State<ContinueScreen> {
       );
     } catch (e) {
       rethrow;
+    }
+  }
+
+  // Helper function to update metadata after OAuth
+  Future<void> _updateUserMetadataAfterOAuth(User user) async {
+    try {
+      // ✅ FIXED: Get ALL profiles with role names
+      final profiles = await supabase
+          .from('profiles')
+          .select('''
+            role_id,
+            roles!inner (
+              name
+            )
+          ''')
+          .eq('id', user.id)
+          .eq('is_active', true)
+          .eq('is_blocked', false);
+
+      if (profiles.isNotEmpty) {
+        // Extract all role names
+        final List<String> roleNames = [];
+        for (var profile in profiles) {
+          final role = profile['roles'] as Map?;
+          if (role != null && role['name'] != null) {
+            roleNames.add(role['name'].toString());
+          }
+        }
+
+        // Save to SessionManager
+        await SessionManager.saveUserRoles(
+          email: user.email!,
+          roles: roleNames,
+        );
+
+        // Get current role (first one or saved)
+        String? currentRole = await SessionManager.getCurrentRole();
+        if (currentRole == null || !roleNames.contains(currentRole)) {
+          currentRole = roleNames.isNotEmpty ? roleNames.first : 'customer';
+          await SessionManager.saveCurrentRole(currentRole);
+        }
+
+        // Update metadata
+        await supabase.auth.updateUser(
+          UserAttributes(
+            data: {
+              ...user.userMetadata ?? {},
+              'roles': roleNames,
+              'current_role': currentRole,
+              'last_login': DateTime.now().toIso8601String(),
+            },
+          ),
+        );
+
+        print(
+          '✅ OAuth user metadata updated with roles: $roleNames, current: $currentRole',
+        );
+      }
+    } catch (e) {
+      print('❌ Error updating OAuth metadata: $e');
     }
   }
 
@@ -339,6 +396,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
         if (data.event == AuthChangeEvent.signedIn) {
           final user = supabase.auth.currentUser;
           if (user?.email == email) {
+            await _updateUserMetadataAfterOAuth(user!);
             await _processSuccessfulLogin(email);
             completer.complete();
           }
@@ -386,6 +444,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
         if (data.event == AuthChangeEvent.signedIn) {
           final user = supabase.auth.currentUser;
           if (user?.email == email) {
+            await _updateUserMetadataAfterOAuth(user!);
             await _processSuccessfulLogin(email);
             completer.complete();
           }
@@ -430,6 +489,51 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
       final autoLoginSuccess = await SessionManager.tryAutoLogin(email);
       if (autoLoginSuccess) {
+        final user = supabase.auth.currentUser;
+        if (user != null) {
+          // ✅ FIXED: Get ALL profiles with role names
+          final dbProfiles = await supabase
+              .from('profiles')
+              .select('''
+                role_id,
+                roles!inner (
+                  name
+                )
+              ''')
+              .eq('id', user.id)
+              .eq('is_active', true)
+              .eq('is_blocked', false);
+
+          if (dbProfiles.isNotEmpty) {
+            final List<String> roleNames = [];
+            for (var profile in dbProfiles) {
+              final role = profile['roles'] as Map?;
+              if (role != null && role['name'] != null) {
+                roleNames.add(role['name'].toString());
+              }
+            }
+
+            await SessionManager.saveUserRoles(email: email, roles: roleNames);
+
+            String? currentRole = await SessionManager.getCurrentRole();
+            if (currentRole == null || !roleNames.contains(currentRole)) {
+              currentRole = roleNames.isNotEmpty ? roleNames.first : 'customer';
+              await SessionManager.saveCurrentRole(currentRole);
+            }
+
+            await supabase.auth.updateUser(
+              UserAttributes(
+                data: {
+                  ...user.userMetadata ?? {},
+                  'roles': roleNames,
+                  'current_role': currentRole,
+                  'last_login': DateTime.now().toIso8601String(),
+                },
+              ),
+            );
+          }
+        }
+
         await _processSuccessfulLogin(email);
         return;
       }
@@ -448,51 +552,75 @@ class _ContinueScreenState extends State<ContinueScreen> {
       final user = response.user;
       if (user == null) throw Exception("Login failed.");
 
+      // ✅ FIXED: Get ALL profiles with role names
+      final dbProfiles = await supabase
+          .from('profiles')
+          .select('''
+            role_id,
+            roles!inner (
+              name
+            )
+          ''')
+          .eq('id', user.id)
+          .eq('is_active', true)
+          .eq('is_blocked', false);
+
+      if (dbProfiles.isNotEmpty) {
+        final List<String> roleNames = [];
+        for (var profile in dbProfiles) {
+          final role = profile['roles'] as Map?;
+          if (role != null && role['name'] != null) {
+            roleNames.add(role['name'].toString());
+          }
+        }
+
+        await SessionManager.saveUserRoles(email: email, roles: roleNames);
+
+        String? currentRole = await SessionManager.getCurrentRole();
+        if (currentRole == null || !roleNames.contains(currentRole)) {
+          currentRole = roleNames.isNotEmpty ? roleNames.first : 'customer';
+          await SessionManager.saveCurrentRole(currentRole);
+        }
+
+        await supabase.auth.updateUser(
+          UserAttributes(
+            data: {
+              ...user.userMetadata ?? {},
+              'roles': roleNames,
+              'current_role': currentRole,
+              'last_login': DateTime.now().toIso8601String(),
+            },
+          ),
+        );
+
+        print(
+          '✅ Email login metadata updated with roles: $roleNames, current: $currentRole',
+        );
+      }
+
       await _processSuccessfulLogin(email);
     } on AuthException catch (e) {
       if (!mounted) return;
 
-      switch (e.code) {
-        case 'invalid_login_credentials':
-          await showCustomAlert(
-            context: context,
-            title: "Login Failed",
-            message: "Email or password is incorrect.",
-            isError: true,
-          );
-          break;
-        case 'email_not_confirmed':
-          appState.emailVerifyerError();
-          appState.refreshState();
-          if (!mounted) return;
-          context.go('/verify-email');
-          break;
-        case 'too_many_requests':
-          await showCustomAlert(
-            context: context,
-            title: "Too Many Attempts ⏳",
-            message: "Please wait a few minutes and try again.",
-            isError: true,
-          );
-          break;
-        default:
-          await showCustomAlert(
-            context: context,
-            title: "Login Error",
-            message: e.message,
-            isError: true,
-          );
+      String errorMessage = e.message;
+      if (e.code == 'invalid_credentials') {
+        errorMessage = "Invalid email or password. Please try again.";
       }
-      await _loadProfiles();
+
+      await showCustomAlert(
+        context: context,
+        title: "Login Failed",
+        message: errorMessage,
+        isError: true,
+      );
     } catch (e) {
-      debugPrint('Login error: $e');
       if (!mounted) return;
 
       await showCustomAlert(
         context: context,
-        title: "Connection Error",
-        message: "Please check your internet connection.",
-        isError: false,
+        title: "Error",
+        message: "Unable to login. Please try again.",
+        isError: true,
       );
     } finally {
       if (mounted) {
@@ -504,36 +632,92 @@ class _ContinueScreenState extends State<ContinueScreen> {
     }
   }
 
-  // Process successful login
+  // ✅ FIXED: Process successful login with role-based redirect
   Future<void> _processSuccessfulLogin(String email) async {
     try {
       final user = supabase.auth.currentUser;
-      if (user == null) return;
+      if (user == null) {
+        if (!mounted) return;
+        context.go('/login');
+        return;
+      }
 
-      final dbProfile = await supabase
+      // Get ALL profiles with roles
+      final dbProfiles = await supabase
           .from('profiles')
-          .select('*, roles!inner(*)') // Join with roles table
+          .select('''
+            role_id,
+            is_active,
+            is_blocked,
+            roles!inner (
+              name
+            )
+          ''')
           .eq('id', user.id)
-          .maybeSingle();
+          .eq('is_active', true)
+          .eq('is_blocked', false);
 
-      if (dbProfile == null) {
+      if (dbProfiles.isEmpty) {
         if (!mounted) return;
         context.go('/reg');
         return;
       }
 
-      // Pass the role data to pickRole
-      final role = await AuthGate.pickRole(dbProfile['role_id']);
+      // Extract ALL role names
+      final List<String> roleNames = [];
+      for (var profile in dbProfiles) {
+        final role = profile['roles'] as Map?;
+        if (role != null && role['name'] != null) {
+          roleNames.add(role['name'].toString());
+        }
+      }
 
-      await SessionManager.saveUserRole(role);
+      // Save to SessionManager
+      await SessionManager.saveUserRoles(email: email, roles: roleNames);
+
+      // Get saved current role or use first
+      String? savedRole = await SessionManager.getCurrentRole();
+      String redirectRole;
+
+      if (savedRole != null && roleNames.contains(savedRole)) {
+        redirectRole = savedRole;
+        print('📌 Using saved role: $redirectRole');
+      } else {
+        redirectRole = roleNames.isNotEmpty ? roleNames.first : 'customer';
+        await SessionManager.saveCurrentRole(redirectRole);
+        print('📌 Using first role: $redirectRole');
+      }
+
+      // Update metadata
+      await supabase.auth.updateUser(
+        UserAttributes(
+          data: {
+            ...user.userMetadata ?? {},
+            'roles': roleNames,
+            'current_role': redirectRole,
+            'last_login': DateTime.now().toIso8601String(),
+          },
+        ),
+      );
+
       await SessionManager.updateLastLogin(email);
-
-      appState.refreshState();
+      await appState.refreshState();
 
       if (!mounted) return;
 
-      switch (role) {
-        case 'business':
+      // ✅ Role-based redirect
+      if (roleNames.length > 1 && savedRole == null) {
+        // Multiple roles and no saved preference - show selector
+        context.go(
+          '/role-selector',
+          extra: {'roles': roleNames, 'email': email, 'userId': user.id},
+        );
+        return;
+      }
+
+      // Single role or saved preference - direct redirect
+      switch (redirectRole) {
+        case 'owner':
           context.go('/owner');
           break;
         case 'employee':
@@ -552,6 +736,8 @@ class _ContinueScreenState extends State<ContinueScreen> {
         message: "Unable to complete login. Please try again.",
         isError: true,
       );
+
+      context.go('/login');
     }
   }
 
@@ -600,9 +786,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
     }
   }
 
-  // Build profile image with error handling - using Image.network
-
-  // Build larger profile image - using Image.network
+  // Build large profile image
   Widget _buildLargeProfileImage(
     Map<String, dynamic> profile,
     String? provider,
@@ -611,7 +795,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
   ) {
     final email = profile['email'] as String? ?? 'Unknown';
     final name = profile['name'] as String? ?? email.split('@').first;
-    final isOAuth = provider != 'email';
     final isGoogle = provider == 'google';
 
     if (isGoogle && _isGoogleImageRateLimited && hasPhoto) {
@@ -660,60 +843,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
         return _getFallbackAvatar(profile, provider);
       }
     } else {
-      return Center(
-        child: isOAuth
-            ? Container(
-                width: 70,
-                height: 70,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: _getProviderColor(provider),
-                ),
-                child: Center(
-                  child: provider == 'google'
-                      ? Text(
-                          'G',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 24,
-                            fontWeight: FontWeight.bold,
-                            fontFamily: 'Roboto',
-                          ),
-                        )
-                      : provider == 'facebook'
-                      ? Text(
-                          'f',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 28,
-                            fontWeight: FontWeight.bold,
-                            fontFamily: 'Roboto',
-                          ),
-                        )
-                      : provider == 'apple'
-                      ? const Icon(Icons.apple, color: Colors.white, size: 28)
-                      : const Icon(Icons.email, color: Colors.white, size: 24),
-                ),
-              )
-            : Container(
-                width: 70,
-                height: 70,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: Colors.blueAccent.withValues(alpha: 0.2),
-                ),
-                child: Center(
-                  child: Text(
-                    name[0].toUpperCase(),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 24,
-                    ),
-                  ),
-                ),
-              ),
-      );
+      return _getFallbackAvatar(profile, provider);
     }
   }
 
@@ -722,50 +852,22 @@ class _ContinueScreenState extends State<ContinueScreen> {
     final email = profile['email'] as String? ?? 'Unknown';
     final name = profile['name'] as String? ?? email.split('@').first;
     final isOAuth = provider != 'email';
-    final isGoogle = provider == 'google';
-
-    if (isGoogle) {
-      return Container(
-        decoration: const BoxDecoration(
-          shape: BoxShape.circle,
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              Color(0xFF4285F4),
-              Color(0xFF34A853),
-              Color(0xFFFBBC05),
-              Color(0xFFEA4335),
-            ],
-          ),
-        ),
-        child: Center(
-          child: Text(
-            name[0].toUpperCase(),
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              fontFamily: 'Roboto',
-            ),
-          ),
-        ),
-      );
-    }
 
     if (isOAuth) {
       return Container(
+        width: 70,
+        height: 70,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           color: _getProviderColor(provider),
         ),
         child: Center(
-          child: isGoogle
+          child: provider == 'google'
               ? Text(
                   'G',
-                  style: TextStyle(
+                  style: const TextStyle(
                     color: Colors.white,
-                    fontSize: 20,
+                    fontSize: 24,
                     fontWeight: FontWeight.bold,
                     fontFamily: 'Roboto',
                   ),
@@ -773,21 +875,23 @@ class _ContinueScreenState extends State<ContinueScreen> {
               : provider == 'facebook'
               ? Text(
                   'f',
-                  style: TextStyle(
+                  style: const TextStyle(
                     color: Colors.white,
-                    fontSize: 22,
+                    fontSize: 28,
                     fontWeight: FontWeight.bold,
                     fontFamily: 'Roboto',
                   ),
                 )
               : provider == 'apple'
-              ? const Icon(Icons.apple, color: Colors.white, size: 22)
-              : const Icon(Icons.email, color: Colors.white, size: 20),
+              ? const Icon(Icons.apple, color: Colors.white, size: 28)
+              : const Icon(Icons.email, color: Colors.white, size: 24),
         ),
       );
     }
 
     return Container(
+      width: 70,
+      height: 70,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         color: Colors.blueAccent.withValues(alpha: 0.2),
@@ -798,7 +902,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
           style: const TextStyle(
             color: Colors.white,
             fontWeight: FontWeight.bold,
-            fontSize: 20,
+            fontSize: 24,
           ),
         ),
       ),
@@ -1076,6 +1180,10 @@ class _ContinueScreenState extends State<ContinueScreen> {
     final name = profile['name'] as String? ?? email.split('@').first;
     final hasPhoto = photoUrl != null && photoUrl.isNotEmpty;
 
+    // ✅ Get roles for display
+    final List<String> roles =
+        (profile['roles'] as List?)?.map((e) => e.toString()).toList() ?? [];
+
     return GestureDetector(
       onTap: () {
         if (_selectionMode) {
@@ -1276,37 +1384,10 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
                     const SizedBox(height: 8),
 
+                    // Last login and roles
                     // Provider type, last login and role in the same row
                     Row(
                       children: [
-                        // Provider type badge - Commented out
-                        // Container(
-                        //   padding: const EdgeInsets.symmetric(
-                        //     horizontal: 10,
-                        //     vertical: 4,
-                        //   ),
-                        //   decoration: BoxDecoration(
-                        //     color: isLoading
-                        //         ? Colors.blueAccent.withValues(alpha: 0.2)
-                        //         : _getProviderColor(
-                        //             provider,
-                        //           ).withValues(alpha: 0.2),
-                        //     borderRadius: BorderRadius.circular(12),
-                        //   ),
-                        //   child: Text(
-                        //     provider == 'email'
-                        //         ? 'EMAIL'
-                        //         : provider.toUpperCase(),
-                        //     style: TextStyle(
-                        //       color: isLoading
-                        //           ? Colors.blueAccent
-                        //           : _getProviderColor(provider),
-                        //       fontSize: 11,
-                        //       fontWeight: FontWeight.w500,
-                        //     ),
-                        //   ),
-                        // ),
-
                         // Last login time
                         if (profile['lastLogin'] != null && !isLoading)
                           Text(
@@ -1317,37 +1398,38 @@ class _ContinueScreenState extends State<ContinueScreen> {
                             ),
                           ),
 
-                        // Role indicator - moved to same row as last login
+                        // 👇 Conditionally add space only if both elements exist
+                        if (profile['lastLogin'] != null &&
+                            !isLoading &&
+                            profile['roles'] != null &&
+                            (profile['roles'] as List).isNotEmpty &&
+                            !_selectionMode)
+                          const SizedBox(width: 10),
+
+                        // Role indicator
                         if (profile['roles'] != null &&
                             (profile['roles'] as List).isNotEmpty &&
                             !_selectionMode &&
                             !isLoading)
-                          Row(
-                            children: [
-                              const SizedBox(
-                                width: 10,
-                              ), // Space between last login and role
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 4,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: Colors.green.withValues(alpha: 0.2),
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: Text(
-                                  (profile['roles'] as List).first
-                                      .toString()
-                                      .toUpperCase(),
-                                  style: const TextStyle(
-                                    color: Colors.greenAccent,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.green.withValues(alpha: 0.2),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              (profile['roles'] as List).first
+                                  .toString()
+                                  .toUpperCase(),
+                              style: const TextStyle(
+                                color: Colors.greenAccent,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
                               ),
-                            ],
+                            ),
                           ),
                       ],
                     ),
@@ -1395,16 +1477,14 @@ class _ContinueScreenState extends State<ContinueScreen> {
               ),
               child: Column(
                 children: [
-                  // Logo at the top with Facebook-style design
+                  // Logo at the top
                   Stack(
                     children: [
-                      // Center the logo container
                       Container(
                         margin: const EdgeInsets.only(top: 10, bottom: 25),
                         child: Center(
                           child: Column(
                             children: [
-                              // Logo
                               Container(
                                 width: 80,
                                 height: 80,
@@ -1449,33 +1529,12 @@ class _ContinueScreenState extends State<ContinueScreen> {
                                   ),
                                 ),
                               ),
-
-                              // App Name
-                              const SizedBox(height: 10),
-                              // const Text(
-                              //   'MySalon',
-                              //   style: TextStyle(
-                              //     color: Colors.white,
-                              //     fontSize: 24,
-                              //     fontWeight: FontWeight.bold,
-                              //     letterSpacing: 0.5,
-                              //   ),
-                              // ),
-
-                              // Tagline
-                              // Text(
-                              //   'Continue to your account',
-                              //   style: TextStyle(
-                              //     color: Colors.white.withValues(alpha:0.7),
-                              //     fontSize: 14,
-                              //   ),
-                              // ),
                             ],
                           ),
                         ),
                       ),
 
-                      // 3-dot menu at top right corner (Facebook style)
+                      // 3-dot menu at top right corner
                       if (profiles.isNotEmpty && !_selectionMode)
                         Positioned(
                           top: 0,
@@ -1550,7 +1609,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                     ],
                   ),
 
-                  // Facebook-style Card for profiles
+                  // Card for profiles
                   Expanded(
                     child: Container(
                       decoration: BoxDecoration(
@@ -1829,7 +1888,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
   }
 }
 
-// Security Compliant Password Dialog
+// Security Compliant Password Dialog (unchanged)
 class SecurityCompliantPasswordDialog extends StatefulWidget {
   final String email;
   const SecurityCompliantPasswordDialog({super.key, required this.email});

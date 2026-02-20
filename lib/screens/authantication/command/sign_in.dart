@@ -311,118 +311,115 @@ class _SignInScreenState extends State<SignInScreen>
     return 'com.yourcompany.mysalon.staging://auth-callback';
   }
 
-
-
   // ✅ COMPLIANT: Save OAuth profile with user choice
-Future<void> _saveOAuthProfile({
-  required User user,
-  required String providerToSave, // ← CHANGED: Clear parameter name
-  required bool rememberMe,
-  String? accessToken,
-  String? refreshToken,
-}) async {
-  try {
-    final email = user.email!;
-    final now = DateTime.now();
+  Future<void> _saveOAuthProfile({
+    required User user,
+    required String providerToSave, // ← CHANGED: Clear parameter name
+    required bool rememberMe,
+    String? accessToken,
+    String? refreshToken,
+  }) async {
+    try {
+      final email = user.email!;
+      final now = DateTime.now();
 
-    // ✅ EXTENSIVE DEBUGGING
-    print('=' * 60);
-    print('🔍 DEBUG: _saveOAuthProfile - Facebook Login');
-    print('=' * 60);
-    print('📧 User email: $email');
-    print('🎯 Provider parameter: "$providerToSave"');
-    print('   - Should be: "facebook" for Facebook login');
-    print('   - Is "facebook"? ${providerToSave == "facebook"}');
-    print('   - Is "email"? ${providerToSave == "email"}');
-    print('🆔 User ID: ${user.id}');
-    
-    final userMetadata = user.userMetadata ?? {};
-    final appMetadata = user.appMetadata ?? {};
-    
-    print('\n📊 Metadata Inspection:');
-    print('   - userMetadata: $userMetadata');
-    print('   - appMetadata: $appMetadata');
-    
-    // ✅ FIX: Check if we should override with metadata
-    String finalProvider = providerToSave;
-    
-    // Facebook OAuth should always use 'facebook' as provider
-    if (providerToSave == 'facebook') {
-      finalProvider = 'facebook';
-      print('✅ Confirmed: Using "facebook" as provider');
-    } 
-    // For email login, use 'email'
-    else if (providerToSave == 'email') {
-      finalProvider = 'email';
-      print('✅ Confirmed: Using "email" as provider');
-    }
-    // Detect from metadata if needed
-    else {
-      if (appMetadata['provider'] != null) {
-        finalProvider = appMetadata['provider'].toString();
-        print('✅ Overriding with app_metadata provider: $finalProvider');
-      } else if (userMetadata['provider'] != null) {
-        finalProvider = userMetadata['provider'].toString();
-        print('✅ Overriding with user_metadata provider: $finalProvider');
+      // ✅ EXTENSIVE DEBUGGING
+      print('=' * 60);
+      print('🔍 DEBUG: _saveOAuthProfile - Facebook Login');
+      print('=' * 60);
+      print('📧 User email: $email');
+      print('🎯 Provider parameter: "$providerToSave"');
+      print('   - Should be: "facebook" for Facebook login');
+      print('   - Is "facebook"? ${providerToSave == "facebook"}');
+      print('   - Is "email"? ${providerToSave == "email"}');
+      print('🆔 User ID: ${user.id}');
+
+      final userMetadata = user.userMetadata ?? {};
+      final appMetadata = user.appMetadata ?? {};
+
+      print('\n📊 Metadata Inspection:');
+      print('   - userMetadata: $userMetadata');
+      print('   - appMetadata: $appMetadata');
+
+      // ✅ FIX: Check if we should override with metadata
+      String finalProvider = providerToSave;
+
+      // Facebook OAuth should always use 'facebook' as provider
+      if (providerToSave == 'facebook') {
+        finalProvider = 'facebook';
+        print('✅ Confirmed: Using "facebook" as provider');
       }
+      // For email login, use 'email'
+      else if (providerToSave == 'email') {
+        finalProvider = 'email';
+        print('✅ Confirmed: Using "email" as provider');
+      }
+      // Detect from metadata if needed
+      else {
+        if (appMetadata['provider'] != null) {
+          finalProvider = appMetadata['provider'].toString();
+          print('✅ Overriding with app_metadata provider: $finalProvider');
+        } else if (userMetadata['provider'] != null) {
+          finalProvider = userMetadata['provider'].toString();
+          print('✅ Overriding with user_metadata provider: $finalProvider');
+        }
+      }
+
+      print('\n🎯 FINAL PROVIDER DECISION: "$finalProvider"');
+      print('=' * 60);
+
+      // ✅ Get photo URL
+      String? photoUrl;
+      if (userMetadata['avatar_url'] != null &&
+          userMetadata['avatar_url'].toString().isNotEmpty) {
+        photoUrl = userMetadata['avatar_url'].toString();
+      } else if (userMetadata['picture'] != null &&
+          userMetadata['picture'].toString().isNotEmpty) {
+        photoUrl = userMetadata['picture'].toString();
+      } else if (userMetadata['photo'] != null &&
+          userMetadata['photo'].toString().isNotEmpty) {
+        photoUrl = userMetadata['photo'].toString();
+      }
+
+      // ✅ Get name
+      String name = email.split('@').first;
+      if (userMetadata['full_name'] != null &&
+          userMetadata['full_name'].toString().isNotEmpty) {
+        name = userMetadata['full_name'].toString();
+      } else if (userMetadata['name'] != null &&
+          userMetadata['name'].toString().isNotEmpty) {
+        name = userMetadata['name'].toString();
+      }
+
+      print('\n💾 SAVING PROFILE:');
+      print('   - Email: $email');
+      print('   - Provider: $finalProvider'); // ← This should print "facebook"
+      print('   - Name: $name');
+      print('   - Photo: ${photoUrl ?? "No photo"}');
+      print('   - Remember Me: $rememberMe');
+
+      // ✅ Save with CORRECT provider
+      await SessionManager.saveUserProfile(
+        email: email,
+        userId: user.id,
+        name: name,
+        photo: photoUrl ?? '',
+        rememberMe: rememberMe,
+        refreshToken: refreshToken,
+        accessToken: accessToken,
+        provider: finalProvider, // ← Use finalProvider
+        termsAcceptedAt: _termsAcceptedAt ?? now,
+        privacyAcceptedAt: _privacyAcceptedAt ?? now,
+        marketingConsent: false,
+        marketingConsentAt: null,
+      );
+
+      print('✅ Profile saved with provider: $finalProvider');
+    } catch (e, stackTrace) {
+      print('❌ Error in _saveOAuthProfile: $e');
+      print('Stack trace: $stackTrace');
     }
-    
-    print('\n🎯 FINAL PROVIDER DECISION: "$finalProvider"');
-    print('=' * 60);
-
-    // ✅ Get photo URL
-    String? photoUrl;
-    if (userMetadata['avatar_url'] != null && 
-        userMetadata['avatar_url'].toString().isNotEmpty) {
-      photoUrl = userMetadata['avatar_url'].toString();
-    } else if (userMetadata['picture'] != null && 
-        userMetadata['picture'].toString().isNotEmpty) {
-      photoUrl = userMetadata['picture'].toString();
-    } else if (userMetadata['photo'] != null && 
-        userMetadata['photo'].toString().isNotEmpty) {
-      photoUrl = userMetadata['photo'].toString();
-    }
-
-    // ✅ Get name
-    String name = email.split('@').first;
-    if (userMetadata['full_name'] != null && 
-        userMetadata['full_name'].toString().isNotEmpty) {
-      name = userMetadata['full_name'].toString();
-    } else if (userMetadata['name'] != null && 
-        userMetadata['name'].toString().isNotEmpty) {
-      name = userMetadata['name'].toString();
-    }
-
-    print('\n💾 SAVING PROFILE:');
-    print('   - Email: $email');
-    print('   - Provider: $finalProvider'); // ← This should print "facebook"
-    print('   - Name: $name');
-    print('   - Photo: ${photoUrl ?? "No photo"}');
-    print('   - Remember Me: $rememberMe');
-
-    // ✅ Save with CORRECT provider
-    await SessionManager.saveUserProfile(
-      email: email,
-      userId: user.id,
-      name: name,
-      photo: photoUrl ?? '',
-      rememberMe: rememberMe,
-      refreshToken: refreshToken,
-      accessToken: accessToken,
-      provider: finalProvider, // ← Use finalProvider
-      termsAcceptedAt: _termsAcceptedAt ?? now,
-      privacyAcceptedAt: _privacyAcceptedAt ?? now,
-      marketingConsent: false,
-      marketingConsentAt: null,
-    );
-
-    print('✅ Profile saved with provider: $finalProvider');
-    
-  } catch (e, stackTrace) {
-    print('❌ Error in _saveOAuthProfile: $e');
-    print('Stack trace: $stackTrace');
   }
-}
 
   // ✅ COMPLIANT: Login with user consent (FIRST TIME ONLY)
   Future<void> loginUser() async {
@@ -943,46 +940,107 @@ Future<void> _saveOAuthProfile({
   }
 
   // ✅ Handle post-login
+  // ✅ UPDATED: Handle post-login with role-based redirect
   Future<void> _handlePostLogin(String userId) async {
     try {
       if (!mounted) return;
 
-      await Future.delayed(const Duration(seconds: 3));
+      await Future.delayed(const Duration(seconds: 1));
 
-      final profile = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', userId)
-          .maybeSingle()
-          .timeout(const Duration(seconds: 5));
-
-      if (profile != null) {
-        if (profile['is_blocked'] == true) {
-          await supabase.auth.signOut();
-          await showCustomAlert(
-            context: context,
-            title: "Account Blocked 🚫",
-            message: "Your account has been blocked. Please contact support.",
-            isError: true,
-          );
-          return;
-        }
-
-        if (profile['is_active'] == false) {
-          await supabase.auth.signOut();
-          await showCustomAlert(
-            context: context,
-            title: "Account Inactive ⚠️",
-            message: "Your account is deactivated.",
-            isError: true,
-          );
-          return;
-        }
-
-        final String role = profile['role'] ?? 'customer';
-        await SessionManager.saveUserRole(role);
+      // Get user email
+      final user = supabase.auth.currentUser;
+      if (user == null || user.email == null) {
+        if (mounted) context.go('/');
+        return;
       }
 
+      final email = user.email!;
+
+      // Get ALL profiles for this user (multiple roles)
+      final profiles = await supabase
+          .from('profiles')
+          .select('''
+          role_id,
+          is_active,
+          is_blocked,
+          extra_data,
+          roles!inner (
+            id,
+            name
+          )
+        ''')
+          .eq('id', userId)
+          .eq('is_active', true)
+          .eq('is_blocked', false);
+
+      print('📊 Found ${profiles.length} active profiles for user: $email');
+
+      // Extract role names from profiles
+      final List<String> roleNames = [];
+      for (var profile in profiles) {
+        final role = profile['roles'] as Map?;
+        if (role != null && role['name'] != null) {
+          roleNames.add(role['name'].toString());
+        }
+      }
+
+      print('📋 User roles: $roleNames');
+
+      // ✅ SAVE ALL ROLES to SessionManager
+      await SessionManager.saveUserRoles(email: email, roles: roleNames);
+
+      if (roleNames.isEmpty) {
+        // No roles - go to registration
+        print('📍 No roles found - redirecting to /reg');
+        if (mounted) context.go('/reg');
+        return;
+      }
+
+      // If only ONE role, redirect directly
+      if (roleNames.length == 1) {
+        final singleRole = roleNames.first;
+        print('🎯 Single role detected: $singleRole');
+
+        // Save current role
+        await SessionManager.saveCurrentRole(singleRole);
+
+        // Update app state
+        await appState.refreshState();
+
+        if (!mounted) return;
+
+        // Redirect based on role
+        switch (singleRole) {
+          case 'owner':
+            context.go('/owner');
+            break;
+          case 'employee':
+            context.go('/employee');
+            break;
+          case 'customer':
+            context.go('/customer');
+            break;
+          default:
+            context.go('/');
+            break;
+        }
+        return;
+      }
+
+      // If MULTIPLE roles, show role selector
+      if (roleNames.length > 1) {
+        print('🔄 Multiple roles detected - showing role selector');
+        if (mounted) {
+          // Navigate to role selector screen with roles
+          context.go(
+            '/role-selector',
+            extra: {'roles': roleNames, 'email': email, 'userId': userId},
+          );
+        }
+        return;
+      }
+
+      // Fallback - go to home
       appState.refreshState();
       if (mounted) context.go('/');
     } catch (e) {

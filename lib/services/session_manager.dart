@@ -966,4 +966,132 @@ class SessionManager {
       debugPrint('Error cleaning up expired sessions: $e');
     }
   }
+
+
+  // SessionManager.dart එකට මේ functions add කරන්න
+
+// =====================================================
+// ✅ SAVE ALL USER ROLES (from database)
+// =====================================================
+static Future<void> saveUserRoles({
+  required String email,
+  required List<String> roles,
+}) async {
+  try {
+    print('📝 SessionManager.saveUserRoles START');
+    print('   - Email: $email');
+    print('   - Roles: $roles');
+    
+    final profiles = await getProfiles();
+    print('   - Current profiles count: ${profiles.length}');
+    
+    final index = profiles.indexWhere((p) => p['email'] == email);
+    print('   - Profile index: $index');
+
+    if (index != -1) {
+      // Update existing profile
+      profiles[index]['roles'] = roles;
+      profiles[index]['roles_updated_at'] = DateTime.now().toIso8601String();
+      print('   ✅ Updated existing profile');
+    } else {
+      // Create new profile entry
+      profiles.add({
+        'email': email,
+        'roles': roles,
+        'created_at': DateTime.now().toIso8601String(),
+      });
+      print('   ✅ Created new profile');
+    }
+    
+    // Save to SharedPreferences
+    final jsonString = jsonEncode(profiles);
+    await _prefs.setString(_keyProfiles, jsonString);
+    print('   ✅ Saved to SharedPreferences (_keyProfiles)');
+    
+    // Save as separate key for quick access
+    await _prefs.setStringList('${email}_all_roles', roles);
+    print('   ✅ Saved quick access: ${email}_all_roles');
+    
+    // Verify quick access save
+    final savedQuick = _prefs.getStringList('${email}_all_roles');
+    print('   🔍 Quick access verification: $savedQuick');
+    
+    debugPrint('✅ SessionManager: Saved all roles for $email: $roles');
+    print('📝 SessionManager.saveUserRoles END');
+  } catch (e, stackTrace) {
+    debugPrint('❌ SessionManager: Error saving user roles: $e');
+    print('   ❌ Stack trace: $stackTrace');
+  }
+}
+
+// =====================================================
+// ✅ GET ALL USER ROLES
+// =====================================================
+static Future<List<String>> getUserRoles(String email) async {
+  try {
+    // Try quick access first
+    final quickRoles = _prefs.getStringList('${email}_all_roles');
+    if (quickRoles != null) {
+      return quickRoles;
+    }
+    
+    // Fallback to profiles
+    final profile = await getProfileByEmail(email);
+    if (profile != null && profile['roles'] != null) {
+      final roles = List<String>.from(profile['roles'] as List);
+      return roles;
+    }
+    
+    return [];
+  } catch (e) {
+    debugPrint('❌ Error getting user roles: $e');
+    return [];
+  }
+}
+
+// =====================================================
+// ✅ SAVE CURRENT SELECTED ROLE
+// =====================================================
+static Future<void> saveCurrentRole(String role) async {
+  try {
+    await _prefs.setString('current_selected_role', role);
+    debugPrint('✅ Saved current role: $role');
+  } catch (e) {
+    debugPrint('❌ Error saving current role: $e');
+  }
+}
+
+// =====================================================
+// ✅ GET CURRENT SELECTED ROLE
+// =====================================================
+static Future<String?> getCurrentRole() async {
+  try {
+    return _prefs.getString('current_selected_role');
+  } catch (e) {
+    debugPrint('❌ Error getting current role: $e');
+    return null;
+  }
+}
+
+// =====================================================
+// ✅ CLEAR USER ROLES (on logout)
+// =====================================================
+static Future<void> clearUserRoles(String email) async {
+  try {
+    await _prefs.remove('${email}_all_roles');
+    await _prefs.remove('current_selected_role');
+    
+    // Also update profiles
+    final profiles = await getProfiles();
+    final index = profiles.indexWhere((p) => p['email'] == email);
+    if (index != -1) {
+      profiles[index]['roles'] = [];
+      await _prefs.setString(_keyProfiles, jsonEncode(profiles));
+    }
+    
+    debugPrint('✅ Cleared roles for $email');
+  } catch (e) {
+    debugPrint('❌ Error clearing user roles: $e');
+  }
+}
 }
