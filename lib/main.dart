@@ -12,6 +12,7 @@ import 'package:flutter_application_1/screens/authantication/command/registratio
 import 'package:flutter_application_1/screens/authantication/command/reset_password_confirm.dart';
 import 'package:flutter_application_1/screens/authantication/command/reset_password_form.dart';
 import 'package:flutter_application_1/screens/authantication/command/reset_password_request.dart';
+import 'package:flutter_application_1/screens/authantication/command/role_selector_screen.dart';
 import 'package:flutter_application_1/services/notification_service.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -132,18 +133,18 @@ Future<void> main() async {
     // ========== PHASE 4: NOTIFICATION SERVICE ==========
     await NotificationService().init();
 
-    // ========== PHASE 5: AUTH LISTENER ==========
-    _setupAuthStateListener();
-
-    // ========== PHASE 6: PLATFORM CONFIG ==========
+    // ========== PHASE 5: PLATFORM CONFIG ==========
     await _setupPlatformSpecificConfig();
 
-    // ========== PHASE 7: SERVICES ==========
+    // ========== PHASE 6: SERVICES ==========
     await SessionManager.init();
 
-    // ========== PHASE 8: APP STATE ==========
+    // ========== PHASE 7: APP STATE ==========
     appState = AppState();
     await appState.initializeApp();
+
+    // ========== PHASE 8: AUTH LISTENER ==========
+    _setupAuthStateListener();
 
     // ========== PHASE 9: ROUTER ==========
     router = _createRouter();
@@ -161,7 +162,7 @@ Future<void> main() async {
 }
 
 // ====================
-// AUTH STATE LISTENER
+// ✅ FIXED AUTH STATE LISTENER
 // ====================
 void _setupAuthStateListener() {
   final supabase = Supabase.instance.client;
@@ -185,34 +186,107 @@ void _setupAuthStateListener() {
         _isRedirecting = true;
         WidgetsBinding.instance.addPostFrameCallback((_) async {
           try {
-            // Check if user has any profile (any role)
+            // ✅ FIXED: Get ALL profiles with role names
             final profiles = await supabase
                 .from('profiles')
-                .select('role_id')
+                .select('''
+                  role_id,
+                  is_active,
+                  is_blocked,
+                  roles!inner (
+                    name
+                  )
+                ''')
                 .eq('id', user.id)
-                .limit(1);
+                .eq('is_active', true)
+                .eq('is_blocked', false);
 
             if (profiles.isEmpty) {
-              print('📍 First time login - redirecting to /reg');
+              print('📍 No active profiles - redirecting to /reg');
               _navigateTo('/reg', extra: user);
-            } else {
-              print('📍 Existing user with profile(s) - checking roles');
+              return;
+            }
 
-              // Get user's roles
-              final userRoles = await supabase
-                  .from('profiles')
-                  .select('roles!inner(name)')
-                  .eq('id', user.id)
-                  .eq('is_active', true);
-
-              if (userRoles.isNotEmpty) {
-                // Navigate based on primary/most recent role
-                await _navigateBasedOnRoles(userRoles, user);
-              } else {
-                // No active roles, go to registration
-                _navigateTo('/reg', extra: user);
+            // ✅ Extract ALL role names
+            final List<String> roleNames = [];
+            for (var profile in profiles) {
+              final role = profile['roles'] as Map?;
+              if (role != null && role['name'] != null) {
+                roleNames.add(role['name'].toString());
               }
             }
+
+            print('📋 User roles: $roleNames');
+
+            // ✅ Save to SessionManager
+            await SessionManager.saveUserRoles(
+              email: user.email!,
+              roles: roleNames,
+            );
+
+            if (roleNames.isEmpty) {
+              _navigateTo('/reg', extra: user);
+              return;
+            }
+
+            // ✅ Get saved current role if any
+            String? savedRole = await SessionManager.getCurrentRole();
+
+            // ✅ If single role, redirect directly
+            if (roleNames.length == 1) {
+              final singleRole = roleNames.first;
+              await SessionManager.saveCurrentRole(singleRole);
+              await appState.refreshState();
+              
+              switch (singleRole) {
+                case 'owner':
+                  _navigateTo('/owner');
+                  break;
+                case 'employee':
+                  _navigateTo('/employee');
+                  break;
+                default:
+                  _navigateTo('/customer');
+                  break;
+              }
+              return;
+            }
+
+            // ✅ If multiple roles
+            if (roleNames.length > 1) {
+              // If saved role exists and is valid, use it
+              if (savedRole != null && roleNames.contains(savedRole)) {
+                print('📌 Using saved role: $savedRole');
+                await SessionManager.saveCurrentRole(savedRole);
+                await appState.refreshState();
+                
+                switch (savedRole) {
+                  case 'owner':
+                    _navigateTo('/owner');
+                    break;
+                  case 'employee':
+                    _navigateTo('/employee');
+                    break;
+                  default:
+                    _navigateTo('/customer');
+                    break;
+                }
+                return;
+              }
+              
+              // Otherwise show role selector
+              print('🔄 Multiple roles - showing role selector');
+              _navigateTo('/role-selector', extra: {
+                'roles': roleNames,
+                'email': user.email,
+                'userId': user.id,
+              });
+              return;
+            }
+
+            // Fallback
+            _navigateTo('/');
+            
           } catch (e) {
             print('❌ Error checking profile: $e');
             _navigateTo('/reg', extra: user);
@@ -237,24 +311,60 @@ void _setupAuthStateListener() {
           try {
             final profiles = await supabase
                 .from('profiles')
-                .select('role_id')
+                .select('''
+                  role_id,
+                  is_active,
+                  is_blocked,
+                  roles!inner (
+                    name
+                  )
+                ''')
                 .eq('id', user.id)
-                .limit(1);
+                .eq('is_active', true)
+                .eq('is_blocked', false);
 
             if (profiles.isEmpty) {
               _navigateTo('/reg', extra: user);
-            } else {
-              final userRoles = await supabase
-                  .from('profiles')
-                  .select('roles!inner(name)')
-                  .eq('id', user.id)
-                  .eq('is_active', true);
+              return;
+            }
 
-              if (userRoles.isNotEmpty) {
-                await _navigateBasedOnRoles(userRoles, user);
-              } else {
-                _navigateTo('/reg', extra: user);
+            final List<String> roleNames = [];
+            for (var profile in profiles) {
+              final role = profile['roles'] as Map?;
+              if (role != null && role['name'] != null) {
+                roleNames.add(role['name'].toString());
               }
+            }
+
+            await SessionManager.saveUserRoles(
+              email: user.email!,
+              roles: roleNames,
+            );
+
+            if (roleNames.isEmpty) {
+              _navigateTo('/reg', extra: user);
+            } else if (roleNames.length == 1) {
+              final singleRole = roleNames.first;
+              await SessionManager.saveCurrentRole(singleRole);
+              await appState.refreshState();
+              
+              switch (singleRole) {
+                case 'owner':
+                  _navigateTo('/owner');
+                  break;
+                case 'employee':
+                  _navigateTo('/employee');
+                  break;
+                default:
+                  _navigateTo('/customer');
+                  break;
+              }
+            } else {
+              _navigateTo('/role-selector', extra: {
+                'roles': roleNames,
+                'email': user.email,
+                'userId': user.id,
+              });
             }
           } catch (e) {
             print('❌ Error: $e');
@@ -290,24 +400,60 @@ void _setupAuthStateListener() {
         try {
           final profiles = await supabase
               .from('profiles')
-              .select('role_id')
+              .select('''
+                role_id,
+                is_active,
+                is_blocked,
+                roles!inner (
+                  name
+                )
+              ''')
               .eq('id', currentUser.id)
-              .limit(1);
+              .eq('is_active', true)
+              .eq('is_blocked', false);
 
-          if (profiles.isNotEmpty) {
-            final userRoles = await supabase
-                .from('profiles')
-                .select('roles!inner(name)')
-                .eq('id', currentUser.id)
-                .eq('is_active', true);
+          if (profiles.isEmpty) {
+            _navigateTo('/reg', extra: currentUser);
+            return;
+          }
 
-            if (userRoles.isNotEmpty) {
-              await _navigateBasedOnRoles(userRoles, currentUser);
-            } else {
-              _navigateTo('/reg', extra: currentUser);
+          final List<String> roleNames = [];
+          for (var profile in profiles) {
+            final role = profile['roles'] as Map?;
+            if (role != null && role['name'] != null) {
+              roleNames.add(role['name'].toString());
+            }
+          }
+
+          await SessionManager.saveUserRoles(
+            email: currentUser.email!,
+            roles: roleNames,
+          );
+
+          if (roleNames.isEmpty) {
+            _navigateTo('/reg', extra: currentUser);
+          } else if (roleNames.length == 1) {
+            final singleRole = roleNames.first;
+            await SessionManager.saveCurrentRole(singleRole);
+            await appState.refreshState();
+            
+            switch (singleRole) {
+              case 'owner':
+                _navigateTo('/owner');
+                break;
+              case 'employee':
+                _navigateTo('/employee');
+                break;
+              default:
+                _navigateTo('/customer');
+                break;
             }
           } else {
-            _navigateTo('/reg', extra: currentUser);
+            _navigateTo('/role-selector', extra: {
+              'roles': roleNames,
+              'email': currentUser.email,
+              'userId': currentUser.id,
+            });
           }
         } catch (e) {
           print('❌ Error checking profile on start: $e');
@@ -326,39 +472,6 @@ void _navigateTo(String location, {Object? extra}) {
     router.go(location, extra: extra);
   } else {
     router.pushReplacement(location, extra: extra);
-  }
-}
-
-// New helper method to navigate based on user roles
-Future<void> _navigateBasedOnRoles(List<dynamic> userRoles, User user) async {
-  // Extract role names
-  final roleNames = userRoles
-      .map((p) => p['roles']?['name'] as String?)
-      .where((name) => name != null)
-      .cast<String>()
-      .toList();
-
-  print('📋 User roles: $roleNames');
-
-  if (roleNames.isEmpty) {
-    _navigateTo('/reg', extra: user);
-    return;
-  }
-
-  // Priority based navigation
-  if (roleNames.contains('owner')) {
-    print('👑 Redirecting to owner dashboard');
-    _navigateTo('/owner', extra: user);
-  } else if (roleNames.contains('employee')) {
-    print('💇 Redirecting to employee dashboard');
-    _navigateTo('/employee', extra: user);
-  } else if (roleNames.contains('customer')) {
-    print('👤 Redirecting to customer home');
-    _navigateTo('/customer', extra: user);
-  } else {
-    // Unknown role, go to role selection
-    print('❓ Unknown role, redirecting to registration');
-    _navigateTo('/reg', extra: user);
   }
 }
 
@@ -394,7 +507,7 @@ Future<void> _setupMobileDeepLinks() async {
 }
 
 // ====================
-// ROUTER - FIXED VERSION
+// ✅ FIXED ROUTER
 // ====================
 GoRouter _createRouter() {
   return GoRouter(
@@ -435,14 +548,38 @@ GoRouter _createRouter() {
         '/data-consent',
       ];
 
-      // 🔥 SPECIAL HANDLING FOR /reg - REMOVED FROM PUBLIC ROUTES
+      // ✅ FIXED: Role selector route
+      final roleRoutes = ['/role-selector', '/owner', '/employee', '/customer'];
+
+      // 🔥 SPECIAL HANDLING FOR /reg
       if (path == '/reg') {
         final user = state.extra as User?;
         if (user == null) {
           print('⚠️ /reg accessed without user → redirecting to /login');
           return '/login';
         }
-        return null; // Allow /reg with user
+        return null;
+      }
+
+      // ✅ FIXED: Role selector route
+      if (path == '/role-selector') {
+        // Only allow if logged in and has multiple roles
+        if (!appState.loggedIn) {
+          return '/login';
+        }
+        if (appState.roles.length <= 1) {
+          // If only one role, redirect to that role's dashboard
+          if (appState.roles.isNotEmpty) {
+            final role = appState.roles.first;
+            switch (role) {
+              case 'owner': return '/owner';
+              case 'employee': return '/employee';
+              default: return '/customer';
+            }
+          }
+          return '/';
+        }
+        return null;
       }
 
       if (publicRoutes.contains(path)) {
@@ -450,15 +587,15 @@ GoRouter _createRouter() {
           if (appState.loggedIn) {
             if (!appState.emailVerified) return '/verify-email';
             if (!appState.profileCompleted) {
-              // 🔥 Get current user
               final user = Supabase.instance.client.auth.currentUser;
               if (user != null) {
-                return '/reg?user=${user.id}'; // Pass user ID via query
+                return '/reg';
               }
               return '/reg';
             }
 
-            switch (appState.role) {
+            // ✅ FIXED: Use currentRole from AppState
+            switch (appState.currentRole) {
               case 'owner':
                 return '/owner';
               case 'employee':
@@ -492,6 +629,19 @@ GoRouter _createRouter() {
         if (!appState.profileCompleted && path != '/reg') {
           return '/reg';
         }
+        
+        // ✅ FIXED: Role-based route access
+        if (path == '/owner' && appState.currentRole != 'owner') {
+          return '/';
+        }
+        if (path == '/employee' && appState.currentRole != 'employee') {
+          return '/';
+        }
+        if (path == '/customer' && 
+            appState.currentRole != 'customer' && 
+            appState.currentRole != null) {
+          return '/';
+        }
       }
 
       return null;
@@ -513,7 +663,6 @@ GoRouter _createRouter() {
       GoRoute(
         path: '/reg',
         builder: (context, state) {
-          // AppState එකෙන් user ගන්න
           final user = appState.currentUser;
           print('📱 RegistrationFlow with user from AppState: ${user?.email}');
           return RegistrationFlow(user: user);
@@ -528,6 +677,22 @@ GoRouter _createRouter() {
         builder: (_, __) => const VerifyInvalidScreen(),
       ),
       GoRoute(path: '/continue', builder: (_, __) => const ContinueScreen()),
+      GoRoute(
+        path: '/role-selector',
+        name: 'roleSelector',
+        builder: (context, state) {
+          final extra = state.extra as Map?;
+          final roles = extra?['roles'] as List<String>? ?? appState.roles;
+          final email = extra?['email'] as String? ?? appState.currentEmail ?? '';
+          final userId = extra?['userId'] as String? ?? appState.currentUser?.id ?? '';
+
+          return RoleSelectorScreen(
+            roles: roles,
+            email: email,
+            userId: userId,
+          );
+        },
+      ),
       GoRoute(path: '/customer', builder: (_, __) => const CustomerHome()),
       GoRoute(path: '/employee', builder: (_, __) => const EmployeeDashboard()),
       GoRoute(path: '/owner', builder: (_, __) => const OwnerDashboard()),
