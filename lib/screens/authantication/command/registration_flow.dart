@@ -79,12 +79,17 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
           // ===============================================================
           // CUSTOMER FLOW
           // ===============================================================
-          if (roles == 'employee') ..._buildCustomerFlow(),
+          if (roles == 'customer') ..._buildCustomerFlow(),
 
           // ===============================================================
           // BUSINESS FLOW
           // ===============================================================
           if (roles == 'owner') ..._buildBusinessFlow(),
+
+            // ===============================================================
+          // EMPLOYEE FLOW
+          // ===============================================================
+          if (roles == 'employee') ..._buildEmployeeFlow(),
         ],
       ),
     );
@@ -113,6 +118,21 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
     CompanyNameScreen(
       onNext: (n) {
         setState(() => companyName = n);
+        _createProfile();
+      },
+      controller: _controller,
+    ),
+  ];
+  // -----------------------------------------------------------------------
+  // BUSINESS FLOW
+  // -----------------------------------------------------------------------
+  List<Widget> _buildEmployeeFlow() => [
+   NameEntry(
+      onNext: (f, l) {
+        setState(() {
+          firstName = f;
+          lastName = l;
+        });
         _createProfile();
       },
       controller: _controller,

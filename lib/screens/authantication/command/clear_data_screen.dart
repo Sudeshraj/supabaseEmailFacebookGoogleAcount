@@ -42,13 +42,56 @@ class _ClearDataScreenState extends State<ClearDataScreen>
 
   void _handleBackButton() {
     if (!_isLoading) {
-      // context.pop();
-      // Default back navigation
       if (GoRouter.of(context).canPop()) {
         GoRouter.of(context).pop();
       } else {
         GoRouter.of(context).go('/login');
       }
+    }
+  }
+
+  Future<void> _clearAllData() async {
+    if (_isLoading) return;
+
+    setState(() => _isLoading = true);
+
+    try {
+      print('🧹 Clearing all data...');
+
+      // 1. Clear SessionManager (local profiles)
+      await SessionManager.clearAll();
+      print('✅ SessionManager cleared');
+
+      // 2. Sign out from Supabase
+      final supabase = Supabase.instance.client;
+      await supabase.auth.signOut();
+      print('✅ Supabase sign out');
+
+      // 3. Refresh app state
+      await appState.refreshState();
+      print('✅ AppState refreshed');
+
+      // 4. Navigate directly to login (not splash)
+      if (mounted) {
+        // Close any open dialogs
+        Navigator.popUntil(context, (route) => route.isFirst);
+
+        // Go directly to login
+        context.go('/login');
+      }
+    } catch (e) {
+      print('❌ Error clearing data: $e');
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error clearing data: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -76,8 +119,9 @@ class _ClearDataScreenState extends State<ClearDataScreen>
                     vertical: 20,
                   ),
                   padding: const EdgeInsets.all(20),
+                  // ✅ FIXED: Use withOpacity instead of withValues
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha:0.03),
+                    color: Colors.white.withOpacity(0.03),
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(color: Colors.white12),
                   ),
@@ -104,10 +148,11 @@ class _ClearDataScreenState extends State<ClearDataScreen>
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
+                              // ✅ FIXED: Changed from Icons.salon to Icons.security
                               Icon(
                                 Icons.security,
                                 size: isMobile ? 50.0 : 60.0,
-                                color: Colors.blue.withValues(alpha:0.8),
+                                color: Colors.blue.withOpacity(0.8),
                               ),
                               SizedBox(height: isMobile ? 16.0 : 20.0),
                               const Text(
@@ -123,11 +168,12 @@ class _ClearDataScreenState extends State<ClearDataScreen>
                               // Data Collection Info
                               Container(
                                 padding: const EdgeInsets.all(16),
+                                // ✅ FIXED: Use withOpacity
                                 decoration: BoxDecoration(
-                                  color: Colors.blue.withValues(alpha:0.1),
+                                  color: Colors.blue.withOpacity(0.1),
                                   borderRadius: BorderRadius.circular(12),
                                   border: Border.all(
-                                    color: Colors.blue.withValues(alpha:0.3),
+                                    color: Colors.blue.withOpacity(0.3),
                                   ),
                                 ),
                                 child: Column(
@@ -180,95 +226,30 @@ class _ClearDataScreenState extends State<ClearDataScreen>
                               SizedBox(
                                 width: double.infinity,
                                 child: ElevatedButton(
-                                  onPressed: () async {
-                                    showDialog(
-                                      context: context,
-                                      builder: (context) => AlertDialog(
-                                        backgroundColor: const Color(
-                                          0xFF1E293B,
-                                        ),
-                                        title: const Text(
-                                          'Confirm Clear Data',
-                                          style: TextStyle(color: Colors.white),
-                                        ),
-                                        content: const Text(
-                                          'This will remove all saved accounts, preferences, and login information from this device. This action cannot be undone.',
-                                          style: TextStyle(
-                                            color: Colors.white70,
-                                          ),
-                                        ),
-                                        actions: [
-                                          TextButton(
-                                            onPressed: () =>
-                                                Navigator.pop(context),
-                                            child: const Text(
-                                              'Cancel',
-                                              style: TextStyle(
-                                                color: Colors.white70,
-                                              ),
-                                            ),
-                                          ),
-                                          ElevatedButton(
-                                            onPressed: () async {
-                                              Navigator.pop(context);
-
-                                              setState(() {
-                                                _isLoading = true;
-                                              });
-
-                                              // Show loading
-                                              showDialog(
-                                                context: context,
-                                                barrierDismissible: false,
-                                                builder: (context) => const Center(
-                                                  child:
-                                                      CircularProgressIndicator(),
-                                                ),
-                                              );
-
-                                              // Clear data
-                                              await SessionManager.clearAll();
-                                              final supabase =
-                                                  Supabase.instance.client;
-                                              await supabase.auth.signOut();
-                                              appState.refreshState();
-
-                                              // Navigate back
-                                              if (context.mounted) {
-                                                Navigator.pop(
-                                                  context,
-                                                ); // Remove loading
-                                                context.go('/');
-                                              }
-                                            },
-                                            style: ElevatedButton.styleFrom(
-                                              backgroundColor: Colors.red,
-                                            ),
-                                            child: const Text(
-                                              'Clear All',
-                                              style: TextStyle(
-                                                color: Colors.white,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    );
-                                  },
+                                  onPressed: _isLoading
+                                      ? null
+                                      : () {
+                                          _showConfirmDialog();
+                                        },
                                   style: ElevatedButton.styleFrom(
                                     padding: const EdgeInsets.symmetric(
                                       vertical: 16.0,
                                     ),
                                     backgroundColor: Colors.red,
+                                    disabledBackgroundColor: Colors.grey,
                                   ),
-                                  child: Text(
-                                    'Clear All Data',
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: isMobile ? 15.0 : 16.0,
-                                    ),
-                                  ),
+                                  child: _isLoading
+                                      ? const CircularProgressIndicator(
+                                          color: Colors.white,
+                                        )
+                                      : Text(
+                                          'Clear All Data',
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: isMobile ? 15.0 : 16.0,
+                                          ),
+                                        ),
                                 ),
                               ),
 
@@ -278,9 +259,11 @@ class _ClearDataScreenState extends State<ClearDataScreen>
                               SizedBox(
                                 width: double.infinity,
                                 child: OutlinedButton(
-                                  onPressed: () {
-                                    context.pop();
-                                  },
+                                  onPressed: _isLoading
+                                      ? null
+                                      : () {
+                                          context.pop();
+                                        },
                                   style: OutlinedButton.styleFrom(
                                     padding: const EdgeInsets.symmetric(
                                       vertical: 16.0,
@@ -303,11 +286,13 @@ class _ClearDataScreenState extends State<ClearDataScreen>
 
                               // Privacy Policy Link
                               TextButton(
-                                onPressed: () {
-                                  context.push(
-                                    '/privacy?from=${Uri.encodeComponent('/clear-data')}',
-                                  );
-                                },
+                                onPressed: _isLoading
+                                    ? null
+                                    : () {
+                                        context.push(
+                                          '/privacy?from=${Uri.encodeComponent('/clear-data')}',
+                                        );
+                                      },
                                 child: const Text(
                                   'View Privacy Policy',
                                   style: TextStyle(
@@ -327,6 +312,43 @@ class _ClearDataScreenState extends State<ClearDataScreen>
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  void _showConfirmDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1E293B),
+        title: const Text(
+          'Confirm Clear Data',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: const Text(
+          'This will remove all saved accounts, preferences, and login information from this device. This action cannot be undone.',
+          style: TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(color: Colors.white70),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context); // Close dialog
+              _clearAllData(); // Call clear function
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text(
+              'Clear All',
+              style: TextStyle(color: Colors.white),
+            ),
+          ),
+        ],
       ),
     );
   }

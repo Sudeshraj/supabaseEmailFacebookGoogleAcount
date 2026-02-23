@@ -626,21 +626,34 @@ class SessionManager {
   }
 
   // ✅ Clear all sessions and profiles
-  static Future<void> clearAll() async {
-    try {
-      await _prefs.remove(_keyProfiles);
-      await _prefs.remove(_currentUserKey);
-      await _prefs.remove(_showContinueKey);
-      await _prefs.remove(_rememberMeKey);
-
-      // Clear secure storage
-      await _secureStorage.deleteAll();
-
-      debugPrint('All session data cleared (including secure storage)');
-    } catch (e) {
-      debugPrint('Error clearing all data: $e');
+static Future<void> clearAll() async {
+  try {
+    print('🧹 SessionManager.clearAll() started');
+    
+    // 1. Clear all SharedPreferences data
+    await _prefs.remove(_keyProfiles);
+    await _prefs.remove(_currentUserKey);
+    await _prefs.remove(_showContinueKey);
+    await _prefs.remove(_rememberMeKey);
+    
+    // 2. Clear any role-related keys
+    final keys = _prefs.getKeys();
+    for (var key in keys) {
+      if (key.contains('_all_roles') || key.contains('current_selected_role')) {
+        await _prefs.remove(key);
+        print('   - Removed: $key');
+      }
     }
+    
+    // 3. Clear secure storage (tokens)
+    await _secureStorage.deleteAll();
+    print('   - Secure storage cleared');
+
+    debugPrint('✅ All session data cleared (including secure storage)');
+  } catch (e) {
+    debugPrint('❌ Error clearing all data: $e');
   }
+}
 
   // Get most recent user based on lastLogin time
   static Future<Map<String, dynamic>?> getMostRecentUser() async {

@@ -167,7 +167,7 @@ Future<void> main() async {
 void _setupAuthStateListener() {
   final supabase = Supabase.instance.client;
   bool? lastKnownEmailVerified;
-  bool _isRedirecting = false; // Prevent multiple redirects
+  bool isRedirecting = false; // Prevent multiple redirects
 
   supabase.auth.onAuthStateChange.listen((data) {
     final event = data.event;
@@ -182,8 +182,8 @@ void _setupAuthStateListener() {
       print('🎉 User signed in: ${user.email}');
       lastKnownEmailVerified = isEmailVerified;
 
-      if (isEmailVerified && !_isRedirecting) {
-        _isRedirecting = true;
+      if (isEmailVerified && !isRedirecting) {
+        isRedirecting = true;
         WidgetsBinding.instance.addPostFrameCallback((_) async {
           try {
             // ✅ FIXED: Get ALL profiles with role names
@@ -237,7 +237,7 @@ void _setupAuthStateListener() {
               final singleRole = roleNames.first;
               await SessionManager.saveCurrentRole(singleRole);
               await appState.refreshState();
-              
+
               switch (singleRole) {
                 case 'owner':
                   _navigateTo('/owner');
@@ -259,7 +259,7 @@ void _setupAuthStateListener() {
                 print('📌 Using saved role: $savedRole');
                 await SessionManager.saveCurrentRole(savedRole);
                 await appState.refreshState();
-                
+
                 switch (savedRole) {
                   case 'owner':
                     _navigateTo('/owner');
@@ -273,25 +273,27 @@ void _setupAuthStateListener() {
                 }
                 return;
               }
-              
+
               // Otherwise show role selector
               print('🔄 Multiple roles - showing role selector');
-              _navigateTo('/role-selector', extra: {
-                'roles': roleNames,
-                'email': user.email,
-                'userId': user.id,
-              });
+              _navigateTo(
+                '/role-selector',
+                extra: {
+                  'roles': roleNames,
+                  'email': user.email,
+                  'userId': user.id,
+                },
+              );
               return;
             }
 
             // Fallback
             _navigateTo('/');
-            
           } catch (e) {
             print('❌ Error checking profile: $e');
             _navigateTo('/reg', extra: user);
           } finally {
-            _isRedirecting = false;
+            isRedirecting = false;
           }
         });
       }
@@ -303,9 +305,9 @@ void _setupAuthStateListener() {
 
       if (!(lastKnownEmailVerified ?? false) &&
           isEmailVerified &&
-          !_isRedirecting) {
+          !isRedirecting) {
         print('✅ Email just verified!');
-        _isRedirecting = true;
+        isRedirecting = true;
 
         WidgetsBinding.instance.addPostFrameCallback((_) async {
           try {
@@ -347,7 +349,7 @@ void _setupAuthStateListener() {
               final singleRole = roleNames.first;
               await SessionManager.saveCurrentRole(singleRole);
               await appState.refreshState();
-              
+
               switch (singleRole) {
                 case 'owner':
                   _navigateTo('/owner');
@@ -360,17 +362,20 @@ void _setupAuthStateListener() {
                   break;
               }
             } else {
-              _navigateTo('/role-selector', extra: {
-                'roles': roleNames,
-                'email': user.email,
-                'userId': user.id,
-              });
+              _navigateTo(
+                '/role-selector',
+                extra: {
+                  'roles': roleNames,
+                  'email': user.email,
+                  'userId': user.id,
+                },
+              );
             }
           } catch (e) {
             print('❌ Error: $e');
             _navigateTo('/reg', extra: user);
           } finally {
-            _isRedirecting = false;
+            isRedirecting = false;
           }
         });
       }
@@ -386,16 +391,20 @@ void _setupAuthStateListener() {
     if (event == AuthChangeEvent.signedOut) {
       print('👋 User signed out');
       lastKnownEmailVerified = null;
-      _isRedirecting = false;
+      isRedirecting = false;
+      // Refresh app state immediately
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        appState.refreshState();
+      });
     }
   });
 
   // Check current user on app start
   final currentUser = supabase.auth.currentUser;
-  if (currentUser != null && !_isRedirecting) {
+  if (currentUser != null && !isRedirecting) {
     lastKnownEmailVerified = currentUser.emailConfirmedAt != null;
     if (lastKnownEmailVerified == true) {
-      _isRedirecting = true;
+      isRedirecting = true;
       WidgetsBinding.instance.addPostFrameCallback((_) async {
         try {
           final profiles = await supabase
@@ -436,7 +445,7 @@ void _setupAuthStateListener() {
             final singleRole = roleNames.first;
             await SessionManager.saveCurrentRole(singleRole);
             await appState.refreshState();
-            
+
             switch (singleRole) {
               case 'owner':
                 _navigateTo('/owner');
@@ -449,17 +458,20 @@ void _setupAuthStateListener() {
                 break;
             }
           } else {
-            _navigateTo('/role-selector', extra: {
-              'roles': roleNames,
-              'email': currentUser.email,
-              'userId': currentUser.id,
-            });
+            _navigateTo(
+              '/role-selector',
+              extra: {
+                'roles': roleNames,
+                'email': currentUser.email,
+                'userId': currentUser.id,
+              },
+            );
           }
         } catch (e) {
           print('❌ Error checking profile on start: $e');
           _navigateTo('/reg', extra: currentUser);
         } finally {
-          _isRedirecting = false;
+          isRedirecting = false;
         }
       });
     }
@@ -520,36 +532,50 @@ GoRouter _createRouter() {
       final path = state.matchedLocation;
       final queryParams = state.uri.queryParameters;
 
+      print('🔄 REDIRECT CHECK - Path: $path');
+      print(
+        '📊 AppState: loading=${appState.loading}, loggedIn=${appState.loggedIn}',
+      );
+
       // 🔥 NEVER redirect auth callbacks
       if (path == '/auth/callback' ||
           queryParams.containsKey('code') ||
           queryParams.containsKey('access_token')) {
+        print('🔑 Auth callback - no redirect');
         return null;
       }
 
-      if (appState.loading) return null;
+      // AppState loading නම්, කිසිම redirect එකක් එපා
+      if (appState.loading) {
+        print('⏳ AppState loading - no redirect');
+        return null;
+      }
+
+      // ✅ Clear data screen is always accessible
+      if (path == '/clear-data') {
+        print('🧹 Clear data screen - allowing access');
+        return null;
+      }
 
       final publicRoutes = [
         '/',
         '/login',
         '/signup',
+        '/finish',
+        '/help',
+        '/about',
+        '/contact',
+        '/data-consent',
         '/continue',
         '/verify-email',
         '/verify-invalid',
         '/privacy',
         '/terms',
         '/reset-password',
-        '/reset-password-form',
         '/reset-password-confirm',
+        '/reset-password-form',
         '/auth/callback',
-        '/help',
-        '/about',
-        '/contact',
-        '/data-consent',
       ];
-
-      // ✅ FIXED: Role selector route
-      final roleRoutes = ['/role-selector', '/owner', '/employee', '/customer'];
 
       // 🔥 SPECIAL HANDLING FOR /reg
       if (path == '/reg') {
@@ -561,20 +587,21 @@ GoRouter _createRouter() {
         return null;
       }
 
-      // ✅ FIXED: Role selector route
+      // ✅ Role selector route
       if (path == '/role-selector') {
-        // Only allow if logged in and has multiple roles
         if (!appState.loggedIn) {
           return '/login';
         }
         if (appState.roles.length <= 1) {
-          // If only one role, redirect to that role's dashboard
           if (appState.roles.isNotEmpty) {
             final role = appState.roles.first;
             switch (role) {
-              case 'owner': return '/owner';
-              case 'employee': return '/employee';
-              default: return '/customer';
+              case 'owner':
+                return '/owner';
+              case 'employee':
+                return '/employee';
+              default:
+                return '/customer';
             }
           }
           return '/';
@@ -584,36 +611,61 @@ GoRouter _createRouter() {
 
       if (publicRoutes.contains(path)) {
         if (path == '/') {
+          // SPLASH SCREEN - මෙතනදි තීරණය කරනවා කොහෙද යන්නේ කියලා
+
           if (appState.loggedIn) {
-            if (!appState.emailVerified) return '/verify-email';
+            // User logged in
+            if (!appState.emailVerified) {
+              print('📧 Email not verified → /verify-email');
+              return '/verify-email';
+            }
+
             if (!appState.profileCompleted) {
-              final user = Supabase.instance.client.auth.currentUser;
-              if (user != null) {
-                return '/reg';
-              }
+              print('📝 Profile not completed → /reg');
               return '/reg';
             }
 
-            // ✅ FIXED: Use currentRole from AppState
-            switch (appState.currentRole) {
-              case 'owner':
-                return '/owner';
-              case 'employee':
-                return '/employee';
-              default:
-                return '/customer';
+            // Check roles
+            if (appState.roles.isEmpty) {
+              print('⚠️ No roles found → /reg');
+              return '/reg';
+            }
+
+            if (appState.roles.length == 1) {
+              // Single role - direct redirect
+              final role = appState.roles.first;
+              print('🎯 Single role: $role → /$role');
+              return '/$role';
+            } else {
+              // Multiple roles
+              final savedRole = appState.currentRole;
+
+              if (savedRole != null && appState.roles.contains(savedRole)) {
+                // Use saved role
+                print('📌 Using saved role: $savedRole → /$savedRole');
+                return '/$savedRole';
+              } else {
+                // Show role selector
+                print('🔄 Multiple roles → /role-selector');
+                return '/role-selector';
+              }
             }
           } else {
+            // Not logged in
             final hasProfile = await SessionManager.hasProfile();
             if (hasProfile) {
+              print('👥 Has saved profiles → /continue');
               return '/continue';
+            } else {
+              print('🔐 No saved profiles → /login');
+              return '/login';
             }
-            return '/login';
           }
         }
         return null;
       }
 
+      // Protected routes
       if (!appState.loggedIn) {
         final hasProfile = await SessionManager.hasProfile();
         if (hasProfile && path != '/continue') {
@@ -629,16 +681,15 @@ GoRouter _createRouter() {
         if (!appState.profileCompleted && path != '/reg') {
           return '/reg';
         }
-        
-        // ✅ FIXED: Role-based route access
+
         if (path == '/owner' && appState.currentRole != 'owner') {
           return '/';
         }
         if (path == '/employee' && appState.currentRole != 'employee') {
           return '/';
         }
-        if (path == '/customer' && 
-            appState.currentRole != 'customer' && 
+        if (path == '/customer' &&
+            appState.currentRole != 'customer' &&
             appState.currentRole != null) {
           return '/';
         }
@@ -683,14 +734,12 @@ GoRouter _createRouter() {
         builder: (context, state) {
           final extra = state.extra as Map?;
           final roles = extra?['roles'] as List<String>? ?? appState.roles;
-          final email = extra?['email'] as String? ?? appState.currentEmail ?? '';
-          final userId = extra?['userId'] as String? ?? appState.currentUser?.id ?? '';
+          final email =
+              extra?['email'] as String? ?? appState.currentEmail ?? '';
+          final userId =
+              extra?['userId'] as String? ?? appState.currentUser?.id ?? '';
 
-          return RoleSelectorScreen(
-            roles: roles,
-            email: email,
-            userId: userId,
-          );
+          return RoleSelectorScreen(roles: roles, email: email, userId: userId);
         },
       ),
       GoRoute(path: '/customer', builder: (_, __) => const CustomerHome()),
