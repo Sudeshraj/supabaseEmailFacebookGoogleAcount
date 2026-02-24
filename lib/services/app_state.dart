@@ -340,11 +340,11 @@ class AppState extends ChangeNotifier {
             _profileCompleted &&
             _currentRole == 'owner'; // FIXED: 'owner' not 'business'
 
-      case '/employee':
+      case '/barber':
         return _loggedIn &&
             _emailVerified &&
             _profileCompleted &&
-            _currentRole == 'employee';
+            _currentRole == 'barber';
 
       case '/customer':
         return _loggedIn &&

@@ -720,8 +720,8 @@ class _ContinueScreenState extends State<ContinueScreen> {
         case 'owner':
           context.go('/owner');
           break;
-        case 'employee':
-          context.go('/employee');
+        case 'barber':
+          context.go('/barber');
           break;
         default:
           context.go('/customer');

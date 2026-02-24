@@ -242,8 +242,8 @@ void _setupAuthStateListener() {
                 case 'owner':
                   _navigateTo('/owner');
                   break;
-                case 'employee':
-                  _navigateTo('/employee');
+                case 'barber':
+                  _navigateTo('/barber');
                   break;
                 default:
                   _navigateTo('/customer');
@@ -264,8 +264,8 @@ void _setupAuthStateListener() {
                   case 'owner':
                     _navigateTo('/owner');
                     break;
-                  case 'employee':
-                    _navigateTo('/employee');
+                  case 'barber':
+                    _navigateTo('/barber');
                     break;
                   default:
                     _navigateTo('/customer');
@@ -354,8 +354,8 @@ void _setupAuthStateListener() {
                 case 'owner':
                   _navigateTo('/owner');
                   break;
-                case 'employee':
-                  _navigateTo('/employee');
+                case 'barber':
+                  _navigateTo('/barber');
                   break;
                 default:
                   _navigateTo('/customer');
@@ -450,8 +450,8 @@ void _setupAuthStateListener() {
               case 'owner':
                 _navigateTo('/owner');
                 break;
-              case 'employee':
-                _navigateTo('/employee');
+              case 'barber':
+                _navigateTo('/barber');
                 break;
               default:
                 _navigateTo('/customer');
@@ -598,8 +598,8 @@ GoRouter _createRouter() {
             switch (role) {
               case 'owner':
                 return '/owner';
-              case 'employee':
-                return '/employee';
+              case 'barber':
+                return '/barber';
               default:
                 return '/customer';
             }
@@ -685,7 +685,7 @@ GoRouter _createRouter() {
         if (path == '/owner' && appState.currentRole != 'owner') {
           return '/';
         }
-        if (path == '/employee' && appState.currentRole != 'employee') {
+        if (path == '/barber' && appState.currentRole != 'barber') {
           return '/';
         }
         if (path == '/customer' &&
@@ -743,7 +743,7 @@ GoRouter _createRouter() {
         },
       ),
       GoRoute(path: '/customer', builder: (_, __) => const CustomerHome()),
-      GoRoute(path: '/employee', builder: (_, __) => const EmployeeDashboard()),
+      GoRoute(path: '/barber', builder: (_, __) => const EmployeeDashboard()),
       GoRoute(path: '/owner', builder: (_, __) => const OwnerDashboard()),
       GoRoute(
         path: '/privacy',

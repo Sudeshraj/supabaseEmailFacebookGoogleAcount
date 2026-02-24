@@ -6,7 +6,7 @@ class AuthGate {
   static final _supabase = Supabase.instance.client;
 
   // ------------------------------------------------------------
-  // ROLE PICKER (priority: business > employee > customer)
+  // ROLE PICKER (priority: business > barber > customer)
   // ------------------------------------------------------------
   static Future<String> pickRole(dynamic data) async {
     if (data == null) return 'customer';
@@ -44,7 +44,7 @@ class AuthGate {
       final roles = data.map((e) => e.toString().toLowerCase()).toList();
 
       if (roles.contains('business')) return 'business';
-      if (roles.contains('employee')) return 'employee';
+      if (roles.contains('barber')) return 'barber';
       if (roles.contains('customer')) return 'customer';
     }
 
