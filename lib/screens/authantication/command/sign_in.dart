@@ -1594,8 +1594,8 @@ $provider OAuth Configuration Required:
                                       child: Column(
                                         children: [
                                           Container(
-                                            width: 80,
-                                            height: 80,
+                                            width: 70,
+                                            height: 70,
                                             decoration: BoxDecoration(
                                               shape: BoxShape.circle,
                                               border: Border.all(
@@ -1622,7 +1622,7 @@ $provider OAuth Configuration Required:
                                             ),
                                             child: ClipRRect(
                                               borderRadius:
-                                                  BorderRadius.circular(15),
+                                                  BorderRadius.circular(20),
                                               child: Image.asset(
                                                 'logo.png',
                                                 fit: BoxFit.cover,
@@ -1643,15 +1643,15 @@ $provider OAuth Configuration Required:
                                               ),
                                             ),
                                           ),
-                                          const SizedBox(height: 12),
-                                          const Text(
-                                            'Log in to MySaloon',
-                                            style: TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 24,
-                                              fontWeight: FontWeight.bold,
-                                            ),
-                                          ),
+                                          // const SizedBox(height: 12),
+                                          // const Text(
+                                          //   'Log in to MySaloon',
+                                          //   style: TextStyle(
+                                          //     color: Colors.white,
+                                          //     fontSize: 24,
+                                          //     fontWeight: FontWeight.bold,
+                                          //   ),
+                                          // ),
                                         ],
                                       ),
                                     ),
@@ -1659,6 +1659,7 @@ $provider OAuth Configuration Required:
                                 ],
                               ),
 
+                              // Email Field
                               // Email Field
                               TextField(
                                 controller: _emailController,
@@ -1671,70 +1672,65 @@ $provider OAuth Configuration Required:
                                   filled: true,
                                   fillColor: Colors.white.withOpacity(0.05),
 
-                                  // Focus නැති වෙලාවට border එක (error නැති වෙලාවට)
                                   enabledBorder: OutlineInputBorder(
                                     borderSide: const BorderSide(
-                                      color: Colors.white24, // White color
+                                      color: Colors.white24,
                                       width: 1.0,
                                     ),
                                     borderRadius: BorderRadius.circular(8),
                                   ),
 
-                                  // Focus වෙලාවට border එක (error නැති වෙලාවට)
                                   focusedBorder: OutlineInputBorder(
                                     borderSide: const BorderSide(
-                                      color: Color(0xFF1877F3), // Blue color
+                                      color: Color(0xFF1877F3),
                                       width: 1.0,
                                     ),
                                     borderRadius: BorderRadius.circular(8),
                                   ),
 
-                                  // Error තියෙන වෙලාවට border එක (focus නැති වෙලාවට)
                                   errorBorder: OutlineInputBorder(
                                     borderSide: const BorderSide(
-                                      color: Colors
-                                          .redAccent, // Red color only for errors
+                                      color: Colors.redAccent,
                                       width: 1.0,
                                     ),
                                     borderRadius: BorderRadius.circular(8),
                                   ),
 
-                                  // Error තියෙන වෙලාවට border එක (focus වෙලාවට)
                                   focusedErrorBorder: OutlineInputBorder(
                                     borderSide: const BorderSide(
-                                      color: Colors
-                                          .redAccent, // Red color only for errors
+                                      color: Colors.redAccent,
                                       width: 1.0,
                                     ),
                                     borderRadius: BorderRadius.circular(8),
                                   ),
 
-                                  // Default border (මේක අනවශ්‍ය නම් ඉවත් කරන්න)
-                                  // border: OutlineInputBorder(
-                                  //   borderRadius: BorderRadius.circular(8),
-                                  // ),
                                   prefixIcon: const Icon(
                                     Icons.email_outlined,
                                     color: Colors.white54,
                                     size: 20,
                                   ),
+
+                                  // ✅ Email validation icon
                                   suffixIcon: _emailController.text.isEmpty
                                       ? null
                                       : _isValidEmail
                                       ? const Icon(
                                           Icons.check_circle,
                                           color: Color(0xFF4CAF50),
+                                          size: 22,
                                         )
                                       : const Icon(
                                           Icons.error_outline,
                                           color: Colors.redAccent,
+                                          size: 22,
                                         ),
+
                                   errorText: _emailError,
                                 ),
                               ),
+
                               const SizedBox(height: 16),
 
-                              // Password Field
                               // Password Field
                               TextField(
                                 controller: _passwordController,
@@ -1747,43 +1743,65 @@ $provider OAuth Configuration Required:
                                   ),
                                   filled: true,
                                   fillColor: Colors.white.withOpacity(0.05),
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
+
                                   enabledBorder: OutlineInputBorder(
                                     borderSide: const BorderSide(
                                       color: Colors.white24,
+                                      width: 1.0,
                                     ),
                                     borderRadius: BorderRadius.circular(8),
                                   ),
-                                  focusedBorder: const OutlineInputBorder(
-                                    borderSide: BorderSide(
-                                      color: Color(0xFF1877F3),
-                                    ),
-                                  ),
-                                  errorText: _passwordError,
 
-                                  // ✅ FIX: Show icon only when text is not empty
+                                  focusedBorder: OutlineInputBorder(
+                                    borderSide: const BorderSide(
+                                      color: Color(0xFF1877F3),
+                                      width: 1.0,
+                                    ),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+
+                                  errorBorder: OutlineInputBorder(
+                                    borderSide: const BorderSide(
+                                      color: Colors.redAccent,
+                                      width: 1.0,
+                                    ),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+
+                                  focusedErrorBorder: OutlineInputBorder(
+                                    borderSide: const BorderSide(
+                                      color: Colors.redAccent,
+                                      width: 1.0,
+                                    ),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+
+                                  prefixIcon: const Icon(
+                                    Icons.lock_outline_rounded,
+                                    color: Colors.white54,
+                                    size: 20,
+                                  ),
+
+                                  // ✅ Password visibility icon - only shows when text exists
                                   suffixIcon:
-                                      (_passwordController.text.isNotEmpty ||
-                                          _passwordError != null)
+                                      _passwordController.text.isNotEmpty
                                       ? IconButton(
                                           icon: Icon(
                                             _obscurePassword
-                                                ? Icons.visibility_off
-                                                : Icons.visibility,
-                                            color: _passwordError != null
-                                                ? Colors
-                                                      .redAccent // Red color when error
-                                                : Colors
-                                                      .white70, // Normal color
+                                                ? Icons.visibility_off_rounded
+                                                : Icons.visibility_rounded,
+                                            color: Colors.white70,
+                                            size: 22,
                                           ),
                                           onPressed: () => setState(
                                             () => _obscurePassword =
                                                 !_obscurePassword,
                                           ),
+                                          splashRadius: 20,
                                         )
-                                      : null, // Hide icon when field is empty
+                                      : null,
+
+                                  errorText: _passwordError,
                                 ),
                               ),
                               const SizedBox(height: 16),
@@ -1880,81 +1898,87 @@ $provider OAuth Configuration Required:
                       // ✅ Updated Bottom Section with OAuth-like Create Account button
                       Column(
                         children: [
-                                  // Privacy Policy Links (inside OAuth section)
-        Padding(
-          padding: const EdgeInsets.only(bottom: 10),
-          child: Wrap(
-            alignment: WrapAlignment.center,
-            spacing: 2,
-            runSpacing: 4,
-            children: [
-              Text(
-                'By continuing, you agree to our',
-                style: TextStyle(color: Colors.white60, fontSize: 11),
-              ),
-              GestureDetector(
-                onTap: () => context.push(
-                  '/terms?from=${Uri.encodeComponent('/login')}',
-                ),
-                child: Text(
-                  'Terms of Service',
-                  style: TextStyle(
-                    color: const Color(0xFF1877F3),
-                    fontSize: 11,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ),
-              Text(
-                'and',
-                style: TextStyle(color: Colors.white60, fontSize: 11),
-              ),
-              GestureDetector(
-                onTap: () => context.push(
-                  '/privacy?from=${Uri.encodeComponent('/login')}',
-                ),
-                child: Text(
-                  'Privacy Policy',
-                  style: TextStyle(
-                    color: const Color(0xFF1877F3),
-                    fontSize: 11,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
+                          // Privacy Policy Links (inside OAuth section)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: Wrap(
+                              alignment: WrapAlignment.center,
+                              spacing: 2,
+                              runSpacing: 4,
+                              children: [
+                                Text(
+                                  'By continuing, you agree to our',
+                                  style: TextStyle(
+                                    color: Colors.white60,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                                GestureDetector(
+                                  onTap: () => context.push(
+                                    '/terms?from=${Uri.encodeComponent('/login')}',
+                                  ),
+                                  child: Text(
+                                    'Terms of Service',
+                                    style: TextStyle(
+                                      color: const Color(0xFF1877F3),
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ),
+                                Text(
+                                  'and',
+                                  style: TextStyle(
+                                    color: Colors.white60,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                                GestureDetector(
+                                  onTap: () => context.push(
+                                    '/privacy?from=${Uri.encodeComponent('/login')}',
+                                  ),
+                                  child: Text(
+                                    'Privacy Policy',
+                                    style: TextStyle(
+                                      color: const Color(0xFF1877F3),
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                           // const SizedBox(
                           //   height: 20,
                           // ), // Small space at the very bottom
                           // Data Management Links
-                          Wrap(
-                            alignment: WrapAlignment.center,
-                            spacing: 16,
-                            children: [
-                              TextButton(
-                                onPressed: () => context.go('/clear-data'),
-                                child: Text(
-                                  'Manage Account Data',
-                                  style: TextStyle(
-                                    color: Colors.white70,
-                                    fontSize: 11,
-                                  ),
-                                ),
-                              ),
-                              TextButton(
-                                onPressed: () => context.go('/data-export'),
-                                child: Text(
-                                  'Export My Data',
-                                  style: TextStyle(
-                                    color: Colors.white70,
-                                    fontSize: 11,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
+                          // Wrap(
+                          //   alignment: WrapAlignment.center,
+                          //   spacing: 16,
+                          //   children: [
+                          //     TextButton(
+                          //       onPressed: () => context.go('/clear-data'),
+                          //       child: Text(
+                          //         'Manage Account Data',
+                          //         style: TextStyle(
+                          //           color: Colors.white70,
+                          //           fontSize: 11,
+                          //         ),
+                          //       ),
+                          //     ),
+                          //     TextButton(
+                          //       onPressed: () => context.go('/data-export'),
+                          //       child: Text(
+                          //         'Export My Data',
+                          //         style: TextStyle(
+                          //           color: Colors.white70,
+                          //           fontSize: 11,
+                          //         ),
+                          //       ),
+                          //     ),
+                          //   ],
+                          // ),
                         ],
                       ),
                     ],
