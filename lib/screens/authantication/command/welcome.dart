@@ -29,7 +29,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
   @override
   void initState() {
     super.initState();
-    
+
     // Optimized animation duration
     _controller = AnimationController(
       vsync: this,
@@ -44,10 +44,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
     _slideAnimation = Tween<Offset>(
       begin: const Offset(0, 0.05),
       end: Offset.zero,
-    ).animate(CurvedAnimation(
-      parent: _controller,
-      curve: Curves.easeOutCubic,
-    ));
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic));
 
     _controller.forward();
   }
@@ -59,38 +56,86 @@ class _WelcomeScreenState extends State<WelcomeScreen>
   }
 
   /// Logout function
+  /// Logout function - FIXED with proper mounted checks
+  /// Logout function - COMPLETELY FIXED with proper mounted checks
   Future<void> _handleLogout() async {
-    // Show loading dialog
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => const Center(
-        child: CircularProgressIndicator(
-          color: Colors.white,
-        ),
-      ),
-    );
+    // Store context reference at the start
+    final currentContext = context;
 
-    try {
-      await SessionManager.logoutForContinue();
-      if (context.mounted) {
-        Navigator.pop(context); // Close loading
-        appState.refreshState();
-        context.go('/');
-      }
-    } catch (e) {
-      if (context.mounted) {
-        Navigator.pop(context); // Close loading
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Logout failed: ${e.toString()}'),
-            backgroundColor: Colors.red,
-            behavior: SnackBarBehavior.floating,
-            margin: const EdgeInsets.all(16),
-          ),
+    if (!mounted) return;
+
+    showLogoutConfirmation(
+      currentContext,
+      onLogoutConfirmed: () async {
+        // Don't store dialogContext separately - use currentContext
+
+        if (!mounted) return; // Check State mounted
+
+        // Show loading dialog - use currentContext
+        if (!mounted) return;
+
+        // Show loading dialog and keep reference
+        BuildContext? dialogContext;
+
+        showDialog(
+          context: currentContext,
+          barrierDismissible: false,
+          builder: (BuildContext context) {
+            // Store this context for later use
+            dialogContext = context;
+            return const Dialog(
+              backgroundColor: Colors.transparent,
+              insetPadding: EdgeInsets.all(0),
+              child: Center(
+                child: CircularProgressIndicator(color: Colors.white),
+              ),
+            );
+          },
         );
-      }
-    }
+
+        try {
+          // Call your logout function
+          await SessionManager.logoutForContinue();
+
+          // Check if State is still mounted
+          if (!mounted) return;
+
+          // Close loading dialog - check if dialogContext exists and is valid
+          if (dialogContext != null && dialogContext!.mounted) {
+            Navigator.pop(dialogContext!);
+          }
+
+          // Check mounted again
+          if (!mounted) return;
+
+          // Navigate to login/splash screen using GoRouter
+          appState.refreshState();
+
+          if (!mounted) return;
+          context.go('/');
+        } catch (e) {
+          // Check if State is still mounted
+          if (!mounted) return;
+
+          // Close loading dialog - check if dialogContext exists and is valid
+          if (dialogContext != null && dialogContext!.mounted) {
+            Navigator.pop(dialogContext!);
+          }
+
+          // Check mounted again
+          if (!mounted) return;
+
+          // Show error message
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Logout failed: ${e.toString()}'),
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
+      },
+    );
   }
 
   /// Optimized role card with better image handling
@@ -141,16 +186,18 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                       return Container(
                         color: Colors.grey[900],
                         child: Icon(
-                          title == 'Customer' ? Icons.person : 
-                          title == 'Business' ? Icons.business : 
-                          Icons.work,
+                          title == 'Customer'
+                              ? Icons.person
+                              : title == 'Business'
+                              ? Icons.business
+                              : Icons.work,
                           color: accentColor.withValues(alpha: 0.3),
                           size: 50,
                         ),
                       );
                     },
                   ),
-                  
+
                   // Semi-transparent overlay with gradient
                   Positioned.fill(
                     child: Container(
@@ -168,7 +215,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                       ),
                     ),
                   ),
-                  
+
                   // Title with better visibility
                   Positioned(
                     bottom: 8,
@@ -243,233 +290,235 @@ class _WelcomeScreenState extends State<WelcomeScreen>
     );
   }
 
-@override
-Widget build(BuildContext context) {
-  final size = MediaQuery.sizeOf(context);
-  final bool isWeb = size.width > 700;
-  final bool isTablet = size.width > 600 && size.width <= 700;
-  final double maxWidth = isWeb ? 560 : (isTablet ? 600 : double.infinity);
-  final double horizontalPadding = isWeb ? 32.0 : 20.0;
+  @override
+  Widget build(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    final bool isWeb = size.width > 700;
+    final bool isTablet = size.width > 600 && size.width <= 700;
+    final double maxWidth = isWeb ? 560 : (isTablet ? 600 : double.infinity);
+    final double horizontalPadding = isWeb ? 32.0 : 20.0;
 
-  return Scaffold(
-    backgroundColor: _primaryBg,
-    body: SafeArea(
-      child: FadeTransition(
-        opacity: _fadeAnimation,
-        child: SlideTransition(
-          position: _slideAnimation,
-          child: Center(
-            child: ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: maxWidth),
-              child: SingleChildScrollView(
-                physics: const BouncingScrollPhysics(),
-                padding: EdgeInsets.symmetric(
-                  horizontal: horizontalPadding,
-                  vertical: isWeb ? 32 : 24,
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // ✅ NEW HEADER - Matches ContinueScreen style
-                    Stack(
-                      children: [
-                        Container(
-                          margin: const EdgeInsets.only(top: 10, bottom: 25),
-                          child: Center(
-                            child: Column(
-                              children: [
-                                Container(
-                                  width: 80,
-                                  height: 80,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    border: Border.all(
-                                      color: Colors.white24,
-                                      width: 2,
-                                    ),
-                                    gradient: const LinearGradient(
-                                      colors: [
-                                        Color(0xFF1877F2),
-                                        Color(0xFF0A58CA),
-                                      ],
-                                      begin: Alignment.topCenter,
-                                      end: Alignment.bottomCenter,
-                                    ),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: const Color(
-                                          0xFF1877F2,
-                                        ).withValues(alpha: 0.4),
-                                        blurRadius: 20,
-                                        spreadRadius: 5,
+    return Scaffold(
+      backgroundColor: _primaryBg,
+      body: SafeArea(
+        child: FadeTransition(
+          opacity: _fadeAnimation,
+          child: SlideTransition(
+            position: _slideAnimation,
+            child: Center(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: maxWidth),
+                child: SingleChildScrollView(
+                  physics: const BouncingScrollPhysics(),
+                  padding: EdgeInsets.symmetric(
+                    horizontal: horizontalPadding,
+                    vertical: isWeb ? 32 : 24,
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // ✅ NEW HEADER - Matches ContinueScreen style
+                      Stack(
+                        children: [
+                          Container(
+                            margin: const EdgeInsets.only(top: 10, bottom: 25),
+                            child: Center(
+                              child: Column(
+                                children: [
+                                  Container(
+                                    width: 80,
+                                    height: 80,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      border: Border.all(
+                                        color: Colors.white24,
+                                        width: 2,
                                       ),
-                                    ],
-                                  ),
-                                  child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(20),
-                                    child: Image.asset(
-                                      'logo.png',
-                                      fit: BoxFit.cover,
-                                      errorBuilder: (context, error, stackTrace) {
-                                        return Center(
-                                          child: Icon(
-                                            Icons.account_circle,
-                                            color: Colors.white,
-                                            size: 40,
-                                          ),
-                                        );
-                                      },
+                                      gradient: const LinearGradient(
+                                        colors: [
+                                          Color(0xFF1877F2),
+                                          Color(0xFF0A58CA),
+                                        ],
+                                        begin: Alignment.topCenter,
+                                        end: Alignment.bottomCenter,
+                                      ),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: const Color(
+                                            0xFF1877F2,
+                                          ).withValues(alpha: 0.4),
+                                          blurRadius: 20,
+                                          spreadRadius: 5,
+                                        ),
+                                      ],
+                                    ),
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(20),
+                                      child: Image.asset(
+                                        'logo.png',
+                                        fit: BoxFit.cover,
+                                        errorBuilder:
+                                            (context, error, stackTrace) {
+                                              return Center(
+                                                child: Icon(
+                                                  Icons.account_circle,
+                                                  color: Colors.white,
+                                                  size: 40,
+                                                ),
+                                              );
+                                            },
+                                      ),
                                     ),
                                   ),
-                                ),
-                                const SizedBox(height: 15),
-                                const Text(
-                                  'Welcome to MySaloon',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 24,
-                                    fontWeight: FontWeight.bold,
+                                  const SizedBox(height: 15),
+                                  const Text(
+                                    'Welcome to MySaloon',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 24,
+                                      fontWeight: FontWeight.bold,
+                                    ),
                                   ),
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  'Choose your role to continue',
-                                  style: TextStyle(
-                                    color: Colors.white.withValues(alpha: 0.7),
-                                    fontSize: 16,
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'Choose your role to continue',
+                                    style: TextStyle(
+                                      color: Colors.white.withValues(
+                                        alpha: 0.7,
+                                      ),
+                                      fontSize: 16,
+                                    ),
                                   ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-
-                      ],
-                    ),
-                    
-                    const SizedBox(height: 32),
-                    
-                    // Role Cards
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: _roleCard(
-                            image: 'saloncus.png',
-                            title: 'Customer',
-                            accentColor: _customerGreen,
-                            onTap: () => widget.onNext('customer'),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _roleCard(
-                            image: 'salon.png',
-                            title: 'Salon',
-                            accentColor: _businessBlue,
-                            onTap: () => widget.onNext('owner'),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _roleCard(
-                            image: 'barber.png', // Change to employee image
-                            title: 'Barber',
-                            accentColor: _employeeOrange,
-                            onTap: () => widget.onNext('employee'),
-                          ),
-                        ),
-                      ],
-                    ),
-                    
-                    const SizedBox(height: 32),
-                    
-                    // Description
-                    Container(
-                      padding: const EdgeInsets.all(20),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.02),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.05),
-                        ),
-                      ),
-                      child: const Text(
-                        'Create an account to connect with trusted salons, discover new styles, and grow your business — all in one place.',
-                        style: TextStyle(
-                          color: Colors.white70,
-                          fontSize: 15,
-                          height: 1.5,
-                        ),
-                      ),
-                    ),
-                    
-                    const SizedBox(height: 32),
-                    
-                    // Action Buttons
-                    _actionButton(
-                      label: 'Create customer account',
-                      color: _customerGreen,
-                      icon: Icons.person_add_alt_1,
-                      onPressed: () => widget.onNext('customer'),
-                    ),
-                    
-                    const SizedBox(height: 12),
-                    
-                    _actionButton(
-                      label: ' Create salon account',
-                      color: _businessBlue,
-                      icon: Icons.storefront,
-                      onPressed: () => widget.onNext('owner'),
-                    ),
-                    
-                    const SizedBox(height: 12),
-                    
-                    _actionButton(
-                      label: 'Create Barber account',
-                      color: _employeeOrange,
-                      icon: Icons.person_add,
-                      onPressed: () => widget.onNext('employee'),
-                    ),
-                    
-                    const SizedBox(height: 16),
-                    
-                    // Logout link (replaced Login text)
-                    Center(
-                      child: TextButton(
-                        onPressed: _handleLogout,
-                        style: TextButton.styleFrom(
-                          foregroundColor: Colors.white54,
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.logout,
-                              size: 18,
-                              color: Colors.white.withValues(alpha: 0.5),
-                            ),
-                            const SizedBox(width: 8),
-                            const Text(
-                              'Sign Out', // Changed to "Sign Out" for better UX
-                              style: TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.w500,
+                                ],
                               ),
                             ),
-                          ],
+                          ),
+                        ],
+                      ),
+
+                      const SizedBox(height: 32),
+
+                      // Role Cards
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: _roleCard(
+                              image: 'saloncus.png',
+                              title: 'Customer',
+                              accentColor: _customerGreen,
+                              onTap: () => widget.onNext('customer'),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _roleCard(
+                              image: 'salon.png',
+                              title: 'Salon',
+                              accentColor: _businessBlue,
+                              onTap: () => widget.onNext('owner'),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _roleCard(
+                              image: 'barber.png', // Change to employee image
+                              title: 'Barber',
+                              accentColor: _employeeOrange,
+                              onTap: () => widget.onNext('employee'),
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      const SizedBox(height: 32),
+
+                      // Description
+                      Container(
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.02),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.05),
+                          ),
+                        ),
+                        child: const Text(
+                          'Create an account to connect with trusted salons, discover new styles, and grow your business — all in one place.',
+                          style: TextStyle(
+                            color: Colors.white70,
+                            fontSize: 15,
+                            height: 1.5,
+                          ),
                         ),
                       ),
-                    ),
-                  ],
+
+                      const SizedBox(height: 32),
+
+                      // Action Buttons
+                      _actionButton(
+                        label: 'Create customer account',
+                        color: _customerGreen,
+                        icon: Icons.person_add_alt_1,
+                        onPressed: () => widget.onNext('customer'),
+                      ),
+
+                      const SizedBox(height: 12),
+
+                      _actionButton(
+                        label: ' Create salon account',
+                        color: _businessBlue,
+                        icon: Icons.storefront,
+                        onPressed: () => widget.onNext('owner'),
+                      ),
+
+                      const SizedBox(height: 12),
+
+                      _actionButton(
+                        label: 'Create Barber account',
+                        color: _employeeOrange,
+                        icon: Icons.person_add,
+                        onPressed: () => widget.onNext('employee'),
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      // Logout link (replaced Login text)
+                      Center(
+                        child: TextButton(
+                          onPressed: _handleLogout,
+                          style: TextButton.styleFrom(
+                            foregroundColor: Colors.white54,
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.logout,
+                                size: 18,
+                                color: Colors.white.withValues(alpha: 0.5),
+                              ),
+                              const SizedBox(width: 8),
+                              const Text(
+                                'Sign Out', // Changed to "Sign Out" for better UX
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
           ),
         ),
       ),
-    ),
-  );
-}
+    );
+  }
 }
