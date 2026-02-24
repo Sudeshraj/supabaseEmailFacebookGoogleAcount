@@ -30,7 +30,7 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
   bool get isIOS => UniversalPlatform.isIOS;
 
   // ---- SELECTED ROLE ----
-  String? roles; // 'owner' or 'employee'
+  String? roles; // 'owner' or 'barber'
 
   // ---- NAME FIELDS ----
   String? firstName;
@@ -89,7 +89,7 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
             // ===============================================================
           // EMPLOYEE FLOW
           // ===============================================================
-          if (roles == 'employee') ..._buildEmployeeFlow(),
+          if (roles == 'barber') ..._buildEmployeeFlow(),
         ],
       ),
     );
@@ -199,7 +199,7 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
         }
         return;
       }
-    } else if (roles == 'employee') {
+    } else if (roles == 'barber') {
       if (firstName == null ||
           lastName == null ||
           firstName!.isEmpty ||
@@ -236,7 +236,7 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
         if (phone != null && phone!.isNotEmpty) {
           extraData['phone'] = phone;
         }
-      } else if (roles == 'employee') {
+      } else if (roles == 'barber') {
         extraData = {
           'full_name': "${firstName!.trim()} ${lastName!.trim()}",
           'first_name': firstName!.trim(),
@@ -264,8 +264,8 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
       String dbRole;
       if (roles == 'owner') {
         dbRole = 'owner';
-      } else if (roles == 'employee') {
-        dbRole = 'employee';
+      } else if (roles == 'barber') {
+        dbRole = 'barber';
       } else {
         dbRole = 'customer';
       }
@@ -444,9 +444,9 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
           message = isWeb
               ? "Your business profile has been created. You can now manage your salon."
               : "Welcome to MySalon Business! Start managing your salon today.";
-        } else if (roles == 'employee') {
+        } else if (roles == 'barber') {
           message =
-              "Welcome to the team! Your employee profile has been created.";
+              "Welcome to the team! Your barber profile has been created.";
         } else {
           message = isWeb
               ? "Your profile has been created. You can now enable notifications."
@@ -457,8 +457,8 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
           context: context,
           title: roles == 'owner'
               ? "🎉 Business Created!"
-              : roles == 'employee'
-              ? "👋 Welcome Employee!"
+              : roles == 'barber'
+              ? "👋 Welcome Barber!"
               : "🎉 Welcome to MySalon!",
           message: message,
           isError: false,
@@ -523,8 +523,8 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
       case 'owner':
         context.go('/owner');
         break;
-      case 'employee':
-        context.go('/employee');
+      case 'barber':
+        context.go('/barber');
         break;
       default:
         context.go('/customer');

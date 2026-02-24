@@ -1029,8 +1029,8 @@ class _SignInScreenState extends State<SignInScreen>
           case 'owner':
             context.go('/owner');
             break;
-          case 'employee':
-            context.go('/employee');
+          case 'barber':
+            context.go('/barber');
             break;
           case 'customer':
             context.go('/customer');
@@ -1058,8 +1058,8 @@ class _SignInScreenState extends State<SignInScreen>
             case 'owner':
               context.go('/owner');
               break;
-            case 'employee':
-              context.go('/employee');
+            case 'barber':
+              context.go('/barber');
               break;
             default:
               context.go('/customer');

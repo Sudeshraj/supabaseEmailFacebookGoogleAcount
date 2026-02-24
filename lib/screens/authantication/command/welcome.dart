@@ -423,10 +423,10 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                           const SizedBox(width: 12),
                           Expanded(
                             child: _roleCard(
-                              image: 'barber.png', // Change to employee image
+                              image: 'barber.png', // Change to barber image
                               title: 'Barber',
                               accentColor: _employeeOrange,
-                              onTap: () => widget.onNext('employee'),
+                              onTap: () => widget.onNext('barber'),
                             ),
                           ),
                         ],
@@ -479,7 +479,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                         label: 'Create Barber account',
                         color: _employeeOrange,
                         icon: Icons.person_add,
-                        onPressed: () => widget.onNext('employee'),
+                        onPressed: () => widget.onNext('barber'),
                       ),
 
                       const SizedBox(height: 16),

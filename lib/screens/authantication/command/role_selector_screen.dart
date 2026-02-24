@@ -44,8 +44,8 @@ class _RoleSelectorScreenState extends State<RoleSelectorScreen> {
         case 'owner':
           context.go('/owner');
           break;
-        case 'employee':
-          context.go('/employee');
+        case 'barber':
+          context.go('/barber');
           break;
         case 'customer':
           context.go('/customer');
@@ -107,19 +107,19 @@ class _RoleSelectorScreenState extends State<RoleSelectorScreen> {
                   onTap: () => _selectRole('owner'),
                 ),
               
-              if (widget.roles.contains('owner') && widget.roles.contains('employee'))
+              if (widget.roles.contains('owner') && widget.roles.contains('barber'))
                 const SizedBox(height: 16),
               
-              if (widget.roles.contains('employee'))
+              if (widget.roles.contains('barber'))
                 _buildRoleButton(
-                  title: 'Employee',
+                  title: 'Barber',
                   subtitle: 'View your schedule and manage appointments',
                   icon: Icons.person_outline,
                   color: const Color(0xFF2196F3),
-                  onTap: () => _selectRole('employee'),
+                  onTap: () => _selectRole('barber'),
                 ),
               
-              if ((widget.roles.contains('owner') || widget.roles.contains('employee')) && 
+              if ((widget.roles.contains('owner') || widget.roles.contains('barber')) && 
                   widget.roles.contains('customer'))
                 const SizedBox(height: 16),
               
