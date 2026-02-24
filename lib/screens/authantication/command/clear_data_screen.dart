@@ -45,7 +45,7 @@ class _ClearDataScreenState extends State<ClearDataScreen>
       if (GoRouter.of(context).canPop()) {
         GoRouter.of(context).pop();
       } else {
-        GoRouter.of(context).go('/login');
+        GoRouter.of(context).go('/continue');
       }
     }
   }

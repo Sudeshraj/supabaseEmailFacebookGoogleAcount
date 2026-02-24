@@ -52,10 +52,13 @@ class _SignInScreenState extends State<SignInScreen>
   bool _obscurePassword = true;
   bool _loading = false;
   bool _coolDown = false;
-  bool _rememberMe = false;
+  bool _rememberMe = true; // ✅ AUTO-CHECKED by default
   bool _loadingGoogle = false;
   bool _loadingFacebook = false;
   bool _loadingApple = false;
+  
+  // ✅ Track if user manually changed remember me
+  bool _userChangedRememberMe = false;
 
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
@@ -93,11 +96,11 @@ class _SignInScreenState extends State<SignInScreen>
       _emailController = TextEditingController();
     }
 
-    // ✅ FIX: Set initial state with NO ERRORS
+    // Set initial state with NO ERRORS
     _emailError = null;
     _passwordError = null;
     _isValidEmail = true;
-    _isValid = false; // Initially false because fields are empty
+    _isValid = false;
 
     _animationController = AnimationController(
       vsync: this,
@@ -113,9 +116,7 @@ class _SignInScreenState extends State<SignInScreen>
 
     _animationController.forward();
 
-    // ✅ FIX: Don't validate immediately - wait for user interaction
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      // Only set text, don't validate
       if (widget.prefilledEmail != null && widget.prefilledEmail!.isNotEmpty) {
         _emailController.text = widget.prefilledEmail!;
       }
@@ -123,20 +124,54 @@ class _SignInScreenState extends State<SignInScreen>
       if (widget.showMessage && widget.message != null) {
         _showCustomMessage(widget.message!);
       }
+      
+      // ✅ Show info toast about remember me (only for new users)
+      _showRememberMeInfoIfNeeded();
     });
 
-    // Add listeners but don't trigger validation immediately
     _emailController.addListener(_onEmailChanged);
     _passwordController.addListener(_onPasswordChanged);
   }
 
-  // ✅ FIX: Separate validation from listeners
+  // ✅ Show info about remember me (only once)
+  Future<void> _showRememberMeInfoIfNeeded() async {
+    if (!_hasSavedProfile && mounted) {
+      SimpleToast.info(
+        context, 
+        "Quick sign-in is enabled for faster login next time",
+        duration: const Duration(seconds: 3),
+      );
+    }
+  }
+
+  // ✅ Load remember me setting with smart default
+  Future<void> _loadRememberMeSetting() async {
+    try {
+      final profiles = await SessionManager.getProfiles();
+      final hasExistingProfile = profiles.isNotEmpty;
+      final savedRememberMe = await SessionManager.isRememberMeEnabled();
+      
+      setState(() {
+        if (hasExistingProfile) {
+          _rememberMe = savedRememberMe;
+        } else {
+          _rememberMe = true; // ✅ New user - AUTO-CHECKED
+        }
+      });
+      
+      if (kDebugMode) {
+        print('📝 Remember Me setting loaded: $_rememberMe');
+      }
+    } catch (e) {
+      print('❌ Error loading remember me: $e');
+      setState(() => _rememberMe = true);
+    }
+  }
+
   void _onEmailChanged() {
-    // Only validate if user has interacted or field is not empty
     if (_emailController.text.isNotEmpty) {
       _validateEmail();
     } else {
-      // Clear errors when field becomes empty
       setState(() {
         _emailError = null;
         _isValidEmail = true;
@@ -146,11 +181,9 @@ class _SignInScreenState extends State<SignInScreen>
   }
 
   void _onPasswordChanged() {
-    // Only validate if user has interacted or field is not empty
     if (_passwordController.text.isNotEmpty) {
       _validatePassword();
     } else {
-      // Clear errors when field becomes empty
       setState(() {
         _passwordError = null;
       });
@@ -195,13 +228,6 @@ class _SignInScreenState extends State<SignInScreen>
     });
   }
 
-  // Keep this for backward compatibility
-  void _validateForm() {
-    _validateEmail();
-    _validatePassword();
-    _updateFormValidity();
-  }
-
   @override
   void dispose() {
     _emailController.dispose();
@@ -213,18 +239,6 @@ class _SignInScreenState extends State<SignInScreen>
 
   void _showCustomMessage(String message) {
     SimpleToast.info(context, message);
-  }
-
-  Future<void> _loadRememberMeSetting() async {
-    try {
-      final rememberMe = await SessionManager.isRememberMeEnabled();
-      setState(() {
-        _rememberMe = rememberMe;
-      });
-    } catch (e) {
-      print('❌ Error loading remember me: $e');
-      setState(() => _rememberMe = false);
-    }
   }
 
   Future<void> _initPackageInfo() async {
@@ -269,7 +283,7 @@ class _SignInScreenState extends State<SignInScreen>
     }
   }
 
-  // ✅ Check if consent is required for this user
+  // ✅ Check if consent is required (for signup only)
   Future<bool> _shouldShowConsent(String email) async {
     try {
       final profiles = await SessionManager.getProfiles();
@@ -278,18 +292,15 @@ class _SignInScreenState extends State<SignInScreen>
         orElse: () => {},
       );
 
-      // Check if user has already given consent
       if (userProfile.isNotEmpty) {
         final termsAccepted = userProfile['termsAcceptedAt'] != null;
         final privacyAccepted = userProfile['privacyAcceptedAt'] != null;
         return !(termsAccepted && privacyAccepted);
       }
 
-      // New user - requires consent
       return true;
     } catch (e) {
-      if (kDebugMode) print('❌ Error checking consent status: $e');
-      return true; // Safe default - show consent
+      return true;
     }
   }
 
@@ -301,7 +312,6 @@ class _SignInScreenState extends State<SignInScreen>
         return _ReturningUserCheck();
       }
 
-      // Find profile with matching provider
       for (var profile in profiles) {
         final profileProvider = profile['provider']?.toString().toLowerCase();
         if (profileProvider == provider.toLowerCase()) {
@@ -320,7 +330,6 @@ class _SignInScreenState extends State<SignInScreen>
 
       return _ReturningUserCheck();
     } catch (e) {
-      if (kDebugMode) print('❌ Error checking returning user: $e');
       return _ReturningUserCheck();
     }
   }
@@ -352,7 +361,7 @@ class _SignInScreenState extends State<SignInScreen>
     return 'com.yourcompany.mysalon.staging://auth-callback';
   }
 
-  // ✅ Save OAuth profile with user choice
+  // ✅ Save OAuth profile
   Future<void> _saveOAuthProfile({
     required User user,
     required String providerToSave,
@@ -364,17 +373,9 @@ class _SignInScreenState extends State<SignInScreen>
       final email = user.email!;
       final now = DateTime.now();
 
-      print('=' * 60);
-      print('🔍 DEBUG: _saveOAuthProfile');
-      print('=' * 60);
-      print('📧 User email: $email');
-      print('🎯 Provider parameter: "$providerToSave"');
-      print('🆔 User ID: ${user.id}');
-
       final userMetadata = user.userMetadata ?? {};
       final appMetadata = user.appMetadata;
 
-      // Determine final provider
       String finalProvider = providerToSave;
 
       if (providerToSave == 'facebook') {
@@ -393,7 +394,6 @@ class _SignInScreenState extends State<SignInScreen>
         }
       }
 
-      // Get photo URL
       String? photoUrl;
       if (userMetadata['avatar_url'] != null &&
           userMetadata['avatar_url'].toString().isNotEmpty) {
@@ -406,7 +406,6 @@ class _SignInScreenState extends State<SignInScreen>
         photoUrl = userMetadata['photo'].toString();
       }
 
-      // Get name
       String name = email.split('@').first;
       if (userMetadata['full_name'] != null &&
           userMetadata['full_name'].toString().isNotEmpty) {
@@ -416,14 +415,6 @@ class _SignInScreenState extends State<SignInScreen>
         name = userMetadata['name'].toString();
       }
 
-      print('\n💾 SAVING PROFILE:');
-      print('   - Email: $email');
-      print('   - Provider: $finalProvider');
-      print('   - Name: $name');
-      print('   - Photo: ${photoUrl ?? "No photo"}');
-      print('   - Remember Me: $rememberMe');
-
-      // Save with CORRECT provider
       await SessionManager.saveUserProfile(
         email: email,
         userId: user.id,
@@ -438,15 +429,12 @@ class _SignInScreenState extends State<SignInScreen>
         marketingConsent: false,
         marketingConsentAt: null,
       );
-
-      print('✅ Profile saved with provider: $finalProvider');
     } catch (e, stackTrace) {
       print('❌ Error in _saveOAuthProfile: $e');
-      print('Stack trace: $stackTrace');
     }
   }
 
-  // ✅ COMPLIANT: Login with user consent (FIRST TIME ONLY)
+  // ✅ LOGIN WITHOUT PRIVACY DIALOG
   Future<void> loginUser() async {
     if (_loading) return;
 
@@ -464,17 +452,8 @@ class _SignInScreenState extends State<SignInScreen>
         }
       }
 
-      // Check if consent needed (FIRST TIME ONLY)
-      final needsConsent = await _shouldShowConsent(email);
-      if (needsConsent) {
-        final accepted = await _showConsentDialog(requireExplicit: true);
-        if (!accepted) {
-          setState(() => _loading = false);
-          return;
-        }
-      } else {
-        if (kDebugMode) print('   - Skipping consent (already given)');
-      }
+      // ✅ NO PRIVACY DIALOG HERE - Login directly
+      // Consent is implied by using the app
 
       final response = await supabase.auth.signInWithPassword(
         email: email,
@@ -491,11 +470,6 @@ class _SignInScreenState extends State<SignInScreen>
       await SessionManager.setRememberMe(_rememberMe);
       await appState.setRememberMe(_rememberMe);
 
-      if (kDebugMode) {
-        print('🎉 LOGIN SUCCESS: ${user.email}');
-        print('   - Remember Me: $_rememberMe');
-      }
-
       await _saveOAuthProfile(
         user: user,
         providerToSave: 'email',
@@ -504,11 +478,9 @@ class _SignInScreenState extends State<SignInScreen>
         refreshToken: session?.refreshToken,
       );
 
-      // ✅ Don't check profile directly - use _handlePostLogin
       appState.refreshState();
       if (!mounted) return;
 
-      // ✅ Use _handlePostLogin for role-based redirect
       await _handlePostLogin(user.id);
     } on AuthException catch (e) {
       if (!mounted) return;
@@ -584,65 +556,320 @@ class _SignInScreenState extends State<SignInScreen>
         : error.toString();
   }
 
-  // ✅ COMPLIANT: Google OAuth with FIRST-TIME consent only
+  // ✅ COMBINED OAuth DIALOG (only for OAuth sign-in)
+  Future<Map<String, dynamic>?> _showCombinedOAuthDialog({
+    required String provider,
+    required List<String> scopes,
+    bool defaultAutoLogin = true,
+  }) async {
+    bool rememberMe = defaultAutoLogin;
+    bool marketingConsent = false;
+
+    return await showDialog<Map<String, dynamic>>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) {
+          return AlertDialog(
+            title: Row(
+              children: [
+                _getProviderIcon(provider, size: 24),
+                const SizedBox(width: 8),
+                Text("Sign in with $provider"),
+              ],
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // OAuth Permissions Section
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.shield, size: 16, color: Colors.grey.shade700),
+                            const SizedBox(width: 8),
+                            Text(
+                              "$provider will share:",
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        for (var scope in scopes)
+                          Padding(
+                            padding: const EdgeInsets.only(left: 16, bottom: 4),
+                            child: Row(
+                              children: [
+                                Icon(Icons.check_circle, size: 14, color: Colors.green.shade600),
+                                const SizedBox(width: 8),
+                                Text("• $scope", style: const TextStyle(fontSize: 13)),
+                              ],
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Terms & Privacy Section
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.description, size: 16, color: Colors.blue.shade700),
+                            const SizedBox(width: 8),
+                            Text(
+                              "Terms & Privacy",
+                              style: TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 13,
+                                color: Colors.blue.shade700,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                          children: [
+                            TextButton.icon(
+                              onPressed: _launchTerms,
+                              icon: const Icon(Icons.open_in_new, size: 16),
+                              label: const Text("Terms of Service"),
+                              style: TextButton.styleFrom(
+                                foregroundColor: Colors.blue.shade700,
+                                textStyle: const TextStyle(fontSize: 12),
+                              ),
+                            ),
+                            TextButton.icon(
+                              onPressed: _launchPrivacy,
+                              icon: const Icon(Icons.open_in_new, size: 16),
+                              label: const Text("Privacy Policy"),
+                              style: TextButton.styleFrom(
+                                foregroundColor: Colors.blue.shade700,
+                                textStyle: const TextStyle(fontSize: 12),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        const Text(
+                          "By continuing, you agree to our Terms and Privacy Policy",
+                          style: TextStyle(fontSize: 11, color: Colors.grey),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Auto-login Section
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: rememberMe ? Colors.green.shade50 : Colors.grey.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: rememberMe ? Colors.green.shade200 : Colors.grey.shade200,
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.remember_me, size: 16, color: rememberMe ? Colors.green.shade700 : Colors.grey.shade700),
+                            const SizedBox(width: 8),
+                            Text(
+                              "Quick Sign-in",
+                              style: TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 13,
+                                color: rememberMe ? Colors.green.shade700 : Colors.grey.shade700,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Checkbox(
+                              value: rememberMe,
+                              onChanged: (value) => setState(() => rememberMe = value ?? false),
+                              activeColor: _getProviderColor(provider),
+                            ),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    "Stay signed in on this device",
+                                    style: TextStyle(fontSize: 13),
+                                  ),
+                                  Text(
+                                    "✓ Faster login next time\n✓ Disable anytime in Settings",
+                                    style: TextStyle(fontSize: 11, color: Colors.grey.shade600, height: 1.3),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  // Marketing Consent (Optional)
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    child: Row(
+                      children: [
+                        Checkbox(
+                          value: marketingConsent,
+                          onChanged: (value) => setState(() => marketingConsent = value ?? false),
+                          activeColor: _getProviderColor(provider),
+                        ),
+                        Expanded(
+                          child: Text(
+                            "Send me occasional offers and updates (optional)",
+                            style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 8),
+
+                  // App version
+                  Center(
+                    child: Text(
+                      "App v${_packageInfo.version} (${_packageInfo.buildNumber})",
+                      style: const TextStyle(fontSize: 10, color: Colors.grey),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, null),
+                child: const Text("Cancel"),
+              ),
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.pop(context, {
+                    'accepted': true,
+                    'rememberMe': rememberMe,
+                    'marketingConsent': marketingConsent,
+                  });
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _getProviderColor(provider),
+                  foregroundColor: Colors.white,
+                ),
+                child: const Text("Continue"),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  // ✅ Get provider icon
+  Widget _getProviderIcon(String provider, {double size = 18}) {
+    switch (provider.toLowerCase()) {
+      case 'google':
+        return SvgPicture.asset('icons/google.svg', width: size, height: size);
+      case 'facebook':
+        return SvgPicture.asset('icons/facebook.svg', width: size, height: size);
+      case 'apple':
+        return Icon(Icons.apple, size: size, color: Colors.black);
+      default:
+        return Icon(Icons.lock, size: size);
+    }
+  }
+
+  // ✅ Get provider color
+  Color _getProviderColor(String provider) {
+    switch (provider.toLowerCase()) {
+      case 'google': return const Color(0xFFDB4437);
+      case 'facebook': return const Color(0xFF1877F2);
+      case 'apple': return Colors.black;
+      default: return const Color(0xFF1877F3);
+    }
+  }
+
+  // ✅ Google Sign In
   Future<void> _signInWithGoogle() async {
     if (_loadingGoogle) return;
 
     try {
       setState(() => _loadingGoogle = true);
 
-      if (kDebugMode) {
-        print('🔵 Google OAuth starting...');
-      }
-
-      // 1. Check if this is a returning user
       final returningUser = await _checkIfReturningUser('google');
-      bool needsConsent = true;
 
-      if (returningUser.email != null) {
-        needsConsent = await _shouldShowConsent(returningUser.email!);
-        if (kDebugMode) {
-          print('   - Returning user: ${returningUser.email}');
-          print('   - Needs consent: $needsConsent');
-        }
-      }
-
-      // 2. Show OAuth consent dialog
-      final oauthConsent = await _showOAuthConsentDialog(
+      final result = await _showCombinedOAuthDialog(
         provider: 'Google',
         scopes: ['email', 'profile'],
+        defaultAutoLogin: true,
       );
-      if (!oauthConsent) {
+
+      if (result == null) {
         setState(() => _loadingGoogle = false);
         return;
       }
 
-      // 3. Show App Store compliant consent dialog (FIRST TIME ONLY)
-      if (needsConsent) {
-        final accepted = await _showConsentDialog(requireExplicit: true);
-        if (!accepted) {
-          setState(() => _loadingGoogle = false);
-          return;
-        }
-      } else {
-        if (kDebugMode) print('   - Skipping consent dialog (already given)');
-      }
+      final bool userWantsAutoLogin = result['rememberMe'] ?? true;
+      final bool marketingConsent = result['marketingConsent'] ?? false;
 
-      // 4. Ask user about auto-login preference
-      bool userWantsAutoLogin = _rememberMe;
-
-      if (needsConsent || !returningUser.hasAutoLoginSetting) {
-        userWantsAutoLogin = await _showAutoLoginConsentDialog(
-          provider: 'Google',
-        );
-      }
-
-      // 5. Set based on user's choice
       setState(() => _rememberMe = userWantsAutoLogin);
       await SessionManager.setRememberMe(userWantsAutoLogin);
       await appState.setRememberMe(userWantsAutoLogin);
 
-      // Setup auth listener
+      final now = DateTime.now();
+      final email = _emailController.text.trim();
+
+      if (email.isNotEmpty) {
+        await SessionManager.updateConsentTimestamps(
+          email: email,
+          termsAcceptedAt: now,
+          privacyAcceptedAt: now,
+        );
+
+        if (marketingConsent) {
+          await SessionManager.updateMarketingConsent(
+            email: email,
+            consent: true,
+            consentedAt: now,
+          );
+        }
+      }
+
       _authSubscription?.cancel();
       _authSubscription = supabase.auth.onAuthStateChange.listen((data) async {
         if (data.event == AuthChangeEvent.signedIn) {
@@ -651,9 +878,6 @@ class _SignInScreenState extends State<SignInScreen>
           final session = supabase.auth.currentSession;
 
           if (user != null && user.email != null) {
-            print('✅ Google OAuth User Signed In: ${user.email}');
-            print('   - User wants auto-login: $userWantsAutoLogin');
-
             await _saveOAuthProfile(
               user: user,
               providerToSave: 'google',
@@ -662,13 +886,19 @@ class _SignInScreenState extends State<SignInScreen>
               refreshToken: session?.refreshToken,
             );
 
-            // ✅ Use _handlePostLogin for role-based redirect
+            if (marketingConsent) {
+              await SessionManager.updateMarketingConsent(
+                email: user.email!,
+                consent: true,
+                consentedAt: DateTime.now(),
+              );
+            }
+
             await _handlePostLogin(user.id);
           }
         }
       });
 
-      // Sign in
       await supabase.auth.signInWithOAuth(
         OAuthProvider.google,
         redirectTo: _getRedirectUrl(),
@@ -696,7 +926,7 @@ class _SignInScreenState extends State<SignInScreen>
     }
   }
 
-  // ✅ COMPLIANT: Facebook OAuth with FIRST-TIME consent only
+  // ✅ Facebook Sign In
   Future<void> _signInWithFacebook() async {
     if (_loadingFacebook) return;
 
@@ -708,55 +938,36 @@ class _SignInScreenState extends State<SignInScreen>
         return;
       }
 
-      if (kDebugMode) {
-        print('🔵 Facebook OAuth starting...');
-      }
-
-      // 1. Check if returning user
       final returningUser = await _checkIfReturningUser('facebook');
-      bool needsConsent = true;
 
-      if (returningUser.email != null) {
-        needsConsent = await _shouldShowConsent(returningUser.email!);
-        if (kDebugMode) {
-          print('   - Returning user: ${returningUser.email}');
-          print('   - Needs consent: $needsConsent');
-        }
-      }
-
-      // 2. OAuth consent
-      final oauthConsent = await _showOAuthConsentDialog(
+      final result = await _showCombinedOAuthDialog(
         provider: 'Facebook',
-        scopes: ['email'],
+        scopes: ['email', 'public_profile'],
+        defaultAutoLogin: true,
       );
-      if (!oauthConsent) {
+
+      if (result == null) {
         setState(() => _loadingFacebook = false);
         return;
       }
 
-      // 3. App consent (FIRST TIME ONLY)
-      if (needsConsent) {
-        final accepted = await _showConsentDialog(requireExplicit: true);
-        if (!accepted) {
-          setState(() => _loadingFacebook = false);
-          return;
-        }
-      } else {
-        if (kDebugMode) print('   - Skipping consent (already given)');
-      }
-
-      // 4. Auto-login consent
-      bool userWantsAutoLogin = _rememberMe;
-
-      if (needsConsent || !returningUser.hasAutoLoginSetting) {
-        userWantsAutoLogin = await _showAutoLoginConsentDialog(
-          provider: 'Facebook',
-        );
-      }
+      final bool userWantsAutoLogin = result['rememberMe'] ?? true;
+      final bool marketingConsent = result['marketingConsent'] ?? false;
 
       setState(() => _rememberMe = userWantsAutoLogin);
       await SessionManager.setRememberMe(userWantsAutoLogin);
       await appState.setRememberMe(userWantsAutoLogin);
+
+      final now = DateTime.now();
+      final email = _emailController.text.trim();
+
+      if (email.isNotEmpty) {
+        await SessionManager.updateConsentTimestamps(
+          email: email,
+          termsAcceptedAt: now,
+          privacyAcceptedAt: now,
+        );
+      }
 
       _authSubscription?.cancel();
       _authSubscription = supabase.auth.onAuthStateChange.listen((data) async {
@@ -766,8 +977,6 @@ class _SignInScreenState extends State<SignInScreen>
           final session = supabase.auth.currentSession;
 
           if (user != null && user.email != null) {
-            print('✅ Facebook OAuth User Signed In: ${user.email}');
-
             await _saveOAuthProfile(
               user: user,
               providerToSave: 'facebook',
@@ -776,7 +985,14 @@ class _SignInScreenState extends State<SignInScreen>
               refreshToken: session?.refreshToken,
             );
 
-            // ✅ Use _handlePostLogin for role-based redirect
+            if (marketingConsent) {
+              await SessionManager.updateMarketingConsent(
+                email: user.email!,
+                consent: true,
+                consentedAt: DateTime.now(),
+              );
+            }
+
             await _handlePostLogin(user.id);
           }
         }
@@ -809,63 +1025,43 @@ class _SignInScreenState extends State<SignInScreen>
     }
   }
 
-  // ✅ Apple Sign In with compliance
+  // ✅ Apple Sign In
   Future<void> _signInWithApple() async {
     if (_loadingApple) return;
 
     try {
       setState(() => _loadingApple = true);
 
-      if (kDebugMode) {
-        print('🔵 Apple Sign In starting...');
-      }
-
-      // 1. Check if returning user
       final returningUser = await _checkIfReturningUser('apple');
-      bool needsConsent = true;
 
-      if (returningUser.email != null) {
-        needsConsent = await _shouldShowConsent(returningUser.email!);
-        if (kDebugMode) {
-          print('   - Returning user: ${returningUser.email}');
-          print('   - Needs consent: $needsConsent');
-        }
-      }
-
-      // 2. Apple requires explicit OAuth consent
-      final oauthConsent = await _showOAuthConsentDialog(
+      final result = await _showCombinedOAuthDialog(
         provider: 'Apple',
         scopes: ['email', 'name'],
+        defaultAutoLogin: true,
       );
-      if (!oauthConsent) {
+
+      if (result == null) {
         setState(() => _loadingApple = false);
         return;
       }
 
-      // 3. App consent (FIRST TIME ONLY)
-      if (needsConsent) {
-        final accepted = await _showConsentDialog(requireExplicit: true);
-        if (!accepted) {
-          setState(() => _loadingApple = false);
-          return;
-        }
-      } else {
-        if (kDebugMode) print('   - Skipping consent (already given)');
-      }
-
-      // 4. Apple is strict about auto-login
-      bool userWantsAutoLogin = _rememberMe;
-
-      if (needsConsent || !returningUser.hasAutoLoginSetting) {
-        userWantsAutoLogin = await _showAutoLoginConsentDialog(
-          provider: 'Apple',
-          defaultToFalse: true,
-        );
-      }
+      final bool userWantsAutoLogin = result['rememberMe'] ?? true;
+      final bool marketingConsent = result['marketingConsent'] ?? false;
 
       setState(() => _rememberMe = userWantsAutoLogin);
       await SessionManager.setRememberMe(userWantsAutoLogin);
       await appState.setRememberMe(userWantsAutoLogin);
+
+      final now = DateTime.now();
+      final email = _emailController.text.trim();
+
+      if (email.isNotEmpty) {
+        await SessionManager.updateConsentTimestamps(
+          email: email,
+          termsAcceptedAt: now,
+          privacyAcceptedAt: now,
+        );
+      }
 
       _authSubscription?.cancel();
       _authSubscription = supabase.auth.onAuthStateChange.listen((data) async {
@@ -875,8 +1071,6 @@ class _SignInScreenState extends State<SignInScreen>
           final session = supabase.auth.currentSession;
 
           if (user != null && user.email != null) {
-            print('✅ Apple OAuth User Signed In: ${user.email}');
-
             await _saveOAuthProfile(
               user: user,
               providerToSave: 'apple',
@@ -885,7 +1079,14 @@ class _SignInScreenState extends State<SignInScreen>
               refreshToken: session?.refreshToken,
             );
 
-            // ✅ Use _handlePostLogin for role-based redirect
+            if (marketingConsent) {
+              await SessionManager.updateMarketingConsent(
+                email: user.email!,
+                consent: true,
+                consentedAt: DateTime.now(),
+              );
+            }
+
             await _handlePostLogin(user.id);
           }
         }
@@ -918,14 +1119,13 @@ class _SignInScreenState extends State<SignInScreen>
     }
   }
 
-  // ✅ FIXED: Handle post-login with role-based redirect
+  // ✅ Handle post-login
   Future<void> _handlePostLogin(String userId) async {
     try {
       if (!mounted) return;
 
       await Future.delayed(const Duration(seconds: 1));
 
-      // Get user email
       final user = supabase.auth.currentUser;
       if (user == null || user.email == null) {
         if (mounted) context.go('/');
@@ -934,7 +1134,6 @@ class _SignInScreenState extends State<SignInScreen>
 
       final email = user.email!;
 
-      // Check if profile exists and is active
       final profileCheck = await supabase
           .from('profiles')
           .select('is_blocked, is_active')
@@ -973,7 +1172,6 @@ class _SignInScreenState extends State<SignInScreen>
         }
       }
 
-      // Get ALL profiles for this user (multiple roles)
       final profiles = await supabase
           .from('profiles')
           .select('''
@@ -988,9 +1186,6 @@ class _SignInScreenState extends State<SignInScreen>
           .eq('is_active', true)
           .eq('is_blocked', false);
 
-      print('📊 Found ${profiles.length} active profiles for user: $email');
-
-      // Extract role names from profiles
       final List<String> roleNames = [];
       for (var profile in profiles) {
         final role = profile['roles'] as Map?;
@@ -999,32 +1194,20 @@ class _SignInScreenState extends State<SignInScreen>
         }
       }
 
-      print('📋 User roles: $roleNames');
-
-      // ✅ SAVE ALL ROLES to SessionManager
       await SessionManager.saveUserRoles(email: email, roles: roleNames);
 
       if (roleNames.isEmpty) {
-        // No roles - go to registration
-        print('📍 No roles found - redirecting to /reg');
         if (mounted) context.go('/reg');
         return;
       }
 
-      // If only ONE role, redirect directly
       if (roleNames.length == 1) {
         final singleRole = roleNames.first;
-        print('🎯 Single role detected: $singleRole');
-
-        // Save current role
         await SessionManager.saveCurrentRole(singleRole);
-
-        // Update app state
         await appState.refreshState();
 
         if (!mounted) return;
 
-        // Redirect based on role
         switch (singleRole) {
           case 'owner':
             context.go('/owner');
@@ -1042,15 +1225,10 @@ class _SignInScreenState extends State<SignInScreen>
         return;
       }
 
-      // If MULTIPLE roles, show role selector
       if (roleNames.length > 1) {
-        print('🔄 Multiple roles detected - showing role selector');
-
-        // Check for saved role preference
         final savedRole = await SessionManager.getCurrentRole();
 
         if (savedRole != null && roleNames.contains(savedRole)) {
-          print('📌 Using saved role: $savedRole');
           await SessionManager.saveCurrentRole(savedRole);
           await appState.refreshState();
 
@@ -1068,7 +1246,6 @@ class _SignInScreenState extends State<SignInScreen>
           return;
         }
 
-        // No saved role or saved role not valid - show selector
         if (mounted) {
           context.go(
             '/role-selector',
@@ -1078,7 +1255,6 @@ class _SignInScreenState extends State<SignInScreen>
         return;
       }
 
-      // Fallback - go to home
       appState.refreshState();
       if (mounted) context.go('/');
     } catch (e) {
@@ -1115,262 +1291,23 @@ $provider OAuth Configuration Required:
     }
   }
 
-  // ✅ OAuth consent dialog (App Store compliance)
-  Future<bool> _showOAuthConsentDialog({
-    required String provider,
-    required List<String> scopes,
-  }) async {
-    return await showDialog<bool>(
-          context: context,
-          barrierDismissible: false,
-          builder: (context) => AlertDialog(
-            title: Text("Sign in with $provider"),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text("$provider will share:"),
-                const SizedBox(height: 8),
-                for (var scope in scopes)
-                  Padding(
-                    padding: const EdgeInsets.only(left: 8.0, bottom: 4),
-                    child: Text("• $scope"),
-                  ),
-                const SizedBox(height: 12),
-                const Text("This app will:"),
-                const SizedBox(height: 8),
-                const Padding(
-                  padding: EdgeInsets.only(left: 8.0),
-                  child: Text("• Create your account"),
-                ),
-                const Padding(
-                  padding: EdgeInsets.only(left: 8.0),
-                  child: Text("• Show your profile"),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  "You can manage permissions in your $provider account settings.",
-                  style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text("Cancel"),
-              ),
-              ElevatedButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: const Text("Continue"),
-              ),
-            ],
-          ),
-        ) ??
-        false;
-  }
-
-  // ✅ Auto-login consent dialog (App Store compliance)
-  Future<bool> _showAutoLoginConsentDialog({
-    required String provider,
-    bool defaultToFalse = false,
-  }) async {
-    bool rememberMe = defaultToFalse;
-
-    return await showDialog<bool>(
-          context: context,
-          builder: (context) => StatefulBuilder(
-            builder: (context, setState) {
-              return AlertDialog(
-                title: Text("$provider Sign In"),
-                content: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text("Would you like to enable quick sign-in?"),
-                    const SizedBox(height: 12),
-                    CheckboxListTile(
-                      title: const Text("Remember me on this device"),
-                      subtitle: const Text(
-                        "You can change this later in settings",
-                      ),
-                      value: rememberMe,
-                      onChanged: (value) =>
-                          setState(() => rememberMe = value ?? false),
-                      controlAffinity: ListTileControlAffinity.leading,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      "If enabled, you can sign in quickly next time without entering credentials.",
-                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      "You can disable this anytime in app settings.",
-                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                    ),
-                  ],
-                ),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(context, false),
-                    child: const Text("Skip"),
-                  ),
-                  ElevatedButton(
-                    onPressed: () => Navigator.pop(context, rememberMe),
-                    child: Text(rememberMe ? "Enable" : "Continue"),
-                  ),
-                ],
-              );
-            },
-          ),
-        ) ??
-        false;
-  }
-
-  // ✅ Consent dialog with FIRST-TIME ONLY logic
-  Future<bool> _showConsentDialog({bool requireExplicit = false}) async {
-    // Check if user has already given consent
-    final email = _emailController.text.trim();
-    if (email.isNotEmpty) {
-      final hasConsent = !(await _shouldShowConsent(email));
-      if (hasConsent) {
-        if (kDebugMode)
-          print('   - User already gave consent, skipping dialog');
-        return true;
-      }
-    }
-
-    bool? marketingConsent = false;
-
-    final result = await showDialog<bool>(
-      context: context,
-      barrierDismissible: !requireExplicit,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setState) {
-          return AlertDialog(
-            title: const Text("Terms & Privacy Policy"),
-            content: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text(
-                    "By continuing, you agree to our:",
-                    style: TextStyle(fontSize: 14),
-                  ),
-                  const SizedBox(height: 12),
-
-                  ListTile(
-                    leading: const Icon(Icons.description),
-                    title: const Text("Terms of Service"),
-                    subtitle: Text(
-                      "Last updated: ${DateTime.now().toString().split(' ')[0]}",
-                    ),
-                    onTap: () => _launchTerms(),
-                  ),
-
-                  ListTile(
-                    leading: const Icon(Icons.privacy_tip),
-                    title: const Text("Privacy Policy"),
-                    subtitle: const Text("GDPR compliant"),
-                    onTap: () => _launchPrivacy(),
-                  ),
-
-                  const SizedBox(height: 16),
-
-                  if (!requireExplicit)
-                    CheckboxListTile(
-                      title: const Text(
-                        "Send me promotional offers and updates",
-                      ),
-                      subtitle: const Text(
-                        "You can change this later in settings",
-                      ),
-                      value: marketingConsent,
-                      onChanged: (value) =>
-                          setState(() => marketingConsent = value),
-                      controlAffinity: ListTileControlAffinity.leading,
-                    ),
-
-                  const SizedBox(height: 8),
-
-                  Text(
-                    "App Version: ${_packageInfo.version} (${_packageInfo.buildNumber})",
-                    style: const TextStyle(fontSize: 12, color: Colors.grey),
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              if (!requireExplicit)
-                TextButton(
-                  onPressed: () => Navigator.pop(context, false),
-                  child: const Text("Cancel"),
-                ),
-              ElevatedButton(
-                onPressed: () {
-                  Navigator.pop(context, true);
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF1877F3),
-                ),
-                child: Text(requireExplicit ? "I Agree & Continue" : "I Agree"),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-
-    if (result == true) {
-      final now = DateTime.now();
-      final email = _emailController.text.trim();
-
-      if (email.isNotEmpty) {
-        try {
-          await SessionManager.updateConsentTimestamps(
-            email: email,
-            termsAcceptedAt: now,
-            privacyAcceptedAt: now,
-          );
-
-          if (marketingConsent == true) {
-            await SessionManager.updateMarketingConsent(
-              email: email,
-              consent: true,
-              consentedAt: now,
-            );
-          }
-        } catch (e) {
-          print('❌ Error saving consent: $e');
-        }
-      }
-
-      setState(() {
-        _termsAcceptedAt = now;
-        _privacyAcceptedAt = now;
-      });
-    }
-
-    return result ?? false;
-  }
-
+  // ✅ Launch Terms URL
   Future<void> _launchTerms() async {
     final url = Uri.parse('https://yourdomain.com/terms');
     if (await canLaunchUrl(url)) {
-      await launchUrl(url);
+      await launchUrl(url, mode: LaunchMode.externalApplication);
     }
   }
 
+  // ✅ Launch Privacy URL
   Future<void> _launchPrivacy() async {
     final url = Uri.parse('https://yourdomain.com/privacy');
     if (await canLaunchUrl(url)) {
-      await launchUrl(url);
+      await launchUrl(url, mode: LaunchMode.externalApplication);
     }
   }
 
-  // ✅ OAuth buttons with SVG icons
-  // OAuth buttons with updated design
+  // ✅ OAuth buttons
   Widget _buildOAuthButtons() {
     final enabledProviders = _env.enabledOAuthProviders;
 
@@ -1393,53 +1330,6 @@ $provider OAuth Configuration Required:
           ),
         ),
 
-        // Privacy Policy Links (inside OAuth section)
-        // Padding(
-        //   padding: const EdgeInsets.only(bottom: 16),
-        //   child: Wrap(
-        //     alignment: WrapAlignment.center,
-        //     spacing: 2,
-        //     runSpacing: 4,
-        //     children: [
-        //       Text(
-        //         'By continuing, you agree to our',
-        //         style: TextStyle(color: Colors.white60, fontSize: 11),
-        //       ),
-        //       GestureDetector(
-        //         onTap: () => context.push(
-        //           '/terms?from=${Uri.encodeComponent('/login')}',
-        //         ),
-        //         child: Text(
-        //           'Terms of Service',
-        //           style: TextStyle(
-        //             color: const Color(0xFF1877F3),
-        //             fontSize: 11,
-        //             fontWeight: FontWeight.w500,
-        //           ),
-        //         ),
-        //       ),
-        //       Text(
-        //         'and',
-        //         style: TextStyle(color: Colors.white60, fontSize: 11),
-        //       ),
-        //       GestureDetector(
-        //         onTap: () => context.push(
-        //           '/privacy?from=${Uri.encodeComponent('/login')}',
-        //         ),
-        //         child: Text(
-        //           'Privacy Policy',
-        //           style: TextStyle(
-        //             color: const Color(0xFF1877F3),
-        //             fontSize: 11,
-        //             fontWeight: FontWeight.w500,
-        //           ),
-        //         ),
-        //       ),
-        //     ],
-        //   ),
-        // ),
-
-        // Google button
         if (enabledProviders.contains('google'))
           Padding(
             padding: const EdgeInsets.only(bottom: 12),
@@ -1450,7 +1340,6 @@ $provider OAuth Configuration Required:
             ),
           ),
 
-        // Facebook button
         if (enabledProviders.contains('facebook'))
           Padding(
             padding: const EdgeInsets.only(bottom: 12),
@@ -1461,7 +1350,6 @@ $provider OAuth Configuration Required:
             ),
           ),
 
-        // Apple button (if enabled)
         if (enabledProviders.contains('apple') &&
             defaultTargetPlatform == TargetPlatform.iOS)
           Padding(
@@ -1473,7 +1361,6 @@ $provider OAuth Configuration Required:
             ),
           ),
 
-        // Password button - using same design
         Padding(
           padding: const EdgeInsets.only(bottom: 12),
           child: _SocialLoginButton(
@@ -1492,6 +1379,12 @@ $provider OAuth Configuration Required:
     } else {
       GoRouter.of(context).go('/');
     }
+  }
+
+  void _validateForm() {
+    _validateEmail();
+    _validatePassword();
+    _updateFormValidity();
   }
 
   @override
@@ -1559,172 +1452,80 @@ $provider OAuth Configuration Required:
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.center,
                             children: [
-                              // const SizedBox(height: 10),
-                              // Container(
-                              //   width: 60,
-                              //   height: 60,
-                              //   decoration: const BoxDecoration(
-                              //     shape: BoxShape.circle,
-                              //     color: Color(0xFF1877F3),
-                              //   ),
-                              //   child: const Icon(
-                              //     Icons.person,
-                              //     color: Colors.white,
-                              //     size: 32,
-                              //   ),
-                              // ),
-                              // const SizedBox(height: 24),
-                              // const Text(
-                              //   'Log in to MySalon',
-                              //   style: TextStyle(
-                              //     color: Colors.white,
-                              //     fontSize: 22,
-                              //     fontWeight: FontWeight.bold,
-                              //   ),
-                              // ),
-                              // const SizedBox(height: 24),
-                              Stack(
-                                children: [
-                                  Container(
-                                    margin: const EdgeInsets.only(
-                                      top: 5,
-                                      bottom: 25,
+                              // Logo
+                              Container(
+                                margin: const EdgeInsets.only(top: 5, bottom: 25),
+                                child: Center(
+                                  child: Container(
+                                    width: 70,
+                                    height: 70,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      border: Border.all(color: Colors.white24, width: 2),
+                                      gradient: const LinearGradient(
+                                        colors: [Color(0xFF1877F2), Color(0xFF0A58CA)],
+                                        begin: Alignment.topCenter,
+                                        end: Alignment.bottomCenter,
+                                      ),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: const Color(0xFF1877F2).withValues(alpha: 0.4),
+                                          blurRadius: 20,
+                                          spreadRadius: 5,
+                                        ),
+                                      ],
                                     ),
-                                    child: Center(
-                                      child: Column(
-                                        children: [
-                                          Container(
-                                            width: 70,
-                                            height: 70,
-                                            decoration: BoxDecoration(
-                                              shape: BoxShape.circle,
-                                              border: Border.all(
-                                                color: Colors.white24,
-                                                width: 2,
-                                              ),
-                                              gradient: const LinearGradient(
-                                                colors: [
-                                                  Color(0xFF1877F2),
-                                                  Color(0xFF0A58CA),
-                                                ],
-                                                begin: Alignment.topCenter,
-                                                end: Alignment.bottomCenter,
-                                              ),
-                                              boxShadow: [
-                                                BoxShadow(
-                                                  color: const Color(
-                                                    0xFF1877F2,
-                                                  ).withValues(alpha: 0.4),
-                                                  blurRadius: 20,
-                                                  spreadRadius: 5,
-                                                ),
-                                              ],
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(20),
+                                      child: Image.asset(
+                                        'logo.png',
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (context, error, stackTrace) {
+                                          return Center(
+                                            child: Icon(
+                                              Icons.account_circle,
+                                              color: Colors.white,
+                                              size: 40,
                                             ),
-                                            child: ClipRRect(
-                                              borderRadius:
-                                                  BorderRadius.circular(20),
-                                              child: Image.asset(
-                                                'logo.png',
-                                                fit: BoxFit.cover,
-                                                errorBuilder:
-                                                    (
-                                                      context,
-                                                      error,
-                                                      stackTrace,
-                                                    ) {
-                                                      return Center(
-                                                        child: Icon(
-                                                          Icons.account_circle,
-                                                          color: Colors.white,
-                                                          size: 40,
-                                                        ),
-                                                      );
-                                                    },
-                                              ),
-                                            ),
-                                          ),
-                                          // const SizedBox(height: 12),
-                                          // const Text(
-                                          //   'Log in to MySaloon',
-                                          //   style: TextStyle(
-                                          //     color: Colors.white,
-                                          //     fontSize: 24,
-                                          //     fontWeight: FontWeight.bold,
-                                          //   ),
-                                          // ),
-                                        ],
+                                          );
+                                        },
                                       ),
                                     ),
                                   ),
-                                ],
+                                ),
                               ),
 
-                              // Email Field
                               // Email Field
                               TextField(
                                 controller: _emailController,
                                 style: const TextStyle(color: Colors.white),
                                 decoration: InputDecoration(
                                   hintText: 'Email address',
-                                  hintStyle: const TextStyle(
-                                    color: Colors.white54,
-                                  ),
+                                  hintStyle: const TextStyle(color: Colors.white54),
                                   filled: true,
                                   fillColor: Colors.white.withOpacity(0.05),
-
                                   enabledBorder: OutlineInputBorder(
-                                    borderSide: const BorderSide(
-                                      color: Colors.white24,
-                                      width: 1.0,
-                                    ),
+                                    borderSide: const BorderSide(color: Colors.white24, width: 1.0),
                                     borderRadius: BorderRadius.circular(8),
                                   ),
-
                                   focusedBorder: OutlineInputBorder(
-                                    borderSide: const BorderSide(
-                                      color: Color(0xFF1877F3),
-                                      width: 1.0,
-                                    ),
+                                    borderSide: const BorderSide(color: Color(0xFF1877F3), width: 1.0),
                                     borderRadius: BorderRadius.circular(8),
                                   ),
-
                                   errorBorder: OutlineInputBorder(
-                                    borderSide: const BorderSide(
-                                      color: Colors.redAccent,
-                                      width: 1.0,
-                                    ),
+                                    borderSide: const BorderSide(color: Colors.redAccent, width: 1.0),
                                     borderRadius: BorderRadius.circular(8),
                                   ),
-
                                   focusedErrorBorder: OutlineInputBorder(
-                                    borderSide: const BorderSide(
-                                      color: Colors.redAccent,
-                                      width: 1.0,
-                                    ),
+                                    borderSide: const BorderSide(color: Colors.redAccent, width: 1.0),
                                     borderRadius: BorderRadius.circular(8),
                                   ),
-
-                                  prefixIcon: const Icon(
-                                    Icons.email_outlined,
-                                    color: Colors.white54,
-                                    size: 20,
-                                  ),
-
-                                  // ✅ Email validation icon
+                                  prefixIcon: const Icon(Icons.email_outlined, color: Colors.white54, size: 20),
                                   suffixIcon: _emailController.text.isEmpty
                                       ? null
                                       : _isValidEmail
-                                      ? const Icon(
-                                          Icons.check_circle,
-                                          color: Color(0xFF4CAF50),
-                                          size: 22,
-                                        )
-                                      : const Icon(
-                                          Icons.error_outline,
-                                          color: Colors.redAccent,
-                                          size: 22,
-                                        ),
-
+                                          ? const Icon(Icons.check_circle, color: Color(0xFF4CAF50), size: 22)
+                                          : const Icon(Icons.error_outline, color: Colors.redAccent, size: 22),
                                   errorText: _emailError,
                                 ),
                               ),
@@ -1738,137 +1539,128 @@ $provider OAuth Configuration Required:
                                 style: const TextStyle(color: Colors.white),
                                 decoration: InputDecoration(
                                   hintText: 'Password',
-                                  hintStyle: const TextStyle(
-                                    color: Colors.white54,
-                                  ),
+                                  hintStyle: const TextStyle(color: Colors.white54),
                                   filled: true,
                                   fillColor: Colors.white.withOpacity(0.05),
-
                                   enabledBorder: OutlineInputBorder(
-                                    borderSide: const BorderSide(
-                                      color: Colors.white24,
-                                      width: 1.0,
-                                    ),
+                                    borderSide: const BorderSide(color: Colors.white24, width: 1.0),
                                     borderRadius: BorderRadius.circular(8),
                                   ),
-
                                   focusedBorder: OutlineInputBorder(
-                                    borderSide: const BorderSide(
-                                      color: Color(0xFF1877F3),
-                                      width: 1.0,
-                                    ),
+                                    borderSide: const BorderSide(color: Color(0xFF1877F3), width: 1.0),
                                     borderRadius: BorderRadius.circular(8),
                                   ),
-
                                   errorBorder: OutlineInputBorder(
-                                    borderSide: const BorderSide(
-                                      color: Colors.redAccent,
-                                      width: 1.0,
-                                    ),
+                                    borderSide: const BorderSide(color: Colors.redAccent, width: 1.0),
                                     borderRadius: BorderRadius.circular(8),
                                   ),
-
                                   focusedErrorBorder: OutlineInputBorder(
-                                    borderSide: const BorderSide(
-                                      color: Colors.redAccent,
-                                      width: 1.0,
-                                    ),
+                                    borderSide: const BorderSide(color: Colors.redAccent, width: 1.0),
                                     borderRadius: BorderRadius.circular(8),
                                   ),
-
-                                  prefixIcon: const Icon(
-                                    Icons.lock_outline_rounded,
-                                    color: Colors.white54,
-                                    size: 20,
-                                  ),
-
-                                  // ✅ Password visibility icon - only shows when text exists
-                                  suffixIcon:
-                                      _passwordController.text.isNotEmpty
+                                  prefixIcon: const Icon(Icons.lock_outline_rounded, color: Colors.white54, size: 20),
+                                  suffixIcon: _passwordController.text.isNotEmpty
                                       ? IconButton(
                                           icon: Icon(
-                                            _obscurePassword
-                                                ? Icons.visibility_off_rounded
-                                                : Icons.visibility_rounded,
+                                            _obscurePassword ? Icons.visibility_off_rounded : Icons.visibility_rounded,
                                             color: Colors.white70,
                                             size: 22,
                                           ),
-                                          onPressed: () => setState(
-                                            () => _obscurePassword =
-                                                !_obscurePassword,
-                                          ),
+                                          onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
                                           splashRadius: 20,
                                         )
                                       : null,
-
                                   errorText: _passwordError,
                                 ),
                               ),
                               const SizedBox(height: 16),
 
                               // Remember Me Checkbox
-                              Row(
-                                children: [
-                                  Checkbox(
-                                    value: _rememberMe,
-                                    onChanged: (value) => setState(
-                                      () => _rememberMe = value ?? false,
-                                    ),
-                                    activeColor: const Color(0xFF1877F3),
-                                    checkColor: Colors.white,
+                              Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: _rememberMe ? const Color(0xFF1877F3).withOpacity(0.1) : Colors.transparent,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: _rememberMe ? const Color(0xFF1877F3).withOpacity(0.3) : Colors.white12,
                                   ),
-                                  const SizedBox(width: 8),
-                                  GestureDetector(
-                                    onTap: () => setState(
-                                      () => _rememberMe = !_rememberMe,
+                                ),
+                                child: Row(
+                                  children: [
+                                    Checkbox(
+                                      value: _rememberMe,
+                                      onChanged: (value) {
+                                        setState(() {
+                                          _rememberMe = value ?? false;
+                                          _userChangedRememberMe = true;
+                                        });
+                                      },
+                                      activeColor: const Color(0xFF1877F3),
+                                      checkColor: Colors.white,
                                     ),
-                                    child: const Text(
-                                      'Remember Me',
-                                      style: TextStyle(color: Colors.white70),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Row(
+                                            children: [
+                                              const Text(
+                                                'Remember Me',
+                                                style: TextStyle(color: Colors.white, fontWeight: FontWeight.w500),
+                                              ),
+                                              if (_rememberMe && !_userChangedRememberMe && !_hasSavedProfile)
+                                                Container(
+                                                  margin: const EdgeInsets.only(left: 8),
+                                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                  decoration: BoxDecoration(
+                                                    color: Colors.green,
+                                                    borderRadius: BorderRadius.circular(10),
+                                                  ),
+                                                  child: const Text(
+                                                    'Recommended',
+                                                    style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
+                                                  ),
+                                                ),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            'Stay signed in for faster access next time',
+                                            style: TextStyle(color: Colors.white70, fontSize: 11),
+                                          ),
+                                          if (_rememberMe)
+                                            Padding(
+                                              padding: const EdgeInsets.only(top: 4),
+                                              child: Text(
+                                                '✓ Quick sign-in enabled • Disable anytime in Settings',
+                                                style: TextStyle(color: Colors.green.shade300, fontSize: 10),
+                                              ),
+                                            ),
+                                        ],
+                                      ),
                                     ),
-                                  ),
-                                ],
+                                  ],
+                                ),
                               ),
-                              const SizedBox(height: 8),
+                              const SizedBox(height: 16),
 
                               // Login Button
                               SizedBox(
                                 width: double.infinity,
                                 child: ElevatedButton(
-                                  onPressed:
-                                      (_isValid && !_loading && !_coolDown)
-                                      ? loginUser
-                                      : null,
+                                  onPressed: (_isValid && !_loading && !_coolDown) ? loginUser : null,
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: const Color(0xFF1877F3),
                                     disabledBackgroundColor: Colors.white12,
                                     foregroundColor: Colors.white,
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 14,
-                                    ),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(24),
-                                    ),
+                                    padding: const EdgeInsets.symmetric(vertical: 14),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
                                   ),
                                   child: _loading
-                                      ? const CircularProgressIndicator(
-                                          color: Colors.white,
-                                        )
+                                      ? const CircularProgressIndicator(color: Colors.white)
                                       : _coolDown
-                                      ? const Text(
-                                          'Please wait...',
-                                          style: TextStyle(
-                                            fontSize: 16,
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        )
-                                      : const Text(
-                                          'Log in',
-                                          style: TextStyle(
-                                            fontSize: 17,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
+                                          ? const Text('Please wait...', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600))
+                                          : const Text('Log in', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
                                 ),
                               ),
                               const SizedBox(height: 12),
@@ -1890,96 +1682,51 @@ $provider OAuth Configuration Required:
                               // OAuth Buttons
                               _buildOAuthButtons(),
                               const SizedBox(height: 24),
+
+                              // ✅ BOTTOM SECTION WITH PRIVACY LINKS (Static text only - NO DIALOG)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 10),
+                                child: Wrap(
+                                  alignment: WrapAlignment.center,
+                                  spacing: 2,
+                                  runSpacing: 4,
+                                  children: [
+                                    Text(
+                                      'By continuing, you agree to our',
+                                      style: TextStyle(color: Colors.white60, fontSize: 11),
+                                    ),
+                                    GestureDetector(
+                                      onTap: () => context.push('/terms?from=${Uri.encodeComponent('/login')}'),
+                                      child: Text(
+                                        'Terms of Service',
+                                        style: TextStyle(
+                                          color: const Color(0xFF1877F3),
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ),
+                                    Text(
+                                      'and',
+                                      style: TextStyle(color: Colors.white60, fontSize: 11),
+                                    ),
+                                    GestureDetector(
+                                      onTap: () => context.push('/privacy?from=${Uri.encodeComponent('/login')}'),
+                                      child: Text(
+                                        'Privacy Policy',
+                                        style: TextStyle(
+                                          color: const Color(0xFF1877F3),
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
                             ],
                           ),
                         ),
-                      ),
-
-                      // ✅ Updated Bottom Section with OAuth-like Create Account button
-                      Column(
-                        children: [
-                          // Privacy Policy Links (inside OAuth section)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 10),
-                            child: Wrap(
-                              alignment: WrapAlignment.center,
-                              spacing: 2,
-                              runSpacing: 4,
-                              children: [
-                                Text(
-                                  'By continuing, you agree to our',
-                                  style: TextStyle(
-                                    color: Colors.white60,
-                                    fontSize: 11,
-                                  ),
-                                ),
-                                GestureDetector(
-                                  onTap: () => context.push(
-                                    '/terms?from=${Uri.encodeComponent('/login')}',
-                                  ),
-                                  child: Text(
-                                    'Terms of Service',
-                                    style: TextStyle(
-                                      color: const Color(0xFF1877F3),
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                ),
-                                Text(
-                                  'and',
-                                  style: TextStyle(
-                                    color: Colors.white60,
-                                    fontSize: 11,
-                                  ),
-                                ),
-                                GestureDetector(
-                                  onTap: () => context.push(
-                                    '/privacy?from=${Uri.encodeComponent('/login')}',
-                                  ),
-                                  child: Text(
-                                    'Privacy Policy',
-                                    style: TextStyle(
-                                      color: const Color(0xFF1877F3),
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          // const SizedBox(
-                          //   height: 20,
-                          // ), // Small space at the very bottom
-                          // Data Management Links
-                          // Wrap(
-                          //   alignment: WrapAlignment.center,
-                          //   spacing: 16,
-                          //   children: [
-                          //     TextButton(
-                          //       onPressed: () => context.go('/clear-data'),
-                          //       child: Text(
-                          //         'Manage Account Data',
-                          //         style: TextStyle(
-                          //           color: Colors.white70,
-                          //           fontSize: 11,
-                          //         ),
-                          //       ),
-                          //     ),
-                          //     TextButton(
-                          //       onPressed: () => context.go('/data-export'),
-                          //       child: Text(
-                          //         'Export My Data',
-                          //         style: TextStyle(
-                          //           color: Colors.white70,
-                          //           fontSize: 11,
-                          //         ),
-                          //       ),
-                          //     ),
-                          //   ],
-                          // ),
-                        ],
                       ),
                     ],
                   ),
@@ -1993,9 +1740,9 @@ $provider OAuth Configuration Required:
   }
 }
 
-// ✅ Social Login Button with SVG Icons
+// ✅ Social Login Button
 class _SocialLoginButton extends StatelessWidget {
-  final String provider; // 'google', 'facebook', 'password'
+  final String provider;
   final VoidCallback onPressed;
   final bool isLoading;
 
@@ -2007,58 +1754,34 @@ class _SocialLoginButton extends StatelessWidget {
 
   Color _getButtonColor() {
     switch (provider) {
-      case 'google':
-        return const Color(0xFFDB4437); // Google Red
-      case 'facebook':
-        return const Color(0xFF1877F2); // Facebook Blue
-      case 'password':
-        return const Color.fromARGB(255, 232, 236, 242); // Blue for password
-      default:
-        return const Color(0xFF1877F3);
+      case 'google': return const Color(0xFFDB4437);
+      case 'facebook': return const Color(0xFF1877F2);
+      case 'apple': return Colors.black;
+      case 'password': return const Color(0xFF1877F3);
+      default: return const Color(0xFF1877F3);
     }
   }
 
   String _getButtonText() {
     switch (provider) {
-      case 'google':
-        return 'Continue with Google';
-      case 'facebook':
-        return 'Continue with Facebook';
-      case 'password':
-        return 'Continue with password';
-      default:
-        return 'Continue';
+      case 'google': return 'Continue with Google';
+      case 'facebook': return 'Continue with Facebook';
+      case 'apple': return 'Continue with Apple';
+      case 'password': return 'Create new account with password';
+      default: return 'Continue';
     }
   }
 
   Widget _getIcon() {
     switch (provider) {
       case 'google':
-        // Google icon - keep original colors (NO colorFilter)
-        return SvgPicture.asset(
-          'icons/google.svg',
-          width: 18,
-          height: 18,
-          // ❌ NO colorFilter - keeps original Google colors
-        );
-
+        return SvgPicture.asset('icons/google.svg', width: 18, height: 18);
       case 'facebook':
-        // Facebook icon - keep original blue (NO colorFilter)
-        return SvgPicture.asset(
-          'icons/facebook.svg',
-          width: 18,
-          height: 18,
-          // ❌ NO colorFilter - keeps original Facebook blue
-        );
-
+        return SvgPicture.asset('icons/facebook.svg', width: 18, height: 18);
+      case 'apple':
+        return const Icon(Icons.apple, size: 18);
       case 'password':
-        // Password icon - blue key
-        return Icon(
-          Icons.key_rounded,
-          size: 18,
-          color: _getButtonColor(), // Blue color
-        );
-
+        return Icon(Icons.person_add_alt_1_rounded, size: 18, color: _getButtonColor());
       default:
         return const SizedBox();
     }
@@ -2073,11 +1796,9 @@ class _SocialLoginButton extends StatelessWidget {
       child: OutlinedButton(
         onPressed: isLoading ? null : onPressed,
         style: OutlinedButton.styleFrom(
-          side: BorderSide(color: buttonColor),
+          side: BorderSide(color: buttonColor.withOpacity(0.5)),
           padding: const EdgeInsets.symmetric(vertical: 12),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           backgroundColor: buttonColor.withOpacity(0.1),
         ),
         child: isLoading
@@ -2096,11 +1817,7 @@ class _SocialLoginButton extends StatelessWidget {
                   const SizedBox(width: 8),
                   Text(
                     _getButtonText(),
-                    style: TextStyle(
-                      color: buttonColor,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 14,
-                    ),
+                    style: TextStyle(color: buttonColor, fontWeight: FontWeight.w600, fontSize: 14),
                   ),
                 ],
               ),

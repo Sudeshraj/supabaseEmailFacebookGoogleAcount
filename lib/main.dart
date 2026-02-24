@@ -747,16 +747,14 @@ GoRouter _createRouter() {
       GoRoute(path: '/owner', builder: (_, __) => const OwnerDashboard()),
       GoRoute(
         path: '/privacy',
-        builder: (context, state) {
-          final extra = state.extra as Map<String, dynamic>?;
-          return PolicyScreen(isPrivacyPolicy: true, extraData: extra);
+        builder: (context, state) {          
+          return const PolicyScreen(isPrivacyPolicy: true);
         },
       ),
       GoRoute(
         path: '/terms',
-        builder: (context, state) {
-          final extra = state.extra as Map<String, dynamic>?;
-          return PolicyScreen(isPrivacyPolicy: false, extraData: extra);
+        builder: (context, state) {         
+          return const PolicyScreen(isPrivacyPolicy: false);
         },
       ),
       GoRoute(
