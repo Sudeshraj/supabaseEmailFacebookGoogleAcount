@@ -1064,104 +1064,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
     }
   }
 
-  void _showRemoveProfilesDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1C1F26),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text(
-          'Remove Profiles',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 20,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        content: Container(
-          width: double.maxFinite,
-          constraints: BoxConstraints(
-            maxHeight: MediaQuery.of(context).size.height * 0.5,
-          ),
-          child: profiles.isEmpty
-              ? const Center(
-                  child: Text(
-                    'No profiles to remove',
-                    style: TextStyle(color: Colors.white70),
-                  ),
-                )
-              : ListView.separated(
-                  shrinkWrap: true,
-                  itemCount: profiles.length,
-                  separatorBuilder: (context, index) =>
-                      const SizedBox(height: 8),
-                  itemBuilder: (context, index) {
-                    final profile = profiles[index];
-                    final email = profile['email'] as String? ?? 'Unknown';
-                    final name =
-                        profile['name'] as String? ?? email.split('@').first;
-                    final provider = profile['provider'] as String? ?? 'email';
-
-                    return Container(
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.05),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.1),
-                        ),
-                      ),
-                      child: ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor: _getProviderColor(
-                            provider,
-                          ).withValues(alpha: 0.3),
-                          child: Text(
-                            name[0].toUpperCase(),
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                        title: Text(
-                          name,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        subtitle: Text(
-                          email,
-                          style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.6),
-                            fontSize: 12,
-                          ),
-                        ),
-                        trailing: IconButton(
-                          icon: const Icon(
-                            Icons.delete_outline,
-                            color: Colors.redAccent,
-                          ),
-                          onPressed: () {
-                            Navigator.pop(context);
-                            _removeSingleProfile(email);
-                          },
-                        ),
-                      ),
-                    );
-                  },
-                ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close', style: TextStyle(color: Colors.white70)),
-          ),
-        ],
-      ),
-    );
-  }
-
   void _startSelectionMode() {
     setState(() {
       _selectionMode = true;
@@ -1566,13 +1468,13 @@ class _ContinueScreenState extends State<ContinueScreen> {
                                   child: Row(
                                     children: [
                                       Icon(
-                                        Icons.check_circle_outline,
-                                        color: Colors.blueAccent,
+                                        Icons.delete_outline,
+                                        color: Colors.redAccent,
                                         size: 20,
                                       ),
                                       const SizedBox(width: 12),
                                       const Text(
-                                        'Select Profiles',
+                                        'Remove Selected',
                                         style: TextStyle(color: Colors.white),
                                       ),
                                     ],
@@ -1583,13 +1485,13 @@ class _ContinueScreenState extends State<ContinueScreen> {
                                   child: Row(
                                     children: [
                                       Icon(
-                                        Icons.delete_outline,
-                                        color: Colors.redAccent,
+                                        Icons.manage_accounts,
+                                        color: Colors.blueAccent,
                                         size: 20,
                                       ),
                                       const SizedBox(width: 12),
                                       const Text(
-                                        'Remove Profiles',
+                                        'Manage Account Data',
                                         style: TextStyle(color: Colors.white),
                                       ),
                                     ],
@@ -1600,7 +1502,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                                 if (value == 'select') {
                                   _startSelectionMode();
                                 } else if (value == 'remove') {
-                                  _showRemoveProfilesDialog();
+                                  context.go('/clear-data');
                                 }
                               },
                             ),
