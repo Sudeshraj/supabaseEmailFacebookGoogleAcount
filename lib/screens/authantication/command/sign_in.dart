@@ -9,11 +9,10 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_application_1/services/session_manager.dart';
 import 'package:package_info_plus/package_info_plus.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import '../../../utils/simple_toast.dart';
 
-// ✅ Class for returning user check
+// Class for returning user check
 class _ReturningUserCheck {
   final String? email;
   final bool hasConsent;
@@ -50,12 +49,12 @@ class _SignInScreenState extends State<SignInScreen>
   bool _obscurePassword = true;
   bool _loading = false;
   bool _coolDown = false;
-  bool _rememberMe = true; // ✅ AUTO-CHECKED by default
+  bool _rememberMe = true; //  AUTO-CHECKED by default
   bool _loadingGoogle = false;
   bool _loadingFacebook = false;
   bool _loadingApple = false;
 
-  // ✅ Track if user manually changed remember me
+  // Track if user manually changed remember me
   bool _userChangedRememberMe = false;
 
   late AnimationController _animationController;
@@ -88,7 +87,7 @@ class _SignInScreenState extends State<SignInScreen>
     if (widget.prefilledEmail != null) {
       _emailController = TextEditingController(text: widget.prefilledEmail);
       if (kDebugMode) {
-        print('📧 Prefilled email: ${widget.prefilledEmail}');
+        print('Prefilled email: ${widget.prefilledEmail}');
       }
     } else {
       _emailController = TextEditingController();
@@ -123,7 +122,7 @@ class _SignInScreenState extends State<SignInScreen>
         _showCustomMessage(widget.message!);
       }
 
-      // ✅ Show info toast about remember me (only for new users)
+      // Show info toast about remember me (only for new users)
       // _showRememberMeInfoIfNeeded();
     });
 
@@ -131,7 +130,7 @@ class _SignInScreenState extends State<SignInScreen>
     _passwordController.addListener(_onPasswordChanged);
   }
 
-  // ✅ Show info about remember me (only once)
+  // Show info about remember me (only once)
   // Future<void> _showRememberMeInfoIfNeeded() async {
   //   if (!_hasSavedProfile && mounted) {
   //     SimpleToast.info(
@@ -142,7 +141,7 @@ class _SignInScreenState extends State<SignInScreen>
   //   }
   // }
 
-  // ✅ Load remember me setting with smart default
+  // Load remember me setting with smart default
   Future<void> _loadRememberMeSetting() async {
     try {
       final profiles = await SessionManager.getProfiles();
@@ -158,10 +157,10 @@ class _SignInScreenState extends State<SignInScreen>
       });
 
       if (kDebugMode) {
-        print('📝 Remember Me setting loaded: $_rememberMe');
+        print('Remember Me setting loaded: $_rememberMe');
       }
     } catch (e) {
-      debugPrint('❌ Error loading remember me: $e');
+      debugPrint('Error loading remember me: $e');
       setState(() => _rememberMe = true);
     }
   }
@@ -243,7 +242,7 @@ class _SignInScreenState extends State<SignInScreen>
     try {
       _packageInfo = await PackageInfo.fromPlatform();
     } catch (e) {
-      debugPrint('❌ Error getting package info: $e');
+      debugPrint(' Error getting package info: $e');
       _packageInfo = PackageInfo(
         appName: 'MySalon',
         packageName: 'com.example.mysalon',
@@ -277,11 +276,11 @@ class _SignInScreenState extends State<SignInScreen>
         }
       }
     } catch (e) {
-      if (kDebugMode) print('❌ Error loading consent: $e');
+      if (kDebugMode) print(' Error loading consent: $e');
     }
   }
 
-  // ✅ Check if user is returning
+  //  Check if user is returning
   Future<_ReturningUserCheck> _checkIfReturningUser(String provider) async {
     try {
       final profiles = await SessionManager.getProfiles();
@@ -323,7 +322,7 @@ class _SignInScreenState extends State<SignInScreen>
         _hasSavedProfile = profiles.isNotEmpty;
       });
     } catch (e) {
-      debugPrint('❌ Error checking saved profiles: $e');
+      debugPrint(' Error checking saved profiles: $e');
     }
   }
 
@@ -338,7 +337,7 @@ class _SignInScreenState extends State<SignInScreen>
     return 'com.yourcompany.mysalon.staging://auth-callback';
   }
 
-  // ✅ Save OAuth profile
+  //  Save OAuth profile
   Future<void> _saveOAuthProfile({
     required User user,
     required String providerToSave,
@@ -354,20 +353,20 @@ class _SignInScreenState extends State<SignInScreen>
       final userMetadata = user.userMetadata ?? {};
       final appMetadata = user.appMetadata;
 
-      // ✅ FINAL marketing consent එක හදාගන්න
+      //  FINAL marketing consent එක හදාගන්න
       bool finalMarketingConsent;
       DateTime? finalMarketingConsentAt;
 
       if (marketingConsent != null) {
-        // ✅ OAuth වලින් ආපොට - parameter එක use කරන්න
+        //  OAuth වලින් ආපොට - parameter එක use කරන්න
         finalMarketingConsent = marketingConsent;
         finalMarketingConsentAt = marketingConsent ? now : null;
 
-        print(
-          '📝 Using marketing consent from parameter: $finalMarketingConsent',
+        debugPrint(
+          'Using marketing consent from parameter: $finalMarketingConsent',
         );
 
-        // ✅ OAuth වලින් ආපොට - metadata එකත් update කරන්න
+        // OAuth වලින් ආපොට - metadata එකත් update කරන්න
         await supabase.auth.updateUser(
           UserAttributes(
             data: {
@@ -380,9 +379,9 @@ class _SignInScreenState extends State<SignInScreen>
             },
           ),
         );
-        print('✅ Updated auth metadata with marketing consent');
+        debugPrint('Updated auth metadata with marketing consent');
       } else {
-        // ✅ Password login වලින් ආපොට - metadata එකෙන් ගන්න
+        // Password login වලින් ආපොට - metadata එකෙන් ගන්න
         finalMarketingConsent =
             userMetadata['marketing_consent'] as bool? ?? false;
 
@@ -396,8 +395,8 @@ class _SignInScreenState extends State<SignInScreen>
           }
         }
 
-        print(
-          '📝 Using marketing consent from metadata: $finalMarketingConsent',
+        debugPrint(
+          'Using marketing consent from metadata: $finalMarketingConsent',
         );
       }
 
@@ -458,11 +457,11 @@ class _SignInScreenState extends State<SignInScreen>
         marketingConsentAt: finalMarketingConsentAt,
       );
     } catch (e) {
-      debugPrint('❌ Error in _saveOAuthProfile: $e');
+      debugPrint(' Error in _saveOAuthProfile: $e');
     }
   }
 
-  // ✅ LOGIN WITHOUT PRIVACY DIALOG
+  // LOGIN WITHOUT PRIVACY DIALOG
   Future<void> loginUser() async {
     if (_loading) return;
 
@@ -480,7 +479,7 @@ class _SignInScreenState extends State<SignInScreen>
         }
       }
 
-      // ✅ NO PRIVACY DIALOG HERE - Login directly
+      // NO PRIVACY DIALOG HERE - Login directly
       // Consent is implied by using the app
 
       final response = await supabase.auth.signInWithPassword(
@@ -584,7 +583,7 @@ class _SignInScreenState extends State<SignInScreen>
         : error.toString();
   }
 
-  // ✅ COMBINED OAuth DIALOG (only for OAuth sign-in)
+  // COMBINED OAuth DIALOG (only for OAuth sign-in)
   Future<Map<String, dynamic>?> _showCombinedOAuthDialog({
     required String provider,
     required List<String> scopes,
@@ -868,7 +867,7 @@ class _SignInScreenState extends State<SignInScreen>
     );
   }
 
-  // ✅ Get provider icon
+  // Get provider icon
   Widget _getProviderIcon(String provider, {double size = 18}) {
     switch (provider.toLowerCase()) {
       case 'google':
@@ -886,7 +885,7 @@ class _SignInScreenState extends State<SignInScreen>
     }
   }
 
-  // ✅ Get provider color
+  // Get provider color
   Color _getProviderColor(String provider) {
     switch (provider.toLowerCase()) {
       case 'google':
@@ -900,7 +899,7 @@ class _SignInScreenState extends State<SignInScreen>
     }
   }
 
-  // ✅ Google Sign In
+  // Google Sign In
   Future<void> _signInWithGoogle() async {
     if (_loadingGoogle) return;
 
@@ -990,7 +989,7 @@ class _SignInScreenState extends State<SignInScreen>
         isError: true,
       );
     } catch (e) {
-      debugPrint('❌ Google OAuth error: $e');
+      debugPrint('Google OAuth error: $e');
       if (!mounted) return;
       await showCustomAlert(
         context: context,
@@ -1003,7 +1002,7 @@ class _SignInScreenState extends State<SignInScreen>
     }
   }
 
-  // ✅ Facebook Sign In
+  // Facebook Sign In
   Future<void> _signInWithFacebook() async {
     if (_loadingFacebook) return;
 
@@ -1090,7 +1089,7 @@ class _SignInScreenState extends State<SignInScreen>
         isError: true,
       );
     } catch (e) {
-      debugPrint('❌ Facebook OAuth error: $e');
+      debugPrint(' Facebook OAuth error: $e');
       if (!mounted) return;
       await showCustomAlert(
         context: context,
@@ -1103,7 +1102,7 @@ class _SignInScreenState extends State<SignInScreen>
     }
   }
 
-  // ✅ Apple Sign In
+  //  Apple Sign In
   Future<void> _signInWithApple() async {
     if (_loadingApple) return;
 
@@ -1185,7 +1184,7 @@ class _SignInScreenState extends State<SignInScreen>
         isError: true,
       );
     } catch (e) {
-      debugPrint('❌ Apple Sign In error: $e');
+      debugPrint('Apple Sign In error: $e');
       if (!mounted) return;
       await showCustomAlert(
         context: context,
@@ -1198,7 +1197,7 @@ class _SignInScreenState extends State<SignInScreen>
     }
   }
 
-  // ✅ Handle post-login
+  //  Handle post-login
   Future<void> _handlePostLogin(String userId) async {
     try {
       if (!mounted) return;
@@ -1337,7 +1336,7 @@ class _SignInScreenState extends State<SignInScreen>
       appState.refreshState();
       if (mounted) context.go('/');
     } catch (e) {
-      debugPrint('❌ Post-login error: $e');
+      debugPrint(' Post-login error: $e');
       appState.refreshState();
       if (mounted) context.go('/');
     }
@@ -1370,7 +1369,7 @@ $provider OAuth Configuration Required:
     }
   }
 
-  // ✅ OAuth buttons
+  //  OAuth buttons
   Widget _buildOAuthButtons() {
     final enabledProviders = _env.enabledOAuthProviders;
 
@@ -1870,7 +1869,7 @@ $provider OAuth Configuration Required:
                               _buildOAuthButtons(),
                               const SizedBox(height: 24),
 
-                              // ✅ BOTTOM SECTION WITH PRIVACY LINKS (Static text only - NO DIALOG)
+                              // BOTTOM SECTION WITH PRIVACY LINKS (Static text only - NO DIALOG)
                               Padding(
                                 padding: const EdgeInsets.only(bottom: 10),
                                 child: Wrap(
@@ -1937,7 +1936,7 @@ $provider OAuth Configuration Required:
   }
 }
 
-// ✅ Social Login Button
+// Social Login Button
 class _SocialLoginButton extends StatelessWidget {
   final String provider;
   final VoidCallback onPressed;
