@@ -17,7 +17,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import '../../../utils/simple_toast.dart';
 
-// 🔥 IMPORT SERVICES
+// IMPORT SERVICES
 import 'package:flutter_application_1/services/google_sign_in_service.dart';
 import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
@@ -31,7 +31,7 @@ class _ReturningUserCheck {
   _ReturningUserCheck({
     this.email,
     this.hasConsent = false,
-    this.hasAutoLoginSetting = true, // 👈 Default true for new users
+    this.hasAutoLoginSetting = true,
   });
 }
 
@@ -86,7 +86,7 @@ class _SignInScreenState extends State<SignInScreen>
   DateTime? _termsAcceptedAt;
   DateTime? _privacyAcceptedAt;
 
-  // 🔥 SERVICES
+  // SERVICES
   late final GoogleSignInService _googleSignInService;
   final FacebookAuth _facebookAuth = FacebookAuth.instance;
 
@@ -96,7 +96,7 @@ class _SignInScreenState extends State<SignInScreen>
   void initState() {
     super.initState();
 
-    // 🔥 Initialize GoogleSignInService
+    // Initialize GoogleSignInService
     _googleSignInService = GoogleSignInService();
     _googleSignInService.initialize();
 
@@ -146,16 +146,16 @@ class _SignInScreenState extends State<SignInScreen>
         if (hasExistingProfile) {
           _rememberMe = savedRememberMe;
         } else {
-          _rememberMe = true; // ✅ New user - AUTO-CHECKED
+          _rememberMe = true; 
         }
       });
 
       if (kDebugMode) {
-        print('📝 Remember Me setting loaded: $_rememberMe');
-        print('📝 Has saved profile: $_hasSavedProfile');
+        print(' Remember Me setting loaded: $_rememberMe');
+        print(' Has saved profile: $_hasSavedProfile');
       }
     } catch (e) {
-      debugPrint('❌ Error loading remember me: $e');
+      debugPrint(' Error loading remember me: $e');
       setState(() => _rememberMe = true);
     }
   }
@@ -242,7 +242,7 @@ class _SignInScreenState extends State<SignInScreen>
     try {
       packageInfo = await PackageInfo.fromPlatform();
     } catch (e) {
-      debugPrint('❌ Error getting package info: $e');
+      debugPrint(' Error getting package info: $e');
       packageInfo = PackageInfo(
         appName: 'MySalon',
         packageName: 'com.example.mysalon',
@@ -276,26 +276,26 @@ class _SignInScreenState extends State<SignInScreen>
         }
       }
     } catch (e) {
-      if (kDebugMode) print('❌ Error loading consent: $e');
+      if (kDebugMode) print(' Error loading consent: $e');
     }
   }
 
-  // ✅ FIXED: Check if user is returning - ALWAYS return true for new users
+  //  FIXED: Check if user is returning - ALWAYS return true for new users
   Future<_ReturningUserCheck> _checkIfReturningUser(String provider) async {
     try {
       final profiles = await SessionManager.getProfiles();
-      print('📊 Total profiles found: ${profiles.length}');
+      debugPrint(' Total profiles found: ${profiles.length}');
 
       if (profiles.isEmpty) {
-        print('📝 No profiles found - new user');
-        // 🔥 NEW USER - return with default true
+        debugPrint(' No profiles found - new user');
+        // NEW USER - return with default true
         return _ReturningUserCheck(hasAutoLoginSetting: true);
       }
 
       for (var profile in profiles) {
         final profileProvider = profile['provider']?.toString().toLowerCase();
-        print(
-          '📝 Checking profile - Provider: $profileProvider, RememberMe: ${profile['rememberMe']}',
+        debugPrint(
+          ' Checking profile - Provider: $profileProvider, RememberMe: ${profile['rememberMe']}',
         );
 
         if (profileProvider == provider.toLowerCase()) {
@@ -304,8 +304,8 @@ class _SignInScreenState extends State<SignInScreen>
           final privacyAccepted = profile['privacyAcceptedAt'] != null;
           final hasRememberMe = profile['rememberMe'] == true;
 
-          print('✅ Found returning user: $email for provider: $provider');
-          print('✅ Has rememberMe: $hasRememberMe');
+          debugPrint(' Found returning user: $email for provider: $provider');
+          debugPrint(' Has rememberMe: $hasRememberMe');
 
           return _ReturningUserCheck(
             email: email,
@@ -315,11 +315,11 @@ class _SignInScreenState extends State<SignInScreen>
         }
       }
 
-      print('📝 No matching profile found for provider: $provider');
-      // 🔥 NEW USER FOR THIS PROVIDER - return with default true
+      debugPrint(' No matching profile found for provider: $provider');
+      // NEW USER FOR THIS PROVIDER - return with default true
       return _ReturningUserCheck(hasAutoLoginSetting: true);
     } catch (e) {
-      print('❌ Error checking returning user: $e');
+      debugPrint(' Error checking returning user: $e');
       return _ReturningUserCheck(hasAutoLoginSetting: true);
     }
   }
@@ -330,9 +330,9 @@ class _SignInScreenState extends State<SignInScreen>
       setState(() {
         _hasSavedProfile = profiles.isNotEmpty;
       });
-      print('📝 Has saved profile: ${profiles.isNotEmpty}');
+      debugPrint(' Has saved profile: ${profiles.isNotEmpty}');
     } catch (e) {
-      debugPrint('❌ Error checking saved profiles: $e');
+      debugPrint(' Error checking saved profiles: $e');
     }
   }
 
@@ -372,7 +372,7 @@ class _SignInScreenState extends State<SignInScreen>
         finalMarketingConsentAt = marketingConsent ? now : null;
 
         debugPrint(
-          '📝 Using marketing consent from parameter: $finalMarketingConsent',
+          ' Using marketing consent from parameter: $finalMarketingConsent',
         );
 
         await supabase.auth.updateUser(
@@ -387,7 +387,7 @@ class _SignInScreenState extends State<SignInScreen>
             },
           ),
         );
-        debugPrint('✅ Updated auth metadata with marketing consent');
+        debugPrint(' Updated auth metadata with marketing consent');
       } else {
         finalMarketingConsent =
             userMetadata['marketing_consent'] as bool? ?? false;
@@ -403,7 +403,7 @@ class _SignInScreenState extends State<SignInScreen>
         }
 
         debugPrint(
-          '📝 Using marketing consent from metadata: $finalMarketingConsent',
+          ' Using marketing consent from metadata: $finalMarketingConsent',
         );
       }
 
@@ -464,9 +464,9 @@ class _SignInScreenState extends State<SignInScreen>
         marketingConsentAt: finalMarketingConsentAt,
       );
 
-      print('✅ Saved profile for $email with rememberMe: $rememberMe');
+      debugPrint('Saved profile for $email with rememberMe: $rememberMe');
     } catch (e) {
-      debugPrint('❌ Error in _saveOAuthProfile: $e');
+      debugPrint(' Error in _saveOAuthProfile: $e');
     }
   }
 
@@ -588,29 +588,33 @@ class _SignInScreenState extends State<SignInScreen>
         : error.toString();
   }
 
-  // ✅ FIXED: COMBINED OAuth DIALOG with Remember Me
+  // ✅FIXED: COMBINED OAuth DIALOG with Remember Me
   Future<Map<String, dynamic>?> _showCombinedOAuthDialog({
     required String provider,
     required List<String> scopes,
     bool defaultAutoLogin = true,
   }) async {
-    // ✅ පරණ remember me setting එක load කරගන්නවා
+    // පරණ remember me setting එක load කරගන්නවා
     bool rememberMe = defaultAutoLogin;
     bool marketingConsent = false;
 
-    // ✅ Saved profile එක තියෙනවා නම්, ඒකේ remember me setting එක ගන්නවා
+    //  Saved profile එක තියෙනවා නම්, ඒකේ remember me setting එක ගන්නවා
     if (_hasSavedProfile) {
       final savedRememberMe = await SessionManager.isRememberMeEnabled();
       rememberMe = savedRememberMe;
-      print('📝 Loaded saved remember me: $rememberMe');
+      debugPrint('Loaded saved remember me: $rememberMe');
     } else {
-      print('📝 New user - default remember me: $rememberMe');
+      debugPrint(' New user - default remember me: $rememberMe');
     }
 
-    return await showDialog<Map<String, dynamic>>(
+    //  Check if mounted before using context
+    if (!mounted) return null;
+
+    //  Use a local variable for the dialog result
+    final dialogResult = await showDialog<Map<String, dynamic>>(
       context: context,
       barrierDismissible: false,
-      builder: (context) => StatefulBuilder(
+      builder: (dialogContext) => StatefulBuilder(
         builder: (context, setState) {
           return AlertDialog(
             title: Row(
@@ -711,7 +715,14 @@ class _SignInScreenState extends State<SignInScreen>
                           children: [
                             TextButton.icon(
                               onPressed: () {
-                                context.push('/terms');
+                                // ✅ Use push with dialogContext (this is safe as it's in the builder)
+                                // If you need to navigate to terms, you might want to:
+                                // 1. Close the dialog first, then navigate
+                                Navigator.pop(context); // Close dialog
+                                // Then navigate using the original context (if still mounted)
+                                if (mounted) {
+                                  context.push('/terms');
+                                }
                               },
                               icon: const Icon(Icons.open_in_new, size: 16),
                               label: const Text("Terms of Service"),
@@ -722,7 +733,11 @@ class _SignInScreenState extends State<SignInScreen>
                             ),
                             TextButton.icon(
                               onPressed: () {
-                                context.push('/privacy');
+                                // Same approach for privacy policy
+                                Navigator.pop(context); // Close dialog
+                                if (mounted) {
+                                  context.push('/privacy');
+                                }
                               },
                               icon: const Icon(Icons.open_in_new, size: 16),
                               label: const Text("Privacy Policy"),
@@ -745,7 +760,7 @@ class _SignInScreenState extends State<SignInScreen>
 
                   const SizedBox(height: 16),
 
-                  // ✅ FIXED: Auto-login Section with Remember Me
+                  // Auto-login Section with Remember Me
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
@@ -787,7 +802,6 @@ class _SignInScreenState extends State<SignInScreen>
                         const SizedBox(height: 8),
                         Row(
                           children: [
-                            // ✅ Checkbox - value එක rememberMe වලින් ගන්නවා
                             Checkbox(
                               value: rememberMe,
                               onChanged: (value) =>
@@ -815,7 +829,6 @@ class _SignInScreenState extends State<SignInScreen>
                             ),
                           ],
                         ),
-                        // ✅ Show saved status if returning user
                         if (_hasSavedProfile && rememberMe)
                           Padding(
                             padding: const EdgeInsets.only(top: 8, left: 8),
@@ -872,14 +885,10 @@ class _SignInScreenState extends State<SignInScreen>
 
                   // App version
                   Center(
-                    // child: Text(
-                    //   "App v${_packageInfo.version} (${_packageInfo.buildNumber})",
-                    //   style: const TextStyle(fontSize: 10, color: Colors.grey),
-                    // ),
-                     child : Text(
-                        "App v${_env.appVersion} (${_env.environment})",
-                        style: const TextStyle(fontSize: 10, color: Colors.grey),
-                      ),
+                    child: Text(
+                      "App v${_env.appVersion} (${_env.environment})",
+                      style: const TextStyle(fontSize: 10, color: Colors.grey),
+                    ),
                   ),
                 ],
               ),
@@ -908,6 +917,8 @@ class _SignInScreenState extends State<SignInScreen>
         },
       ),
     );
+
+    return dialogResult;
   }
 
   // Get provider icon
@@ -942,34 +953,34 @@ class _SignInScreenState extends State<SignInScreen>
     }
   }
 
-  // 🔥 HYBRID GOOGLE SIGN-IN USING SERVICE
+  // HYBRID GOOGLE SIGN-IN USING SERVICE
   Future<void> _signInWithGoogle() async {
     if (_loadingGoogle) return;
 
     try {
       setState(() => _loadingGoogle = true);
 
-      print('🚀 Starting Google Sign-In process...');
+      debugPrint('Starting Google Sign-In process...');
 
-      // 🔥 Returning user check
+      // Returning user check
       final returningUserCheck = await _checkIfReturningUser('google');
 
-      print('🔍 Returning User Check - Google:');
-      print('   Email: ${returningUserCheck.email}');
-      print('   Has Consent: ${returningUserCheck.hasConsent}');
-      print('   Auto Login Setting: ${returningUserCheck.hasAutoLoginSetting}');
+      debugPrint('Returning User Check - Google:');
+      debugPrint('   Email: ${returningUserCheck.email}');
+      debugPrint('   Has Consent: ${returningUserCheck.hasConsent}');
+      debugPrint('   Auto Login Setting: ${returningUserCheck.hasAutoLoginSetting}');
 
-      // 🔥 Dialog එකට පරණ setting එක pass කරන්න
+      // Dialog එකට පරණ setting එක pass කරන්න
       final result = await _showCombinedOAuthDialog(
         provider: 'Google',
         scopes: ['email', 'profile'],
         defaultAutoLogin: returningUserCheck.hasAutoLoginSetting,
       );
 
-      print('📝 Dialog result: $result');
+      debugPrint('Dialog result: $result');
 
       if (result == null) {
-        print('❌ User cancelled dialog');
+        debugPrint(' User cancelled dialog');
         setState(() => _loadingGoogle = false);
         return;
       }
@@ -977,8 +988,8 @@ class _SignInScreenState extends State<SignInScreen>
       final bool userWantsAutoLogin = result['rememberMe'] ?? true;
       final bool marketingConsent = result['marketingConsent'] ?? false;
 
-      print('📝 User wants auto login: $userWantsAutoLogin');
-      print('📝 Marketing consent: $marketingConsent');
+      debugPrint(' User wants auto login: $userWantsAutoLogin');
+      debugPrint(' Marketing consent: $marketingConsent');
 
       setState(() => _rememberMe = userWantsAutoLogin);
       await SessionManager.setRememberMe(userWantsAutoLogin);
@@ -1003,15 +1014,15 @@ class _SignInScreenState extends State<SignInScreen>
         }
       }
 
-      // 🌐 WEB: Supabase OAuth
+      //  WEB: Supabase OAuth
       if (kIsWeb) {
-        print('🌐 Web platform - starting Supabase OAuth');
+        debugPrint(' Web platform - starting Supabase OAuth');
         _authSubscription?.cancel();
 
         _authSubscription = supabase.auth.onAuthStateChange.listen((
           data,
         ) async {
-          print('📡 Auth event: ${data.event}');
+          debugPrint('Auth event: ${data.event}');
           if (data.event == AuthChangeEvent.signedIn && mounted) {
             final user = supabase.auth.currentUser;
             final session = supabase.auth.currentSession;
@@ -1035,15 +1046,15 @@ class _SignInScreenState extends State<SignInScreen>
         return;
       }
 
-      // 📱 MOBILE: Use GoogleSignInService (Native)
+      // MOBILE: Use GoogleSignInService (Native)
       if (defaultTargetPlatform == TargetPlatform.android ||
           defaultTargetPlatform == TargetPlatform.iOS) {
-        print('📱 Mobile platform - using native Google Sign-In');
+        debugPrint(' Mobile platform - using native Google Sign-In');
 
         final authData = await _googleSignInService.authenticateAndGetDetails();
 
         if (authData != null && authData['idToken'] != null) {
-          print('✅ Got auth data from Google');
+          debugPrint(' Got auth data from Google');
 
           try {
             final response = await supabase.auth.signInWithIdToken(
@@ -1065,15 +1076,15 @@ class _SignInScreenState extends State<SignInScreen>
               return;
             }
           } catch (e) {
-            print('❌ Supabase sign-in failed: $e');
+            debugPrint(' Supabase sign-in failed: $e');
           }
         } else {
-          print('❌ Google authentication failed');
+          debugPrint(' Google authentication failed');
         }
       }
 
-      // 🔄 FALLBACK: Supabase OAuth
-      print('🔄 Falling back to Supabase OAuth');
+      // FALLBACK: Supabase OAuth
+      debugPrint(' Falling back to Supabase OAuth');
       _authSubscription?.cancel();
 
       _authSubscription = supabase.auth.onAuthStateChange.listen((data) async {
@@ -1098,7 +1109,7 @@ class _SignInScreenState extends State<SignInScreen>
         queryParams: {'prompt': 'select_account'},
       );
     } on AuthException catch (e) {
-      print('❌ AuthException: ${e.message}');
+      debugPrint(' AuthException: ${e.message}');
       if (!mounted) return;
       await showCustomAlert(
         context: context,
@@ -1107,7 +1118,7 @@ class _SignInScreenState extends State<SignInScreen>
         isError: true,
       );
     } catch (e) {
-      print('❌ Error: $e');
+      debugPrint(' Error: $e');
       if (!mounted) return;
       await showCustomAlert(
         context: context,
@@ -1158,7 +1169,7 @@ class _SignInScreenState extends State<SignInScreen>
         return;
       }
 
-      // 🔥 Returning user check
+      // Returning user check
       final returningUserCheck = await _checkIfReturningUser('facebook');
 
       final result = await _showCombinedOAuthDialog(
@@ -1229,7 +1240,7 @@ class _SignInScreenState extends State<SignInScreen>
             }
           }
         } catch (e) {
-          print('Native Facebook login failed: $e');
+          debugPrint('Native Facebook login failed: $e');
         }
       }
 
@@ -1248,7 +1259,7 @@ class _SignInScreenState extends State<SignInScreen>
         isError: true,
       );
     } catch (e) {
-      debugPrint('❌ Facebook OAuth error: $e');
+      debugPrint(' Facebook OAuth error: $e');
       if (!mounted) return;
       await showCustomAlert(
         context: context,
@@ -1315,14 +1326,14 @@ class _SignInScreenState extends State<SignInScreen>
   }
 
   // Apple Sign In
-  // 🔥 UPDATED: Apple Sign In with Web Support
+  // UPDATED: Apple Sign In with Web Support
   Future<void> _signInWithApple() async {
     if (_loadingApple) return;
 
     try {
       setState(() => _loadingApple = true);
 
-      // 🔥 Returning user check
+      // Returning user check
       final returningUserCheck = await _checkIfReturningUser('apple');
 
       final result = await _showCombinedOAuthDialog(
@@ -1354,9 +1365,9 @@ class _SignInScreenState extends State<SignInScreen>
         );
       }
 
-      // 🔥 WEB: Supabase OAuth (Apple)
+      // WEB: Supabase OAuth (Apple)
       if (kIsWeb) {
-        print('🌐 Web platform - starting Apple OAuth');
+        debugPrint(' Web platform - starting Apple OAuth');
         await _signInWithAppleWeb(
           userWantsAutoLogin,
           marketingConsent,
@@ -1367,7 +1378,7 @@ class _SignInScreenState extends State<SignInScreen>
 
       // Android: Use Supabase OAuth
       if (defaultTargetPlatform == TargetPlatform.android) {
-        print('🤖 Android platform - starting Apple OAuth');
+        debugPrint(' Android platform - starting Apple OAuth');
         await _signInWithAppleWeb(
           userWantsAutoLogin,
           marketingConsent,
@@ -1378,7 +1389,7 @@ class _SignInScreenState extends State<SignInScreen>
 
       // iOS: Try native Apple Sign-In
       if (defaultTargetPlatform == TargetPlatform.iOS) {
-        print('📱 iOS platform - trying native Apple Sign-In');
+        debugPrint(' iOS platform - trying native Apple Sign-In');
         try {
           final credential = await SignInWithApple.getAppleIDCredential(
             scopes: [
@@ -1388,7 +1399,7 @@ class _SignInScreenState extends State<SignInScreen>
           );
 
           if (credential.identityToken != null) {
-            print('✅ Got native Apple credential');
+            debugPrint(' Got native Apple credential');
 
             final response = await supabase.auth.signInWithIdToken(
               provider: OAuthProvider.apple,
@@ -1409,20 +1420,20 @@ class _SignInScreenState extends State<SignInScreen>
             }
           }
         } catch (e) {
-          print('❌ Native Apple Sign-In failed: $e');
+          debugPrint('Native Apple Sign-In failed: $e');
           // Fall back to OAuth
         }
       }
 
-      // 🔄 FALLBACK: Supabase OAuth
-      print('🔄 Falling back to Supabase OAuth for Apple');
+      //  FALLBACK: Supabase OAuth
+      debugPrint(' Falling back to Supabase OAuth for Apple');
       await _signInWithAppleWeb(
         userWantsAutoLogin,
         marketingConsent,
         returningUserCheck,
       );
     } on AuthException catch (e) {
-      print('❌ Apple AuthException: ${e.message}');
+      debugPrint(' Apple AuthException: ${e.message}');
       if (!mounted) return;
       await showCustomAlert(
         context: context,
@@ -1431,7 +1442,7 @@ class _SignInScreenState extends State<SignInScreen>
         isError: true,
       );
     } catch (e) {
-      print('❌ Apple Sign In error: $e');
+      debugPrint(' Apple Sign In error: $e');
       if (!mounted) return;
       await showCustomAlert(
         context: context,
@@ -1444,7 +1455,7 @@ class _SignInScreenState extends State<SignInScreen>
     }
   }
 
-  // 🔥 Web/Android Apple Sign-In (Supabase OAuth)
+  // Web/Android Apple Sign-In (Supabase OAuth)
   Future<void> _signInWithAppleWeb(
     bool userWantsAutoLogin,
     bool marketingConsent,
@@ -1453,7 +1464,7 @@ class _SignInScreenState extends State<SignInScreen>
     _authSubscription?.cancel();
 
     _authSubscription = supabase.auth.onAuthStateChange.listen((data) async {
-      print('📡 Apple Auth event: ${data.event}');
+      debugPrint('📡 Apple Auth event: ${data.event}');
       if (data.event == AuthChangeEvent.signedIn && mounted) {
         final user = supabase.auth.currentUser;
         final session = supabase.auth.currentSession;
@@ -1470,7 +1481,7 @@ class _SignInScreenState extends State<SignInScreen>
 
     // Use redirect URL from EnvironmentManager
     final redirectUrl = _getRedirectUrl();
-    print('🚀 Starting Apple OAuth with redirect: $redirectUrl');
+    debugPrint('Starting Apple OAuth with redirect: $redirectUrl');
 
     await supabase.auth.signInWithOAuth(
       OAuthProvider.apple,
@@ -1486,7 +1497,7 @@ class _SignInScreenState extends State<SignInScreen>
     required bool marketingConsent,
   }) async {
     if (!mounted) return;
-    print('✅ Completing Apple Sign-In for: ${user.email}');
+     debugPrint('Completing Apple Sign-In for: ${user.email}');
 
     await _saveOAuthProfile(
       user: user,
@@ -1646,7 +1657,7 @@ class _SignInScreenState extends State<SignInScreen>
       appState.refreshState();
       if (mounted) context.go('/');
     } catch (e) {
-      debugPrint('❌ Post-login error: $e');
+      debugPrint('Post-login error: $e');
       appState.refreshState();
       if (mounted) context.go('/');
     }
@@ -1682,7 +1693,7 @@ $provider OAuth Configuration Required:
   // OAuth buttons
   Widget _buildOAuthButtons() {
     final enabledProviders = _env.enabledOAuthProviders;
-   
+
     return Column(
       children: [
         Padding(
@@ -1726,17 +1737,8 @@ $provider OAuth Configuration Required:
             ),
           ),
 
-        // if (enabledProviders.contains('apple') &&
-        //     (defaultTargetPlatform == TargetPlatform.iOS || kIsWeb))
-        //   Padding(
-        //     padding: const EdgeInsets.only(bottom: 12),
-        //     child: _SocialLoginButton(
-        //       provider: 'apple',
-        //       onPressed: _signInWithApple,
-        //       isLoading: _loadingApple,
-        //     ),
-        //   ),
-        if (enabledProviders.contains('apple'))
+        if (enabledProviders.contains('apple') &&
+            (defaultTargetPlatform == TargetPlatform.iOS || kIsWeb))
           Padding(
             padding: const EdgeInsets.only(bottom: 12),
             child: _SocialLoginButton(
@@ -1745,6 +1747,15 @@ $provider OAuth Configuration Required:
               isLoading: _loadingApple,
             ),
           ),
+        // if (enabledProviders.contains('apple'))
+        //   Padding(
+        //     padding: const EdgeInsets.only(bottom: 12),
+        //     child: _SocialLoginButton(
+        //       provider: 'apple',
+        //       onPressed: _signInWithApple,
+        //       isLoading: _loadingApple,
+        //     ),
+        //   ),
 
         Padding(
           padding: const EdgeInsets.only(bottom: 12),
