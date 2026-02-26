@@ -101,22 +101,38 @@ class EnvironmentManager {
            facebookClientToken.isNotEmpty;
   }
 
+  // ========== APPLE OAUTH CONFIGURATION ==========
+  
+  /// 🔥 NEW: Apple Service ID (from Apple Developer Console)
+  String get appleServiceId {
+    return dotenv.env['APPLE_SERVICE_ID'] ?? '';
+  }
+
+  /// 🔥 NEW: Apple redirect URL
+  String get appleRedirectUrl {
+    return dotenv.env['APPLE_REDIRECT_URL'] ?? 'myapp://auth/callback';
+  }
+
+  /// 🔥 NEW: Enable/disable Apple OAuth
+  bool get enableAppleOAuth {
+    return dotenv.env['ENABLE_APPLE_OAUTH'] != 'false';
+  }
+
   // ========== REDIRECT URL CONFIGURATION ==========
   
   String get webRedirectUrl {
     final customUrl = dotenv.env['WEB_REDIRECT_URL'];
-    if (customUrl != null && customUrl.isNotEmpty) { // meka naththam vitharai pahala eva wada karanne
+    if (customUrl != null && customUrl.isNotEmpty) {
       return customUrl;
     }
     
     // Default URLs based on environment
-     
-    if (isProduction) { // mevarible ture venne ,evn eka anuwa
+    if (isProduction) {
       return 'https://yourdomain.com/auth/callback';
     } else if (isStaging) {
       return 'https://staging.yourdomain.com/auth/callback';
     } else {
-       return'${Uri.base.origin}/auth/callback';     
+       return '${Uri.base.origin}/auth/callback';     
     }
   }
 
@@ -154,6 +170,11 @@ class EnvironmentManager {
       'com.example.mysalon://auth/callback',
     };
     
+    // Add Apple specific URLs
+    if (enableAppleOAuth) {
+      urls.add(appleRedirectUrl);
+    }
+    
     // Add production URL if configured
     if (isProduction && dotenv.env['PRODUCTION_REDIRECT_URL'] != null) {
       urls.add(dotenv.env['PRODUCTION_REDIRECT_URL']!);
@@ -190,26 +211,32 @@ class EnvironmentManager {
 
   // ========== OAUTH PROVIDER MANAGEMENT ==========
   
+  /// 🔥 UPDATED: List of enabled OAuth providers
   List<String> get enabledOAuthProviders {
     final providers = <String>[];
     
     if (enableGoogleOAuth) providers.add('google');
     if (enableFacebookOAuth) providers.add('facebook');
+    if (enableAppleOAuth) providers.add('apple'); // 👈 Apple එක add කරන්න
     
     return providers;
   }
 
+  /// 🔥 UPDATED: Check if specific OAuth provider is enabled
   bool isOAuthProviderEnabled(String provider) {
     switch (provider.toLowerCase()) {
       case 'google':
         return enableGoogleOAuth;
       case 'facebook':
         return enableFacebookOAuth;
+      case 'apple':  // 👈 Apple support එක
+        return enableAppleOAuth;
       default:
         return false;
     }
   }
 
+  /// 🔥 UPDATED: Validate OAuth configuration
   bool hasValidOAuthConfiguration(String provider) {
     switch (provider.toLowerCase()) {
       case 'google':
@@ -221,6 +248,8 @@ class EnvironmentManager {
         return enableFacebookOAuth && 
                facebookAppId.isNotEmpty && 
                facebookClientToken.isNotEmpty;
+      case 'apple':  // 👈 Apple validation
+        return enableAppleOAuth;
       default:
         return false;
     }
@@ -243,12 +272,13 @@ class EnvironmentManager {
   // ========== ENVIRONMENT CHECKS ==========
   
   bool get isProduction => environment == 'production';
-  bool get isStaging => environment == 'staging'; // production ekata kalin state eka
+  bool get isStaging => environment == 'staging';
   bool get isDevelopment => environment == 'development';
   bool get isTest => environment == 'test';
 
   // ========== VALIDATION ==========
   
+  /// 🔥 UPDATED: Validate with Apple support
   void validate() {
     final errors = <String>[];
     
@@ -292,6 +322,14 @@ class EnvironmentManager {
       }
     }
     
+    // 👈 Apple validation (optional)
+    if (enableAppleOAuth) {
+      // Apple doesn't require client ID validation for basic OAuth
+      if (appleServiceId.isNotEmpty) {
+        print('🍎 Apple Service ID configured: $appleServiceId');
+      }
+    }
+    
     if (errors.isNotEmpty) {
       throw Exception('Environment validation failed:\n${errors.join('\n')}');
     }
@@ -329,6 +367,7 @@ class EnvironmentManager {
 
   // ========== DEBUG INFO ==========
   
+  /// 🔥 UPDATED: Print info with Apple support
   void printInfo() {
     if (!debugMode) return;
     
@@ -371,11 +410,24 @@ class EnvironmentManager {
       print('   • Facebook OAuth: ❌ Disabled');
     }
     
+    // 🔥 Apple status
+    if (enableAppleOAuth) {
+      print('   • Apple OAuth: ✅ Enabled');
+      if (appleServiceId.isNotEmpty) {
+        print('     - Service ID: $appleServiceId');
+      }
+    } else {
+      print('   • Apple OAuth: ❌ Disabled');
+    }
+    
     // Redirect URLs
     print('\n🔄 Redirect URLs:');
     print('   • Web: $webRedirectUrl');
     print('   • Mobile: $mobileRedirectUrl');
     print('   • Supabase: $supabaseOAuthCallbackUrl');
+    if (enableAppleOAuth) {
+      print('   • Apple: $appleRedirectUrl');
+    }
     
     // Feature Flags
     print('\n🚀 Feature Flags:');
@@ -414,6 +466,7 @@ class EnvironmentManager {
   
   // ========== OAUTH VALIDATION METHODS ==========
   
+  /// 🔥 UPDATED: Validate OAuth configurations with Apple
   Map<String, dynamic> validateOAuthConfigurations() {
     final results = <String, dynamic>{};
     
@@ -434,10 +487,18 @@ class EnvironmentManager {
       'redirectUrls': getRequiredRedirectUrls(),
     };
     
+    // 🔥 Apple OAuth
+    results['apple'] = {
+      'enabled': enableAppleOAuth,
+      'serviceId': appleServiceId.isNotEmpty,
+      'redirectUrls': getRequiredRedirectUrls(),
+    };
+    
     return results;
   }
   
   // Get OAuth provider configuration
+  /// 🔥 UPDATED: Get provider config with Apple
   Map<String, dynamic>? getOAuthProviderConfig(String provider) {
     switch (provider.toLowerCase()) {
       case 'google':
@@ -453,6 +514,12 @@ class EnvironmentManager {
           'appId': facebookAppId,
           'clientToken': facebookClientToken,
           'enabled': enableFacebookOAuth,
+        };
+      case 'apple':  // 👈 Apple config
+        return {
+          'serviceId': appleServiceId,
+          'redirectUrl': appleRedirectUrl,
+          'enabled': enableAppleOAuth,
         };
       default:
         return null;
