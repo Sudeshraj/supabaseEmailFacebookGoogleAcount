@@ -161,17 +161,14 @@ class AuthService {
         email: email.trim(),
         password: password.trim(),
         emailRedirectTo: _getRedirectUrl(),
-        data: {
-          'created_at': now,
-          'email': email.trim(),
+        data: { 
+          'display_name': email.split('@').first,        
+          'remember_me_enabled': rememberMe,        
           'terms_accepted_at': now,
-          'privacy_accepted_at': now,
-          'data_consent_given': true,
+          'privacy_accepted_at': now,          
           'marketing_consent': marketingConsent,
-          'marketing_consent_at': marketingConsent ? now : null,
-          'remember_me_enabled': rememberMe,
-          'app_version': '1.0.0',
-          'platform': 'mobile',
+          'marketing_consent_at': marketingConsent ? now : null,          
+          'data_consent_given': true,
           'registration_complete': false, // 👈 Track if profile created
           'role': null, // 👈 Will be set later
           'role_id': null, // 👈 Will be set later
