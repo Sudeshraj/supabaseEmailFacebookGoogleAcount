@@ -1,7 +1,12 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart'
-    show kIsWeb, kDebugMode, kReleaseMode, defaultTargetPlatform;
+    show
+        kIsWeb,
+        kDebugMode,
+        kReleaseMode,
+        defaultTargetPlatform,
+        TargetPlatform;
 import 'package:flutter_application_1/config/environment_manager.dart';
 import 'package:flutter_application_1/main.dart';
 import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
@@ -12,6 +17,11 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import '../../../utils/simple_toast.dart';
 
+// 🔥 IMPORT SERVICES
+import 'package:flutter_application_1/services/google_sign_in_service.dart';
+import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
+import 'package:sign_in_with_apple/sign_in_with_apple.dart';
+
 // Class for returning user check
 class _ReturningUserCheck {
   final String? email;
@@ -21,7 +31,7 @@ class _ReturningUserCheck {
   _ReturningUserCheck({
     this.email,
     this.hasConsent = false,
-    this.hasAutoLoginSetting = false,
+    this.hasAutoLoginSetting = true, // 👈 Default true for new users
   });
 }
 
@@ -43,62 +53,63 @@ class SignInScreen extends StatefulWidget {
 
 class _SignInScreenState extends State<SignInScreen>
     with SingleTickerProviderStateMixin {
-  TextEditingController _emailController = TextEditingController();
+  // Controllers
+  late TextEditingController _emailController;
   final TextEditingController _passwordController = TextEditingController();
 
+  // State variables
   bool _obscurePassword = true;
   bool _loading = false;
   bool _coolDown = false;
-  bool _rememberMe = true; //  AUTO-CHECKED by default
+  bool _rememberMe = true; // AUTO-CHECKED by default
   bool _loadingGoogle = false;
   bool _loadingFacebook = false;
   bool _loadingApple = false;
-
-  // Track if user manually changed remember me
   bool _userChangedRememberMe = false;
 
+  // Animation
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
   late Animation<double> _scaleAnimation;
 
+  // Validation
   String? _emailError;
   String? _passwordError;
   bool _isValid = false;
   bool _isValidEmail = false;
   bool _hasSavedProfile = false;
 
+  // Services
   final supabase = Supabase.instance.client;
   final EnvironmentManager _env = EnvironmentManager();
-  late PackageInfo _packageInfo;
+  late PackageInfo packageInfo;
   DateTime? _termsAcceptedAt;
   DateTime? _privacyAcceptedAt;
+
+  // 🔥 SERVICES
+  late final GoogleSignInService _googleSignInService;
+  final FacebookAuth _facebookAuth = FacebookAuth.instance;
 
   StreamSubscription<AuthState>? _authSubscription;
 
   @override
   void initState() {
     super.initState();
+
+    // 🔥 Initialize GoogleSignInService
+    _googleSignInService = GoogleSignInService();
+    _googleSignInService.initialize();
+
+    // Initialize controllers
+    _emailController = TextEditingController(text: widget.prefilledEmail ?? '');
+
+    // Load data
     _initPackageInfo();
     _loadConsentStatus();
     _checkSavedProfile();
     _loadRememberMeSetting();
 
-    // Initialize controllers
-    if (widget.prefilledEmail != null) {
-      _emailController = TextEditingController(text: widget.prefilledEmail);
-      if (kDebugMode) {
-        print('Prefilled email: ${widget.prefilledEmail}');
-      }
-    } else {
-      _emailController = TextEditingController();
-    }
-
-    // Set initial state with NO ERRORS
-    _emailError = null;
-    _passwordError = null;
-    _isValidEmail = true;
-    _isValid = false;
-
+    // Setup animations
     _animationController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 700),
@@ -110,36 +121,19 @@ class _SignInScreenState extends State<SignInScreen>
     _scaleAnimation = Tween<double>(begin: 0.9, end: 1.0).animate(
       CurvedAnimation(parent: _animationController, curve: Curves.easeOutBack),
     );
-
     _animationController.forward();
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (widget.prefilledEmail != null && widget.prefilledEmail!.isNotEmpty) {
-        _emailController.text = widget.prefilledEmail!;
-      }
+    // Add listeners
+    _emailController.addListener(_onEmailChanged);
+    _passwordController.addListener(_onPasswordChanged);
 
+    // Post frame callback
+    WidgetsBinding.instance.addPostFrameCallback((_) {
       if (widget.showMessage && widget.message != null) {
         _showCustomMessage(widget.message!);
       }
-
-      // Show info toast about remember me (only for new users)
-      // _showRememberMeInfoIfNeeded();
     });
-
-    _emailController.addListener(_onEmailChanged);
-    _passwordController.addListener(_onPasswordChanged);
   }
-
-  // Show info about remember me (only once)
-  // Future<void> _showRememberMeInfoIfNeeded() async {
-  //   if (!_hasSavedProfile && mounted) {
-  //     SimpleToast.info(
-  //       context,
-  //       "Quick sign-in is enabled for faster login next time",
-  //       duration: const Duration(seconds: 3),
-  //     );
-  //   }
-  // }
 
   // Load remember me setting with smart default
   Future<void> _loadRememberMeSetting() async {
@@ -157,10 +151,11 @@ class _SignInScreenState extends State<SignInScreen>
       });
 
       if (kDebugMode) {
-        print('Remember Me setting loaded: $_rememberMe');
+        print('📝 Remember Me setting loaded: $_rememberMe');
+        print('📝 Has saved profile: $_hasSavedProfile');
       }
     } catch (e) {
-      debugPrint('Error loading remember me: $e');
+      debugPrint('❌ Error loading remember me: $e');
       setState(() => _rememberMe = true);
     }
   }
@@ -225,6 +220,11 @@ class _SignInScreenState extends State<SignInScreen>
     });
   }
 
+  bool _isValidEmailFormat(String value) {
+    final emailRegex = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
+    return emailRegex.hasMatch(value);
+  }
+
   @override
   void dispose() {
     _emailController.dispose();
@@ -240,10 +240,10 @@ class _SignInScreenState extends State<SignInScreen>
 
   Future<void> _initPackageInfo() async {
     try {
-      _packageInfo = await PackageInfo.fromPlatform();
+      packageInfo = await PackageInfo.fromPlatform();
     } catch (e) {
-      debugPrint(' Error getting package info: $e');
-      _packageInfo = PackageInfo(
+      debugPrint('❌ Error getting package info: $e');
+      packageInfo = PackageInfo(
         appName: 'MySalon',
         packageName: 'com.example.mysalon',
         version: '1.0.0',
@@ -276,25 +276,36 @@ class _SignInScreenState extends State<SignInScreen>
         }
       }
     } catch (e) {
-      if (kDebugMode) print(' Error loading consent: $e');
+      if (kDebugMode) print('❌ Error loading consent: $e');
     }
   }
 
-  //  Check if user is returning
+  // ✅ FIXED: Check if user is returning - ALWAYS return true for new users
   Future<_ReturningUserCheck> _checkIfReturningUser(String provider) async {
     try {
       final profiles = await SessionManager.getProfiles();
+      print('📊 Total profiles found: ${profiles.length}');
+
       if (profiles.isEmpty) {
-        return _ReturningUserCheck();
+        print('📝 No profiles found - new user');
+        // 🔥 NEW USER - return with default true
+        return _ReturningUserCheck(hasAutoLoginSetting: true);
       }
 
       for (var profile in profiles) {
         final profileProvider = profile['provider']?.toString().toLowerCase();
+        print(
+          '📝 Checking profile - Provider: $profileProvider, RememberMe: ${profile['rememberMe']}',
+        );
+
         if (profileProvider == provider.toLowerCase()) {
           final email = profile['email']?.toString();
           final termsAccepted = profile['termsAcceptedAt'] != null;
           final privacyAccepted = profile['privacyAcceptedAt'] != null;
           final hasRememberMe = profile['rememberMe'] == true;
+
+          print('✅ Found returning user: $email for provider: $provider');
+          print('✅ Has rememberMe: $hasRememberMe');
 
           return _ReturningUserCheck(
             email: email,
@@ -304,15 +315,13 @@ class _SignInScreenState extends State<SignInScreen>
         }
       }
 
-      return _ReturningUserCheck();
+      print('📝 No matching profile found for provider: $provider');
+      // 🔥 NEW USER FOR THIS PROVIDER - return with default true
+      return _ReturningUserCheck(hasAutoLoginSetting: true);
     } catch (e) {
-      return _ReturningUserCheck();
+      print('❌ Error checking returning user: $e');
+      return _ReturningUserCheck(hasAutoLoginSetting: true);
     }
-  }
-
-  bool _isValidEmailFormat(String value) {
-    final emailRegex = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
-    return emailRegex.hasMatch(value);
   }
 
   Future<void> _checkSavedProfile() async {
@@ -321,8 +330,9 @@ class _SignInScreenState extends State<SignInScreen>
       setState(() {
         _hasSavedProfile = profiles.isNotEmpty;
       });
+      print('📝 Has saved profile: ${profiles.isNotEmpty}');
     } catch (e) {
-      debugPrint(' Error checking saved profiles: $e');
+      debugPrint('❌ Error checking saved profiles: $e');
     }
   }
 
@@ -337,7 +347,7 @@ class _SignInScreenState extends State<SignInScreen>
     return 'com.yourcompany.mysalon.staging://auth-callback';
   }
 
-  //  Save OAuth profile
+  // Save OAuth profile
   Future<void> _saveOAuthProfile({
     required User user,
     required String providerToSave,
@@ -353,35 +363,32 @@ class _SignInScreenState extends State<SignInScreen>
       final userMetadata = user.userMetadata ?? {};
       final appMetadata = user.appMetadata;
 
-      //  FINAL marketing consent එක හදාගන්න
+      // FINAL marketing consent
       bool finalMarketingConsent;
       DateTime? finalMarketingConsentAt;
 
       if (marketingConsent != null) {
-        //  OAuth වලින් ආපොට - parameter එක use කරන්න
         finalMarketingConsent = marketingConsent;
         finalMarketingConsentAt = marketingConsent ? now : null;
 
         debugPrint(
-          'Using marketing consent from parameter: $finalMarketingConsent',
+          '📝 Using marketing consent from parameter: $finalMarketingConsent',
         );
 
-        // OAuth වලින් ආපොට - metadata එකත් update කරන්න
         await supabase.auth.updateUser(
           UserAttributes(
             data: {
               'remember_me_enabled': rememberMe,
-              'terms_accepted_at': now,
-              'privacy_accepted_at': now,
+              'terms_accepted_at': now.toIso8601String(),
+              'privacy_accepted_at': now.toIso8601String(),
               'marketing_consent': finalMarketingConsent,
               'marketing_consent_at': finalMarketingConsentAt
                   ?.toIso8601String(),
             },
           ),
         );
-        debugPrint('Updated auth metadata with marketing consent');
+        debugPrint('✅ Updated auth metadata with marketing consent');
       } else {
-        // Password login වලින් ආපොට - metadata එකෙන් ගන්න
         finalMarketingConsent =
             userMetadata['marketing_consent'] as bool? ?? false;
 
@@ -396,7 +403,7 @@ class _SignInScreenState extends State<SignInScreen>
         }
 
         debugPrint(
-          'Using marketing consent from metadata: $finalMarketingConsent',
+          '📝 Using marketing consent from metadata: $finalMarketingConsent',
         );
       }
 
@@ -456,8 +463,10 @@ class _SignInScreenState extends State<SignInScreen>
         marketingConsent: finalMarketingConsent,
         marketingConsentAt: finalMarketingConsentAt,
       );
+
+      print('✅ Saved profile for $email with rememberMe: $rememberMe');
     } catch (e) {
-      debugPrint(' Error in _saveOAuthProfile: $e');
+      debugPrint('❌ Error in _saveOAuthProfile: $e');
     }
   }
 
@@ -478,9 +487,6 @@ class _SignInScreenState extends State<SignInScreen>
           return;
         }
       }
-
-      // NO PRIVACY DIALOG HERE - Login directly
-      // Consent is implied by using the app
 
       final response = await supabase.auth.signInWithPassword(
         email: email,
@@ -521,7 +527,6 @@ class _SignInScreenState extends State<SignInScreen>
       );
 
       if (e.code == 'email_not_confirmed') {
-        _emailController.text.trim();
         final session = supabase.auth.currentSession;
 
         await _saveOAuthProfile(
@@ -583,14 +588,24 @@ class _SignInScreenState extends State<SignInScreen>
         : error.toString();
   }
 
-  // COMBINED OAuth DIALOG (only for OAuth sign-in)
+  // ✅ FIXED: COMBINED OAuth DIALOG with Remember Me
   Future<Map<String, dynamic>?> _showCombinedOAuthDialog({
     required String provider,
     required List<String> scopes,
     bool defaultAutoLogin = true,
   }) async {
+    // ✅ පරණ remember me setting එක load කරගන්නවා
     bool rememberMe = defaultAutoLogin;
     bool marketingConsent = false;
+
+    // ✅ Saved profile එක තියෙනවා නම්, ඒකේ remember me setting එක ගන්නවා
+    if (_hasSavedProfile) {
+      final savedRememberMe = await SessionManager.isRememberMeEnabled();
+      rememberMe = savedRememberMe;
+      print('📝 Loaded saved remember me: $rememberMe');
+    } else {
+      print('📝 New user - default remember me: $rememberMe');
+    }
 
     return await showDialog<Map<String, dynamic>>(
       context: context,
@@ -730,7 +745,7 @@ class _SignInScreenState extends State<SignInScreen>
 
                   const SizedBox(height: 16),
 
-                  // Auto-login Section
+                  // ✅ FIXED: Auto-login Section with Remember Me
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
@@ -772,6 +787,7 @@ class _SignInScreenState extends State<SignInScreen>
                         const SizedBox(height: 8),
                         Row(
                           children: [
+                            // ✅ Checkbox - value එක rememberMe වලින් ගන්නවා
                             Checkbox(
                               value: rememberMe,
                               onChanged: (value) =>
@@ -799,6 +815,29 @@ class _SignInScreenState extends State<SignInScreen>
                             ),
                           ],
                         ),
+                        // ✅ Show saved status if returning user
+                        if (_hasSavedProfile && rememberMe)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 8, left: 8),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.check_circle,
+                                  size: 14,
+                                  color: Colors.green.shade600,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  "Saved preference applied",
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: Colors.green.shade700,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                       ],
                     ),
                   ),
@@ -833,10 +872,14 @@ class _SignInScreenState extends State<SignInScreen>
 
                   // App version
                   Center(
-                    child: Text(
-                      "App v${_packageInfo.version} (${_packageInfo.buildNumber})",
-                      style: const TextStyle(fontSize: 10, color: Colors.grey),
-                    ),
+                    // child: Text(
+                    //   "App v${_packageInfo.version} (${_packageInfo.buildNumber})",
+                    //   style: const TextStyle(fontSize: 10, color: Colors.grey),
+                    // ),
+                     child : Text(
+                        "App v${_env.appVersion} (${_env.environment})",
+                        style: const TextStyle(fontSize: 10, color: Colors.grey),
+                      ),
                   ),
                 ],
               ),
@@ -899,28 +942,43 @@ class _SignInScreenState extends State<SignInScreen>
     }
   }
 
-  // Google Sign In
+  // 🔥 HYBRID GOOGLE SIGN-IN USING SERVICE
   Future<void> _signInWithGoogle() async {
     if (_loadingGoogle) return;
 
     try {
       setState(() => _loadingGoogle = true);
 
-      await _checkIfReturningUser('google');
+      print('🚀 Starting Google Sign-In process...');
 
+      // 🔥 Returning user check
+      final returningUserCheck = await _checkIfReturningUser('google');
+
+      print('🔍 Returning User Check - Google:');
+      print('   Email: ${returningUserCheck.email}');
+      print('   Has Consent: ${returningUserCheck.hasConsent}');
+      print('   Auto Login Setting: ${returningUserCheck.hasAutoLoginSetting}');
+
+      // 🔥 Dialog එකට පරණ setting එක pass කරන්න
       final result = await _showCombinedOAuthDialog(
         provider: 'Google',
         scopes: ['email', 'profile'],
-        defaultAutoLogin: true,
+        defaultAutoLogin: returningUserCheck.hasAutoLoginSetting,
       );
 
+      print('📝 Dialog result: $result');
+
       if (result == null) {
+        print('❌ User cancelled dialog');
         setState(() => _loadingGoogle = false);
         return;
       }
 
       final bool userWantsAutoLogin = result['rememberMe'] ?? true;
       final bool marketingConsent = result['marketingConsent'] ?? false;
+
+      print('📝 User wants auto login: $userWantsAutoLogin');
+      print('📝 Marketing consent: $marketingConsent');
 
       setState(() => _rememberMe = userWantsAutoLogin);
       await SessionManager.setRememberMe(userWantsAutoLogin);
@@ -945,32 +1003,90 @@ class _SignInScreenState extends State<SignInScreen>
         }
       }
 
-      _authSubscription?.cancel();
-      _authSubscription = supabase.auth.onAuthStateChange.listen((data) async {
-        if (data.event == AuthChangeEvent.signedIn) {
-          await Future.delayed(const Duration(seconds: 2));
-          final user = supabase.auth.currentUser;
-          final session = supabase.auth.currentSession;
+      // 🌐 WEB: Supabase OAuth
+      if (kIsWeb) {
+        print('🌐 Web platform - starting Supabase OAuth');
+        _authSubscription?.cancel();
 
-          if (user != null && user.email != null) {
-            await _saveOAuthProfile(
-              user: user,
-              providerToSave: 'google',
-              rememberMe: userWantsAutoLogin,
-              accessToken: session?.accessToken,
-              refreshToken: session?.refreshToken,
-              marketingConsent: marketingConsent,
-            );
-
-            if (marketingConsent) {
-              await SessionManager.updateMarketingConsent(
-                email: user.email!,
-                consent: true,
-                consentedAt: DateTime.now(),
+        _authSubscription = supabase.auth.onAuthStateChange.listen((
+          data,
+        ) async {
+          print('📡 Auth event: ${data.event}');
+          if (data.event == AuthChangeEvent.signedIn && mounted) {
+            final user = supabase.auth.currentUser;
+            final session = supabase.auth.currentSession;
+            if (user != null && user.email != null) {
+              await _completeGoogleSignIn(
+                user: user,
+                session: session,
+                userWantsAutoLogin: userWantsAutoLogin,
+                marketingConsent: marketingConsent,
               );
             }
+          }
+        });
 
-            await _handlePostLogin(user.id);
+        await supabase.auth.signInWithOAuth(
+          OAuthProvider.google,
+          redirectTo: _getRedirectUrl(),
+          scopes: 'email profile',
+          queryParams: {'prompt': 'select_account'},
+        );
+        return;
+      }
+
+      // 📱 MOBILE: Use GoogleSignInService (Native)
+      if (defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS) {
+        print('📱 Mobile platform - using native Google Sign-In');
+
+        final authData = await _googleSignInService.authenticateAndGetDetails();
+
+        if (authData != null && authData['idToken'] != null) {
+          print('✅ Got auth data from Google');
+
+          try {
+            final response = await supabase.auth.signInWithIdToken(
+              provider: OAuthProvider.google,
+              idToken: authData['idToken']!,
+              accessToken: authData['accessToken'],
+            );
+
+            final user = response.user;
+            final session = response.session;
+
+            if (user != null && mounted) {
+              await _completeGoogleSignIn(
+                user: user,
+                session: session,
+                userWantsAutoLogin: userWantsAutoLogin,
+                marketingConsent: marketingConsent,
+              );
+              return;
+            }
+          } catch (e) {
+            print('❌ Supabase sign-in failed: $e');
+          }
+        } else {
+          print('❌ Google authentication failed');
+        }
+      }
+
+      // 🔄 FALLBACK: Supabase OAuth
+      print('🔄 Falling back to Supabase OAuth');
+      _authSubscription?.cancel();
+
+      _authSubscription = supabase.auth.onAuthStateChange.listen((data) async {
+        if (data.event == AuthChangeEvent.signedIn && mounted) {
+          final user = supabase.auth.currentUser;
+          final session = supabase.auth.currentSession;
+          if (user != null && user.email != null) {
+            await _completeGoogleSignIn(
+              user: user,
+              session: session,
+              userWantsAutoLogin: userWantsAutoLogin,
+              marketingConsent: marketingConsent,
+            );
           }
         }
       });
@@ -979,8 +1095,10 @@ class _SignInScreenState extends State<SignInScreen>
         OAuthProvider.google,
         redirectTo: _getRedirectUrl(),
         scopes: 'email profile',
+        queryParams: {'prompt': 'select_account'},
       );
     } on AuthException catch (e) {
+      print('❌ AuthException: ${e.message}');
       if (!mounted) return;
       await showCustomAlert(
         context: context,
@@ -989,7 +1107,7 @@ class _SignInScreenState extends State<SignInScreen>
         isError: true,
       );
     } catch (e) {
-      debugPrint('Google OAuth error: $e');
+      print('❌ Error: $e');
       if (!mounted) return;
       await showCustomAlert(
         context: context,
@@ -1002,6 +1120,31 @@ class _SignInScreenState extends State<SignInScreen>
     }
   }
 
+  Future<void> _completeGoogleSignIn({
+    required User user,
+    required Session? session,
+    required bool userWantsAutoLogin,
+    required bool marketingConsent,
+  }) async {
+    if (!mounted) return;
+    await _saveOAuthProfile(
+      user: user,
+      providerToSave: 'google',
+      rememberMe: userWantsAutoLogin,
+      accessToken: session?.accessToken,
+      refreshToken: session?.refreshToken,
+      marketingConsent: marketingConsent,
+    );
+    if (marketingConsent) {
+      await SessionManager.updateMarketingConsent(
+        email: user.email!,
+        consent: true,
+        consentedAt: DateTime.now(),
+      );
+    }
+    await _handlePostLogin(user.id);
+  }
+
   // Facebook Sign In
   Future<void> _signInWithFacebook() async {
     if (_loadingFacebook) return;
@@ -1011,15 +1154,17 @@ class _SignInScreenState extends State<SignInScreen>
 
       if (!_env.enableFacebookOAuth) {
         SimpleToast.info(context, 'Facebook sign in is currently disabled');
+        setState(() => _loadingFacebook = false);
         return;
       }
 
-      await _checkIfReturningUser('facebook');
+      // 🔥 Returning user check
+      final returningUserCheck = await _checkIfReturningUser('facebook');
 
       final result = await _showCombinedOAuthDialog(
         provider: 'Facebook',
         scopes: ['email', 'public_profile'],
-        defaultAutoLogin: true,
+        defaultAutoLogin: returningUserCheck.hasAutoLoginSetting,
       );
 
       if (result == null) {
@@ -1045,40 +1190,54 @@ class _SignInScreenState extends State<SignInScreen>
         );
       }
 
-      _authSubscription?.cancel();
-      _authSubscription = supabase.auth.onAuthStateChange.listen((data) async {
-        if (data.event == AuthChangeEvent.signedIn) {
-          await Future.delayed(const Duration(seconds: 2));
-          final user = supabase.auth.currentUser;
-          final session = supabase.auth.currentSession;
+      // WEB: Supabase OAuth
+      if (kIsWeb) {
+        await _signInWithFacebookWeb(
+          userWantsAutoLogin,
+          marketingConsent,
+          returningUserCheck,
+        );
+        return;
+      }
 
-          if (user != null && user.email != null) {
-            await _saveOAuthProfile(
-              user: user,
-              providerToSave: 'facebook',
-              rememberMe: userWantsAutoLogin,
-              accessToken: session?.accessToken,
-              refreshToken: session?.refreshToken,
-              marketingConsent: marketingConsent,
+      // MOBILE: Native Facebook Login
+      if (defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS) {
+        try {
+          final LoginResult fbResult = await _facebookAuth.login(
+            permissions: ['email', 'public_profile'],
+          );
+
+          if (fbResult.status == LoginStatus.success) {
+            final AccessToken accessToken = fbResult.accessToken!;
+            final response = await supabase.auth.signInWithIdToken(
+              provider: OAuthProvider.facebook,
+              idToken: accessToken.tokenString,
             );
 
-            if (marketingConsent) {
-              await SessionManager.updateMarketingConsent(
-                email: user.email!,
-                consent: true,
-                consentedAt: DateTime.now(),
+            final user = response.user;
+            final session = response.session;
+
+            if (user != null && mounted) {
+              await _completeFacebookSignIn(
+                user: user,
+                session: session,
+                userWantsAutoLogin: userWantsAutoLogin,
+                marketingConsent: marketingConsent,
               );
+              return;
             }
-
-            await _handlePostLogin(user.id);
           }
+        } catch (e) {
+          print('Native Facebook login failed: $e');
         }
-      });
+      }
 
-      await supabase.auth.signInWithOAuth(
-        OAuthProvider.facebook,
-        redirectTo: _getRedirectUrl(),
-        scopes: 'public_profile',
+      // FALLBACK: Supabase OAuth
+      await _signInWithFacebookWeb(
+        userWantsAutoLogin,
+        marketingConsent,
+        returningUserCheck,
       );
     } on AuthException catch (e) {
       if (!mounted) return;
@@ -1089,7 +1248,7 @@ class _SignInScreenState extends State<SignInScreen>
         isError: true,
       );
     } catch (e) {
-      debugPrint(' Facebook OAuth error: $e');
+      debugPrint('❌ Facebook OAuth error: $e');
       if (!mounted) return;
       await showCustomAlert(
         context: context,
@@ -1102,19 +1261,74 @@ class _SignInScreenState extends State<SignInScreen>
     }
   }
 
-  //  Apple Sign In
+  Future<void> _signInWithFacebookWeb(
+    bool userWantsAutoLogin,
+    bool marketingConsent,
+    _ReturningUserCheck returningUserCheck,
+  ) async {
+    _authSubscription?.cancel();
+    _authSubscription = supabase.auth.onAuthStateChange.listen((data) async {
+      if (data.event == AuthChangeEvent.signedIn && mounted) {
+        final user = supabase.auth.currentUser;
+        final session = supabase.auth.currentSession;
+        if (user != null && user.email != null) {
+          await _completeFacebookSignIn(
+            user: user,
+            session: session,
+            userWantsAutoLogin: userWantsAutoLogin,
+            marketingConsent: marketingConsent,
+          );
+        }
+      }
+    });
+
+    await supabase.auth.signInWithOAuth(
+      OAuthProvider.facebook,
+      redirectTo: _getRedirectUrl(),
+      scopes: 'public_profile',
+    );
+  }
+
+  Future<void> _completeFacebookSignIn({
+    required User user,
+    required Session? session,
+    required bool userWantsAutoLogin,
+    required bool marketingConsent,
+  }) async {
+    if (!mounted) return;
+    await _saveOAuthProfile(
+      user: user,
+      providerToSave: 'facebook',
+      rememberMe: userWantsAutoLogin,
+      accessToken: session?.accessToken,
+      refreshToken: session?.refreshToken,
+      marketingConsent: marketingConsent,
+    );
+    if (marketingConsent) {
+      await SessionManager.updateMarketingConsent(
+        email: user.email!,
+        consent: true,
+        consentedAt: DateTime.now(),
+      );
+    }
+    await _handlePostLogin(user.id);
+  }
+
+  // Apple Sign In
+  // 🔥 UPDATED: Apple Sign In with Web Support
   Future<void> _signInWithApple() async {
     if (_loadingApple) return;
 
     try {
       setState(() => _loadingApple = true);
 
-      await _checkIfReturningUser('apple');
+      // 🔥 Returning user check
+      final returningUserCheck = await _checkIfReturningUser('apple');
 
       final result = await _showCombinedOAuthDialog(
         provider: 'Apple',
         scopes: ['email', 'name'],
-        defaultAutoLogin: true,
+        defaultAutoLogin: returningUserCheck.hasAutoLoginSetting,
       );
 
       if (result == null) {
@@ -1140,42 +1354,75 @@ class _SignInScreenState extends State<SignInScreen>
         );
       }
 
-      _authSubscription?.cancel();
-      _authSubscription = supabase.auth.onAuthStateChange.listen((data) async {
-        if (data.event == AuthChangeEvent.signedIn) {
-          await Future.delayed(const Duration(seconds: 2));
-          final user = supabase.auth.currentUser;
-          final session = supabase.auth.currentSession;
+      // 🔥 WEB: Supabase OAuth (Apple)
+      if (kIsWeb) {
+        print('🌐 Web platform - starting Apple OAuth');
+        await _signInWithAppleWeb(
+          userWantsAutoLogin,
+          marketingConsent,
+          returningUserCheck,
+        );
+        return;
+      }
 
-          if (user != null && user.email != null) {
-            await _saveOAuthProfile(
-              user: user,
-              providerToSave: 'apple',
-              rememberMe: userWantsAutoLogin,
-              accessToken: session?.accessToken,
-              refreshToken: session?.refreshToken,
-              marketingConsent: marketingConsent,
+      // Android: Use Supabase OAuth
+      if (defaultTargetPlatform == TargetPlatform.android) {
+        print('🤖 Android platform - starting Apple OAuth');
+        await _signInWithAppleWeb(
+          userWantsAutoLogin,
+          marketingConsent,
+          returningUserCheck,
+        );
+        return;
+      }
+
+      // iOS: Try native Apple Sign-In
+      if (defaultTargetPlatform == TargetPlatform.iOS) {
+        print('📱 iOS platform - trying native Apple Sign-In');
+        try {
+          final credential = await SignInWithApple.getAppleIDCredential(
+            scopes: [
+              AppleIDAuthorizationScopes.email,
+              AppleIDAuthorizationScopes.fullName,
+            ],
+          );
+
+          if (credential.identityToken != null) {
+            print('✅ Got native Apple credential');
+
+            final response = await supabase.auth.signInWithIdToken(
+              provider: OAuthProvider.apple,
+              idToken: credential.identityToken!,
             );
 
-            if (marketingConsent) {
-              await SessionManager.updateMarketingConsent(
-                email: user.email!,
-                consent: true,
-                consentedAt: DateTime.now(),
+            final user = response.user;
+            final session = response.session;
+
+            if (user != null && mounted) {
+              await _completeAppleSignIn(
+                user: user,
+                session: session,
+                userWantsAutoLogin: userWantsAutoLogin,
+                marketingConsent: marketingConsent,
               );
+              return;
             }
-
-            await _handlePostLogin(user.id);
           }
+        } catch (e) {
+          print('❌ Native Apple Sign-In failed: $e');
+          // Fall back to OAuth
         }
-      });
+      }
 
-      await supabase.auth.signInWithOAuth(
-        OAuthProvider.apple,
-        redirectTo: _getRedirectUrl(),
-        scopes: 'email name',
+      // 🔄 FALLBACK: Supabase OAuth
+      print('🔄 Falling back to Supabase OAuth for Apple');
+      await _signInWithAppleWeb(
+        userWantsAutoLogin,
+        marketingConsent,
+        returningUserCheck,
       );
     } on AuthException catch (e) {
+      print('❌ Apple AuthException: ${e.message}');
       if (!mounted) return;
       await showCustomAlert(
         context: context,
@@ -1184,7 +1431,7 @@ class _SignInScreenState extends State<SignInScreen>
         isError: true,
       );
     } catch (e) {
-      debugPrint('Apple Sign In error: $e');
+      print('❌ Apple Sign In error: $e');
       if (!mounted) return;
       await showCustomAlert(
         context: context,
@@ -1197,7 +1444,70 @@ class _SignInScreenState extends State<SignInScreen>
     }
   }
 
-  //  Handle post-login
+  // 🔥 Web/Android Apple Sign-In (Supabase OAuth)
+  Future<void> _signInWithAppleWeb(
+    bool userWantsAutoLogin,
+    bool marketingConsent,
+    _ReturningUserCheck returningUserCheck,
+  ) async {
+    _authSubscription?.cancel();
+
+    _authSubscription = supabase.auth.onAuthStateChange.listen((data) async {
+      print('📡 Apple Auth event: ${data.event}');
+      if (data.event == AuthChangeEvent.signedIn && mounted) {
+        final user = supabase.auth.currentUser;
+        final session = supabase.auth.currentSession;
+        if (user != null && user.email != null) {
+          await _completeAppleSignIn(
+            user: user,
+            session: session,
+            userWantsAutoLogin: userWantsAutoLogin,
+            marketingConsent: marketingConsent,
+          );
+        }
+      }
+    });
+
+    // Use redirect URL from EnvironmentManager
+    final redirectUrl = _getRedirectUrl();
+    print('🚀 Starting Apple OAuth with redirect: $redirectUrl');
+
+    await supabase.auth.signInWithOAuth(
+      OAuthProvider.apple,
+      redirectTo: redirectUrl,
+      scopes: 'email name',
+    );
+  }
+
+  Future<void> _completeAppleSignIn({
+    required User user,
+    required Session? session,
+    required bool userWantsAutoLogin,
+    required bool marketingConsent,
+  }) async {
+    if (!mounted) return;
+    print('✅ Completing Apple Sign-In for: ${user.email}');
+
+    await _saveOAuthProfile(
+      user: user,
+      providerToSave: 'apple',
+      rememberMe: userWantsAutoLogin,
+      accessToken: session?.accessToken,
+      refreshToken: session?.refreshToken,
+      marketingConsent: marketingConsent,
+    );
+
+    if (marketingConsent) {
+      await SessionManager.updateMarketingConsent(
+        email: user.email!,
+        consent: true,
+        consentedAt: DateTime.now(),
+      );
+    }
+    await _handlePostLogin(user.id);
+  }
+
+  // Handle post-login
   Future<void> _handlePostLogin(String userId) async {
     try {
       if (!mounted) return;
@@ -1336,13 +1646,13 @@ class _SignInScreenState extends State<SignInScreen>
       appState.refreshState();
       if (mounted) context.go('/');
     } catch (e) {
-      debugPrint(' Post-login error: $e');
+      debugPrint('❌ Post-login error: $e');
       appState.refreshState();
       if (mounted) context.go('/');
     }
   }
 
-  // ✅ OAuth error messages
+  // OAuth error messages
   String _getOAuthErrorMessage(AuthException e, String provider) {
     if (kReleaseMode) {
       return "Unable to sign in with $provider. Please try again.";
@@ -1369,10 +1679,10 @@ $provider OAuth Configuration Required:
     }
   }
 
-  //  OAuth buttons
+  // OAuth buttons
   Widget _buildOAuthButtons() {
     final enabledProviders = _env.enabledOAuthProviders;
-
+   
     return Column(
       children: [
         Padding(
@@ -1416,8 +1726,17 @@ $provider OAuth Configuration Required:
             ),
           ),
 
-        if (enabledProviders.contains('apple') &&
-            defaultTargetPlatform == TargetPlatform.iOS)
+        // if (enabledProviders.contains('apple') &&
+        //     (defaultTargetPlatform == TargetPlatform.iOS || kIsWeb))
+        //   Padding(
+        //     padding: const EdgeInsets.only(bottom: 12),
+        //     child: _SocialLoginButton(
+        //       provider: 'apple',
+        //       onPressed: _signInWithApple,
+        //       isLoading: _loadingApple,
+        //     ),
+        //   ),
+        if (enabledProviders.contains('apple'))
           Padding(
             padding: const EdgeInsets.only(bottom: 12),
             child: _SocialLoginButton(
@@ -1635,7 +1954,6 @@ $provider OAuth Configuration Required:
                                   errorText: _emailError,
                                 ),
                               ),
-
                               const SizedBox(height: 16),
 
                               // Password Field
@@ -1783,11 +2101,6 @@ $provider OAuth Configuration Required:
                                                 ),
                                             ],
                                           ),
-                                          // const SizedBox(height: 2),
-                                          // Text(
-                                          //   'Stay signed in for faster access next time',
-                                          //   style: TextStyle(color: Colors.white70, fontSize: 11),
-                                          // ),
                                           if (_rememberMe)
                                             Padding(
                                               padding: const EdgeInsets.only(
@@ -1869,7 +2182,7 @@ $provider OAuth Configuration Required:
                               _buildOAuthButtons(),
                               const SizedBox(height: 24),
 
-                              // BOTTOM SECTION WITH PRIVACY LINKS (Static text only - NO DIALOG)
+                              // Privacy Links
                               Padding(
                                 padding: const EdgeInsets.only(bottom: 10),
                                 child: Wrap(
@@ -1955,9 +2268,9 @@ class _SocialLoginButton extends StatelessWidget {
       case 'facebook':
         return const Color(0xFF1877F2);
       case 'apple':
-        return Colors.black;
+        return const Color.fromARGB(255, 227, 227, 227);
       case 'password':
-        return const Color(0xFF1877F3);
+        return const Color.fromARGB(255, 192, 8, 243);
       default:
         return const Color(0xFF1877F3);
     }
@@ -1985,7 +2298,8 @@ class _SocialLoginButton extends StatelessWidget {
       case 'facebook':
         return SvgPicture.asset('icons/facebook.svg', width: 18, height: 18);
       case 'apple':
-        return const Icon(Icons.apple, size: 18);
+        // return const Icon(Icons.apple, size: 18);
+        return SvgPicture.asset('icons/apple.svg', width: 20, height: 20);
       case 'password':
         return Icon(
           Icons.person_add_alt_1_rounded,
