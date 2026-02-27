@@ -146,7 +146,11 @@ class _SignInScreenState extends State<SignInScreen>
         if (hasExistingProfile) {
           _rememberMe = savedRememberMe;
         } else {
+<<<<<<< HEAD
           _rememberMe = true;
+=======
+          _rememberMe = true; 
+>>>>>>> e9e59d5dd90b6912a002bba736958956fcf13343
         }
       });
 
@@ -886,6 +890,7 @@ class _SignInScreenState extends State<SignInScreen>
                   // App version
                   Center(
                     child: Text(
+<<<<<<< HEAD
                       "App v${packageInfo.version} (${packageInfo.buildNumber})",
                       style: const TextStyle(fontSize: 10, color: Colors.grey),
                     ),
@@ -893,6 +898,11 @@ class _SignInScreenState extends State<SignInScreen>
                     //     "App v${_env.appVersion} (${_env.environment})",
                     //     style: const TextStyle(fontSize: 10, color: Colors.grey),
                     //   ),
+=======
+                      "App v${_env.appVersion} (${_env.environment})",
+                      style: const TextStyle(fontSize: 10, color: Colors.grey),
+                    ),
+>>>>>>> e9e59d5dd90b6912a002bba736958956fcf13343
                   ),
                 ],
               ),
@@ -972,9 +982,13 @@ class _SignInScreenState extends State<SignInScreen>
       debugPrint('Returning User Check - Google:');
       debugPrint('   Email: ${returningUserCheck.email}');
       debugPrint('   Has Consent: ${returningUserCheck.hasConsent}');
+<<<<<<< HEAD
       debugPrint(
         '   Auto Login Setting: ${returningUserCheck.hasAutoLoginSetting}',
       );
+=======
+      debugPrint('   Auto Login Setting: ${returningUserCheck.hasAutoLoginSetting}');
+>>>>>>> e9e59d5dd90b6912a002bba736958956fcf13343
 
       // Dialog එකට පරණ setting එක pass කරන්න
       final result = await _showCombinedOAuthDialog(
@@ -1503,7 +1517,11 @@ class _SignInScreenState extends State<SignInScreen>
     required bool marketingConsent,
   }) async {
     if (!mounted) return;
+<<<<<<< HEAD
     debugPrint('Completing Apple Sign-In for: ${user.email}');
+=======
+     debugPrint('Completing Apple Sign-In for: ${user.email}');
+>>>>>>> e9e59d5dd90b6912a002bba736958956fcf13343
 
     await _saveOAuthProfile(
       user: user,
@@ -1753,7 +1771,10 @@ $provider OAuth Configuration Required:
               isLoading: _loadingApple,
             ),
           ),
+<<<<<<< HEAD
 
+=======
+>>>>>>> e9e59d5dd90b6912a002bba736958956fcf13343
         // if (enabledProviders.contains('apple'))
         //   Padding(
         //     padding: const EdgeInsets.only(bottom: 12),
@@ -1763,6 +1784,10 @@ $provider OAuth Configuration Required:
         //       isLoading: _loadingApple,
         //     ),
         //   ),
+<<<<<<< HEAD
+=======
+
+>>>>>>> e9e59d5dd90b6912a002bba736958956fcf13343
         Padding(
           padding: const EdgeInsets.only(bottom: 12),
           child: _SocialLoginButton(
