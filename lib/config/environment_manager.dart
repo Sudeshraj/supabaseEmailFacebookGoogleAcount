@@ -8,11 +8,7 @@ class EnvironmentManager {
   EnvironmentManager._internal();
 
   // Initialize environment based on flavor
-<<<<<<< HEAD
   Future<void> init({String flavor = 'development'}) async {// 1 .flavor කියන්නේ optional named parameter එකක්value එකක් pass කළොත්, default value එක override වෙලා අලුත් value එක ගන්නවා,default value එක 'development' වෙයි
-=======
-  Future<void> init({String flavor = 'development'}) async {
->>>>>>> e9e59d5dd90b6912a002bba736958956fcf13343
     String envFile;
     
     switch (flavor) {
@@ -30,22 +26,13 @@ class EnvironmentManager {
     }
     
     try {
-<<<<<<< HEAD
       await dotenv.load(fileName: envFile); // 2 .name ekata adala file eka load karanava pasuva eke thiyena varible access krnva
       if (debugMode) debugPrint('✅ Loaded environment: $flavor from $envFile');
-=======
-      await dotenv.load(fileName: envFile);
-      if (debugMode) print('✅ Loaded environment: $flavor from $envFile');
->>>>>>> e9e59d5dd90b6912a002bba736958956fcf13343
     } catch (e) {
       // Fallback to default .env
       try {
         await dotenv.load(fileName: '.env');
-<<<<<<< HEAD
         if (debugMode) debugPrint('⚠️  Using default .env file');
-=======
-        if (debugMode) print('⚠️  Using default .env file');
->>>>>>> e9e59d5dd90b6912a002bba736958956fcf13343
       } catch (e2) {
         throw Exception('Failed to load any environment file: $e2');
       }
@@ -284,11 +271,7 @@ class EnvironmentManager {
 
   // ========== ENVIRONMENT CHECKS ==========
   
-<<<<<<< HEAD
   bool get isProduction => environment == 'production'; //meken karanne 'environment' kiyana metode ekata call karla den tiyena envirement eka .ev eken gannava ekai mekai samananam true venva.
-=======
-  bool get isProduction => environment == 'production';
->>>>>>> e9e59d5dd90b6912a002bba736958956fcf13343
   bool get isStaging => environment == 'staging';
   bool get isDevelopment => environment == 'development';
   bool get isTest => environment == 'test';
@@ -343,11 +326,7 @@ class EnvironmentManager {
     if (enableAppleOAuth) {
       // Apple doesn't require client ID validation for basic OAuth
       if (appleServiceId.isNotEmpty) {
-<<<<<<< HEAD
         debugPrint('🍎 Apple Service ID configured: $appleServiceId');
-=======
-        print('🍎 Apple Service ID configured: $appleServiceId');
->>>>>>> e9e59d5dd90b6912a002bba736958956fcf13343
       }
     }
     
@@ -392,7 +371,6 @@ class EnvironmentManager {
   void printInfo() {
     if (!debugMode) return;
     
-<<<<<<< HEAD
     debugPrint('\n${'=' * 60}');
     debugPrint('🌍 ENVIRONMENT CONFIGURATION');
     debugPrint('=' * 60);
@@ -402,22 +380,10 @@ class EnvironmentManager {
     debugPrint('🌐 Environment: $environment');
     debugPrint('🔧 Debug Mode: $debugMode');
     debugPrint('📝 Log Level: $logLevel');
-=======
-    print('\n' + '=' * 60);
-    print('🌍 ENVIRONMENT CONFIGURATION');
-    print('=' * 60);
-    
-    // App Info
-    print('📱 App: $appName v$appVersion');
-    print('🌐 Environment: $environment');
-    print('🔧 Debug Mode: $debugMode');
-    print('📝 Log Level: $logLevel');
->>>>>>> e9e59d5dd90b6912a002bba736958956fcf13343
     
     // Supabase Info (partial for security)
     final url = supabaseUrl;
     final displayUrl = url.length > 40 ? '${url.substring(0, 40)}...' : url;
-<<<<<<< HEAD
     debugPrint('🔗 Supabase URL: $displayUrl');
     debugPrint('🔑 Supabase Key: ${supabaseAnonKey.length} chars');
     debugPrint('🔗 Supabase OAuth URL: $supabaseOAuthCallbackUrl');
@@ -442,37 +408,10 @@ class EnvironmentManager {
       debugPrint('     - App ID: $displayFbId');
     } else {
       debugPrint('   • Facebook OAuth: ❌ Disabled');
-=======
-    print('🔗 Supabase URL: $displayUrl');
-    print('🔑 Supabase Key: ${supabaseAnonKey.length} chars');
-    print('🔗 Supabase OAuth URL: $supabaseOAuthCallbackUrl');
-    
-    // OAuth Configuration
-    print('\n🔐 OAuth Configuration:');
-    
-    if (enableGoogleOAuth) {
-      print('   • Google OAuth: ✅ Enabled');
-      final googleId = googleWebClientId;
-      final displayGoogleId = googleId.length > 30 ? '${googleId.substring(0, 30)}...' : googleId;
-      print('     - Client ID: $displayGoogleId');
-      print('     - Valid: ${googleWebClientId.endsWith('.apps.googleusercontent.com') ? '✅' : '❌'}');
-    } else {
-      print('   • Google OAuth: ❌ Disabled');
-    }
-    
-    if (enableFacebookOAuth) {
-      print('   • Facebook OAuth: ✅ Enabled');
-      final fbId = facebookAppId;
-      final displayFbId = fbId.length > 15 ? '${fbId.substring(0, 15)}...' : fbId;
-      print('     - App ID: $displayFbId');
-    } else {
-      print('   • Facebook OAuth: ❌ Disabled');
->>>>>>> e9e59d5dd90b6912a002bba736958956fcf13343
     }
     
     // 🔥 Apple status
     if (enableAppleOAuth) {
-<<<<<<< HEAD
       debugPrint('   • Apple OAuth: ✅ Enabled');
       if (appleServiceId.isNotEmpty) {
         debugPrint('     - Service ID: $appleServiceId');
@@ -508,43 +447,6 @@ class EnvironmentManager {
     // Show non-secret variables in debug mode
     debugPrint('\n📋 Environment Variables:');
     debugPrint('-' * 30);
-=======
-      print('   • Apple OAuth: ✅ Enabled');
-      if (appleServiceId.isNotEmpty) {
-        print('     - Service ID: $appleServiceId');
-      }
-    } else {
-      print('   • Apple OAuth: ❌ Disabled');
-    }
-    
-    // Redirect URLs
-    print('\n🔄 Redirect URLs:');
-    print('   • Web: $webRedirectUrl');
-    print('   • Mobile: $mobileRedirectUrl');
-    print('   • Supabase: $supabaseOAuthCallbackUrl');
-    if (enableAppleOAuth) {
-      print('   • Apple: $appleRedirectUrl');
-    }
-    
-    // Feature Flags
-    print('\n🚀 Feature Flags:');
-    print('   • Biometrics: ${enableBiometrics ? '✅' : '❌'}');
-    print('   • Dark Mode: ${enableDarkMode ? '✅' : '❌'}');
-    print('   • Notifications: ${enableNotifications ? '✅' : '❌'}');
-    print('   • Analytics: ${enableAnalytics ? '✅' : '❌'}');
-    
-    // Optional Config
-    if (supportEmail != null) {
-      print('📧 Support: $supportEmail');
-    }
-    if (websiteUrl != null) {
-      print('🌐 Website: $websiteUrl');
-    }
-    
-    // Show non-secret variables in debug mode
-    print('\n📋 Environment Variables:');
-    print('-' * 30);
->>>>>>> e9e59d5dd90b6912a002bba736958956fcf13343
     dotenv.env.forEach((key, value) {
       final isSecret = key.contains('KEY') || 
                       key.contains('SECRET') || 
@@ -553,7 +455,6 @@ class EnvironmentManager {
                       key.contains('PRIVATE');
       
       if (!isSecret) {
-<<<<<<< HEAD
         debugPrint('$key: $value');
       } else if (debugMode && key == 'ENVIRONMENT') {
         debugPrint('$key: $value');
@@ -561,15 +462,6 @@ class EnvironmentManager {
     });
     
     debugPrint('=' * 60 + '\n');
-=======
-        print('$key: $value');
-      } else if (debugMode && key == 'ENVIRONMENT') {
-        print('$key: $value');
-      }
-    });
-    
-    print('=' * 60 + '\n');
->>>>>>> e9e59d5dd90b6912a002bba736958956fcf13343
   }
   
   // ========== OAUTH VALIDATION METHODS ==========
