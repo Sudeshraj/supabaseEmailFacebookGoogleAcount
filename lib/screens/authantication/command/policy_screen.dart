@@ -10,6 +10,17 @@ class PolicyScreen extends StatelessWidget {
     required this.isPrivacyPolicy,
   });
 
+    void _handleBack(BuildContext context) {
+    // Simply pop to go back to DataConsentScreen
+    // This preserves the state of DataConsentScreen
+    if (GoRouter.of(context).canPop()) {
+      GoRouter.of(context).pop();
+    } else {
+      // Fallback navigation
+      context.go('/');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -19,7 +30,7 @@ class PolicyScreen extends StatelessWidget {
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => context.pop(),
+          onPressed: () => _handleBack(context),
         ),
         title: Text(
           isPrivacyPolicy 
