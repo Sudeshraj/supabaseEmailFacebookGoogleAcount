@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:developer' as developer;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_application_1/config/environment_manager.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_application_1/main.dart';
@@ -13,7 +14,7 @@ class AuthService {
   static final AuthService _instance = AuthService._internal();
   factory AuthService() => _instance;
   AuthService._internal();
-
+  final EnvironmentManager _env = EnvironmentManager();
   final SupabaseClient _supabase = Supabase.instance.client;
   static const _tag = 'AuthService';
 
@@ -161,13 +162,13 @@ class AuthService {
         email: email.trim(),
         password: password.trim(),
         emailRedirectTo: _getRedirectUrl(),
-        data: { 
-          'display_name': email.split('@').first,        
-          'remember_me_enabled': rememberMe,        
+        data: {
+          'display_name': email.split('@').first,
+          'remember_me_enabled': rememberMe,
           'terms_accepted_at': now,
-          'privacy_accepted_at': now,          
+          'privacy_accepted_at': now,
           'marketing_consent': marketingConsent,
-          'marketing_consent_at': marketingConsent ? now : null,          
+          'marketing_consent_at': marketingConsent ? now : null,
           'data_consent_given': true,
           'registration_complete': false, // 👈 Track if profile created
           'role': null, // 👈 Will be set later
@@ -621,10 +622,14 @@ class AuthService {
 
       await _supabase.auth.resetPasswordForEmail(
         email,
-        redirectTo: _getRedirectUrl().replaceFirst(
+        redirectTo: _env.getRedirectUrl().replaceFirst(
           'verify-email',
           'reset-password',
         ),
+        // redirectTo: _getRedirectUrl().replaceFirst(
+        //   'verify-email',
+        //   'reset-password',
+        // ),
       );
 
       developer.log('Password reset email sent to: $email', name: _tag);

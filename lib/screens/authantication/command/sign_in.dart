@@ -1045,7 +1045,8 @@ class _SignInScreenState extends State<SignInScreen>
 
         await supabase.auth.signInWithOAuth(
           OAuthProvider.google,
-          redirectTo: _getRedirectUrl(),
+          // redirectTo: _getRedirectUrl(),
+           redirectTo:_env.getRedirectUrl(),
           scopes: 'email profile',
           queryParams: {'prompt': 'select_account'},
         );
@@ -1110,7 +1111,8 @@ class _SignInScreenState extends State<SignInScreen>
 
       await supabase.auth.signInWithOAuth(
         OAuthProvider.google,
-        redirectTo: _getRedirectUrl(),
+        // redirectTo: _getRedirectUrl(),
+         redirectTo:_env.getRedirectUrl(),
         scopes: 'email profile',
         queryParams: {'prompt': 'select_account'},
       );
@@ -1301,7 +1303,8 @@ class _SignInScreenState extends State<SignInScreen>
 
     await supabase.auth.signInWithOAuth(
       OAuthProvider.facebook,
-      redirectTo: _getRedirectUrl(),
+      // redirectTo: _getRedirectUrl(),
+       redirectTo:_env.getRedirectUrl(),
       scopes: 'public_profile',
     );
   }
@@ -1491,7 +1494,8 @@ class _SignInScreenState extends State<SignInScreen>
 
     await supabase.auth.signInWithOAuth(
       OAuthProvider.apple,
-      redirectTo: redirectUrl,
+      // redirectTo: redirectUrl,
+       redirectTo:_env.getRedirectUrl(),
       scopes: 'email name',
     );
   }

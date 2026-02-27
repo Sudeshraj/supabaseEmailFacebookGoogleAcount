@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter_application_1/config/environment_manager.dart';
 import 'package:flutter_application_1/main.dart';
 import 'package:flutter_application_1/router/auth_gate.dart';
 import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
@@ -18,6 +19,7 @@ class ContinueScreen extends StatefulWidget {
 }
 
 class _ContinueScreenState extends State<ContinueScreen> {
+  final EnvironmentManager _env = EnvironmentManager();
   List<Map<String, dynamic>> profiles = [];
   bool _loading = false;
   String? _selectedEmail;
@@ -279,7 +281,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
       await supabase.auth.signInWithOAuth(
         OAuthProvider.google,
-        redirectTo: _getRedirectUrl(),
+        // redirectTo: _getRedirectUrl(),
+        redirectTo:_env.getRedirectUrl(),
+
         scopes: 'email profile',
       );
 
@@ -387,7 +391,8 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
       await supabase.auth.signInWithOAuth(
         OAuthProvider.facebook,
-        redirectTo: _getRedirectUrl(),
+        // redirectTo: _getRedirectUrl(),
+         redirectTo:_env.getRedirectUrl(),
         scopes: 'email',
       );
 
@@ -435,7 +440,8 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
       await supabase.auth.signInWithOAuth(
         OAuthProvider.apple,
-        redirectTo: _getRedirectUrl(),
+        // redirectTo: _getRedirectUrl(),
+         redirectTo:_env.getRedirectUrl(),
         scopes: 'email name',
       );
 
