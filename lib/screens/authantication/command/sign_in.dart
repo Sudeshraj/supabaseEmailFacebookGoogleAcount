@@ -146,7 +146,7 @@ class _SignInScreenState extends State<SignInScreen>
         if (hasExistingProfile) {
           _rememberMe = savedRememberMe;
         } else {
-          _rememberMe = true; 
+          _rememberMe = true;
         }
       });
 
@@ -886,9 +886,13 @@ class _SignInScreenState extends State<SignInScreen>
                   // App version
                   Center(
                     child: Text(
-                      "App v${_env.appVersion} (${_env.environment})",
+                      "App v${packageInfo.version} (${packageInfo.buildNumber})",
                       style: const TextStyle(fontSize: 10, color: Colors.grey),
                     ),
+                    //   child: Text(
+                    //     "App v${_env.appVersion} (${_env.environment})",
+                    //     style: const TextStyle(fontSize: 10, color: Colors.grey),
+                    //   ),
                   ),
                 ],
               ),
@@ -968,7 +972,9 @@ class _SignInScreenState extends State<SignInScreen>
       debugPrint('Returning User Check - Google:');
       debugPrint('   Email: ${returningUserCheck.email}');
       debugPrint('   Has Consent: ${returningUserCheck.hasConsent}');
-      debugPrint('   Auto Login Setting: ${returningUserCheck.hasAutoLoginSetting}');
+      debugPrint(
+        '   Auto Login Setting: ${returningUserCheck.hasAutoLoginSetting}',
+      );
 
       // Dialog එකට පරණ setting එක pass කරන්න
       final result = await _showCombinedOAuthDialog(
@@ -1497,7 +1503,7 @@ class _SignInScreenState extends State<SignInScreen>
     required bool marketingConsent,
   }) async {
     if (!mounted) return;
-     debugPrint('Completing Apple Sign-In for: ${user.email}');
+    debugPrint('Completing Apple Sign-In for: ${user.email}');
 
     await _saveOAuthProfile(
       user: user,
@@ -1747,6 +1753,7 @@ $provider OAuth Configuration Required:
               isLoading: _loadingApple,
             ),
           ),
+
         // if (enabledProviders.contains('apple'))
         //   Padding(
         //     padding: const EdgeInsets.only(bottom: 12),
@@ -1756,7 +1763,6 @@ $provider OAuth Configuration Required:
         //       isLoading: _loadingApple,
         //     ),
         //   ),
-
         Padding(
           padding: const EdgeInsets.only(bottom: 12),
           child: _SocialLoginButton(
