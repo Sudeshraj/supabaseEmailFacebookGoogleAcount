@@ -2,7 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/config/environment_manager.dart';
 import 'package:flutter_application_1/main.dart';
-import 'package:flutter_application_1/router/auth_gate.dart';
+// import 'package:flutter_application_1/router/auth_gate.dart';
 import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
 import 'package:flutter_application_1/services/session_manager.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -282,7 +282,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
       await supabase.auth.signInWithOAuth(
         OAuthProvider.google,
         // redirectTo: _getRedirectUrl(),
-        redirectTo:_env.getRedirectUrl(),
+        redirectTo: _env.getRedirectUrl(),
 
         scopes: 'email profile',
       );
@@ -317,7 +317,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
   // Helper function to update metadata after OAuth
   Future<void> _updateUserMetadataAfterOAuth(User user) async {
     try {
-      // ✅ FIXED: Get ALL profiles with role names
+      //  FIXED: Get ALL profiles with role names
       final profiles = await supabase
           .from('profiles')
           .select('''
@@ -365,12 +365,12 @@ class _ContinueScreenState extends State<ContinueScreen> {
           ),
         );
 
-        print(
-          '✅ OAuth user metadata updated with roles: $roleNames, current: $currentRole',
+        debugPrint(
+          'OAuth user metadata updated with roles: $roleNames, current: $currentRole',
         );
       }
     } catch (e) {
-      print('❌ Error updating OAuth metadata: $e');
+      debugPrint('Error updating OAuth metadata: $e');
     }
   }
 
@@ -392,7 +392,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
       await supabase.auth.signInWithOAuth(
         OAuthProvider.facebook,
         // redirectTo: _getRedirectUrl(),
-         redirectTo:_env.getRedirectUrl(),
+        redirectTo: _env.getRedirectUrl(),
         scopes: 'email',
       );
 
@@ -441,7 +441,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
       await supabase.auth.signInWithOAuth(
         OAuthProvider.apple,
         // redirectTo: _getRedirectUrl(),
-         redirectTo:_env.getRedirectUrl(),
+        redirectTo: _env.getRedirectUrl(),
         scopes: 'email name',
       );
 
@@ -497,7 +497,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
       if (autoLoginSuccess) {
         final user = supabase.auth.currentUser;
         if (user != null) {
-          // ✅ FIXED: Get ALL profiles with role names
+          // FIXED: Get ALL profiles with role names
           final dbProfiles = await supabase
               .from('profiles')
               .select('''
@@ -558,7 +558,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
       final user = response.user;
       if (user == null) throw Exception("Login failed.");
 
-      // ✅ FIXED: Get ALL profiles with role names
+      // FIXED: Get ALL profiles with role names
       final dbProfiles = await supabase
           .from('profiles')
           .select('''
@@ -599,8 +599,8 @@ class _ContinueScreenState extends State<ContinueScreen> {
           ),
         );
 
-        print(
-          '✅ Email login metadata updated with roles: $roleNames, current: $currentRole',
+        debugPrint(
+          ' Email login metadata updated with roles: $roleNames, current: $currentRole',
         );
       }
 
@@ -638,7 +638,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
     }
   }
 
-  // ✅ FIXED: Process successful login with role-based redirect
+  // FIXED: Process successful login with role-based redirect
   Future<void> _processSuccessfulLogin(String email) async {
     try {
       final user = supabase.auth.currentUser;
@@ -687,11 +687,11 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
       if (savedRole != null && roleNames.contains(savedRole)) {
         redirectRole = savedRole;
-        print('📌 Using saved role: $redirectRole');
+        debugPrint('Using saved role: $redirectRole');
       } else {
         redirectRole = roleNames.isNotEmpty ? roleNames.first : 'customer';
         await SessionManager.saveCurrentRole(redirectRole);
-        print('📌 Using first role: $redirectRole');
+        debugPrint(' Using first role: $redirectRole');
       }
 
       // Update metadata
@@ -711,7 +711,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
       if (!mounted) return;
 
-      // ✅ Role-based redirect
+      //  Role-based redirect
       if (roleNames.length > 1 && savedRole == null) {
         // Multiple roles and no saved preference - show selector
         context.go(
@@ -742,15 +742,15 @@ class _ContinueScreenState extends State<ContinueScreen> {
         message: "Unable to complete login. Please try again.",
         isError: true,
       );
-
+      if (!mounted) return;
       context.go('/login');
     }
   }
 
   // Redirect URL for OAuth
-  String _getRedirectUrl() {
-    return 'http://localhost:5000/auth/callback';
-  }
+  // String _getRedirectUrl() {
+  //   return 'http://localhost:5000/auth/callback';
+  // }
 
   Future<String?> _showPasswordDialog(String email) async {
     return await showDialog<String?>(
@@ -799,8 +799,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
     String? photoUrl,
     bool hasPhoto,
   ) {
-    final email = profile['email'] as String? ?? 'Unknown';
-    final name = profile['name'] as String? ?? email.split('@').first;
     final isGoogle = provider == 'google';
 
     if (isGoogle && _isGoogleImageRateLimited && hasPhoto) {
@@ -1014,61 +1012,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
     }
   }
 
-  Future<void> _removeSingleProfile(String email) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1C1F26),
-        title: const Text(
-          "Remove Profile?",
-          style: TextStyle(color: Colors.white),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              "Remove $email from this device?",
-              style: const TextStyle(color: Colors.white70),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              "This will not delete your account, only remove it from this device.",
-              style: TextStyle(color: Colors.grey, fontSize: 12),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text(
-              "Cancel",
-              style: TextStyle(color: Colors.white70),
-            ),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text("Remove"),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed == true) {
-      await SessionManager.removeProfile(email);
-      await _loadProfiles();
-
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('$email removed'),
-          backgroundColor: Colors.green,
-          duration: const Duration(seconds: 2),
-        ),
-      );
-    }
-  }
 
   void _startSelectionMode() {
     setState(() {
@@ -1088,10 +1031,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
     final name = profile['name'] as String? ?? email.split('@').first;
     final hasPhoto = photoUrl != null && photoUrl.isNotEmpty;
 
-    // ✅ Get roles for display
-    final List<String> roles =
-        (profile['roles'] as List?)?.map((e) => e.toString()).toList() ?? [];
-
+   
     return GestureDetector(
       onTap: () {
         if (_selectionMode) {
