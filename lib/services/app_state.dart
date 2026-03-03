@@ -4,7 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'session_manager.dart';
-import '../router/auth_gate.dart';
+// import '../router/auth_gate.dart';
 
 /// Production-ready App State Management with Multiple Role Support
 class AppState extends ChangeNotifier {
@@ -18,7 +18,7 @@ class AppState extends ChangeNotifier {
   bool _hasLocalProfile = false;
   bool _continueSc = false;
 
-  // ✅ FIXED: Multiple roles support
+  // FIXED: Multiple roles support
   List<String> _roles = []; // All user roles
   String? _currentRole; // Currently selected role
 
@@ -39,7 +39,7 @@ class AppState extends ChangeNotifier {
   bool get hasLocalProfile => _hasLocalProfile;
   bool get continueSc => _continueSc;
 
-  // ✅ FIXED: Role getters
+  // FIXED: Role getters
   List<String> get roles => List.unmodifiable(_roles);
   String? get role => _currentRole; // Keep for backward compatibility
   String? get currentRole => _currentRole;
@@ -90,7 +90,7 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  // ✅ FIXED: Set all roles
+  // FIXED: Set all roles
   void _setRoles(List<String> roles) {
     if (!listEquals(_roles, roles)) {
       _roles = List.from(roles);
@@ -152,7 +152,7 @@ class AppState extends ChangeNotifier {
   // PUBLIC METHODS
   // ====================
 
-  /// 🚀 Initialize app state
+  // Initialize app state
   Future<void> initializeApp() async {
     _setLoading(true);
     _setErrorMessage(null);
@@ -193,7 +193,7 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// Refresh app state
+  // Refresh app state
   Future<void> refreshState({bool silent = false}) async {
     if (!silent) _setLoading(true);
 
@@ -229,7 +229,7 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// 🚪 Logout user
+  // Logout user
   Future<void> logout() async {
     _setLoading(true);
 
@@ -315,7 +315,7 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// ✅ FIXED: Set current role (call this after role selection)
+  /// FIXED: Set current role (call this after role selection)
   Future<void> setCurrentRole(String role) async {
     if (_roles.contains(role)) {
       _setCurrentRole(role);
@@ -329,7 +329,7 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// 🔍 Check if user can access a route
+  /// Check if user can access a route
   bool canAccessRoute(String route) {
     if (_loading) return false;
 
@@ -407,7 +407,7 @@ class AppState extends ChangeNotifier {
     _setRememberMeEnabled(enabled);
   }
 
-  /// 🔐 Attempt auto-login
+  /// Attempt auto-login
   Future<void> attemptAutoLogin() async {
     try {
       debugPrint('AppState: Attempting auto-login...');
@@ -467,7 +467,7 @@ class AppState extends ChangeNotifier {
         success = await _tryAutoLoginWithToken(refreshToken);
 
         if (success) {
-          debugPrint('✅ AppState: Auto-login successful for $email');
+          debugPrint('AppState: Auto-login successful for $email');
           await refreshState();
           return;
         }
@@ -483,7 +483,7 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// 📝 Update user profile after login
+  /// Update user profile after login
   Future<void> updateUserProfileAfterLogin({
     required String email,
     required String userId,
@@ -495,7 +495,7 @@ class AppState extends ChangeNotifier {
     String? refreshToken,
     DateTime? termsAcceptedAt,
     DateTime? privacyAcceptedAt,
-    List<String>? roles, // ✅ NEW: Add roles parameter
+    List<String>? roles, //  NEW: Add roles parameter
   }) async {
     try {
       await SessionManager.saveUserProfile(
@@ -544,7 +544,7 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  // ✅ FIXED: Update user profile with multiple roles
+  // FIXED: Update user profile with multiple roles
   Future<void> _updateUserProfile() async {
     if (!_loggedIn) {
       _setProfileCompleted(false);
@@ -581,7 +581,7 @@ class AppState extends ChangeNotifier {
         );
       }
 
-      // ✅ Get ALL profiles for this user (multiple roles)
+      // Get ALL profiles for this user (multiple roles)
       final profiles = await supabase
           .from('profiles')
           .select('''
@@ -614,7 +614,7 @@ class AppState extends ChangeNotifier {
           return;
         }
 
-        // ✅ Extract ALL role names
+        // Extract ALL role names
         final List<String> roleNames = [];
         for (var profile in profiles) {
           final role = profile['roles'] as Map?;
@@ -627,7 +627,7 @@ class AppState extends ChangeNotifier {
         final uniqueRoles = roleNames.toSet().toList();
         _setRoles(uniqueRoles);
 
-        // ✅ Get current role from SessionManager
+        // Get current role from SessionManager
         String? savedCurrentRole = await SessionManager.getCurrentRole();
 
         // If saved role is valid, use it
@@ -645,7 +645,7 @@ class AppState extends ChangeNotifier {
         }
 
         developer.log(
-          '✅ Profile updated: roles=$uniqueRoles, current=$_currentRole, provider=$provider',
+          'Profile updated: roles=$uniqueRoles, current=$_currentRole, provider=$provider',
           name: 'AppState',
         );
       } else {
@@ -698,7 +698,7 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// 🔐 Try to auto-login using refresh token
+  /// Try to auto-login using refresh token
   Future<bool> _tryAutoLoginWithToken(String refreshToken) async {
     try {
       final supabase = Supabase.instance.client;
@@ -741,7 +741,7 @@ class AppState extends ChangeNotifier {
     _setCurrentEmail(null);
   }
 
-  /// 📧 Email verification error handler
+  /// Email verification error handler
   Future<void> emailVerifyerError() async {
     debugPrint('Email verification error handler called');
     _setEmailVerified(false);
