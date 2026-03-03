@@ -44,7 +44,7 @@ class PermissionCard extends StatelessWidget {
         decoration: BoxDecoration(
           gradient: LinearGradient(
             colors: [
-              const Color(0xFFFF6B8B).withOpacity(0.05),
+              const Color(0xFFFF6B8B).withValues(alpha: 0.05),
               Colors.white,
             ],
             begin: Alignment.topLeft,
@@ -60,7 +60,7 @@ class PermissionCard extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFFF6B8B).withOpacity(0.1),
+                  color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(
@@ -160,7 +160,7 @@ class PermissionCard extends StatelessWidget {
         decoration: BoxDecoration(
           gradient: LinearGradient(
             colors: [
-              const Color(0xFFFF6B8B).withOpacity(0.05),
+              const Color(0xFFFF6B8B).withValues(alpha: 0.05),
               Colors.white,
             ],
             begin: Alignment.topLeft,
@@ -176,7 +176,7 @@ class PermissionCard extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFFF6B8B).withOpacity(0.1),
+                  color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(
@@ -255,7 +255,7 @@ class PermissionCard extends StatelessWidget {
         decoration: BoxDecoration(
           gradient: LinearGradient(
             colors: [
-              const Color(0xFFFF6B8B).withOpacity(0.1),
+              const Color(0xFFFF6B8B).withValues(alpha: 0.1),
               Colors.white,
             ],
             begin: Alignment.topCenter,
@@ -280,7 +280,7 @@ class PermissionCard extends StatelessWidget {
                   shape: BoxShape.circle,
                   boxShadow: [
                     BoxShadow(
-                      color: const Color(0xFFFF6B8B).withOpacity(0.3),
+                      color: const Color(0xFFFF6B8B).withValues(alpha: 0.3),
                       blurRadius: 12,
                       offset: const Offset(0, 4),
                     ),

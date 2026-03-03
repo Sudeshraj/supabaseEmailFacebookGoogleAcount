@@ -39,7 +39,7 @@ class PermissionDialog extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: const Color(0xFFFF6B8B).withOpacity(0.1),
+              color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
               shape: BoxShape.circle,
             ),
             child: const Icon(
@@ -96,7 +96,7 @@ class PermissionDialog extends StatelessWidget {
                 shape: BoxShape.circle,
                 boxShadow: [
                   BoxShadow(
-                    color: const Color(0xFFFF6B8B).withOpacity(0.3),
+                    color: const Color(0xFFFF6B8B).withValues(alpha: 0.3),
                     blurRadius: 12,
                     offset: const Offset(0, 4),
                   ),
@@ -174,7 +174,7 @@ class PermissionDialog extends StatelessWidget {
                       backgroundColor: const Color(0xFFFF6B8B),
                       foregroundColor: Colors.white,
                       elevation: 2,
-                      shadowColor: const Color(0xFFFF6B8B).withOpacity(0.3),
+                      shadowColor: const Color(0xFFFF6B8B).withValues(alpha: 0.3),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(30),
                       ),

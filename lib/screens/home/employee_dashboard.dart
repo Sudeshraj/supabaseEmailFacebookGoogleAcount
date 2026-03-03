@@ -9,7 +9,6 @@ import 'package:flutter_application_1/services/permission_manager.dart';
 import 'package:flutter_application_1/services/session_manager.dart';
 import 'package:flutter_application_1/widgets/permission_card.dart';
 import 'package:go_router/go_router.dart';
-import '../authantication/command/multi_continue_screen.dart';
 
 class EmployeeDashboard extends StatefulWidget {
   const EmployeeDashboard({super.key});
@@ -29,9 +28,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
 
   // Employee specific data
   int _assignedTasks = 5;
-  int _completedToday = 3;
+  final int _completedToday = 3;
   int _pendingTasks = 2;
-  int _upcomingAppointments = 4;
+  final int _upcomingAppointments = 4;
 
   @override
   void initState() {
@@ -50,31 +49,26 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
     setState(() => _isLoading = true);
 
     try {
-      print('📱 Employee _loadData started');
-
       // Check permission status
       _hasPermission = await _notificationService.hasPermission();
-      print('📱 hasPermission from system: $_hasPermission');
 
       // Check if should show permission card
       if (!_hasPermission) {
         _showPermissionCard = await _permissionManager.shouldShowPermissionCard(
           'employee_dashboard',
         );
-        print('📱 shouldShowPermissionCard: $_showPermissionCard');
       } else {
         _showPermissionCard = false;
       }
 
       // Get permission stats for debugging
-      final stats = await _permissionManager.getPermissionStats();
-      print('📊 Permission Stats: $stats');
+      await _permissionManager.getPermissionStats();
 
       if (mounted) {
         setState(() => _isLoading = false);
       }
     } catch (e) {
-      print('❌ Error loading data: $e');
+      debugPrint(' Error loading data: $e');
       if (mounted) {
         setState(() => _isLoading = false);
         ScaffoldMessenger.of(context).showSnackBar(
@@ -87,13 +81,11 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
     }
   }
 
-  // 🔥 Setup notification listeners for employee
+  // Setup notification listeners for employee
   void _setupNotificationListeners() {
     try {
       // Listen for new task assignments
       FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-        print('📨 Received message: ${message.data}');
-
         if (message.data['type'] == 'new_task') {
           _showNewTaskAlert(message);
           setState(() {
@@ -104,14 +96,12 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
           _showReminderAlert(message);
         }
       });
-
-      print('📱 Employee notification listeners setup complete');
     } catch (e) {
-      print('❌ Error setting up notification listeners: $e');
+      debugPrint('❌ Error setting up notification listeners: $e');
     }
   }
 
-  // 🔥 Show new task alert
+  // Show new task alert
   void _showNewTaskAlert(RemoteMessage message) {
     if (!mounted) return;
 
@@ -124,7 +114,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: Colors.blue.withOpacity(0.1),
+                color: Colors.blue.withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
               child: const Icon(Icons.assignment, color: Colors.blue),
@@ -140,8 +130,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
             Text(message.notification?.title ?? 'New Appointment'),
             const SizedBox(height: 8),
             Text(
-              message.notification?.body ??
-                  'You have a new task to complete',
+              message.notification?.body ?? 'You have a new task to complete',
               style: TextStyle(color: Colors.grey[600]),
             ),
           ],
@@ -179,7 +168,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: Colors.orange.withOpacity(0.1),
+                color: Colors.orange.withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
               child: const Icon(Icons.access_time, color: Colors.orange),
@@ -188,7 +177,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
             const Text('Upcoming Appointment!'),
           ],
         ),
-        content: Text(message.notification?.body ?? 'Appointment in 30 minutes'),
+        content: Text(
+          message.notification?.body ?? 'Appointment in 30 minutes',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -199,16 +190,12 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
     );
   }
 
-  // 🔥 Enable notifications with proper flow
+  // Enable notifications with proper flow
   Future<void> _enableNotifications() async {
-    print('🔔 _enableNotifications called');
-
     setState(() => _showPermissionCard = false);
 
     try {
       final canAsk = await _permissionManager.canAskSystemPermission();
-      print('🔍 canAskSystemPermission: $canAsk');
-
       if (!canAsk) {
         _showSettingsDialog();
         return;
@@ -218,11 +205,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
         context: context,
         action: 'employee_dashboard',
         customTitle: '🔔 Get Task Notifications',
-        customMessage:
-            'Get instant notifications when new tasks are assigned',
+        customMessage: 'Get instant notifications when new tasks are assigned',
         onGranted: () async {
-          print('✅ User granted permission');
-
           await _permissionManager.markPermissionGranted();
 
           setState(() {
@@ -245,8 +229,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
           _sendWelcomeNotification();
         },
         onDenied: () async {
-          print('❌ User denied permission');
-
           await _permissionManager.markPermissionDenied(permanent: false);
 
           if (mounted) {
@@ -262,7 +244,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
         },
       );
     } catch (e) {
-      print('❌ Error enabling notifications: $e');
+      debugPrint('❌ Error enabling notifications: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
@@ -307,9 +289,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text(
-              '📨 Welcome! You\'ll now receive task notifications',
-            ),
+            content: Text('📨 Welcome! You\'ll now receive task notifications'),
             backgroundColor: Colors.blue,
           ),
         );
@@ -317,10 +297,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
     });
   }
 
-  // 🔥 Handle not now
+  //  Handle not now
   Future<void> _handleNotNow() async {
-    print('👋 User clicked Not Now');
-
     setState(() => _showPermissionCard = false);
     await _permissionManager.markPermissionShown('employee_dashboard');
 
@@ -334,34 +312,28 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
     }
   }
 
-  // 🔥 View tasks
+  // View tasks
   void _viewTasks() {
-    print('📋 Navigating to tasks');
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text('Navigating to tasks...'),
         duration: Duration(seconds: 1),
       ),
     );
-    // TODO: Add actual navigation to tasks screen
   }
 
-  // 🔥 View schedule
+  //  View schedule
   void _viewSchedule() {
-    print('📅 Navigating to schedule');
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text('Navigating to schedule...'),
         duration: Duration(seconds: 1),
       ),
     );
-    // TODO: Add actual navigation to schedule screen
   }
 
-  // 🔥 Send test notification (for debugging)
+  // Send test notification (for debugging)
   Future<void> _sendTestNotification() async {
-    print('🔍 Sending test notification...');
-
     if (!_hasPermission) {
       setState(() {
         _showPermissionCard = true;
@@ -389,9 +361,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
           context: context,
           builder: (context) => AlertDialog(
             title: const Text('📨 Test Notification'),
-            content: const Text(
-              'This is how task notifications will appear.',
-            ),
+            content: const Text('This is how task notifications will appear.'),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context),
@@ -419,8 +389,14 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              _buildStatRow('System Permission', stats['has_system_permission']),
-              _buildStatRow('Stored Permission', stats['has_stored_permission']),
+              _buildStatRow(
+                'System Permission',
+                stats['has_system_permission'],
+              ),
+              _buildStatRow(
+                'Stored Permission',
+                stats['has_stored_permission'],
+              ),
               const Divider(),
               _buildStatRow('Last Screen', stats['last_screen'] ?? 'none'),
               _buildStatRow('User Action', stats['user_action'] ?? 'none'),
@@ -445,7 +421,10 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
         children: [
           Expanded(
             flex: 2,
-            child: Text('$label:', style: const TextStyle(fontWeight: FontWeight.w500)),
+            child: Text(
+              '$label:',
+              style: const TextStyle(fontWeight: FontWeight.w500),
+            ),
           ),
           Expanded(
             flex: 3,
@@ -466,69 +445,69 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
   }
 
   // 🔥 Logout
-Future<void> _logout(BuildContext context) async {
-  showLogoutConfirmation(
-    context,
-    onLogoutConfirmed: () async {
-      // Show loading dialog
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => const Dialog(
-          backgroundColor: Colors.transparent,
-          insetPadding: EdgeInsets.all(0),
-          child: Center(
-            child: CircularProgressIndicator(color: Colors.white),
-          ),
-        ),
-      );
-
-      try {
-        // Call your logout function
-        await SessionManager.logoutForContinue();
-
-        // Close loading dialog safely
-        if (context.mounted) {
-          // Check if we can pop before trying
-          if (Navigator.canPop(context)) {
-            Navigator.pop(context);
-          }
-        }
-
-        // Update app state
-        await appState.refreshState();
-
-        // Navigate to login/splash screen using post frame callback
-        if (context.mounted) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (context.mounted) {
-              // Clear all routes and go to login
-              context.go('/');
-            }
-          });
-        }
-      } catch (e) {
-        // Close loading dialog safely
-        if (context.mounted) {
-          if (Navigator.canPop(context)) {
-            Navigator.pop(context);
-          }
-        }
-
-        // Show error message
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Logout failed: ${e.toString()}'),
-              backgroundColor: Colors.red,
-              duration: const Duration(seconds: 3),
+  Future<void> _logout(BuildContext context) async {
+    showLogoutConfirmation(
+      context,
+      onLogoutConfirmed: () async {
+        // Show loading dialog
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => const Dialog(
+            backgroundColor: Colors.transparent,
+            insetPadding: EdgeInsets.all(0),
+            child: Center(
+              child: CircularProgressIndicator(color: Colors.white),
             ),
-          );
+          ),
+        );
+
+        try {
+          // Call your logout function
+          await SessionManager.logoutForContinue();
+
+          // Close loading dialog safely
+          if (context.mounted) {
+            // Check if we can pop before trying
+            if (Navigator.canPop(context)) {
+              Navigator.pop(context);
+            }
+          }
+
+          // Update app state
+          await appState.refreshState();
+
+          // Navigate to login/splash screen using post frame callback
+          if (context.mounted) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (context.mounted) {
+                // Clear all routes and go to login
+                context.go('/');
+              }
+            });
+          }
+        } catch (e) {
+          // Close loading dialog safely
+          if (context.mounted) {
+            if (Navigator.canPop(context)) {
+              Navigator.pop(context);
+            }
+          }
+
+          // Show error message
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Logout failed: ${e.toString()}'),
+                backgroundColor: Colors.red,
+                duration: const Duration(seconds: 3),
+              ),
+            );
+          }
         }
-      }
-    },
-  );
-}
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -619,7 +598,7 @@ Future<void> _logout(BuildContext context) async {
                       width: double.infinity,
                       padding: const EdgeInsets.all(20),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF1877F3).withOpacity(0.1),
+                        color: const Color(0xFF1877F3).withValues(alpha: 0.1),
                         borderRadius: const BorderRadius.only(
                           bottomLeft: Radius.circular(30),
                           bottomRight: Radius.circular(30),
@@ -646,7 +625,7 @@ Future<void> _logout(BuildContext context) async {
                               vertical: 6,
                             ),
                             decoration: BoxDecoration(
-                              color: Colors.green.withOpacity(0.2),
+                              color: Colors.green.withValues(alpha: 0.2),
                               borderRadius: BorderRadius.circular(20),
                             ),
                             child: const Text(
@@ -772,7 +751,9 @@ Future<void> _logout(BuildContext context) async {
                                   onTap: () {
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       const SnackBar(
-                                        content: Text('Status updated to Available'),
+                                        content: Text(
+                                          'Status updated to Available',
+                                        ),
                                         duration: Duration(seconds: 1),
                                       ),
                                     );
@@ -839,7 +820,7 @@ Future<void> _logout(BuildContext context) async {
                           vertical: 8,
                         ),
                         decoration: BoxDecoration(
-                          color: Colors.green.withOpacity(0.1),
+                          color: Colors.green.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: Row(
@@ -884,7 +865,7 @@ Future<void> _logout(BuildContext context) async {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
+            color: Colors.grey.withValues(alpha: 0.1),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -898,7 +879,7 @@ Future<void> _logout(BuildContext context) async {
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: color.withOpacity(0.1),
+                  color: color.withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
                 child: Icon(icon, color: color, size: 20),
@@ -935,7 +916,7 @@ Future<void> _logout(BuildContext context) async {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: ListTile(
         leading: CircleAvatar(
-          backgroundColor: const Color(0xFF1877F3).withOpacity(0.1),
+          backgroundColor: const Color(0xFF1877F3).withValues(alpha: 0.1),
           child: Text(
             customers[index][0],
             style: const TextStyle(
@@ -956,7 +937,7 @@ Future<void> _logout(BuildContext context) async {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
               decoration: BoxDecoration(
-                color: statusColors[index].withOpacity(0.1),
+                color: statusColors[index].withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Text(
@@ -976,14 +957,15 @@ Future<void> _logout(BuildContext context) async {
           onPressed: () {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text('Marked ${customers[index]}\'s service as completed'),
+                content: Text(
+                  'Marked ${customers[index]}\'s service as completed',
+                ),
                 duration: const Duration(seconds: 1),
               ),
             );
           },
         ),
         onTap: () {
-          print('📅 Tapped on schedule: ${customers[index]}');
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('Viewing ${customers[index]}\'s details'),
@@ -1008,9 +990,9 @@ Future<void> _logout(BuildContext context) async {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 16),
         decoration: BoxDecoration(
-          color: color.withOpacity(0.1),
+          color: color.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: color.withOpacity(0.3)),
+          border: Border.all(color: color.withValues(alpha: 0.3)),
         ),
         child: Column(
           children: [

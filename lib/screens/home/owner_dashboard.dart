@@ -125,7 +125,7 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: Colors.green.withOpacity(0.1),
+                color: Colors.green.withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
               child: const Icon(Icons.event_available, color: Colors.green),
@@ -690,7 +690,7 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
                           vertical: 8,
                         ),
                         decoration: BoxDecoration(
-                          color: Colors.green.withOpacity(0.1),
+                          color: Colors.green.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: Row(
@@ -737,7 +737,7 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
+            color: Colors.grey.withValues(alpha: 0.1),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -751,7 +751,7 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: color.withOpacity(0.1),
+                  color: color.withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
                 child: Icon(icon, color: color, size: 20),
@@ -788,7 +788,7 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: ListTile(
         leading: CircleAvatar(
-          backgroundColor: const Color(0xFFFF6B8B).withOpacity(0.1),
+          backgroundColor: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
           child: Text(
             customers[index][0],
             style: const TextStyle(
@@ -809,7 +809,7 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
               decoration: BoxDecoration(
-                color: statusColors[index].withOpacity(0.1),
+                color: statusColors[index].withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Text(

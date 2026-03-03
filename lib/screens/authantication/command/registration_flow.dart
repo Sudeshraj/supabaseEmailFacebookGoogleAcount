@@ -48,9 +48,9 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
 
   void _checkUser() {
     if (widget.user != null) {
-      print('📱 RegistrationFlow for: ${widget.user!.email}');
+      debugPrint('📱 RegistrationFlow for: ${widget.user!.email}');
     } else {
-      print('⚠️ No user passed to RegistrationFlow');
+      debugPrint('⚠️ No user passed to RegistrationFlow');
       WidgetsBinding.instance.addPostFrameCallback((_) {
         context.go('/login');
       });
@@ -270,10 +270,8 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
         dbRole = 'customer';
       }
 
-      print('🔍 Selected role: $roles → Database role: $dbRole');
-      print('📦 Extra data: $extraData');
-
-      // 🔥 Get role ID from roles table
+    
+      // Get role ID from roles table
       final roleResponse = await supabase
           .from('roles')
           .select('id')
@@ -296,10 +294,7 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
         platform = 'ios';
       }
 
-      print(
-        '🔍 Checking if profile exists for User ID: ${user.id} and Role ID: $roleId',
-      );
-
+    
       // Check if profile with this specific role already exists
       final existingProfile = await supabase
           .from('profiles')
@@ -308,10 +303,9 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
           .eq('role_id', roleId)
           .maybeSingle();
 
-      print('📊 Existing profile query result: $existingProfile');
-
+  
       // ============================================================
-      // 🔥🔥🔥 STEP 1: Get all existing roles for this user 🔥🔥🔥
+      // STEP 1: Get all existing roles for this user 
       // ============================================================
       final allProfiles = await supabase
           .from('profiles')
@@ -333,16 +327,12 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
           existingRoleNames.add(role['name'].toString());
         }
       }
-
-      print('📋 Existing roles before registration: $existingRoleNames');
-
+    
       if (existingProfile != null) {
         // ============================================================
-        // 🔄 UPDATE EXISTING PROFILE
+        // UPDATE EXISTING PROFILE
         // ============================================================
-        print(
-          '⚠️ Profile already exists for this user and role - updating instead',
-        );
+       
 
         final existingExtraData =
             existingProfile['extra_data'] as Map<String, dynamic>? ?? {};
@@ -359,20 +349,16 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
             .eq('id', user.id)
             .eq('role_id', roleId);
 
-        print('✅ Profile updated for ${user.email} with role: $dbRole');
-        
+              
         // Add to existing role names if not already present
         if (!existingRoleNames.contains(dbRole)) {
           existingRoleNames.add(dbRole);
         }
       } else {
         // ============================================================
-        // 🆕 CREATE NEW PROFILE
+        // CREATE NEW PROFILE
         // ============================================================
-        print(
-          '🆕 No profile found for this user and role - creating new profile',
-        );
-
+    
         // Insert new profile
         await supabase.from('profiles').insert({
           'id': user.id,
@@ -384,14 +370,13 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
           'is_blocked': false,
         });
 
-        print('✅ New profile created for ${user.email} with role: $dbRole');
-        
+             
         // Add to existing role names
         existingRoleNames.add(dbRole);
       }
 
       // ============================================================
-      // 🔥🔥🔥 STEP 2: Update auth.users metadata with ALL roles 🔥🔥🔥
+      //  STEP 2: Update auth.users metadata with ALL roles 
       // ============================================================
       
       // Get current metadata
@@ -407,15 +392,11 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
         'needs_profile': false,
         'registration_complete': true,
       };
-
-      print('📝 Updating auth metadata with ALL roles: $metadataUpdate');
-
+ 
       await supabase.auth.updateUser(UserAttributes(data: metadataUpdate));
-
-      print('✅ Auth user metadata updated with roles: $existingRoleNames');
-
+  
       // ============================================================
-      // 🔥🔥🔥 STEP 3: Update SessionManager 🔥🔥🔥
+      // STEP 3: Update SessionManager 
       // ============================================================
       
       // Save all roles to SessionManager
@@ -428,7 +409,7 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
       await SessionManager.saveCurrentRole(dbRole);
 
       // ============================================================
-      // 🔥🔥🔥 STEP 4: Refresh app state 🔥🔥🔥
+      //  STEP 4: Refresh app state 
       // ============================================================
       
       await appState.refreshState();
@@ -464,12 +445,12 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
           isError: false,
         );
 
-        // 🔥 ROLE-BASED REDIRECT
+        // ROLE-BASED REDIRECT
         if (mounted) {
           // Check if user has multiple roles
           if (existingRoleNames.length > 1) {
             // Show role selector for multiple roles
-            print('🔄 Multiple roles detected - showing role selector');
+         
             context.go('/role-selector', extra: {
               'roles': existingRoleNames,
               'email': email,
@@ -482,7 +463,7 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
         }
       }
     } catch (e) {
-      print('❌ Profile creation error: $e');
+      debugPrint(' Profile creation error: $e');
 
       // If profile creation fails, update metadata to indicate incomplete
       try {
@@ -495,7 +476,7 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
           ),
         );
       } catch (metaError) {
-        print('❌ Failed to update error metadata: $metaError');
+        debugPrint('Failed to update error metadata: $metaError');
       }
 
       if (mounted) {

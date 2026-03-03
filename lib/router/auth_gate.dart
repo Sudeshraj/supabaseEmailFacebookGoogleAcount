@@ -73,7 +73,7 @@ class AuthGate {
 
     final session = _supabase.auth.currentSession;
     final user = _supabase.auth.currentUser;
-    print(session);
+
     if (session == null) {
       return '/login';
     }

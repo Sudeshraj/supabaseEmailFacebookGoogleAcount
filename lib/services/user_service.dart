@@ -1,4 +1,5 @@
 // lib/services/user_service.dart
+import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class UserService {
@@ -11,12 +12,12 @@ class UserService {
         'user_id': userId,
         'user_role_id': roleId,
       });
-      print('Login recorded successfully');
+      debugPrint('Login recorded successfully');
     } on PostgrestException catch (error) {
-      print('PostgreSQL Error: ${error.message}');
+      debugPrint('PostgreSQL Error: ${error.message}');
       rethrow;
     } catch (error) {
-      print('Error recording login: $error');
+      debugPrint('Error recording login: $error');
       rethrow;
     }
   }
@@ -29,7 +30,7 @@ class UserService {
         'user_role_id': roleId,
       });
     } catch (error) {
-      print('Error recording activity: $error');
+      debugPrint('Error recording activity: $error');
     }
   }
   
@@ -39,7 +40,7 @@ class UserService {
       final response = await _supabase.rpc('get_online_users');
       return List<Map<String, dynamic>>.from(response);
     } catch (error) {
-      print('Error getting online users: $error');
+      debugPrint('Error getting online users: $error');
       return [];
     }
   }
@@ -53,7 +54,7 @@ class UserService {
       });
       return response as bool;
     } catch (error) {
-      print('Error checking role: $error');
+      debugPrint('Error checking role: $error');
       return false;
     }
   }
@@ -66,7 +67,7 @@ class UserService {
       });
       return List<Map<String, dynamic>>.from(response);
     } catch (error) {
-      print('Error getting user roles: $error');
+      debugPrint('Error getting user roles: $error');
       return [];
     }
   }
@@ -84,7 +85,7 @@ class UserService {
       }
       return null;
     } catch (error) {
-      print('Error getting login info: $error');
+      debugPrint('Error getting login info: $error');
       return null;
     }
   }
@@ -97,7 +98,7 @@ class UserService {
         'user_role_id': roleId,
       });
     } catch (error) {
-      print('Error recording logout: $error');
+      debugPrint('Error recording logout: $error');
     }
   }
 }

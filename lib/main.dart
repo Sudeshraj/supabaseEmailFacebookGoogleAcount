@@ -59,7 +59,7 @@ void setupErrorHandling() {
 
   PlatformDispatcher.instance.onError = (error, stack) {
     if (kDebugMode) {
-      print('❌ Uncaught error: $error');
+      print('Uncaught error: $error');
       print('Stack: $stack');
     }
     return true;
@@ -78,7 +78,7 @@ class AppLifecycleObserver with WidgetsBindingObserver {
         _validateSessionOnResume();
         break;
       case AppLifecycleState.paused:
-        print('📱 App backgrounded');
+        debugPrint('App backgrounded');
         break;
       default:
         break;
@@ -95,12 +95,12 @@ Future<void> _validateSessionOnResume() async {
     if (currentUser == null) {
       final rememberMe = await SessionManager.isRememberMeEnabled();
       if (rememberMe) {
-        print('🔄 Attempting auto-login...');
+        debugPrint('Attempting auto-login...');
         await appState.attemptAutoLogin();
       }
     }
   } catch (e) {
-    print('❌ Error: $e');
+    debugPrint('Error: $e');
   }
 }
 
@@ -111,7 +111,7 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   setupErrorHandling();
 
-  print('🚀 ${DateTime.now()}: Starting application...');
+  debugPrint('${DateTime.now()}: Starting application...');
 
   try {
     // ========== PHASE 1: ENVIRONMENT ==========
@@ -152,17 +152,17 @@ Future<void> main() async {
     // ========== PHASE 10: LIFECYCLE ==========
     WidgetsBinding.instance.addObserver(AppLifecycleObserver());
 
-    print('✅ ${DateTime.now()}: Initialization complete');
+    debugPrint('${DateTime.now()}: Initialization complete');
     runApp(MyApp());
   } catch (e, stackTrace) {
-    print('❌❌❌ CRITICAL ERROR: $e');
-    print('Stack: $stackTrace');
+    debugPrint('CRITICAL ERROR: $e');
+    debugPrint('Stack: $stackTrace');
     runApp(_ErrorApp(error: e.toString()));
   }
 }
 
 // ====================
-// ✅ FIXED AUTH STATE LISTENER
+// FIXED AUTH STATE LISTENER
 // ====================
 void _setupAuthStateListener() {
   final supabase = Supabase.instance.client;
@@ -179,14 +179,14 @@ void _setupAuthStateListener() {
       final user = session.user;
       final isEmailVerified = user.emailConfirmedAt != null;
 
-      print('🎉 User signed in: ${user.email}');
+      debugPrint('User signed in: ${user.email}');
       lastKnownEmailVerified = isEmailVerified;
 
       if (isEmailVerified && !isRedirecting) {
         isRedirecting = true;
         WidgetsBinding.instance.addPostFrameCallback((_) async {
           try {
-            // ✅ FIXED: Get ALL profiles with role names
+            // FIXED: Get ALL profiles with role names
             final profiles = await supabase
                 .from('profiles')
                 .select('''
@@ -202,12 +202,12 @@ void _setupAuthStateListener() {
                 .eq('is_blocked', false);
 
             if (profiles.isEmpty) {
-              print('📍 No active profiles - redirecting to /reg');
+              debugPrint('No active profiles - redirecting to /reg');
               _navigateTo('/reg', extra: user);
               return;
             }
 
-            // ✅ Extract ALL role names
+            //  Extract ALL role names
             final List<String> roleNames = [];
             for (var profile in profiles) {
               final role = profile['roles'] as Map?;
@@ -216,9 +216,9 @@ void _setupAuthStateListener() {
               }
             }
 
-            print('📋 User roles: $roleNames');
+            debugPrint(' User roles: $roleNames');
 
-            // ✅ Save to SessionManager
+            // Save to SessionManager
             await SessionManager.saveUserRoles(
               email: user.email!,
               roles: roleNames,
@@ -229,10 +229,10 @@ void _setupAuthStateListener() {
               return;
             }
 
-            // ✅ Get saved current role if any
+            // Get saved current role if any
             String? savedRole = await SessionManager.getCurrentRole();
 
-            // ✅ If single role, redirect directly
+            // If single role, redirect directly
             if (roleNames.length == 1) {
               final singleRole = roleNames.first;
               await SessionManager.saveCurrentRole(singleRole);
@@ -252,11 +252,11 @@ void _setupAuthStateListener() {
               return;
             }
 
-            // ✅ If multiple roles
+            // If multiple roles
             if (roleNames.length > 1) {
               // If saved role exists and is valid, use it
               if (savedRole != null && roleNames.contains(savedRole)) {
-                print('📌 Using saved role: $savedRole');
+                debugPrint(' Using saved role: $savedRole');
                 await SessionManager.saveCurrentRole(savedRole);
                 await appState.refreshState();
 
@@ -275,7 +275,7 @@ void _setupAuthStateListener() {
               }
 
               // Otherwise show role selector
-              print('🔄 Multiple roles - showing role selector');
+              debugPrint('Multiple roles - showing role selector');
               _navigateTo(
                 '/role-selector',
                 extra: {
@@ -290,7 +290,7 @@ void _setupAuthStateListener() {
             // Fallback
             _navigateTo('/');
           } catch (e) {
-            print('❌ Error checking profile: $e');
+            debugPrint('Error checking profile: $e');
             _navigateTo('/reg', extra: user);
           } finally {
             isRedirecting = false;
@@ -306,7 +306,7 @@ void _setupAuthStateListener() {
       if (!(lastKnownEmailVerified ?? false) &&
           isEmailVerified &&
           !isRedirecting) {
-        print('✅ Email just verified!');
+        debugPrint('Email just verified!');
         isRedirecting = true;
 
         WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -372,7 +372,7 @@ void _setupAuthStateListener() {
               );
             }
           } catch (e) {
-            print('❌ Error: $e');
+            debugPrint('Error: $e');
             _navigateTo('/reg', extra: user);
           } finally {
             isRedirecting = false;
@@ -389,7 +389,7 @@ void _setupAuthStateListener() {
     }
 
     if (event == AuthChangeEvent.signedOut) {
-      print('👋 User signed out');
+      debugPrint('User signed out');
       lastKnownEmailVerified = null;
       isRedirecting = false;
       // Refresh app state immediately
@@ -468,7 +468,7 @@ void _setupAuthStateListener() {
             );
           }
         } catch (e) {
-          print('❌ Error checking profile on start: $e');
+          debugPrint('Error checking profile on start: $e');
           _navigateTo('/reg', extra: currentUser);
         } finally {
           isRedirecting = false;
@@ -492,13 +492,13 @@ void _navigateTo(String location, {Object? extra}) {
 // ====================
 Future<void> _setupPlatformSpecificConfig() async {
   if (kIsWeb) {
-    print('🌐 Configuring for Web');
+    debugPrint('Configuring for Web');
     final uri = Uri.base;
     if (uri.toString().contains('/auth/callback')) {
-      print('   🔥 Web auth callback detected');
+      debugPrint('Web auth callback detected');
     }
   } else {
-    print('📱 Configuring for Mobile');
+    debugPrint('Configuring for Mobile');
     await _setupMobileDeepLinks();
   }
 }
@@ -509,17 +509,17 @@ Future<void> _setupMobileDeepLinks() async {
     if (uri.toString().isNotEmpty && uri.toString() != '/') {
       if (uri.toString().contains('myapp://') ||
           uri.toString().contains('/auth/callback')) {
-        print('   📱 Mobile deep link detected!');
+        debugPrint('Mobile deep link detected!');
         pendingDeepLink = uri.toString();
       }
     }
   } catch (e) {
-    print('   ❌ Mobile deep link error: $e');
+    debugPrint('Mobile deep link error: $e');
   }
 }
 
 // ====================
-// ✅ FIXED ROUTER
+// FIXED ROUTER
 // ====================
 GoRouter _createRouter() {
   return GoRouter(
@@ -532,28 +532,28 @@ GoRouter _createRouter() {
       final path = state.matchedLocation;
       final queryParams = state.uri.queryParameters;
 
-      print('🔄 REDIRECT CHECK - Path: $path');
-      print(
-        '📊 AppState: loading=${appState.loading}, loggedIn=${appState.loggedIn}',
+      debugPrint('REDIRECT CHECK - Path: $path');
+      debugPrint(
+        'AppState: loading=${appState.loading}, loggedIn=${appState.loggedIn}',
       );
 
       // 🔥 NEVER redirect auth callbacks
       if (path == '/auth/callback' ||
           queryParams.containsKey('code') ||
           queryParams.containsKey('access_token')) {
-        print('🔑 Auth callback - no redirect');
+        debugPrint('Auth callback - no redirect');
         return null;
       }
 
       // AppState loading නම්, කිසිම redirect එකක් එපා
       if (appState.loading) {
-        print('⏳ AppState loading - no redirect');
+        debugPrint('AppState loading - no redirect');
         return null;
       }
 
-      // ✅ Clear data screen is always accessible
+      // Clear data screen is always accessible
       if (path == '/clear-data') {
-        print('🧹 Clear data screen - allowing access');
+        debugPrint('Clear data screen - allowing access');
         return null;
       }
 
@@ -577,17 +577,17 @@ GoRouter _createRouter() {
         '/auth/callback',
       ];
 
-      // 🔥 SPECIAL HANDLING FOR /reg
+      // SPECIAL HANDLING FOR /reg
       if (path == '/reg') {
         final user = state.extra as User?;
         if (user == null) {
-          print('⚠️ /reg accessed without user → redirecting to /login');
+          debugPrint('/reg accessed without user → redirecting to /login');
           return '/login';
         }
         return null;
       }
 
-      // ✅ Role selector route
+      // Role selector route
       if (path == '/role-selector') {
         if (!appState.loggedIn) {
           return '/login';
@@ -616,25 +616,25 @@ GoRouter _createRouter() {
           if (appState.loggedIn) {
             // User logged in
             if (!appState.emailVerified) {
-              print('📧 Email not verified → /verify-email');
+              debugPrint('Email not verified → /verify-email');
               return '/verify-email';
             }
 
             if (!appState.profileCompleted) {
-              print('📝 Profile not completed → /reg');
+              debugPrint('Profile not completed → /reg');
               return '/reg';
             }
 
             // Check roles
             if (appState.roles.isEmpty) {
-              print('⚠️ No roles found → /reg');
+              debugPrint(' No roles found → /reg');
               return '/reg';
             }
 
             if (appState.roles.length == 1) {
               // Single role - direct redirect
               final role = appState.roles.first;
-              print('🎯 Single role: $role → /$role');
+              debugPrint('Single role: $role → /$role');
               return '/$role';
             } else {
               // Multiple roles
@@ -642,11 +642,11 @@ GoRouter _createRouter() {
 
               if (savedRole != null && appState.roles.contains(savedRole)) {
                 // Use saved role
-                print('📌 Using saved role: $savedRole → /$savedRole');
+                debugPrint('Using saved role: $savedRole → /$savedRole');
                 return '/$savedRole';
               } else {
                 // Show role selector
-                print('🔄 Multiple roles → /role-selector');
+                debugPrint('Multiple roles → /role-selector');
                 return '/role-selector';
               }
             }
@@ -654,10 +654,10 @@ GoRouter _createRouter() {
             // Not logged in
             final hasProfile = await SessionManager.hasProfile();
             if (hasProfile) {
-              print('👥 Has saved profiles → /continue');
+              debugPrint('Has saved profiles → /continue');
               return '/continue';
             } else {
-              print('🔐 No saved profiles → /login');
+              debugPrint(' No saved profiles → /login');
               return '/login';
             }
           }
@@ -715,7 +715,7 @@ GoRouter _createRouter() {
         path: '/reg',
         builder: (context, state) {
           final user = appState.currentUser;
-          print('📱 RegistrationFlow with user from AppState: ${user?.email}');
+          debugPrint('RegistrationFlow with user from AppState: ${user?.email}');
           return RegistrationFlow(user: user);
         },
       ),

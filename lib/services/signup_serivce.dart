@@ -147,14 +147,15 @@ class AuthService {
 
         // If sign in succeeds, user exists
         LoadingOverlay.hide();
+        if (!context.mounted) return;
         await _handleExistingUser(context, email);
         return;
       } on AuthException catch (e) {
         // Expected - user doesn't exist or wrong password
-        print('🔍 User check: ${e.message}');
+        debugPrint('🔍 User check: ${e.message}');
       } catch (e) {
         // Other errors, continue with registration
-        print('🔍 User check error: $e');
+        debugPrint('🔍 User check error: $e');
       }
 
       // Perform registration
@@ -181,6 +182,7 @@ class AuthService {
       // ✅ Check if user already exists (identities empty)
       if (user?.identities?.isEmpty ?? true) {
         LoadingOverlay.hide();
+        if (!context.mounted) return;
         await _handleExistingUser(context, email);
         return;
       }
@@ -190,8 +192,8 @@ class AuthService {
         throw Exception('Failed to create user');
       }
 
-      print('✅ User created: ${user.id}');
-      print('📝 Initial metadata: ${user.userMetadata}');
+      debugPrint('✅ User created: ${user.id}');
+      debugPrint('📝 Initial metadata: ${user.userMetadata}');
 
       // ✅ IMPORTANT: Navigate to profile creation screen
       LoadingOverlay.hide();
@@ -208,14 +210,16 @@ class AuthService {
       );
     } on AuthException catch (e) {
       LoadingOverlay.hide();
+      if (!context.mounted) return;
       await _handleAuthException(context, e, 'Registration');
     } catch (e, stackTrace) {
       LoadingOverlay.hide();
+      if (!context.mounted) return;
       await _handleGenericException(context, e, stackTrace, 'Registration');
     }
   }
 
-  // ✅ Update registration handler
+  // Update registration handler
   Future<void> _handleSuccessfulRegistration(
     BuildContext context,
     User user,
@@ -225,7 +229,7 @@ class AuthService {
     bool marketingConsent,
   ) async {
     try {
-      // ✅ Save user profile with all consent data
+      // Save user profile with all consent data
       await SessionManager.saveUserProfile(
         email: email,
         userId: user.id,

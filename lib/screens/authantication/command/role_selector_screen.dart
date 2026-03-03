@@ -29,9 +29,7 @@ class _RoleSelectorScreenState extends State<RoleSelectorScreen> {
     setState(() => _isLoading = true);
     
     try {
-      print('🎯 User selected role: $role');
-      
-      // Save selected role to SessionManager
+          // Save selected role to SessionManager
       await SessionManager.saveCurrentRole(role);
       
       // Update app state
@@ -55,7 +53,7 @@ class _RoleSelectorScreenState extends State<RoleSelectorScreen> {
           break;
       }
     } catch (e) {
-      print('❌ Error selecting role: $e');
+      debugPrint('❌ Error selecting role: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error selecting role: $e')),
@@ -161,14 +159,14 @@ class _RoleSelectorScreenState extends State<RoleSelectorScreen> {
         decoration: BoxDecoration(
           gradient: LinearGradient(
             colors: [
-              color.withOpacity(0.2),
-              color.withOpacity(0.05),
+              color.withValues(alpha: 0.2),
+              color.withValues(alpha: 0.05),
             ],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: color.withOpacity(0.3)),
+          border: Border.all(color: color.withValues(alpha: 0.3)),
         ),
         child: Row(
           children: [
@@ -176,7 +174,7 @@ class _RoleSelectorScreenState extends State<RoleSelectorScreen> {
               width: 60,
               height: 60,
               decoration: BoxDecoration(
-                color: color.withOpacity(0.2),
+                color: color.withValues(alpha: 0.2),
                 shape: BoxShape.circle,
               ),
               child: Icon(icon, color: color, size: 30),

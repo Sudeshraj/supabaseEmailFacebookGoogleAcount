@@ -56,21 +56,18 @@ class _ClearDataScreenState extends State<ClearDataScreen>
     setState(() => _isLoading = true);
 
     try {
-      print('🧹 Clearing all data...');
-
+   
       // 1. Clear SessionManager (local profiles)
       await SessionManager.clearAll();
-      print('✅ SessionManager cleared');
+  
 
       // 2. Sign out from Supabase
       final supabase = Supabase.instance.client;
       await supabase.auth.signOut();
-      print('✅ Supabase sign out');
-
+  
       // 3. Refresh app state
       await appState.refreshState();
-      print('✅ AppState refreshed');
-
+ 
       // 4. Navigate directly to login (not splash)
       if (mounted) {
         // Close any open dialogs
@@ -80,7 +77,7 @@ class _ClearDataScreenState extends State<ClearDataScreen>
         context.go('/login');
       }
     } catch (e) {
-      print('❌ Error clearing data: $e');
+      debugPrint('❌ Error clearing data: $e');
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -121,7 +118,7 @@ class _ClearDataScreenState extends State<ClearDataScreen>
                   padding: const EdgeInsets.all(20),
                   // ✅ FIXED: Use withOpacity instead of withValues
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.03),
+                    color: Colors.white.withValues(alpha: 0.03),
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(color: Colors.white12),
                   ),
@@ -152,7 +149,7 @@ class _ClearDataScreenState extends State<ClearDataScreen>
                               Icon(
                                 Icons.security,
                                 size: isMobile ? 50.0 : 60.0,
-                                color: Colors.blue.withOpacity(0.8),
+                                color: Colors.blue.withValues(alpha: 0.8),
                               ),
                               SizedBox(height: isMobile ? 16.0 : 20.0),
                               const Text(
@@ -170,10 +167,10 @@ class _ClearDataScreenState extends State<ClearDataScreen>
                                 padding: const EdgeInsets.all(16),
                                 // ✅ FIXED: Use withOpacity
                                 decoration: BoxDecoration(
-                                  color: Colors.blue.withOpacity(0.1),
+                                  color: Colors.blue.withValues(alpha: 0.1),
                                   borderRadius: BorderRadius.circular(12),
                                   border: Border.all(
-                                    color: Colors.blue.withOpacity(0.3),
+                                    color: Colors.blue.withValues(alpha: 0.3),
                                   ),
                                 ),
                                 child: Column(

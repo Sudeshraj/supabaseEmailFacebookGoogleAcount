@@ -625,10 +625,10 @@ class SessionManager {
     }
   }
 
-  // ✅ Clear all sessions and profiles
+  // Clear all sessions and profiles
 static Future<void> clearAll() async {
   try {
-    print('🧹 SessionManager.clearAll() started');
+    debugPrint('🧹 SessionManager.clearAll() started');
     
     // 1. Clear all SharedPreferences data
     await _prefs.remove(_keyProfiles);
@@ -640,14 +640,12 @@ static Future<void> clearAll() async {
     final keys = _prefs.getKeys();
     for (var key in keys) {
       if (key.contains('_all_roles') || key.contains('current_selected_role')) {
-        await _prefs.remove(key);
-        print('   - Removed: $key');
+        await _prefs.remove(key);      
       }
     }
     
     // 3. Clear secure storage (tokens)
-    await _secureStorage.deleteAll();
-    print('   - Secure storage cleared');
+    await _secureStorage.deleteAll(); 
 
     debugPrint('✅ All session data cleared (including secure storage)');
   } catch (e) {
@@ -991,21 +989,20 @@ static Future<void> saveUserRoles({
   required List<String> roles,
 }) async {
   try {
-    print('📝 SessionManager.saveUserRoles START');
-    print('   - Email: $email');
-    print('   - Roles: $roles');
+    debugPrint('📝 SessionManager.saveUserRoles START');  
+    debugPrint('   - Roles: $roles');
     
     final profiles = await getProfiles();
-    print('   - Current profiles count: ${profiles.length}');
+ 
     
     final index = profiles.indexWhere((p) => p['email'] == email);
-    print('   - Profile index: $index');
+  
 
     if (index != -1) {
       // Update existing profile
       profiles[index]['roles'] = roles;
       profiles[index]['roles_updated_at'] = DateTime.now().toIso8601String();
-      print('   ✅ Updated existing profile');
+    
     } else {
       // Create new profile entry
       profiles.add({
@@ -1013,27 +1010,26 @@ static Future<void> saveUserRoles({
         'roles': roles,
         'created_at': DateTime.now().toIso8601String(),
       });
-      print('   ✅ Created new profile');
+    
     }
     
     // Save to SharedPreferences
     final jsonString = jsonEncode(profiles);
     await _prefs.setString(_keyProfiles, jsonString);
-    print('   ✅ Saved to SharedPreferences (_keyProfiles)');
-    
+  
     // Save as separate key for quick access
     await _prefs.setStringList('${email}_all_roles', roles);
-    print('   ✅ Saved quick access: ${email}_all_roles');
+  
     
     // Verify quick access save
-    final savedQuick = _prefs.getStringList('${email}_all_roles');
-    print('   🔍 Quick access verification: $savedQuick');
+    _prefs.getStringList('${email}_all_roles');
+  
     
     debugPrint('✅ SessionManager: Saved all roles for $email: $roles');
-    print('📝 SessionManager.saveUserRoles END');
-  } catch (e, stackTrace) {
+   
+  } catch (e) {
     debugPrint('❌ SessionManager: Error saving user roles: $e');
-    print('   ❌ Stack trace: $stackTrace');
+ 
   }
 }
 

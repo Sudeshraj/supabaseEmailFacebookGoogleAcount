@@ -89,7 +89,7 @@ class _CustomAlertDialog extends StatelessWidget {
                   borderRadius: BorderRadius.circular(16),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.2),
+                      color: Colors.black.withValues(alpha: 0.2),
                       blurRadius: 20,
                       offset: const Offset(0, 8),
                     ),
@@ -109,7 +109,7 @@ class _CustomAlertDialog extends StatelessWidget {
                           Container(
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
-                              color: primaryColor.withOpacity(0.1),
+                              color: primaryColor.withValues(alpha: 0.1),
                               shape: BoxShape.circle,
                             ),
                             child: Icon(
@@ -222,7 +222,7 @@ class _CustomAlertDialog extends StatelessWidget {
                             child: Icon(
                               Icons.close,
                               size: 18,
-                              color: titleColor.withOpacity(0.6),
+                              color: titleColor.withValues(alpha: 0.6),
                             ),
                           ),
                         ),

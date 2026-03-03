@@ -9,7 +9,6 @@ import 'package:flutter_application_1/services/permission_manager.dart';
 import 'package:flutter_application_1/services/session_manager.dart';
 import 'package:flutter_application_1/widgets/permission_card.dart';
 import 'package:go_router/go_router.dart';
-import '../authantication/command/multi_continue_screen.dart';
 
 class CustomerHome extends StatefulWidget {
   const CustomerHome({super.key});
@@ -29,10 +28,10 @@ class _CustomerHomeState extends State<CustomerHome> {
 
   // Customer specific data
   int _upcomingBookings = 2;
-  int _pastBookings = 8;
-  int _favoriteSalons = 3;
-  int _pendingPayments = 1;
-  int _loyaltyPoints = 350;
+  final int _pastBookings = 8;
+  final int _favoriteSalons = 3;
+  final int _pendingPayments = 1;
+  final int _loyaltyPoints = 350;
 
   // Selected tab for bookings
   int _selectedBookingTab = 0;
@@ -49,36 +48,34 @@ class _CustomerHomeState extends State<CustomerHome> {
     _setupNotificationListeners();
   }
 
-  // 🔥 Load initial data with proper error handling
+  // Load initial data with proper error handling
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
 
     try {
-      print('📱 Customer _loadData started');
+      debugPrint('📱 Customer _loadData started');
 
       // Check permission status
       _hasPermission = await _notificationService.hasPermission();
-      print('📱 hasPermission from system: $_hasPermission');
-
+    
       // Check if should show permission card
       if (!_hasPermission) {
         _showPermissionCard = await _permissionManager.shouldShowPermissionCard(
           'customer_home',
         );
-        print('📱 shouldShowPermissionCard: $_showPermissionCard');
+       
       } else {
         _showPermissionCard = false;
       }
 
       // Get permission stats for debugging
-      final stats = await _permissionManager.getPermissionStats();
-      print('📊 Permission Stats: $stats');
-
+      await _permissionManager.getPermissionStats();
+    
       if (mounted) {
         setState(() => _isLoading = false);
       }
     } catch (e) {
-      print('❌ Error loading data: $e');
+      debugPrint('❌ Error loading data: $e');
       if (mounted) {
         setState(() => _isLoading = false);
         ScaffoldMessenger.of(context).showSnackBar(
@@ -95,8 +92,7 @@ class _CustomerHomeState extends State<CustomerHome> {
   void _setupNotificationListeners() {
     try {
       // Listen for booking updates
-      FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-        print('📨 Received message: ${message.data}');
+      FirebaseMessaging.onMessage.listen((RemoteMessage message) {      
 
         if (message.data['type'] == 'booking_confirmed') {
           _showBookingConfirmedAlert(message);
@@ -109,10 +105,9 @@ class _CustomerHomeState extends State<CustomerHome> {
           _showPromotionAlert(message);
         }
       });
-
-      print('📱 Customer notification listeners setup complete');
+    
     } catch (e) {
-      print('❌ Error setting up notification listeners: $e');
+      debugPrint('❌ Error setting up notification listeners: $e');
     }
   }
 
@@ -129,7 +124,7 @@ class _CustomerHomeState extends State<CustomerHome> {
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: Colors.green.withOpacity(0.1),
+                color: Colors.green.withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
               child: const Icon(Icons.check_circle, color: Colors.green),
@@ -184,7 +179,7 @@ class _CustomerHomeState extends State<CustomerHome> {
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: Colors.orange.withOpacity(0.1),
+                color: Colors.orange.withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
               child: const Icon(Icons.access_time, color: Colors.orange),
@@ -217,7 +212,7 @@ class _CustomerHomeState extends State<CustomerHome> {
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: Colors.purple.withOpacity(0.1),
+                color: Colors.purple.withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
               child: const Icon(Icons.local_offer, color: Colors.purple),
@@ -247,15 +242,13 @@ class _CustomerHomeState extends State<CustomerHome> {
     );
   }
 
-  // 🔥 Enable notifications with proper flow
+  //  Enable notifications with proper flow
   Future<void> _enableNotifications() async {
-    print('🔔 _enableNotifications called');
-
+  
     setState(() => _showPermissionCard = false);
 
     try {
-      final canAsk = await _permissionManager.canAskSystemPermission();
-      print('🔍 canAskSystemPermission: $canAsk');
+      final canAsk = await _permissionManager.canAskSystemPermission();   
 
       if (!canAsk) {
         _showSettingsDialog();
@@ -268,8 +261,7 @@ class _CustomerHomeState extends State<CustomerHome> {
         customTitle: '🔔 Get Booking Updates',
         customMessage:
             'Get instant notifications about your appointments and special offers',
-        onGranted: () async {
-          print('✅ User granted permission');
+        onGranted: () async {         
 
           await _permissionManager.markPermissionGranted();
 
@@ -293,8 +285,7 @@ class _CustomerHomeState extends State<CustomerHome> {
           _sendWelcomeNotification();
         },
         onDenied: () async {
-          print('❌ User denied permission');
-
+        
           await _permissionManager.markPermissionDenied(permanent: false);
 
           if (mounted) {
@@ -384,55 +375,55 @@ class _CustomerHomeState extends State<CustomerHome> {
 
   // 🔥 View bookings
   void _viewBookings() {
-    print('📅 Navigating to bookings');
+  
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text('Navigating to my bookings...'),
         duration: Duration(seconds: 1),
       ),
     );
-    // TODO: Add actual navigation to bookings screen
+   
   }
 
   // 🔥 Book new appointment
   void _bookNewAppointment() {
-    print('📅 Navigating to booking');
+  
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text('Starting new booking...'),
         duration: Duration(seconds: 1),
       ),
     );
-    // TODO: Add actual navigation to booking screen
+   
   }
 
   // 🔥 View favorite salons
   void _viewFavorites() {
-    print('❤️ Navigating to favorites');
+  
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text('Navigating to favorite salons...'),
         duration: Duration(seconds: 1),
       ),
     );
-    // TODO: Add actual navigation to favorites screen
+   
   }
 
   // 🔥 View offers
   void _viewOffers() {
-    print('🎁 Navigating to offers');
+ 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text('Navigating to offers...'),
         duration: Duration(seconds: 1),
       ),
     );
-    // TODO: Add actual navigation to offers screen
+   
   }
 
   // 🔥 Send test notification (for debugging)
   Future<void> _sendTestNotification() async {
-    print('🔍 Sending test notification...');
+   
 
     if (!_hasPermission) {
       setState(() {
@@ -691,7 +682,7 @@ Future<void> _logout(BuildContext context) async {
                       width: double.infinity,
                       padding: const EdgeInsets.all(20),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF9C27B0).withOpacity(0.1),
+                        color: const Color(0xFF9C27B0).withValues(alpha: 0.1),
                         borderRadius: const BorderRadius.only(
                           bottomLeft: Radius.circular(30),
                           bottomRight: Radius.circular(30),
@@ -718,7 +709,7 @@ Future<void> _logout(BuildContext context) async {
                               vertical: 10,
                             ),
                             decoration: BoxDecoration(
-                              color: Colors.amber.withOpacity(0.2),
+                              color: Colors.amber.withValues(alpha: 0.2),
                               borderRadius: BorderRadius.circular(30),
                             ),
                             child: Row(
@@ -998,7 +989,7 @@ Future<void> _logout(BuildContext context) async {
                           vertical: 8,
                         ),
                         decoration: BoxDecoration(
-                          color: Colors.green.withOpacity(0.1),
+                          color: Colors.green.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: Row(
@@ -1043,7 +1034,7 @@ Future<void> _logout(BuildContext context) async {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
+            color: Colors.grey.withValues(alpha: 0.1),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -1057,7 +1048,7 @@ Future<void> _logout(BuildContext context) async {
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: color.withOpacity(0.1),
+                  color: color.withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
                 child: Icon(icon, color: color, size: 20),
@@ -1126,7 +1117,7 @@ Future<void> _logout(BuildContext context) async {
       child: ListTile(
         contentPadding: const EdgeInsets.all(12),
         leading: CircleAvatar(
-          backgroundColor: const Color(0xFF9C27B0).withOpacity(0.1),
+          backgroundColor: const Color(0xFF9C27B0).withValues(alpha: 0.1),
           child: Text(
             salonName[0],
             style: const TextStyle(
@@ -1158,7 +1149,7 @@ Future<void> _logout(BuildContext context) async {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
               decoration: BoxDecoration(
-                color: statusColor.withOpacity(0.1),
+                color: statusColor.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Text(
@@ -1209,7 +1200,7 @@ Future<void> _logout(BuildContext context) async {
               )
             : Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey[400]),
         onTap: () {
-          print('📅 Tapped on booking: $salonName');
+         
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('Viewing booking details for $salonName'),
@@ -1234,9 +1225,9 @@ Future<void> _logout(BuildContext context) async {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 16),
         decoration: BoxDecoration(
-          color: color.withOpacity(0.1),
+          color: color.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: color.withOpacity(0.3)),
+          border: Border.all(color: color.withValues(alpha: 0.3)),
         ),
         child: Column(
           children: [
@@ -1279,7 +1270,7 @@ Future<void> _logout(BuildContext context) async {
             Container(
               height: 100,
               decoration: BoxDecoration(
-                color: const Color(0xFF9C27B0).withOpacity(0.2),
+                color: const Color(0xFF9C27B0).withValues(alpha: 0.2),
                 borderRadius: const BorderRadius.vertical(
                   top: Radius.circular(12),
                 ),
