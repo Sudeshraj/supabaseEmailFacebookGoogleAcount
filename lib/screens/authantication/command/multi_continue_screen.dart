@@ -39,39 +39,55 @@ class _ContinueScreenState extends State<ContinueScreen> {
     _checkCompliance();
   }
 
-  Future<void> _loadProfiles() async {
-    try {
-      // Load all profiles with remember me enabled
-      final allProfiles = await SessionManager.getProfiles();
-      final rememberMeProfiles = allProfiles
-          .where((p) => p['rememberMe'] == true)
-          .toList();
+Future<void> _loadProfiles() async {
+  try {
+    // Load all profiles with remember me enabled
+    final allProfiles = await SessionManager.getProfiles();
+    final rememberMeProfiles = allProfiles
+        .where((p) => p['rememberMe'] == true)
+        .toList();
 
-      // Sort profiles: OAuth first, then email
-      rememberMeProfiles.sort((a, b) {
-        final aProvider = a['provider'] as String? ?? 'email';
-        final bProvider = b['provider'] as String? ?? 'email';
+    // Sort profiles: OAuth first, then email
+    rememberMeProfiles.sort((a, b) {
+      final aProvider = a['provider'] as String? ?? 'email';
+      final bProvider = b['provider'] as String? ?? 'email';
 
-        if (aProvider != 'email' && bProvider == 'email') return -1;
-        if (aProvider == 'email' && bProvider != 'email') return 1;
-        return 0;
-      });
+      if (aProvider != 'email' && bProvider == 'email') return -1;
+      if (aProvider == 'email' && bProvider != 'email') return 1;
+      return 0;
+    });
 
-      // Process and optimize profile images
-      for (var profile in rememberMeProfiles) {
-        await _optimizeProfileImage(profile);
+    // 🔥 FIX: Ensure each profile has roles array
+    for (var profile in rememberMeProfiles) {
+      // Ensure roles is a List
+      if (profile['roles'] == null) {
+        profile['roles'] = [];
+      } else if (profile['roles'] is! List) {
+        // Convert to List if it's not already
+        try {
+          final rolesList = List<String>.from(profile['roles'] as List? ?? []);
+          profile['roles'] = rolesList;
+        } catch (e) {
+          profile['roles'] = [];
+        }
       }
-
-      if (!mounted) return;
-      setState(() => profiles = rememberMeProfiles);
-
-      if (kDebugMode) {
-        debugPrint('Loaded ${profiles.length} profiles for continue screen');
-      }
-    } catch (e) {
-      debugPrint('Error loading profiles: $e');
+      
+      await _optimizeProfileImage(profile);
     }
+
+    if (!mounted) return;
+    setState(() => profiles = rememberMeProfiles);
+
+    if (kDebugMode) {
+      debugPrint('Loaded ${profiles.length} profiles for continue screen');
+      for (var p in profiles) {
+        debugPrint('Profile: ${p['email']}, roles: ${p['roles']}');
+      }
+    }
+  } catch (e) {
+    debugPrint('Error loading profiles: $e');
   }
+}
 
   Future<void> _optimizeProfileImage(Map<String, dynamic> profile) async {
     try {
@@ -1021,286 +1037,304 @@ class _ContinueScreenState extends State<ContinueScreen> {
     });
   }
 
-  // Profile card for main list
-  Widget _buildProfileCard(Map<String, dynamic> profile, int index) {
-    final email = profile['email'] as String? ?? 'Unknown';
-    final provider = profile['provider'] as String? ?? 'email';
-    final isSelected = _selectedProfiles.contains(email);
-    final isLoading = _oauthLoadingStates[email] == true;
-    final photoUrl = profile['photo'] as String?;
-    final name = profile['name'] as String? ?? email.split('@').first;
-    final hasPhoto = photoUrl != null && photoUrl.isNotEmpty;
-
-   
-    return GestureDetector(
-      onTap: () {
-        if (_selectionMode) {
-          _toggleProfileSelection(profile);
-        } else if (isLoading) {
-          return;
-        } else if (provider == 'email') {
-          _handleEmailLogin(profile);
-        } else {
-          _handleOAuthLogin(profile);
-        }
-      },
-      onLongPress: () {
-        if (!_selectionMode) {
-          _startSelectionMode();
-          _toggleProfileSelection(profile);
-        }
-      },
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeInOut,
-        decoration: BoxDecoration(
-          color: isSelected
-              ? const Color(0xFF1877F2).withValues(alpha: 0.2)
-              : Colors.white.withValues(alpha: 0.03),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: isLoading
-                ? Colors.blueAccent
-                : isSelected
-                ? const Color(0xFF1877F2)
-                : Colors.white.withValues(alpha: 0.1),
-            width: isLoading ? 2 : 1.5,
-          ),
-          boxShadow: isLoading
-              ? [
-                  BoxShadow(
-                    color: Colors.blueAccent.withValues(alpha: 0.3),
-                    blurRadius: 8,
-                    spreadRadius: 1,
-                  ),
-                ]
-              : null,
+// Profile card for main list
+Widget _buildProfileCard(Map<String, dynamic> profile, int index) {
+  final email = profile['email'] as String? ?? 'Unknown';
+  final provider = profile['provider'] as String? ?? 'email';
+  final isSelected = _selectedProfiles.contains(email);
+  final isLoading = _oauthLoadingStates[email] == true;
+  final photoUrl = profile['photo'] as String?;
+  final name = profile['name'] as String? ?? email.split('@').first;
+  final hasPhoto = photoUrl != null && photoUrl.isNotEmpty;
+  
+  // 🔥 FIX: Get roles from profile
+  final roles = profile['roles'] as List? ?? [];
+  final primaryRole = roles.isNotEmpty ? roles.first.toString() : 'customer';
+  
+  return GestureDetector(
+    onTap: () {
+      if (_selectionMode) {
+        _toggleProfileSelection(profile);
+      } else if (isLoading) {
+        return;
+      } else if (provider == 'email') {
+        _handleEmailLogin(profile);
+      } else {
+        _handleOAuthLogin(profile);
+      }
+    },
+    onLongPress: () {
+      if (!_selectionMode) {
+        _startSelectionMode();
+        _toggleProfileSelection(profile);
+      }
+    },
+    child: AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+      decoration: BoxDecoration(
+        color: isSelected
+            ? const Color(0xFF1877F2).withValues(alpha: 0.2)
+            : Colors.white.withValues(alpha: 0.03),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isLoading
+              ? Colors.blueAccent
+              : isSelected
+              ? const Color(0xFF1877F2)
+              : Colors.white.withValues(alpha: 0.1),
+          width: isLoading ? 2 : 1.5,
         ),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              // Profile Image
-              Stack(
-                children: [
-                  Container(
-                    width: 70,
-                    height: 70,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: _getProviderColor(provider).withValues(alpha: 0.2),
-                    ),
-                    child: _buildLargeProfileImage(
-                      profile,
-                      provider,
-                      photoUrl,
-                      hasPhoto,
+        boxShadow: isLoading
+            ? [
+                BoxShadow(
+                  color: Colors.blueAccent.withValues(alpha: 0.3),
+                  blurRadius: 8,
+                  spreadRadius: 1,
+                ),
+              ]
+            : null,
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            // Profile Image
+            Stack(
+              children: [
+                Container(
+                  width: 70,
+                  height: 70,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: _getProviderColor(provider).withValues(alpha: 0.2),
+                  ),
+                  child: _buildLargeProfileImage(
+                    profile,
+                    provider,
+                    photoUrl,
+                    hasPhoto,
+                  ),
+                ),
+
+                // Provider icon badge
+                if (provider != 'email' && !_selectionMode && !isLoading)
+                  Positioned(
+                    right: 0,
+                    bottom: 0,
+                    child: Container(
+                      width: 24,
+                      height: 24,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: _getProviderColor(provider),
+                        border: Border.all(
+                          color: const Color(0xFF0F1820),
+                          width: 2,
+                        ),
+                      ),
+                      child: Center(
+                        child: provider == 'google'
+                            ? Text(
+                                'G',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  fontFamily: 'Roboto',
+                                ),
+                              )
+                            : provider == 'facebook'
+                            ? Text(
+                                'f',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                  fontFamily: 'Roboto',
+                                ),
+                              )
+                            : provider == 'apple'
+                            ? const Icon(
+                                Icons.apple,
+                                color: Colors.white,
+                                size: 14,
+                              )
+                            : const Icon(
+                                Icons.email,
+                                color: Colors.white,
+                                size: 12,
+                              ),
+                      ),
                     ),
                   ),
 
-                  // Provider icon badge
-                  if (provider != 'email' && !_selectionMode && !isLoading)
-                    Positioned(
-                      right: 0,
-                      bottom: 0,
-                      child: Container(
-                        width: 24,
-                        height: 24,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: _getProviderColor(provider),
-                          border: Border.all(
-                            color: const Color(0xFF0F1820),
-                            width: 2,
-                          ),
-                        ),
-                        child: Center(
-                          child: provider == 'google'
-                              ? Text(
-                                  'G',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
-                                    fontFamily: 'Roboto',
-                                  ),
-                                )
-                              : provider == 'facebook'
-                              ? Text(
-                                  'f',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.bold,
-                                    fontFamily: 'Roboto',
-                                  ),
-                                )
-                              : provider == 'apple'
-                              ? const Icon(
-                                  Icons.apple,
-                                  color: Colors.white,
-                                  size: 14,
-                                )
-                              : const Icon(
-                                  Icons.email,
-                                  color: Colors.white,
-                                  size: 12,
-                                ),
+                // Selection check badge
+                if (isSelected && _selectionMode)
+                  Positioned(
+                    right: 0,
+                    bottom: 0,
+                    child: Container(
+                      width: 24,
+                      height: 24,
+                      decoration: const BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Colors.blueAccent,
+                      ),
+                      child: const Center(
+                        child: Icon(
+                          Icons.check,
+                          color: Colors.white,
+                          size: 16,
                         ),
                       ),
                     ),
+                  ),
+              ],
+            ),
 
-                  // Selection check badge
-                  if (isSelected && _selectionMode)
-                    Positioned(
-                      right: 0,
-                      bottom: 0,
-                      child: Container(
-                        width: 24,
-                        height: 24,
-                        decoration: const BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: Colors.blueAccent,
-                        ),
-                        child: const Center(
-                          child: Icon(
-                            Icons.check,
+            const SizedBox(width: 16),
+
+            // Profile Info
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Row for name and loading indicator
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          name,
+                          style: const TextStyle(
                             color: Colors.white,
-                            size: 16,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 18,
                           ),
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
+                      // Simple loading text
+                      if (isLoading)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.blueAccent.withValues(alpha: 0.2),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Text(
+                            'Logging in...',
+                            style: TextStyle(
+                              color: Colors.blueAccent,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 6),
+
+                  // Email
+                  Text(
+                    email,
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.7),
+                      fontSize: 14,
                     ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+
+                  const SizedBox(height: 8),
+
+                  // Last login and roles
+                  Row(
+                    children: [
+                      // Last login time
+                      if (profile['lastLogin'] != null && !isLoading)
+                        Text(
+                          _formatLastLogin(profile['lastLogin'] as String?),
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.5),
+                            fontSize: 12,
+                          ),
+                        ),
+
+                      // Space if both exist
+                      if (profile['lastLogin'] != null &&
+                          !isLoading &&
+                          roles.isNotEmpty &&
+                          !_selectionMode)
+                        const SizedBox(width: 10),
+
+                      // 🔥 FIX: Show ALL roles as chips
+                      if (roles.isNotEmpty && !_selectionMode && !isLoading)
+                        Expanded(
+                          child: Wrap(
+                            spacing: 4,
+                            runSpacing: 4,
+                            children: roles.map((role) {
+                              return Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: _getRoleColor(role.toString()).withValues(alpha: 0.2),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  role.toString().toUpperCase(),
+                                  style: TextStyle(
+                                    color: _getRoleColor(role.toString()),
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                        ),
+                    ],
+                  ),
                 ],
               ),
+            ),
 
-              const SizedBox(width: 16),
-
-              // Profile Info
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Row for name and loading indicator
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            name,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w600,
-                              fontSize: 18,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        // Simple loading text
-                        if (isLoading)
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.blueAccent.withValues(alpha: 0.2),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: const Text(
-                              'Logging in...',
-                              style: TextStyle(
-                                color: Colors.blueAccent,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-
-                    const SizedBox(height: 6),
-
-                    // Email
-                    Text(
-                      email,
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.7),
-                        fontSize: 14,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-
-                    const SizedBox(height: 8),
-
-                    // Last login and roles
-                    // Provider type, last login and role in the same row
-                    Row(
-                      children: [
-                        // Last login time
-                        if (profile['lastLogin'] != null && !isLoading)
-                          Text(
-                            _formatLastLogin(profile['lastLogin'] as String?),
-                            style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.5),
-                              fontSize: 12,
-                            ),
-                          ),
-
-                        // 👇 Conditionally add space only if both elements exist
-                        if (profile['lastLogin'] != null &&
-                            !isLoading &&
-                            profile['roles'] != null &&
-                            (profile['roles'] as List).isNotEmpty &&
-                            !_selectionMode)
-                          const SizedBox(width: 10),
-
-                        // Role indicator
-                        if (profile['roles'] != null &&
-                            (profile['roles'] as List).isNotEmpty &&
-                            !_selectionMode &&
-                            !isLoading)
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.green.withValues(alpha: 0.2),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Text(
-                              (profile['roles'] as List).first
-                                  .toString()
-                                  .toUpperCase(),
-                              style: const TextStyle(
-                                color: Colors.greenAccent,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ],
+            // Arrow indicator
+            if (!_selectionMode && !isLoading)
+              const Padding(
+                padding: EdgeInsets.only(left: 8),
+                child: Icon(
+                  Icons.chevron_right,
+                  color: Colors.white38,
+                  size: 24,
                 ),
               ),
-
-              // Arrow indicator
-              if (!_selectionMode && !isLoading)
-                const Padding(
-                  padding: EdgeInsets.only(left: 8),
-                  child: Icon(
-                    Icons.chevron_right,
-                    color: Colors.white38,
-                    size: 24,
-                  ),
-                ),
-            ],
-          ),
+          ],
         ),
       ),
-    );
+    ),
+  );
+}
+
+// 🔥 Helper function to get role color
+Color _getRoleColor(String role) {
+  switch (role.toLowerCase()) {
+    case 'owner':
+      return Colors.blueAccent;
+    case 'barber':
+      return Colors.orangeAccent;
+    case 'customer':
+      return Colors.greenAccent;
+    default:
+      return Colors.grey;
   }
+}
 
   @override
   Widget build(BuildContext context) {
