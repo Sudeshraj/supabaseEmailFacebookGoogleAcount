@@ -8,7 +8,7 @@ import '../../../services/session_manager.dart';
 class WelcomeScreen extends StatefulWidget {
   final void Function(String) onNext;
 
-  const WelcomeScreen({super.key, required this.onNext});
+  const WelcomeScreen({super.key, required this.onNext, required void Function() onBack});
 
   @override
   State<WelcomeScreen> createState() => _WelcomeScreenState();
@@ -56,87 +56,96 @@ class _WelcomeScreenState extends State<WelcomeScreen>
   }
 
   /// Logout function
-  /// Logout function - FIXED with proper mounted checks
-  /// Logout function - COMPLETELY FIXED with proper mounted checks
-  Future<void> _handleLogout() async {
-    // Store context reference at the start
-    final currentContext = context;
+Future<void> _handleLogout() async {
+  debugPrint('📍 Logout button pressed');
+  
+  if (!mounted) return;
+
+  // Show confirmation dialog
+  final shouldLogout = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      backgroundColor: const Color(0xFF1C1F26),
+      title: const Text(
+        'Logout',
+        style: TextStyle(color: Colors.white),
+      ),
+      content: const Text(
+        'Are you sure you want to logout?',
+        style: TextStyle(color: Colors.white70),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(dialogContext, false),
+          child: const Text(
+            'Cancel',
+            style: TextStyle(color: Colors.white70),
+          ),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(dialogContext, true),
+          style: TextButton.styleFrom(foregroundColor: Colors.red),
+          child: const Text(
+            'Logout',
+            style: TextStyle(color: Colors.red),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  if (shouldLogout != true) {
+    debugPrint('❌ Logout cancelled');
+    return;
+  }
+
+  debugPrint('✅ Logout confirmed');
+
+  if (!mounted) return;
+
+  // Show loading indicator
+  showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (dialogContext) => const Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: EdgeInsets.all(0),
+      child: Center(
+        child: CircularProgressIndicator(color: Colors.white),
+      ),
+    ),
+  );
+
+  try {
+    // Perform logout
+    await SessionManager.logoutForContinue();
 
     if (!mounted) return;
 
-    showLogoutConfirmation(
-      currentContext,
-      onLogoutConfirmed: () async {
-        // Don't store dialogContext separately - use currentContext
+    // Navigate directly to login - DON'T use pop
+    debugPrint('📍 Navigating to /login');
+    context.go('/'); // Use go() instead of pushReplacement
 
-        if (!mounted) return; // Check State mounted
+  } catch (e) {
+    debugPrint('❌ Logout error: $e');
 
-        // Show loading dialog - use currentContext
-        if (!mounted) return;
+    if (!mounted) return;
 
-        // Show loading dialog and keep reference
-        BuildContext? dialogContext;
+    // Close loading dialog using Navigator.of(context, rootNavigator: true)
+    Navigator.of(context, rootNavigator: true).pop();
 
-        showDialog(
-          context: currentContext,
-          barrierDismissible: false,
-          builder: (BuildContext context) {
-            // Store this context for later use
-            dialogContext = context;
-            return const Dialog(
-              backgroundColor: Colors.transparent,
-              insetPadding: EdgeInsets.all(0),
-              child: Center(
-                child: CircularProgressIndicator(color: Colors.white),
-              ),
-            );
-          },
-        );
+    if (!mounted) return;
 
-        try {
-          // Call your logout function
-          await SessionManager.logoutForContinue();
-
-          // Check if State is still mounted
-          if (!mounted) return;
-
-          // Close loading dialog - check if dialogContext exists and is valid
-          if (dialogContext != null && dialogContext!.mounted) {
-            Navigator.pop(dialogContext!);
-          }
-
-          // Check mounted again
-          if (!mounted) return;
-
-          // Navigate to login/splash screen using GoRouter
-          appState.refreshState();
-
-          if (!mounted) return;
-          context.go('/');
-        } catch (e) {
-          // Check if State is still mounted
-          if (!mounted) return;
-
-          // Close loading dialog - check if dialogContext exists and is valid
-          if (dialogContext != null && dialogContext!.mounted) {
-            Navigator.pop(dialogContext!);
-          }
-
-          // Check mounted again
-          if (!mounted) return;
-
-          // Show error message
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Logout failed: ${e.toString()}'),
-              backgroundColor: Colors.red,
-              duration: const Duration(seconds: 3),
-            ),
-          );
-        }
-      },
+    // Show error
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Logout failed: ${e.toString()}'),
+        backgroundColor: Colors.red,
+        duration: const Duration(seconds: 3),
+      ),
     );
   }
+}
 
   /// Optimized role card with better image handling
   Widget _roleCard({

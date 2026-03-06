@@ -3,11 +3,13 @@ import 'package:flutter/material.dart';
 class CompanyNameScreen extends StatefulWidget {
   final void Function(String) onNext;
   final PageController controller;
+  final VoidCallback onBack;
 
   const CompanyNameScreen({
     super.key,
     required this.onNext,
     required this.controller,
+    required this.onBack,
   });
 
   @override
@@ -34,8 +36,10 @@ class _CompanyNameScreenState extends State<CompanyNameScreen>
       duration: const Duration(milliseconds: 600),
     );
 
-    _fadeAnimation =
-        CurvedAnimation(parent: _animationController, curve: Curves.easeIn);
+    _fadeAnimation = CurvedAnimation(
+      parent: _animationController,
+      curve: Curves.easeIn,
+    );
     _scaleAnimation = Tween<double>(begin: 0.95, end: 1.0).animate(
       CurvedAnimation(parent: _animationController, curve: Curves.easeOutBack),
     );
@@ -59,6 +63,11 @@ class _CompanyNameScreenState extends State<CompanyNameScreen>
     super.dispose();
   }
 
+  // void _handleBack(BuildContext context) {
+  //   // Simply pop to go back to DataConsentScreen
+  //     Navigator.of(context).pop();
+  // }
+
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
@@ -77,7 +86,10 @@ class _CompanyNameScreenState extends State<CompanyNameScreen>
                 constraints: BoxConstraints(maxWidth: maxWidth),
                 child: Container(
                   height: size.height - 40, // 🔥 Same as WelcomeScreen
-                  margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+                  margin: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 20,
+                  ),
                   padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: 0.03),
@@ -90,14 +102,19 @@ class _CompanyNameScreenState extends State<CompanyNameScreen>
                     children: [
                       // 🔙 Back Arrow INSIDE frame
                       IconButton(
-                        icon: const Icon(Icons.arrow_back_ios_new_rounded,
-                            color: Colors.white, size: 22),
-                        onPressed: () {
-                          widget.controller.previousPage(
-                            duration: const Duration(milliseconds: 300),
-                            curve: Curves.ease,
-                          );
-                        },
+                        icon: const Icon(
+                          Icons.arrow_back_ios_new_rounded,
+                          color: Colors.white,
+                          size: 22,
+                        ),
+                        // onPressed: () {
+                        //   widget.controller.previousPage(
+                        //     duration: const Duration(milliseconds: 300),
+                        //     curve: Curves.ease,
+                        //   );
+                        // },
+                        // onPressed: () => _handleBack(context),
+                        onPressed: widget.onBack,
                       ),
 
                       const SizedBox(height: 10),
@@ -131,7 +148,9 @@ class _CompanyNameScreenState extends State<CompanyNameScreen>
                                 style: const TextStyle(color: Colors.white),
                                 decoration: InputDecoration(
                                   hintText: "Company name",
-                                  hintStyle: const TextStyle(color: Colors.white54),
+                                  hintStyle: const TextStyle(
+                                    color: Colors.white54,
+                                  ),
                                   enabledBorder: OutlineInputBorder(
                                     borderSide: BorderSide(
                                       color: _showError
@@ -171,8 +190,8 @@ class _CompanyNameScreenState extends State<CompanyNameScreen>
                                 child: ElevatedButton(
                                   onPressed: _isValid
                                       ? () => widget.onNext(
-                                            _companyController.text.trim(),
-                                          )
+                                          _companyController.text.trim(),
+                                        )
                                       : null,
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: const Color(0xFF1877F3),

@@ -1,5 +1,4 @@
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/alertBox/show_logout_conf.dart';
 import 'package:flutter_application_1/main.dart';
@@ -8,6 +7,10 @@ import 'package:flutter_application_1/services/permission_service.dart';
 import 'package:flutter_application_1/services/permission_manager.dart';
 import 'package:flutter_application_1/services/session_manager.dart';
 import 'package:flutter_application_1/widgets/permission_card.dart';
+import 'package:flutter_application_1/widgets/side_menu.dart';
+import 'package:flutter_application_1/widgets/dashboard_stat_card.dart';
+import 'package:flutter_application_1/widgets/booking_tile.dart';
+import 'package:flutter_application_1/widgets/section_header.dart';
 import 'package:go_router/go_router.dart';
 
 class OwnerDashboard extends StatefulWidget {
@@ -18,6 +21,9 @@ class OwnerDashboard extends StatefulWidget {
 }
 
 class _OwnerDashboardState extends State<OwnerDashboard> {
+  // 🔑 GlobalKey for scaffold - මේකෙන් 100% වැඩ කරනවා
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+
   final NotificationService _notificationService = NotificationService();
   final PermissionService _permissionService = PermissionService();
   final PermissionManager _permissionManager = PermissionManager();
@@ -26,59 +32,58 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
   bool _showPermissionCard = false;
   bool _isLoading = true;
 
-  // Sample booking data
+  // Dashboard data
   int _pendingBookings = 3;
-  int _todayAppointments = 8;
-  int _totalRevenue = 24500;
+  final int _todayAppointments = 8;
+  final int _totalRevenue = 24500;
+  final int _totalCustomers = 156;
+  final int _activeBarbers = 5;
 
   @override
   void initState() {
     super.initState();
 
-    // Small delay to ensure everything is loaded
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _loadData();
+    // කුඩා delay එකකින් පසුව data load කරන්න
+    // Debug current role
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final role = await SessionManager.getCurrentRole();
+      final appStateRole = appState.currentRole;
+      debugPrint('🔍 OwnerDashboard - SessionManager role: $role');
+      debugPrint('🔍 OwnerDashboard - AppState role: $appStateRole');
     });
 
+    _loadData();
     _setupNotificationListeners();
+    debugPrint('🔄 OwnerDashboard initState completed');
   }
 
-  // 🔥 Load initial data with proper error handling
+  // 🔥 Load initial data
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
 
     try {
-      print('📱 _loadData started');
+      print('📊 Loading dashboard data...');
 
-      // Check permission status
       _hasPermission = await _notificationService.hasPermission();
-      print('📱 hasPermission from system: $_hasPermission');
 
-      // Check if should show permission card
       if (!_hasPermission) {
-        // IMPORTANT: Use correct screen name
         _showPermissionCard = await _permissionManager.shouldShowPermissionCard(
           'owner_dashboard',
         );
-        print('📱 shouldShowPermissionCard: $_showPermissionCard');
       } else {
         _showPermissionCard = false;
-        print('📱 Already has permission - hiding card');
       }
-
-      // Get permission stats for debugging
-      final stats = await _permissionManager.getPermissionStats();
-      print('📊 Permission Stats: $stats');
 
       if (mounted) {
         setState(() => _isLoading = false);
+        print('✅ Data loaded successfully');
       }
     } catch (e) {
       print('❌ Error loading data: $e');
       if (mounted) {
         setState(() => _isLoading = false);
 
-        // Show error message
+        // Error message
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Error loading data: $e'),
@@ -89,24 +94,19 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
     }
   }
 
-  // 🔥 Setup notification listeners for owner
+  // 🔥 Setup notification listeners
   void _setupNotificationListeners() {
     try {
-      // Listen for new booking notifications
       FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-        print('📨 Received message: ${message.data}');
+        print('📨 New message: ${message.data}');
 
         if (message.data['type'] == 'new_booking') {
           _showNewBookingAlert(message);
-
-          // Update pending bookings count
           setState(() {
             _pendingBookings++;
           });
         }
       });
-
-      print('📱 Notification listeners setup complete');
     } catch (e) {
       print('❌ Error setting up notification listeners: $e');
     }
@@ -167,19 +167,14 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
     );
   }
 
-  // 🔥 Enable notifications with proper flow
+  // 🔥 Enable notifications
   Future<void> _enableNotifications() async {
-    print('🔔 _enableNotifications called');
-
     setState(() => _showPermissionCard = false);
 
     try {
-      // Check if we can ask for system permission
       final canAsk = await _permissionManager.canAskSystemPermission();
-      print('🔍 canAskSystemPermission: $canAsk');
 
       if (!canAsk) {
-        // Show settings dialog
         _showSettingsDialog();
         return;
       }
@@ -191,44 +186,26 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
         customMessage:
             'Get instant notifications when customers book appointments',
         onGranted: () async {
-          print('✅ User granted permission');
-
-          // Mark as granted in PermissionManager
           await _permissionManager.markPermissionGranted();
-
           setState(() {
             _hasPermission = true;
             _showPermissionCard = false;
           });
-
-          // Show success message
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text(
-                  '✅ Notifications enabled! You\'ll get booking alerts',
-                ),
+                content: Text('✅ Notifications enabled!'),
                 backgroundColor: Colors.green,
-                duration: Duration(seconds: 3),
               ),
             );
           }
-
-          // Send test notification after permission granted
-          _sendWelcomeNotification();
         },
         onDenied: () async {
-          print('❌ User denied permission');
-
-          // Mark as denied
           await _permissionManager.markPermissionDenied(permanent: false);
-
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text(
-                  'You can enable notifications later from settings',
-                ),
+                content: Text('You can enable later from settings'),
                 backgroundColor: Colors.orange,
               ),
             );
@@ -237,12 +214,6 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
       );
     } catch (e) {
       print('❌ Error enabling notifications: $e');
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-        );
-      }
     }
   }
 
@@ -253,7 +224,6 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
       builder: (context) => AlertDialog(
         title: const Text('🔔 Notifications Disabled'),
         content: const Text(
-          'You have denied notifications multiple times. '
           'To enable notifications, please go to your device settings.',
         ),
         actions: [
@@ -264,7 +234,6 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
           ElevatedButton(
             onPressed: () {
               Navigator.pop(context);
-              // Open app settings (platform specific)
               _permissionService.openAppSettings();
             },
             style: ElevatedButton.styleFrom(
@@ -277,144 +246,126 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
     );
   }
 
-  // 🔥 Send welcome notification
-  void _sendWelcomeNotification() {
-    Future.delayed(const Duration(seconds: 1), () {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              '📨 Welcome! You\'ll now receive booking notifications',
-            ),
-            backgroundColor: Colors.blue,
-          ),
-        );
-      }
-    });
-  }
-
-  // 🔥 Handle not now
+  // 🔥 Handle Not Now
   Future<void> _handleNotNow() async {
-    print('👋 User clicked Not Now');
-
     setState(() => _showPermissionCard = false);
     await _permissionManager.markPermissionShown('owner_dashboard');
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('You can enable notifications anytime from settings'),
-          duration: Duration(seconds: 2),
-        ),
-      );
-    }
   }
 
-  // 🔥 View bookings
+  // 🔥 Navigation methods
   void _viewBookings() {
-    print('📅 Navigating to bookings');
-
-    // Navigate to bookings screen
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Navigating to bookings...'),
-        duration: Duration(seconds: 1),
-      ),
-    );
-
-    // TODO: Add actual navigation
-    // Navigator.push(context, MaterialPageRoute(builder: (_) => const BookingsScreen()));
+    context.push('/owner/appointments');
   }
 
-  // 🔥 Send test notification (for debugging)
-  Future<void> _sendTestNotification() async {
-    print('🔍 Sending test notification...');
-    print('🔍 hasPermission: $_hasPermission');
+  void _viewAllCustomers() {
+    context.push('/owner/customers');
+  }
 
-    if (!_hasPermission) {
-      // Show permission card if not enabled
-      setState(() {
-        _showPermissionCard = true;
-      });
+  void _viewBarbers() {
+    context.push('/owner/barbers');
+  }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please enable notifications first'),
-          backgroundColor: Colors.orange,
-          duration: Duration(seconds: 2),
-        ),
-      );
-      return;
-    }
+  void _viewRevenue() {
+    context.push('/owner/revenue');
+  }
 
-    // Show sending indicator
+  void _viewBookingDetails(String customerName) {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('📤 Sending test notification...'),
-        duration: Duration(seconds: 1),
+      SnackBar(
+        content: Text('Viewing $customerName\'s booking'),
+        duration: const Duration(seconds: 1),
       ),
     );
+  }
 
-    // Simulate notification
-    Future.delayed(const Duration(seconds: 2), () {
-      if (mounted) {
-        showDialog(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: const Text('📨 Test Notification'),
-            content: const Text(
-              'This is how notifications will appear when customers book.',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('OK'),
-              ),
-            ],
-          ),
-        );
+  // 🔥 Open drawer method
+  void _openDrawer() {
+    try {
+      // Method 1: GlobalKey (most reliable)
+      if (_scaffoldKey.currentState != null) {
+        _scaffoldKey.currentState!.openDrawer();
+        print('✅ Drawer opened via GlobalKey');
       }
-    });
+      // Method 2: Scaffold.of (fallback)
+      else {
+        Scaffold.of(context).openDrawer();
+        print('✅ Drawer opened via Scaffold.of');
+      }
+    } catch (e) {
+      print('❌ Error opening drawer: $e');
+
+      // Emergency fallback - show menu items in dialog
+      _showMenuDialog();
+    }
   }
 
-  // 🔥 Show permission stats
-  Future<void> _showPermissionStats() async {
-    final stats = await _permissionManager.getPermissionStats();
-
-    if (!mounted) return;
-
+  // 🔥 Emergency menu dialog (drawer open nathnam)
+  void _showMenuDialog() {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('📊 Permission Stats'),
-        content: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
+        title: const Text('Menu'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView(
+            shrinkWrap: true,
             children: [
-              _buildStatRow(
-                'System Permission',
-                stats['has_system_permission'],
+              ListTile(
+                leading: const Icon(Icons.dashboard, color: Colors.blue),
+                title: const Text('Dashboard'),
+                onTap: () {
+                  Navigator.pop(context);
+                  // Already in dashboard
+                },
               ),
-              _buildStatRow(
-                'Stored Permission',
-                stats['has_stored_permission'],
+              ListTile(
+                leading: const Icon(Icons.calendar_today, color: Colors.green),
+                title: const Text('Appointments'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _viewBookings();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.people, color: Colors.purple),
+                title: const Text('Customers'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _viewAllCustomers();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.content_cut, color: Colors.orange),
+                title: const Text('Barbers'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _viewBarbers();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.attach_money, color: Colors.green),
+                title: const Text('Revenue'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _viewRevenue();
+                },
               ),
               const Divider(),
-              _buildStatRow('Last Screen', stats['last_screen'] ?? 'none'),
-              _buildStatRow(
-                'Last Denied',
-                stats['last_denied']?.toString() ?? 'never',
+              ListTile(
+                leading: const Icon(Icons.settings, color: Colors.grey),
+                title: const Text('Settings'),
+                onTap: () {
+                  Navigator.pop(context);
+                  context.push('/owner/settings');
+                },
               ),
-              _buildStatRow('User Action', stats['user_action'] ?? 'none'),
-              _buildStatRow('Permanent Deny', stats['permanent_deny']),
-              const Divider(),
-              const Text(
-                'Screen Counts:',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-              ...(stats['screen_counts'] as Map<String, int>).entries.map(
-                (e) => _buildStatRow(e.key, e.value),
+              ListTile(
+                leading: const Icon(Icons.logout, color: Colors.red),
+                title: const Text('Logout'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _logout(context);
+                },
               ),
             ],
           ),
@@ -423,48 +374,6 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('Close'),
-          ),
-          TextButton(
-            onPressed: () async {
-              await _permissionManager.resetPermissionState();
-              Navigator.pop(context);
-              _loadData();
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Permission state reset')),
-              );
-            },
-            child: const Text('Reset', style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Helper for stats dialog
-  Widget _buildStatRow(String label, dynamic value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
-        children: [
-          Expanded(
-            flex: 2,
-            child: Text(
-              '$label:',
-              style: const TextStyle(fontWeight: FontWeight.w500),
-            ),
-          ),
-          Expanded(
-            flex: 3,
-            child: Text(
-              value?.toString() ?? 'null',
-              style: TextStyle(
-                color: value == true
-                    ? Colors.green
-                    : value == false
-                    ? Colors.red
-                    : Colors.blue,
-              ),
-            ),
           ),
         ],
       ),
@@ -476,46 +385,32 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
     showLogoutConfirmation(
       context,
       onLogoutConfirmed: () async {
-        // Show loading dialog
+        // Show loading
+        if (!mounted) return;
+
         showDialog(
           context: context,
           barrierDismissible: false,
-          builder: (context) => const Dialog(
-            backgroundColor: Colors.transparent,
-            insetPadding: EdgeInsets.all(0),
-            child: Center(
-              child: CircularProgressIndicator(color: Colors.white),
-            ),
+          builder: (context) => const Center(
+            child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
           ),
         );
 
         try {
-          // Call your logout function
           await SessionManager.logoutForContinue();
+          appState.refreshState();
 
-          // Close loading dialog
-          if (context.mounted) Navigator.pop(context);
-
-          // Navigate to login/splash screen using GoRouter
           if (context.mounted) {
-            appState.refreshState();
+            Navigator.pop(context); // Close loading
             context.go('/');
-            // OR if you have a specific route for login:
-            // context.go('/login');
-            // OR to clear all routes and start fresh:
-            // context.go('/');
           }
         } catch (e) {
-          // Close loading dialog
-          if (context.mounted) Navigator.pop(context);
-
-          // Show error message
           if (context.mounted) {
+            Navigator.pop(context); // Close loading
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text('Logout failed: ${e.toString()}'),
+                content: Text('Logout failed: $e'),
                 backgroundColor: Colors.red,
-                duration: const Duration(seconds: 3),
               ),
             );
           }
@@ -524,24 +419,72 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
     );
   }
 
+  // 🔥 Build quick action button
+  Widget _buildQuickAction({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Column(
+            children: [
+              Icon(icon, color: color, size: 28),
+              const SizedBox(height: 4),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: color,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      key: _scaffoldKey, // 🔑 මේක හරිම වැදගත්!
+
       appBar: AppBar(
         title: const Text('Owner Dashboard'),
         backgroundColor: const Color(0xFFFF6B8B),
         foregroundColor: Colors.white,
-        actions: [
-          // Debug button (only in debug mode)
-          if (kDebugMode)
-            IconButton(
-              icon: const Icon(Icons.bug_report),
-              onPressed: _showPermissionStats,
-              tooltip: 'Permission Stats',
-            ),
+        elevation: 0,
 
+        // 🟢 Menu button - 100% working
+        leading: IconButton(
+          icon: const Icon(Icons.menu),
+          onPressed: _openDrawer, // කෙලින්ම method call
+          tooltip: 'Menu',
+          iconSize: 28,
+        ),
+
+        actions: [
+          // ➕ Add Barber Button (Notification icon එක ළඟ)
+          IconButton(
+            icon: const Icon(Icons.person_add_alt_1),
+            onPressed: () {
+              context.push('/owner/add-barber');
+            },
+            tooltip: 'Add Barber',
+          ),
           // 🔔 Notification bell with badge
           Stack(
+            clipBehavior: Clip.none,
             children: [
               IconButton(
                 icon: const Icon(Icons.notifications_outlined),
@@ -553,13 +496,13 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
                   top: 8,
                   child: Container(
                     padding: const EdgeInsets.all(2),
-                    decoration: BoxDecoration(
+                    decoration: const BoxDecoration(
                       color: Colors.red,
-                      borderRadius: BorderRadius.circular(10),
+                      shape: BoxShape.circle,
                     ),
                     constraints: const BoxConstraints(
-                      minWidth: 16,
-                      minHeight: 16,
+                      minWidth: 18,
+                      minHeight: 18,
                     ),
                     child: Text(
                       '$_pendingBookings',
@@ -575,23 +518,27 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
             ],
           ),
 
-          // Test notification button (debug only)
-          if (kDebugMode)
-            IconButton(
-              icon: const Icon(Icons.send),
-              onPressed: _sendTestNotification,
-              tooltip: 'Send test notification',
-            ),
-
-          IconButton(
-            onPressed: () => _logout(context),
-            icon: const Icon(Icons.logout),
-            tooltip: 'Logout',
-          ),
+          // Refresh button
+          IconButton(icon: const Icon(Icons.refresh), onPressed: _loadData),
         ],
       ),
+
+      // 🟢 Drawer - SideMenu widget
+      drawer: SideMenu(
+        userRole: 'owner',
+        userName: 'Salon Owner',
+        // userEmail: 'owner@salon.com',
+        profileImageUrl: null,
+        onMenuItemSelected: () {
+          // Refresh data when returning from menu
+          _loadData();
+        },
+      ),
+
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(
+              child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+            )
           : RefreshIndicator(
               onRefresh: _loadData,
               color: const Color(0xFFFF6B8B),
@@ -599,7 +546,7 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
                 physics: const AlwaysScrollableScrollPhysics(),
                 child: Column(
                   children: [
-                    // 🔥 PERMISSION CARD (if needed)
+                    // 🔥 PERMISSION CARD
                     if (_showPermissionCard && !_hasPermission)
                       PermissionCard(
                         onEnable: _enableNotifications,
@@ -610,78 +557,254 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
                         compact: false,
                       ),
 
-                    // Stats Cards
+                    // Welcome Message
                     Padding(
                       padding: const EdgeInsets.all(16),
-                      child: Column(
+                      child: Row(
                         children: [
-                          Row(
-                            children: [
-                              Flexible(
-                                flex: 1,
-                                child: _buildStatCard(
-                                  title: 'Today\'s Appointments',
-                                  value: '$_todayAppointments',
-                                  icon: Icons.calendar_today,
-                                  color: Colors.blue,
-                                ),
-                              ),
-                              const SizedBox(width: 16),
-                              Flexible(
-                                flex: 1,
-                                child: _buildStatCard(
-                                  title: 'Pending Bookings',
-                                  value: '$_pendingBookings',
-                                  icon: Icons.pending_actions,
-                                  color: Colors.orange,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 16),
-                          _buildStatCard(
-                            title: 'Today\'s Revenue',
-                            value: 'Rs. $_totalRevenue',
-                            icon: Icons.currency_rupee,
-                            color: Colors.green,
-                            fullWidth: true,
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    // Recent Bookings Section
-                    Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               const Text(
-                                'Recent Bookings',
+                                'Welcome back,',
                                 style: TextStyle(
-                                  fontSize: 18,
+                                  fontSize: 14,
+                                  color: Colors.grey,
+                                ),
+                              ),
+                              const Text(
+                                'Salon Owner 👑',
+                                style: TextStyle(
+                                  fontSize: 20,
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),
-                              TextButton(
-                                onPressed: _viewBookings,
-                                child: const Text('View All'),
-                              ),
                             ],
                           ),
-                          const SizedBox(height: 12),
-                          ...List.generate(
-                            3,
-                            (index) => _buildBookingTile(index),
+                          const Spacer(),
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: const Color(
+                                0xFFFF6B8B,
+                              ).withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Row(
+                              children: [
+                                Icon(
+                                  Icons.calendar_today,
+                                  size: 16,
+                                  color: Color(0xFFFF6B8B),
+                                ),
+                                SizedBox(width: 4),
+                                Text(
+                                  'March 4, 2026',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                    color: Color(0xFFFF6B8B),
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ],
                       ),
                     ),
 
-                    // Permission status indicator
+                    // Stats Cards Row 1
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: DashboardStatCard(
+                              title: 'Today\'s Appointments',
+                              value: '$_todayAppointments',
+                              icon: Icons.calendar_today,
+                              color: Colors.blue,
+                              percentageChange: 12.5,
+                              onTap: _viewBookings,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: DashboardStatCard(
+                              title: 'Pending Bookings',
+                              value: '$_pendingBookings',
+                              icon: Icons.pending_actions,
+                              color: Colors.orange,
+                              subtitle: 'Awaiting confirmation',
+                              onTap: _viewBookings,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    // Stats Cards Row 2
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: DashboardStatCard(
+                              title: 'Total Customers',
+                              value: '$_totalCustomers',
+                              icon: Icons.people,
+                              color: Colors.purple,
+                              percentageChange: 8.2,
+                              onTap: _viewAllCustomers,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: DashboardStatCard(
+                              title: 'Active Barbers',
+                              value: '$_activeBarbers',
+                              icon: Icons.content_cut,
+                              color: Colors.green,
+                              subtitle: '3 working today',
+                              onTap: _viewBarbers,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    // Revenue Card (full width)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: DashboardStatCard(
+                        title: 'Today\'s Revenue',
+                        value: 'Rs. $_totalRevenue',
+                        icon: Icons.currency_rupee,
+                        color: Colors.green,
+                        fullWidth: true,
+                        percentageChange: 5.0,
+                        showProgress: true,
+                        onTap: _viewRevenue,
+                      ),
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    // Quick Actions
+                    const SectionHeader(
+                      title: 'Quick Actions',
+                      actionText: 'See All',
+                    ),
+                    const SizedBox(height: 8),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Row(
+                        children: [
+                          _buildQuickAction(
+                            icon: Icons.add_circle_outline,
+                            label: 'New Booking',
+                            color: Colors.blue,
+                            onTap: () {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'New Booking feature coming soon',
+                                  ),
+                                  duration: Duration(seconds: 1),
+                                ),
+                              );
+                            },
+                          ),
+                          const SizedBox(width: 12),
+                          _buildQuickAction(
+                            icon: Icons.person_add_outlined,
+                            label: 'Add Barber',
+                            color: Colors.purple,
+                            onTap: () {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'Add Barber feature coming soon',
+                                  ),
+                                  duration: Duration(seconds: 1),
+                                ),
+                              );
+                            },
+                          ),
+                          const SizedBox(width: 12),
+                          _buildQuickAction(
+                            icon: Icons.inventory_2_outlined,
+                            label: 'Add Service',
+                            color: Colors.orange,
+                            onTap: () {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'Add Service feature coming soon',
+                                  ),
+                                  duration: Duration(seconds: 1),
+                                ),
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    // Recent Bookings Section
+                    const SectionHeader(
+                      title: 'Recent Bookings',
+                      actionText: 'View All',
+                    ),
+                    const SizedBox(height: 8),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Column(
+                        children: [
+                          BookingTile(
+                            customerName: 'Nimal Perera',
+                            serviceName: 'Hair Cut',
+                            time: '10:30 AM',
+                            status: 'Confirmed',
+                            statusColor: Colors.green,
+                            barberName: 'Kamal',
+                            price: 1500,
+                            onTap: () => _viewBookingDetails('Nimal Perera'),
+                          ),
+                          BookingTile(
+                            customerName: 'Kamal Silva',
+                            serviceName: 'Facial',
+                            time: '2:00 PM',
+                            status: 'Pending',
+                            statusColor: Colors.orange,
+                            barberName: 'Sunil',
+                            price: 2500,
+                            onTap: () => _viewBookingDetails('Kamal Silva'),
+                          ),
+                          BookingTile(
+                            customerName: 'Sunil Weerasinghe',
+                            serviceName: 'Massage',
+                            time: '4:30 PM',
+                            status: 'Completed',
+                            statusColor: Colors.blue,
+                            barberName: 'Nuwan',
+                            price: 3000,
+                            onTap: () =>
+                                _viewBookingDetails('Sunil Weerasinghe'),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    // Notification Status
                     if (_hasPermission)
                       Container(
                         margin: const EdgeInsets.only(bottom: 16),
@@ -718,123 +841,6 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
                 ),
               ),
             ),
-    );
-  }
-
-  // 🔥 Build stat card
-  Widget _buildStatCard({
-    required String title,
-    required String value,
-    required IconData icon,
-    required Color color,
-    bool fullWidth = false,
-  }) {
-    return Container(
-      width: fullWidth ? double.infinity : null,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withValues(alpha: 0.1),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.1),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(icon, color: color, size: 20),
-              ),
-              const Spacer(),
-              Text(
-                value,
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: color,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(title, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
-        ],
-      ),
-    );
-  }
-
-  // 🔥 Build booking tile
-  Widget _buildBookingTile(int index) {
-    final customers = ['Nimal Perera', 'Kamal Silva', 'Sunil Weerasinghe'];
-    final times = ['10:30 AM', '2:00 PM', '4:30 PM'];
-    final services = ['Hair Cut', 'Facial', 'Massage'];
-    final status = ['Confirmed', 'Pending', 'Completed'];
-    final statusColors = [Colors.green, Colors.orange, Colors.blue];
-
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      elevation: 1,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: ListTile(
-        leading: CircleAvatar(
-          backgroundColor: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
-          child: Text(
-            customers[index][0],
-            style: const TextStyle(
-              color: Color(0xFFFF6B8B),
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-        ),
-        title: Text(
-          customers[index],
-          style: const TextStyle(fontWeight: FontWeight.w600),
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('${services[index]} • ${times[index]}'),
-            const SizedBox(height: 4),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                color: statusColors[index].withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Text(
-                status[index],
-                style: TextStyle(
-                  fontSize: 10,
-                  color: statusColors[index],
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ],
-        ),
-        trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-        onTap: () {
-          print('📅 Tapped on booking: ${customers[index]}');
-          // View booking details
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Viewing ${customers[index]}\'s booking'),
-              duration: const Duration(seconds: 1),
-            ),
-          );
-        },
-      ),
     );
   }
 }

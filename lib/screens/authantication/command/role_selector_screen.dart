@@ -29,7 +29,7 @@ class _RoleSelectorScreenState extends State<RoleSelectorScreen> {
     setState(() => _isLoading = true);
     
     try {
-          // Save selected role to SessionManager
+      // Save selected role to SessionManager
       await SessionManager.saveCurrentRole(role);
       
       // Update app state
@@ -66,6 +66,9 @@ class _RoleSelectorScreenState extends State<RoleSelectorScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // 🔥 Safely convert roles to List<String>
+    final List<String> safeRoles = widget.roles.map((e) => e.toString()).toList();
+    
     return Scaffold(
       backgroundColor: const Color(0xFF0F1820),
       body: SafeArea(
@@ -96,7 +99,7 @@ class _RoleSelectorScreenState extends State<RoleSelectorScreen> {
               const SizedBox(height: 40),
               
               // Role buttons
-              if (widget.roles.contains('owner'))
+              if (safeRoles.contains('owner'))
                 _buildRoleButton(
                   title: 'Business Owner',
                   subtitle: 'Manage your salon, staff, and appointments',
@@ -105,10 +108,10 @@ class _RoleSelectorScreenState extends State<RoleSelectorScreen> {
                   onTap: () => _selectRole('owner'),
                 ),
               
-              if (widget.roles.contains('owner') && widget.roles.contains('barber'))
+              if (safeRoles.contains('owner') && safeRoles.contains('barber'))
                 const SizedBox(height: 16),
               
-              if (widget.roles.contains('barber'))
+              if (safeRoles.contains('barber'))
                 _buildRoleButton(
                   title: 'Barber',
                   subtitle: 'View your schedule and manage appointments',
@@ -117,11 +120,11 @@ class _RoleSelectorScreenState extends State<RoleSelectorScreen> {
                   onTap: () => _selectRole('barber'),
                 ),
               
-              if ((widget.roles.contains('owner') || widget.roles.contains('barber')) && 
-                  widget.roles.contains('customer'))
+              if ((safeRoles.contains('owner') || safeRoles.contains('barber')) && 
+                  safeRoles.contains('customer'))
                 const SizedBox(height: 16),
               
-              if (widget.roles.contains('customer'))
+              if (safeRoles.contains('customer'))
                 _buildRoleButton(
                   title: 'Customer',
                   subtitle: 'Book appointments and manage your profile',

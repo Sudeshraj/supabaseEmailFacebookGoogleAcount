@@ -3,11 +3,13 @@ import 'package:flutter/material.dart';
 class NameEntry extends StatefulWidget {
   final void Function(String, String) onNext;
   final PageController controller;
+  final VoidCallback onBack;
 
   const NameEntry({
     super.key,
     required this.onNext,
     required this.controller,
+    required this.onBack,
   });
 
   @override
@@ -35,8 +37,10 @@ class _NameEntryState extends State<NameEntry>
       duration: const Duration(milliseconds: 600),
     );
 
-    _fadeAnimation =
-        CurvedAnimation(parent: _animationController, curve: Curves.easeIn);
+    _fadeAnimation = CurvedAnimation(
+      parent: _animationController,
+      curve: Curves.easeIn,
+    );
 
     _scaleAnimation = Tween<double>(begin: 0.95, end: 1.0).animate(
       CurvedAnimation(parent: _animationController, curve: Curves.easeOutBack),
@@ -68,6 +72,11 @@ class _NameEntryState extends State<NameEntry>
     super.dispose();
   }
 
+  void _handleBack(BuildContext context) {
+    // Simply pop to go back to DataConsentScreen
+    Navigator.of(context).pop();
+  }
+
   @override
   Widget build(BuildContext context) {
     final double screenWidth = MediaQuery.of(context).size.width;
@@ -85,15 +94,16 @@ class _NameEntryState extends State<NameEntry>
               color: screenWidth > 700
                   ? const Color(0xFF131C27)
                   : Colors.transparent,
-              borderRadius:
-                  screenWidth > 700 ? BorderRadius.circular(16) : null,
+              borderRadius: screenWidth > 700
+                  ? BorderRadius.circular(16)
+                  : null,
               boxShadow: screenWidth > 700
                   ? [
                       BoxShadow(
                         color: Colors.black.withValues(alpha: 0.3),
                         blurRadius: 12,
                         offset: const Offset(0, 4),
-                      )
+                      ),
                     ]
                   : [],
             ),
@@ -104,18 +114,19 @@ class _NameEntryState extends State<NameEntry>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-
                     /// ⭐ BACK ARROW INSIDE FRAME ⭐
                     IconButton(
                       padding: EdgeInsets.zero,
                       alignment: Alignment.centerLeft,
                       icon: const Icon(Icons.arrow_back, color: Colors.white),
-                      onPressed: () {
-                        widget.controller.previousPage(
-                          duration: const Duration(milliseconds: 300),
-                          curve: Curves.ease,
-                        );
-                      },
+                      // onPressed: () {
+                      //   widget.controller.previousPage(
+                      //     duration: const Duration(milliseconds: 300),
+                      //     curve: Curves.ease,
+                      //   );
+                      // },
+                      // onPressed: () => _handleBack(context),
+                      onPressed: widget.onBack,
                     ),
 
                     const SizedBox(height: 10),
@@ -133,10 +144,7 @@ class _NameEntryState extends State<NameEntry>
 
                     const Text(
                       "Enter the name you use in real life.",
-                      style: TextStyle(
-                        fontSize: 15,
-                        color: Colors.white70,
-                      ),
+                      style: TextStyle(fontSize: 15, color: Colors.white70),
                     ),
 
                     const SizedBox(height: 28),
@@ -152,7 +160,8 @@ class _NameEntryState extends State<NameEntry>
                               hintStyle: const TextStyle(color: Colors.white54),
                               enabledBorder: OutlineInputBorder(
                                 borderSide: BorderSide(
-                                  color: _showError &&
+                                  color:
+                                      _showError &&
                                           _firstNameController.text
                                               .trim()
                                               .isEmpty
@@ -163,7 +172,8 @@ class _NameEntryState extends State<NameEntry>
                               ),
                               focusedBorder: OutlineInputBorder(
                                 borderSide: BorderSide(
-                                  color: _showError &&
+                                  color:
+                                      _showError &&
                                           _firstNameController.text
                                               .trim()
                                               .isEmpty
@@ -188,7 +198,8 @@ class _NameEntryState extends State<NameEntry>
                               hintStyle: const TextStyle(color: Colors.white54),
                               enabledBorder: OutlineInputBorder(
                                 borderSide: BorderSide(
-                                  color: _showError &&
+                                  color:
+                                      _showError &&
                                           _lastNameController.text
                                               .trim()
                                               .isEmpty
@@ -199,7 +210,8 @@ class _NameEntryState extends State<NameEntry>
                               ),
                               focusedBorder: OutlineInputBorder(
                                 borderSide: BorderSide(
-                                  color: _showError &&
+                                  color:
+                                      _showError &&
                                           _lastNameController.text
                                               .trim()
                                               .isEmpty
@@ -219,10 +231,7 @@ class _NameEntryState extends State<NameEntry>
                       const SizedBox(height: 8),
                       const Text(
                         "Please fill in both first and last name",
-                        style: TextStyle(
-                          color: Colors.redAccent,
-                          fontSize: 13,
-                        ),
+                        style: TextStyle(color: Colors.redAccent, fontSize: 13),
                       ),
                     ],
 
@@ -234,9 +243,9 @@ class _NameEntryState extends State<NameEntry>
                       child: ElevatedButton(
                         onPressed: _isValid
                             ? () => widget.onNext(
-                                  _firstNameController.text.trim(),
-                                  _lastNameController.text.trim(),
-                                )
+                                _firstNameController.text.trim(),
+                                _lastNameController.text.trim(),
+                              )
                             : null,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFF1877F3),

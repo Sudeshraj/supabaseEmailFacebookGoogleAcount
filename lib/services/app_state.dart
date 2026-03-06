@@ -170,7 +170,7 @@ class AppState extends ChangeNotifier {
       _setCurrentUser(Supabase.instance.client.auth.currentUser);
 
       await _checkAuthenticationState();
-      await _updateUserProfile();
+      // await _updateUserProfile();
 
       _lastUpdateTime = DateTime.now();
 
@@ -230,60 +230,62 @@ class AppState extends ChangeNotifier {
   }
 
   // Logout user
-  Future<void> logout() async {
-    _setLoading(true);
+// Logout user
+Future<void> logout() async {
+  _setLoading(true);
 
-    try {
-      final supabase = Supabase.instance.client;
-      final user = supabase.auth.currentUser;
-      final email = user?.email;
+  try {
+    final supabase = Supabase.instance.client;
+    final user = supabase.auth.currentUser;
+    final email = user?.email;
 
-      if (user != null && email != null) {
-        final currentSession = supabase.auth.currentSession;
-        final refreshToken = currentSession?.refreshToken;
-        final rememberMe = await SessionManager.isRememberMeEnabled();
+    if (user != null && email != null) {
+      final currentSession = supabase.auth.currentSession;
+      final refreshToken = currentSession?.refreshToken;
+      final rememberMe = await SessionManager.isRememberMeEnabled();
 
-        if (rememberMe && refreshToken != null) {
-          final provider =
-              _loginProvider ??
-              user.userMetadata?['provider']?.toString().toLowerCase() ??
-              'email';
+      if (rememberMe && refreshToken != null) {
+        final provider =
+            _loginProvider ??
+            user.userMetadata?['provider']?.toString().toLowerCase() ??
+            'email';
 
-          await SessionManager.saveUserProfile(
-            email: email,
-            userId: user.id,
-            name: user.userMetadata?['full_name'] ?? email.split('@').first,
-            rememberMe: rememberMe,
-            refreshToken: refreshToken,
-            provider: provider,
-          );
-        }
+        await SessionManager.saveUserProfile(
+          email: email,
+          userId: user.id,
+          name: user.userMetadata?['full_name'] ?? email.split('@').first,
+          rememberMe: rememberMe,
+          refreshToken: refreshToken,
+          provider: provider,
+        );
       }
-
-      await supabase.auth.signOut();
-
-      _setLoggedIn(false);
-      _setEmailVerified(false);
-      _setProfileCompleted(false);
-      _setRoles([]); // Clear all roles
-      _setCurrentRole(null); // Clear current role
-      _setCurrentEmail(null);
-      _setLoginProvider(null);
-
-      developer.log('User logged out', name: 'AppState');
-    } catch (e, stackTrace) {
-      developer.log(
-        'Logout error: $e',
-        name: 'AppState',
-        error: e,
-        stackTrace: stackTrace,
-      );
-      _setErrorMessage('Logout failed');
-      rethrow;
-    } finally {
-      _setLoading(false);
     }
+
+    await supabase.auth.signOut();
+
+    // 🔥 CRITICAL: Clear all roles and current role
+    _setLoggedIn(false);
+    _setEmailVerified(false);
+    _setProfileCompleted(false);
+    _setRoles([]); // Clear all roles
+    _setCurrentRole(null); // Clear current role
+    _setCurrentEmail(null);
+    _setLoginProvider(null);
+
+    developer.log('User logged out', name: 'AppState');
+  } catch (e, stackTrace) {
+    developer.log(
+      'Logout error: $e',
+      name: 'AppState',
+      error: e,
+      stackTrace: stackTrace,
+    );
+    _setErrorMessage('Logout failed');
+    rethrow;
+  } finally {
+    _setLoading(false);
   }
+}
 
   /// Logout for continue screen
   Future<void> logoutForContinue() async {
@@ -564,35 +566,18 @@ class AppState extends ChangeNotifier {
       _setLoginProvider(provider);
       _setCurrentEmail(email);
 
-      final rememberMe = await SessionManager.isRememberMeEnabled();
-      if (rememberMe) {
-        final session = supabase.auth.currentSession;
-
-        await SessionManager.saveUserProfile(
-          email: email,
-          userId: user.id,
-          name: user.userMetadata?['full_name'] ?? email.split('@').first,
-          photo:
-              user.userMetadata?['avatar_url'] ?? user.userMetadata?['picture'],
-          rememberMe: rememberMe,
-          provider: provider,
-          accessToken: session?.accessToken,
-          refreshToken: session?.refreshToken,
-        );
-      }
-
       // Get ALL profiles for this user (multiple roles)
       final profiles = await supabase
           .from('profiles')
           .select('''
-            id, 
-            is_blocked, 
-            is_active, 
-            role_id,
-            roles!inner (
-              name
-            )
-          ''')
+          id, 
+          is_blocked, 
+          is_active, 
+          role_id,
+          roles!inner (
+            name
+          )
+        ''')
           .eq('id', user.id);
 
       _setProfileCompleted(profiles.isNotEmpty);
@@ -627,7 +612,26 @@ class AppState extends ChangeNotifier {
         final uniqueRoles = roleNames.toSet().toList();
         _setRoles(uniqueRoles);
 
-        // Get current role from SessionManager
+        final rememberMe = await SessionManager.isRememberMeEnabled();
+        if (rememberMe) {
+          final session = supabase.auth.currentSession;
+
+          await SessionManager.saveUserProfile(
+            email: email,
+            userId: user.id,
+            name: user.userMetadata?['full_name'] ?? email.split('@').first,
+            photo:
+                user.userMetadata?['avatar_url'] ??
+                user.userMetadata?['picture'],
+            roles: uniqueRoles,
+            rememberMe: rememberMe,
+            provider: provider,
+            accessToken: session?.accessToken,
+            refreshToken: session?.refreshToken,
+          );
+        }
+
+        // 🔥 FIX: Get current role from SessionManager, but DON'T save it here
         String? savedCurrentRole = await SessionManager.getCurrentRole();
 
         // If saved role is valid, use it
@@ -635,17 +639,19 @@ class AppState extends ChangeNotifier {
             uniqueRoles.contains(savedCurrentRole)) {
           _setCurrentRole(savedCurrentRole);
         }
-        // Otherwise, use first role or default to 'customer'
+        // If no saved role or saved role invalid, DON'T save a default role
         else {
+          // Just set the current role in memory, but don't save to SessionManager
           final defaultRole = uniqueRoles.isNotEmpty
               ? uniqueRoles.first
               : 'customer';
           _setCurrentRole(defaultRole);
-          await SessionManager.saveCurrentRole(defaultRole);
+          // 🔥 REMOVED: await SessionManager.saveCurrentRole(defaultRole);
+          // Don't save to SessionManager here!
         }
 
         developer.log(
-          'Profile updated: roles=$uniqueRoles, current=$_currentRole, provider=$provider',
+          'Profile updated: roles=$uniqueRoles, current=$_currentRole, provider=$provider (saved role not stored)',
           name: 'AppState',
         );
       } else {
@@ -668,11 +674,11 @@ class AppState extends ChangeNotifier {
       final profiles = await supabase
           .from('profiles')
           .select('''
-            role_id,
-            roles!inner (
-              name
-            )
-          ''')
+          role_id,
+          roles!inner (
+            name
+          )
+        ''')
           .eq('id', userId);
 
       final List<String> roleNames = [];
@@ -685,12 +691,15 @@ class AppState extends ChangeNotifier {
 
       _setRoles(roleNames);
 
+      // 🔥 FIX: Don't save role here either
       final currentRole = roleNames.isNotEmpty ? roleNames.first : 'customer';
       _setCurrentRole(currentRole);
 
-      await SessionManager.saveCurrentRole(currentRole);
+      // 🔥 REMOVED: await SessionManager.saveCurrentRole(currentRole);
 
-      debugPrint('User roles initialized: $roleNames, current: $currentRole');
+      debugPrint(
+        'User roles initialized: $roleNames, current: $currentRole (not saved)',
+      );
     } catch (e) {
       debugPrint('Failed to get user roles: $e');
       _setRoles([]);

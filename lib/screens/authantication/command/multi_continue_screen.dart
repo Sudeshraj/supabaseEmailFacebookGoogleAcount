@@ -2,7 +2,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/config/environment_manager.dart';
 import 'package:flutter_application_1/main.dart';
-// import 'package:flutter_application_1/router/auth_gate.dart';
 import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
 import 'package:flutter_application_1/services/session_manager.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -23,11 +22,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
   List<Map<String, dynamic>> profiles = [];
   bool _loading = false;
   String? _selectedEmail;
-  final Map<String, bool> _oauthLoadingStates = {};
+  final Map<String, bool> _profileLoadingStates = {};
   bool _isGoogleImageRateLimited = false;
   DateTime? _lastGoogleImageError;
-
-  // Selection mode variables
   bool _selectionMode = false;
   Set<String> _selectedProfiles = {};
   int _selectedCount = 0;
@@ -35,65 +32,74 @@ class _ContinueScreenState extends State<ContinueScreen> {
   @override
   void initState() {
     super.initState();
+    _profileLoadingStates.clear();
     _loadProfiles();
     _checkCompliance();
   }
 
-Future<void> _loadProfiles() async {
-  try {
-    // Load all profiles with remember me enabled
-    final allProfiles = await SessionManager.getProfiles();
-    final rememberMeProfiles = allProfiles
-        .where((p) => p['rememberMe'] == true)
-        .toList();
+  // ============================================================
+  // 🔥 LOAD PROFILES - FIXED VERSION
+  // ============================================================
+  Future<void> _loadProfiles() async {
+    try {
+      final allProfiles = await SessionManager.getProfiles();
+      debugPrint('📥 All profiles loaded: ${allProfiles.length}');
 
-    // Sort profiles: OAuth first, then email
-    rememberMeProfiles.sort((a, b) {
-      final aProvider = a['provider'] as String? ?? 'email';
-      final bProvider = b['provider'] as String? ?? 'email';
+      final List<Map<String, dynamic>> expandedProfiles = [];
 
-      if (aProvider != 'email' && bProvider == 'email') return -1;
-      if (aProvider == 'email' && bProvider != 'email') return 1;
-      return 0;
-    });
+      for (var profile in allProfiles.where((p) => p['rememberMe'] == true)) {
+        final roles = profile['roles'] as List? ?? [];
+        final email = profile['email'] as String? ?? 'unknown';
 
-    // 🔥 FIX: Ensure each profile has roles array
-    for (var profile in rememberMeProfiles) {
-      // Ensure roles is a List
-      if (profile['roles'] == null) {
-        profile['roles'] = [];
-      } else if (profile['roles'] is! List) {
-        // Convert to List if it's not already
-        try {
-          final rolesList = List<String>.from(profile['roles'] as List? ?? []);
-          profile['roles'] = rolesList;
-        } catch (e) {
-          profile['roles'] = [];
+        debugPrint('📋 Processing profile: $email, roles: $roles');
+
+        if (roles.isEmpty) {
+          expandedProfiles.add(Map.from(profile));
+          debugPrint('  → Added profile with no roles');
+        } else if (roles.length == 1) {
+          expandedProfiles.add(Map.from(profile));
+          debugPrint('  → Added profile with single role: ${roles.first}');
+        } else {
+          debugPrint('  → Splitting into ${roles.length} profiles');
+          for (var role in roles) {
+            final roleProfile = Map<String, dynamic>.from(profile);
+            roleProfile['roles'] = [role.toString()];
+            expandedProfiles.add(roleProfile);
+            debugPrint('    → Created profile for role: $role');
+          }
         }
       }
-      
-      await _optimizeProfileImage(profile);
-    }
 
-    if (!mounted) return;
-    setState(() => profiles = rememberMeProfiles);
+      expandedProfiles.sort((a, b) {
+        final aProvider = a['provider'] as String? ?? 'email';
+        final bProvider = b['provider'] as String? ?? 'email';
+        if (aProvider != 'email' && bProvider == 'email') return -1;
+        if (aProvider == 'email' && bProvider != 'email') return 1;
+        return 0;
+      });
 
-    if (kDebugMode) {
-      debugPrint('Loaded ${profiles.length} profiles for continue screen');
-      for (var p in profiles) {
-        debugPrint('Profile: ${p['email']}, roles: ${p['roles']}');
+      for (var profile in expandedProfiles) {
+        await _optimizeProfileImage(profile);
       }
+
+      if (!mounted) return;
+      setState(() {
+        profiles = expandedProfiles;
+        debugPrint('✅ Final profiles count: ${expandedProfiles.length}');
+        for (var i = 0; i < expandedProfiles.length; i++) {
+          debugPrint(
+            '  Profile $i: ${expandedProfiles[i]['email']} - Role: ${expandedProfiles[i]['roles']?.first}',
+          );
+        }
+      });
+    } catch (e) {
+      debugPrint('❌ Error loading profiles: $e');
     }
-  } catch (e) {
-    debugPrint('Error loading profiles: $e');
   }
-}
 
   Future<void> _optimizeProfileImage(Map<String, dynamic> profile) async {
     try {
-      // Try different possible photo keys
       String? photoUrl;
-
       if (profile['photo'] != null && (profile['photo'] as String).isNotEmpty) {
         photoUrl = profile['photo'] as String;
       } else if (profile['avatar_url'] != null &&
@@ -108,20 +114,13 @@ Future<void> _loadProfiles() async {
       }
 
       if (photoUrl != null && photoUrl.isNotEmpty) {
-        // Clean up URL
         photoUrl = photoUrl.replaceAll('"', '').trim();
-
-        // Ensure proper protocol
         if (!photoUrl.startsWith('http')) {
           photoUrl = 'https:$photoUrl';
         }
-
-        // Optimize Google URLs
         if (photoUrl.contains('googleusercontent.com')) {
           photoUrl = _optimizeGoogleProfileUrl(photoUrl) ?? photoUrl;
         }
-
-        // Update profile with optimized URL
         profile['photo'] = photoUrl;
       }
     } catch (e) {
@@ -133,29 +132,19 @@ Future<void> _loadProfiles() async {
     if (photoUrl == null || !photoUrl.contains('googleusercontent.com')) {
       return photoUrl;
     }
-
     try {
-      // Simple optimization for Google URLs
-      if (photoUrl.startsWith('//')) {
-        photoUrl = 'https:$photoUrl';
-      }
-
-      // Check if already has size parameter
+      if (photoUrl.startsWith('//')) photoUrl = 'https:$photoUrl';
       final hasSizeParam =
           photoUrl.contains('=s96') ||
           photoUrl.contains('=s') ||
           photoUrl.contains('?sz=') ||
           photoUrl.contains('/s96-c/');
-
       if (hasSizeParam) {
-        // Replace with larger size if needed
         if (photoUrl.contains('=s96')) {
           photoUrl = photoUrl.replaceAll('=s96', '=s200');
         }
         return photoUrl;
       }
-
-      // Add size parameter if missing
       if (!photoUrl.contains('=s') && !photoUrl.contains('?sz=')) {
         if (photoUrl.contains('?')) {
           return '$photoUrl&sz=200';
@@ -163,7 +152,6 @@ Future<void> _loadProfiles() async {
           return '$photoUrl?sz=200';
         }
       }
-
       return photoUrl;
     } catch (e) {
       debugPrint('Error optimizing Google URL: $e');
@@ -173,600 +161,191 @@ Future<void> _loadProfiles() async {
 
   void _handleGoogleImageError() {
     final now = DateTime.now();
-
     if (_lastGoogleImageError != null) {
       final difference = now.difference(_lastGoogleImageError!);
       if (difference.inMinutes < 5) {
         _isGoogleImageRateLimited = true;
-
-        // Schedule reset
         Future.delayed(const Duration(minutes: 5), () {
-          if (mounted) {
-            setState(() {
-              _isGoogleImageRateLimited = false;
-            });
-          }
+          if (mounted) setState(() => _isGoogleImageRateLimited = false);
         });
       }
     }
-
     _lastGoogleImageError = now;
   }
 
   Future<void> _checkCompliance() async {
     final rememberMe = await SessionManager.isRememberMeEnabled();
-    if (!rememberMe) {
-      setState(() {});
-    }
+    if (!rememberMe) setState(() {});
   }
 
-  // Handle OAuth login with improved error handling
-  Future<void> _handleOAuthLogin(Map<String, dynamic> profile) async {
-    if (_selectionMode) {
-      _toggleProfileSelection(profile);
-      return;
-    }
+  // ============================================================
+  // 🔥 HANDLE PROFILE LOGIN - FIXED WITH AUTO-LOGIN
+  // ============================================================
+  Future<void> _handleProfileLogin(
+    Map<String, dynamic> profile,
+    String role,
+    String uniqueId,
+  ) async {
+    debugPrint('🔐 _handleProfileLogin - Role: $role, UniqueId: $uniqueId');
+    debugPrint('📧 Email: ${profile['email']}');
+    debugPrint('🔑 Provider: ${profile['provider']}');
 
     final email = profile['email'] as String?;
     final provider = profile['provider'] as String?;
 
-    if (email == null || provider == null || provider == 'email') {
-      await _handleEmailLogin(profile);
+    if (email == null) {
+      debugPrint('❌ No email found');
       return;
     }
 
-    if (_oauthLoadingStates[email] == true) return;
-
     setState(() {
-      _oauthLoadingStates[email] = true;
+      _profileLoadingStates[uniqueId] = true;
       _selectedEmail = email;
     });
 
     try {
-      if (kDebugMode) {
-        print(' Attempting OAuth login for: $email ($provider)');
+      bool loginSuccess = false;
+
+      // 🔥 TRY AUTO-LOGIN FIRST - FIXED
+      debugPrint('🔄 Attempting auto login for: $email');
+      final autoSuccess = await SessionManager.tryAutoLogin(email);
+      
+      if (autoSuccess) {
+        debugPrint('✅ Auto login successful!');
+        loginSuccess = true;
+      } else if (provider == 'email') {
+        debugPrint('🔐 Email login flow started (auto-login failed)');
+        final password = await _showPasswordDialog(email);
+        if (password != null) {
+          final response = await supabase.auth.signInWithPassword(
+            email: email,
+            password: password,
+          );
+          loginSuccess = response.user != null;
+          debugPrint('📊 Email login success: $loginSuccess');
+        }
+      } else {
+        debugPrint('🔐 OAuth login flow started for $provider (auto-login failed)');
+        loginSuccess = await _handleOAuthLoginForProfile(profile);
+        debugPrint('📊 OAuth login success: $loginSuccess');
       }
 
-      // Clear any existing session before starting new OAuth flow
-      await supabase.auth.signOut();
+      if (loginSuccess && mounted) {
+        debugPrint('✅ Login successful for role: $role');
+        
+        // 🔥 Check current user after login
+        final currentUser = supabase.auth.currentUser;
+        debugPrint('👤 Current user after login: ${currentUser?.email}');
+        
+        // Check if profile completed
+        final hasProfile = await SessionManager.hasProfile();
+        debugPrint('📋 Has local profile: $hasProfile');
 
-      // Add delay to ensure storage is cleared
-      await Future.delayed(const Duration(milliseconds: 500));
+        // Save this role
+        await SessionManager.saveCurrentRole(role);
+        debugPrint('💾 Saved role: $role');
 
-      // Different handling for each provider
-      switch (provider) {
-        case 'google':
-          await _signInWithGoogle(email);
-          break;
-        case 'facebook':
-          await _signInWithFacebook(email);
-          break;
-        case 'apple':
-          await _signInWithApple(email);
-          break;
-        default:
-          await _handleEmailLogin(profile);
-          break;
+        final savedRole = await SessionManager.getCurrentRole();
+        debugPrint('✅ Verified saved role: $savedRole');
+
+        if (currentUser != null) {
+          await supabase.auth.updateUser(
+            UserAttributes(
+              data: {...currentUser.userMetadata ?? {}, 'current_role': role},
+            ),
+          );
+          debugPrint('📝 Updated user metadata with role: $role');
+        }
+
+        // Refresh app state
+        await appState.refreshState();
+        debugPrint('🔄 AppState refreshed - currentRole: ${appState.currentRole}');
+
+        // Redirect based on role
+        String dashboardRoute;
+        switch (role) {
+          case 'owner':
+            dashboardRoute = '/owner';
+            break;
+          case 'barber':
+            dashboardRoute = '/barber';
+            break;
+          default:
+            dashboardRoute = '/customer';
+        }
+
+        debugPrint('📍 Redirecting to: $dashboardRoute');
+        context.go(dashboardRoute);
+      } else {
+        debugPrint('❌ Login failed for role: $role');
       }
     } catch (e) {
-      debugPrint('OAuth login error: $e');
-      if (!mounted) return;
-
-      if (e.toString().contains('Code verifier could not be found')) {
-        await showCustomAlert(
-          context: context,
-          title: "Authentication Error",
-          message:
-              "Please try signing in again. Clearing browser cache may help.",
-          isError: true,
-        );
-      } else {
+      debugPrint('❌ Login error: $e');
+      if (mounted) {
         await showCustomAlert(
           context: context,
           title: "Login Failed",
-          message: "Unable to sign in with $provider. Please try again.",
+          message: e.toString(),
           isError: true,
         );
       }
-
-      await _loadProfiles();
     } finally {
       if (mounted) {
         setState(() {
-          _oauthLoadingStates[email] = false;
+          _profileLoadingStates[uniqueId] = false;
           _selectedEmail = null;
         });
       }
     }
   }
 
-  // Google OAuth login with improved handling
-  Future<void> _signInWithGoogle(String email) async {
+  Future<bool> _handleOAuthLoginForProfile(Map<String, dynamic> profile) async {
+    final email = profile['email'] as String?;
+    final provider = profile['provider'] as String?;
+    if (email == null || provider == null) return false;
+
     try {
       final currentUser = supabase.auth.currentUser;
-      if (currentUser?.email == email) {
-        await _processSuccessfulLogin(email);
-        return;
-      }
+      if (currentUser?.email == email) return true;
 
+      // 🔥 Try auto-login first for OAuth too
       final autoSuccess = await SessionManager.tryAutoLogin(email);
-      if (autoSuccess) {
-        await _processSuccessfulLogin(email);
-        return;
-      }
+      if (autoSuccess) return true;
 
-      await supabase.auth.signInWithOAuth(
-        OAuthProvider.google,
-        // redirectTo: _getRedirectUrl(),
-        redirectTo: _env.getRedirectUrl(),
-
-        scopes: 'email profile',
-      );
-
-      final completer = Completer<void>();
-      final subscription = supabase.auth.onAuthStateChange.listen((data) async {
-        if (data.event == AuthChangeEvent.signedIn) {
-          final user = supabase.auth.currentUser;
-          if (user?.email == email) {
-            await _updateUserMetadataAfterOAuth(user!);
-            await _processSuccessfulLogin(email);
-            completer.complete();
-          }
-        }
-      });
-
-      await completer.future.timeout(const Duration(seconds: 30));
-      subscription.cancel();
-    } on TimeoutException {
-      if (!mounted) return;
-      await showCustomAlert(
-        context: context,
-        title: "Timeout",
-        message: "Google sign in took too long. Please try again.",
-        isError: true,
-      );
-    } catch (e) {
-      rethrow;
-    }
-  }
-
-  // Helper function to update metadata after OAuth
-  Future<void> _updateUserMetadataAfterOAuth(User user) async {
-    try {
-      //  FIXED: Get ALL profiles with role names
-      final profiles = await supabase
-          .from('profiles')
-          .select('''
-            role_id,
-            roles!inner (
-              name
-            )
-          ''')
-          .eq('id', user.id)
-          .eq('is_active', true)
-          .eq('is_blocked', false);
-
-      if (profiles.isNotEmpty) {
-        // Extract all role names
-        final List<String> roleNames = [];
-        for (var profile in profiles) {
-          final role = profile['roles'] as Map?;
-          if (role != null && role['name'] != null) {
-            roleNames.add(role['name'].toString());
-          }
-        }
-
-        // Save to SessionManager
-        await SessionManager.saveUserRoles(
-          email: user.email!,
-          roles: roleNames,
-        );
-
-        // Get current role (first one or saved)
-        String? currentRole = await SessionManager.getCurrentRole();
-        if (currentRole == null || !roleNames.contains(currentRole)) {
-          currentRole = roleNames.isNotEmpty ? roleNames.first : 'customer';
-          await SessionManager.saveCurrentRole(currentRole);
-        }
-
-        // Update metadata
-        await supabase.auth.updateUser(
-          UserAttributes(
-            data: {
-              ...user.userMetadata ?? {},
-              'roles': roleNames,
-              'current_role': currentRole,
-              'last_login': DateTime.now().toIso8601String(),
-            },
-          ),
-        );
-
-        debugPrint(
-          'OAuth user metadata updated with roles: $roleNames, current: $currentRole',
-        );
-      }
-    } catch (e) {
-      debugPrint('Error updating OAuth metadata: $e');
-    }
-  }
-
-  // Facebook OAuth login with improved handling
-  Future<void> _signInWithFacebook(String email) async {
-    try {
-      final currentUser = supabase.auth.currentUser;
-      if (currentUser?.email == email) {
-        await _processSuccessfulLogin(email);
-        return;
-      }
-
-      final autoSuccess = await SessionManager.tryAutoLogin(email);
-      if (autoSuccess) {
-        await _processSuccessfulLogin(email);
-        return;
-      }
-
-      await supabase.auth.signInWithOAuth(
-        OAuthProvider.facebook,
-        // redirectTo: _getRedirectUrl(),
-        redirectTo: _env.getRedirectUrl(),
-        scopes: 'email',
-      );
-
-      final completer = Completer<void>();
-      final subscription = supabase.auth.onAuthStateChange.listen((data) async {
-        if (data.event == AuthChangeEvent.signedIn) {
-          final user = supabase.auth.currentUser;
-          if (user?.email == email) {
-            await _updateUserMetadataAfterOAuth(user!);
-            await _processSuccessfulLogin(email);
-            completer.complete();
-          }
-        }
-      });
-
-      await completer.future.timeout(const Duration(seconds: 30));
-      subscription.cancel();
-    } on TimeoutException {
-      if (!mounted) return;
-      await showCustomAlert(
-        context: context,
-        title: "Timeout",
-        message: "Facebook sign in took too long. Please try again.",
-        isError: true,
-      );
-    } catch (e) {
-      rethrow;
-    }
-  }
-
-  // Apple OAuth login with improved handling
-  Future<void> _signInWithApple(String email) async {
-    try {
-      final currentUser = supabase.auth.currentUser;
-      if (currentUser?.email == email) {
-        await _processSuccessfulLogin(email);
-        return;
-      }
-
-      final autoSuccess = await SessionManager.tryAutoLogin(email);
-      if (autoSuccess) {
-        await _processSuccessfulLogin(email);
-        return;
-      }
-
-      await supabase.auth.signInWithOAuth(
-        OAuthProvider.apple,
-        // redirectTo: _getRedirectUrl(),
-        redirectTo: _env.getRedirectUrl(),
-        scopes: 'email name',
-      );
-
-      final completer = Completer<void>();
-      final subscription = supabase.auth.onAuthStateChange.listen((data) async {
-        if (data.event == AuthChangeEvent.signedIn) {
-          final user = supabase.auth.currentUser;
-          if (user?.email == email) {
-            await _updateUserMetadataAfterOAuth(user!);
-            await _processSuccessfulLogin(email);
-            completer.complete();
-          }
-        }
-      });
-
-      await completer.future.timeout(const Duration(seconds: 30));
-      subscription.cancel();
-    } on TimeoutException {
-      if (!mounted) return;
-      await showCustomAlert(
-        context: context,
-        title: "Timeout",
-        message: "Apple sign in took too long. Please try again.",
-        isError: true,
-      );
-    } catch (e) {
-      rethrow;
-    }
-  }
-
-  // Handle email login
-  Future<void> _handleEmailLogin(Map<String, dynamic> profile) async {
-    if (_selectionMode) {
-      _toggleProfileSelection(profile);
-      return;
-    }
-
-    if (_loading) return;
-
-    setState(() {
-      _loading = true;
-      _selectedEmail = profile['email'] as String?;
-    });
-
-    try {
-      final email = profile['email'] as String?;
-      if (email == null) {
-        setState(() => _loading = false);
-        return;
-      }
-
-      final autoLoginSuccess = await SessionManager.tryAutoLogin(email);
-      if (autoLoginSuccess) {
-        final user = supabase.auth.currentUser;
-        if (user != null) {
-          // FIXED: Get ALL profiles with role names
-          final dbProfiles = await supabase
-              .from('profiles')
-              .select('''
-                role_id,
-                roles!inner (
-                  name
-                )
-              ''')
-              .eq('id', user.id)
-              .eq('is_active', true)
-              .eq('is_blocked', false);
-
-          if (dbProfiles.isNotEmpty) {
-            final List<String> roleNames = [];
-            for (var profile in dbProfiles) {
-              final role = profile['roles'] as Map?;
-              if (role != null && role['name'] != null) {
-                roleNames.add(role['name'].toString());
-              }
-            }
-
-            await SessionManager.saveUserRoles(email: email, roles: roleNames);
-
-            String? currentRole = await SessionManager.getCurrentRole();
-            if (currentRole == null || !roleNames.contains(currentRole)) {
-              currentRole = roleNames.isNotEmpty ? roleNames.first : 'customer';
-              await SessionManager.saveCurrentRole(currentRole);
-            }
-
-            await supabase.auth.updateUser(
-              UserAttributes(
-                data: {
-                  ...user.userMetadata ?? {},
-                  'roles': roleNames,
-                  'current_role': currentRole,
-                  'last_login': DateTime.now().toIso8601String(),
-                },
-              ),
-            );
-          }
-        }
-
-        await _processSuccessfulLogin(email);
-        return;
-      }
-
-      final password = await _showPasswordDialog(email);
-      if (password == null || password.isEmpty) {
-        setState(() => _loading = false);
-        return;
-      }
-
-      final response = await supabase.auth.signInWithPassword(
-        email: email,
-        password: password,
-      );
-
-      final user = response.user;
-      if (user == null) throw Exception("Login failed.");
-
-      // FIXED: Get ALL profiles with role names
-      final dbProfiles = await supabase
-          .from('profiles')
-          .select('''
-            role_id,
-            roles!inner (
-              name
-            )
-          ''')
-          .eq('id', user.id)
-          .eq('is_active', true)
-          .eq('is_blocked', false);
-
-      if (dbProfiles.isNotEmpty) {
-        final List<String> roleNames = [];
-        for (var profile in dbProfiles) {
-          final role = profile['roles'] as Map?;
-          if (role != null && role['name'] != null) {
-            roleNames.add(role['name'].toString());
-          }
-        }
-
-        await SessionManager.saveUserRoles(email: email, roles: roleNames);
-
-        String? currentRole = await SessionManager.getCurrentRole();
-        if (currentRole == null || !roleNames.contains(currentRole)) {
-          currentRole = roleNames.isNotEmpty ? roleNames.first : 'customer';
-          await SessionManager.saveCurrentRole(currentRole);
-        }
-
-        await supabase.auth.updateUser(
-          UserAttributes(
-            data: {
-              ...user.userMetadata ?? {},
-              'roles': roleNames,
-              'current_role': currentRole,
-              'last_login': DateTime.now().toIso8601String(),
-            },
-          ),
-        );
-
-        debugPrint(
-          ' Email login metadata updated with roles: $roleNames, current: $currentRole',
-        );
-      }
-
-      await _processSuccessfulLogin(email);
-    } on AuthException catch (e) {
-      if (!mounted) return;
-
-      String errorMessage = e.message;
-      if (e.code == 'invalid_credentials') {
-        errorMessage = "Invalid email or password. Please try again.";
-      }
-
-      await showCustomAlert(
-        context: context,
-        title: "Login Failed",
-        message: errorMessage,
-        isError: true,
-      );
-    } catch (e) {
-      if (!mounted) return;
-
-      await showCustomAlert(
-        context: context,
-        title: "Error",
-        message: "Unable to login. Please try again.",
-        isError: true,
-      );
-    } finally {
-      if (mounted) {
-        setState(() {
-          _loading = false;
-          _selectedEmail = null;
-        });
-      }
-    }
-  }
-
-  // FIXED: Process successful login with role-based redirect
-  Future<void> _processSuccessfulLogin(String email) async {
-    try {
-      final user = supabase.auth.currentUser;
-      if (user == null) {
-        if (!mounted) return;
-        context.go('/login');
-        return;
-      }
-
-      // Get ALL profiles with roles
-      final dbProfiles = await supabase
-          .from('profiles')
-          .select('''
-            role_id,
-            is_active,
-            is_blocked,
-            roles!inner (
-              name
-            )
-          ''')
-          .eq('id', user.id)
-          .eq('is_active', true)
-          .eq('is_blocked', false);
-
-      if (dbProfiles.isEmpty) {
-        if (!mounted) return;
-        context.go('/reg');
-        return;
-      }
-
-      // Extract ALL role names
-      final List<String> roleNames = [];
-      for (var profile in dbProfiles) {
-        final role = profile['roles'] as Map?;
-        if (role != null && role['name'] != null) {
-          roleNames.add(role['name'].toString());
-        }
-      }
-
-      // Save to SessionManager
-      await SessionManager.saveUserRoles(email: email, roles: roleNames);
-
-      // Get saved current role or use first
-      String? savedRole = await SessionManager.getCurrentRole();
-      String redirectRole;
-
-      if (savedRole != null && roleNames.contains(savedRole)) {
-        redirectRole = savedRole;
-        debugPrint('Using saved role: $redirectRole');
-      } else {
-        redirectRole = roleNames.isNotEmpty ? roleNames.first : 'customer';
-        await SessionManager.saveCurrentRole(redirectRole);
-        debugPrint(' Using first role: $redirectRole');
-      }
-
-      // Update metadata
-      await supabase.auth.updateUser(
-        UserAttributes(
-          data: {
-            ...user.userMetadata ?? {},
-            'roles': roleNames,
-            'current_role': redirectRole,
-            'last_login': DateTime.now().toIso8601String(),
-          },
-        ),
-      );
-
-      await SessionManager.updateLastLogin(email);
-      await appState.refreshState();
-
-      if (!mounted) return;
-
-      //  Role-based redirect
-      if (roleNames.length > 1 && savedRole == null) {
-        // Multiple roles and no saved preference - show selector
-        context.go(
-          '/role-selector',
-          extra: {'roles': roleNames, 'email': email, 'userId': user.id},
-        );
-        return;
-      }
-
-      // Single role or saved preference - direct redirect
-      switch (redirectRole) {
-        case 'owner':
-          context.go('/owner');
+      switch (provider) {
+        case 'google':
+          await supabase.auth.signInWithOAuth(
+            OAuthProvider.google,
+            redirectTo: _env.getRedirectUrl(),
+            scopes: 'email profile',
+          );
           break;
-        case 'barber':
-          context.go('/barber');
+        case 'facebook':
+          await supabase.auth.signInWithOAuth(
+            OAuthProvider.facebook,
+            redirectTo: _env.getRedirectUrl(),
+            scopes: 'email',
+          );
+          break;
+        case 'apple':
+          await supabase.auth.signInWithOAuth(
+            OAuthProvider.apple,
+            redirectTo: _env.getRedirectUrl(),
+            scopes: 'email name',
+          );
           break;
         default:
-          context.go('/customer');
+          return false;
       }
-    } catch (e) {
-      debugPrint('Error processing successful login: $e');
-      if (!mounted) return;
 
-      await showCustomAlert(
-        context: context,
-        title: "Error",
-        message: "Unable to complete login. Please try again.",
-        isError: true,
-      );
-      if (!mounted) return;
-      context.go('/login');
+      await Future.delayed(const Duration(seconds: 2));
+      final user = supabase.auth.currentUser;
+      return user?.email == email;
+    } catch (e) {
+      debugPrint('OAuth error: $e');
+      return false;
     }
   }
-
-  // Redirect URL for OAuth
-  // String _getRedirectUrl() {
-  //   return 'http://localhost:5000/auth/callback';
-  // }
 
   Future<String?> _showPasswordDialog(String email) async {
     return await showDialog<String?>(
@@ -775,6 +354,8 @@ Future<void> _loadProfiles() async {
       builder: (context) => SecurityCompliantPasswordDialog(email: email),
     );
   }
+
+  // ... (ඉතිරි කොටස් සියල්ලම පෙර පරිදිම තබන්න - _buildProfileCard, _buildFooter, SecurityCompliantPasswordDialog ආදිය)
 
   Color _getProviderColor(String? provider) {
     switch (provider?.toLowerCase()) {
@@ -789,26 +370,374 @@ Future<void> _loadProfiles() async {
     }
   }
 
+  Color _getRoleColor(String role) {
+    switch (role.toLowerCase()) {
+      case 'owner':
+        return Colors.blueAccent;
+      case 'barber':
+        return Colors.orangeAccent;
+      case 'customer':
+        return Colors.greenAccent;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  IconData _getRoleIcon(String role) {
+    switch (role.toLowerCase()) {
+      case 'owner':
+        return Icons.work_outline;
+      case 'barber':
+        return Icons.content_cut;
+      case 'customer':
+        return Icons.person_outline;
+      default:
+        return Icons.help_outline;
+    }
+  }
+
+  String _getRoleDisplayName(String role) {
+    switch (role.toLowerCase()) {
+      case 'owner':
+        return 'Owner';
+      case 'barber':
+        return 'Barber';
+      case 'customer':
+        return 'Customer';
+      default:
+        return role;
+    }
+  }
+
   String _formatLastLogin(String? lastLogin) {
     if (lastLogin == null || lastLogin.isEmpty) return 'Never';
-
     try {
       final loginTime = DateTime.parse(lastLogin);
       final now = DateTime.now();
       final difference = now.difference(loginTime);
-
       if (difference.inMinutes < 1) return 'Just now';
       if (difference.inMinutes < 60) return '${difference.inMinutes}m ago';
       if (difference.inHours < 24) return '${difference.inHours}h ago';
       if (difference.inDays < 7) return '${difference.inDays}d ago';
-
       return '${difference.inDays ~/ 7}w ago';
     } catch (e) {
       return 'Recently';
     }
   }
 
-  // Build large profile image
+  // ============================================================
+  // 🔥 PROFILE CARD
+  // ============================================================
+  Widget _buildProfileCard(Map<String, dynamic> profile, int index) {
+    final email = profile['email'] as String? ?? 'Unknown';
+    final provider = profile['provider'] as String? ?? 'email';
+
+    final roles = profile['roles'] as List? ?? [];
+    final profileRole = roles.isNotEmpty ? roles.first.toString() : 'customer';
+
+    final uniqueId = '$email-$index-$profileRole';
+    final isLoading = _profileLoadingStates[uniqueId] == true;
+    final isSelected = _selectedProfiles.contains(uniqueId);
+    final photoUrl = profile['photo'] as String?;
+    final name = profile['name'] as String? ?? email.split('@').first;
+    final hasPhoto = photoUrl != null && photoUrl.isNotEmpty;
+
+    final roleColor = _getRoleColor(profileRole);
+    final roleIcon = _getRoleIcon(profileRole);
+    final roleDisplayName = _getRoleDisplayName(profileRole);
+
+    debugPrint(
+      '📱 Building profile card $index - Role: $profileRole, Email: $email, UniqueId: $uniqueId',
+    );
+
+    return GestureDetector(
+      onTap: () {
+        debugPrint('🎯 TAPPED - Profile card $index, Role: $profileRole');
+
+        if (_selectionMode) {
+          _toggleProfileSelection(profile, uniqueId);
+        } else if (isLoading) {
+          debugPrint('⏳ Already loading');
+          return;
+        } else {
+          debugPrint('🚀 Starting login for role: $profileRole');
+          _handleProfileLogin(profile, profileRole, uniqueId);
+        }
+      },
+      onLongPress: () {
+        debugPrint('👆 Long press on profile $index');
+        if (!_selectionMode) {
+          _startSelectionMode();
+          _toggleProfileSelection(profile, uniqueId);
+        }
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeInOut,
+        decoration: BoxDecoration(
+          color: isSelected
+              ? roleColor.withValues(alpha: 0.2)
+              : isLoading
+              ? roleColor.withValues(alpha: 0.1)
+              : Colors.white.withValues(alpha: 0.03),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isLoading
+                ? roleColor
+                : isSelected
+                ? roleColor
+                : Colors.white.withValues(alpha: 0.1),
+            width: isLoading ? 2 : (isSelected ? 2 : 1.5),
+          ),
+          boxShadow: isLoading
+              ? [
+                  BoxShadow(
+                    color: roleColor.withValues(alpha: 0.5),
+                    blurRadius: 8,
+                    spreadRadius: 1,
+                  ),
+                ]
+              : isSelected
+              ? [
+                  BoxShadow(
+                    color: roleColor.withValues(alpha: 0.3),
+                    blurRadius: 8,
+                    spreadRadius: 1,
+                  ),
+                ]
+              : null,
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              // Profile Image with Role Badge
+              Stack(
+                children: [
+                  Container(
+                    width: 70,
+                    height: 70,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: _getProviderColor(provider).withValues(alpha: 0.2),
+                    ),
+                    child: _buildLargeProfileImage(
+                      profile,
+                      provider,
+                      photoUrl,
+                      hasPhoto,
+                    ),
+                  ),
+
+                  // ROLE BADGE
+                  Positioned(
+                    bottom: 0,
+                    right: 0,
+                    child: Container(
+                      width: 30,
+                      height: 30,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: roleColor,
+                        border: Border.all(
+                          color: const Color(0xFF0F1820),
+                          width: 2,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: roleColor.withValues(alpha: 0.5),
+                            blurRadius: 4,
+                          ),
+                        ],
+                      ),
+                      child: Center(
+                        child: isLoading
+                            ? SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : Icon(roleIcon, color: Colors.white, size: 16),
+                      ),
+                    ),
+                  ),
+
+                  // Provider icon badge
+                  if (provider != 'email' && !_selectionMode && !isLoading)
+                    Positioned(
+                      top: 0,
+                      left: 0,
+                      child: Container(
+                        width: 24,
+                        height: 24,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: _getProviderColor(provider),
+                          border: Border.all(
+                            color: const Color(0xFF0F1820),
+                            width: 2,
+                          ),
+                        ),
+                        child: Center(
+                          child: provider == 'google'
+                              ? Text(
+                                  'G',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                )
+                              : provider == 'facebook'
+                              ? Text(
+                                  'f',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                )
+                              : provider == 'apple'
+                              ? const Icon(
+                                  Icons.apple,
+                                  color: Colors.white,
+                                  size: 14,
+                                )
+                              : const Icon(
+                                  Icons.email,
+                                  color: Colors.white,
+                                  size: 12,
+                                ),
+                        ),
+                      ),
+                    ),
+
+                  // Selection check badge
+                  if (isSelected && _selectionMode)
+                    Positioned(
+                      top: 0,
+                      right: 0,
+                      child: Container(
+                        width: 24,
+                        height: 24,
+                        decoration: const BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Colors.blueAccent,
+                        ),
+                        child: const Center(
+                          child: Icon(
+                            Icons.check,
+                            color: Colors.white,
+                            size: 16,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+
+              const SizedBox(width: 16),
+
+              // Profile Info
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 18,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      email,
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.7),
+                        fontSize: 14,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: roleColor.withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: roleColor.withValues(alpha: 0.5),
+                          width: 1,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(roleIcon, color: roleColor, size: 16),
+                          const SizedBox(width: 6),
+                          Text(
+                            roleDisplayName,
+                            style: TextStyle(
+                              color: roleColor,
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (profile['lastLogin'] != null && !isLoading)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(
+                          _formatLastLogin(profile['lastLogin'] as String?),
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.5),
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+
+              // Loading indicator or arrow
+              if (isLoading)
+                const Padding(
+                  padding: EdgeInsets.only(left: 8),
+                  child: SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                    ),
+                  ),
+                )
+              else if (!_selectionMode)
+                const Padding(
+                  padding: EdgeInsets.only(left: 8),
+                  child: Icon(
+                    Icons.chevron_right,
+                    color: Colors.white38,
+                    size: 24,
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildLargeProfileImage(
     Map<String, dynamic> profile,
     String? provider,
@@ -816,11 +745,9 @@ Future<void> _loadProfiles() async {
     bool hasPhoto,
   ) {
     final isGoogle = provider == 'google';
-
     if (isGoogle && _isGoogleImageRateLimited && hasPhoto) {
       return _getFallbackAvatar(profile, provider);
     }
-
     if (hasPhoto) {
       try {
         return ClipRRect(
@@ -867,7 +794,6 @@ Future<void> _loadProfiles() async {
     }
   }
 
-  // Get fallback avatar
   Widget _getFallbackAvatar(Map<String, dynamic> profile, String? provider) {
     final email = profile['email'] as String? ?? 'Unknown';
     final name = profile['name'] as String? ?? email.split('@').first;
@@ -889,7 +815,6 @@ Future<void> _loadProfiles() async {
                     color: Colors.white,
                     fontSize: 24,
                     fontWeight: FontWeight.bold,
-                    fontFamily: 'Roboto',
                   ),
                 )
               : provider == 'facebook'
@@ -899,7 +824,6 @@ Future<void> _loadProfiles() async {
                     color: Colors.white,
                     fontSize: 28,
                     fontWeight: FontWeight.bold,
-                    fontFamily: 'Roboto',
                   ),
                 )
               : provider == 'apple'
@@ -929,29 +853,30 @@ Future<void> _loadProfiles() async {
     );
   }
 
-  void _toggleProfileSelection(Map<String, dynamic> profile) {
-    final email = profile['email'] as String? ?? '';
+  void _toggleProfileSelection(Map<String, dynamic> profile, String uniqueId) {
     setState(() {
-      if (_selectedProfiles.contains(email)) {
-        _selectedProfiles.remove(email);
+      if (_selectedProfiles.contains(uniqueId)) {
+        _selectedProfiles.remove(uniqueId);
       } else {
-        _selectedProfiles.add(email);
+        _selectedProfiles.add(uniqueId);
       }
       _selectedCount = _selectedProfiles.length;
-
-      if (_selectedCount == 0) {
-        _selectionMode = false;
-      }
+      if (_selectedCount == 0) _selectionMode = false;
     });
   }
 
   void _selectAllProfiles() {
     setState(() {
-      _selectedProfiles = Set<String>.from(
-        profiles
-            .map((p) => p['email'] as String? ?? '')
-            .where((e) => e.isNotEmpty),
-      );
+      _selectedProfiles.clear();
+      for (int i = 0; i < profiles.length; i++) {
+        final email = profiles[i]['email'] as String? ?? '';
+        final role = profiles[i]['roles']?.isNotEmpty == true
+            ? profiles[i]['roles'].first
+            : 'customer';
+        if (email.isNotEmpty) {
+          _selectedProfiles.add('$email-$i-$role');
+        }
+      }
       _selectedCount = _selectedProfiles.length;
     });
   }
@@ -1008,7 +933,13 @@ Future<void> _loadProfiles() async {
     );
 
     if (confirmed == true) {
-      for (final email in _selectedProfiles) {
+      final Set<String> emailsToRemove = {};
+      for (final uniqueId in _selectedProfiles) {
+        final parts = uniqueId.split('-');
+        if (parts.isNotEmpty) emailsToRemove.add(parts[0]);
+      }
+
+      for (final email in emailsToRemove) {
         await SessionManager.removeProfile(email);
       }
 
@@ -1019,7 +950,7 @@ Future<void> _loadProfiles() async {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            '$_selectedCount profile${_selectedCount == 1 ? '' : 's'} removed',
+            '${emailsToRemove.length} profile${emailsToRemove.length == 1 ? '' : 's'} removed',
           ),
           backgroundColor: Colors.green,
           duration: const Duration(seconds: 2),
@@ -1027,7 +958,6 @@ Future<void> _loadProfiles() async {
       );
     }
   }
-
 
   void _startSelectionMode() {
     setState(() {
@@ -1037,305 +967,9 @@ Future<void> _loadProfiles() async {
     });
   }
 
-// Profile card for main list
-Widget _buildProfileCard(Map<String, dynamic> profile, int index) {
-  final email = profile['email'] as String? ?? 'Unknown';
-  final provider = profile['provider'] as String? ?? 'email';
-  final isSelected = _selectedProfiles.contains(email);
-  final isLoading = _oauthLoadingStates[email] == true;
-  final photoUrl = profile['photo'] as String?;
-  final name = profile['name'] as String? ?? email.split('@').first;
-  final hasPhoto = photoUrl != null && photoUrl.isNotEmpty;
-  
-  // 🔥 FIX: Get roles from profile
-  final roles = profile['roles'] as List? ?? [];
-  final primaryRole = roles.isNotEmpty ? roles.first.toString() : 'customer';
-  
-  return GestureDetector(
-    onTap: () {
-      if (_selectionMode) {
-        _toggleProfileSelection(profile);
-      } else if (isLoading) {
-        return;
-      } else if (provider == 'email') {
-        _handleEmailLogin(profile);
-      } else {
-        _handleOAuthLogin(profile);
-      }
-    },
-    onLongPress: () {
-      if (!_selectionMode) {
-        _startSelectionMode();
-        _toggleProfileSelection(profile);
-      }
-    },
-    child: AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeInOut,
-      decoration: BoxDecoration(
-        color: isSelected
-            ? const Color(0xFF1877F2).withValues(alpha: 0.2)
-            : Colors.white.withValues(alpha: 0.03),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: isLoading
-              ? Colors.blueAccent
-              : isSelected
-              ? const Color(0xFF1877F2)
-              : Colors.white.withValues(alpha: 0.1),
-          width: isLoading ? 2 : 1.5,
-        ),
-        boxShadow: isLoading
-            ? [
-                BoxShadow(
-                  color: Colors.blueAccent.withValues(alpha: 0.3),
-                  blurRadius: 8,
-                  spreadRadius: 1,
-                ),
-              ]
-            : null,
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            // Profile Image
-            Stack(
-              children: [
-                Container(
-                  width: 70,
-                  height: 70,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: _getProviderColor(provider).withValues(alpha: 0.2),
-                  ),
-                  child: _buildLargeProfileImage(
-                    profile,
-                    provider,
-                    photoUrl,
-                    hasPhoto,
-                  ),
-                ),
-
-                // Provider icon badge
-                if (provider != 'email' && !_selectionMode && !isLoading)
-                  Positioned(
-                    right: 0,
-                    bottom: 0,
-                    child: Container(
-                      width: 24,
-                      height: 24,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: _getProviderColor(provider),
-                        border: Border.all(
-                          color: const Color(0xFF0F1820),
-                          width: 2,
-                        ),
-                      ),
-                      child: Center(
-                        child: provider == 'google'
-                            ? Text(
-                                'G',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold,
-                                  fontFamily: 'Roboto',
-                                ),
-                              )
-                            : provider == 'facebook'
-                            ? Text(
-                                'f',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.bold,
-                                  fontFamily: 'Roboto',
-                                ),
-                              )
-                            : provider == 'apple'
-                            ? const Icon(
-                                Icons.apple,
-                                color: Colors.white,
-                                size: 14,
-                              )
-                            : const Icon(
-                                Icons.email,
-                                color: Colors.white,
-                                size: 12,
-                              ),
-                      ),
-                    ),
-                  ),
-
-                // Selection check badge
-                if (isSelected && _selectionMode)
-                  Positioned(
-                    right: 0,
-                    bottom: 0,
-                    child: Container(
-                      width: 24,
-                      height: 24,
-                      decoration: const BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: Colors.blueAccent,
-                      ),
-                      child: const Center(
-                        child: Icon(
-                          Icons.check,
-                          color: Colors.white,
-                          size: 16,
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-
-            const SizedBox(width: 16),
-
-            // Profile Info
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Row for name and loading indicator
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          name,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w600,
-                            fontSize: 18,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      // Simple loading text
-                      if (isLoading)
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.blueAccent.withValues(alpha: 0.2),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: const Text(
-                            'Logging in...',
-                            style: TextStyle(
-                              color: Colors.blueAccent,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 6),
-
-                  // Email
-                  Text(
-                    email,
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.7),
-                      fontSize: 14,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-
-                  const SizedBox(height: 8),
-
-                  // Last login and roles
-                  Row(
-                    children: [
-                      // Last login time
-                      if (profile['lastLogin'] != null && !isLoading)
-                        Text(
-                          _formatLastLogin(profile['lastLogin'] as String?),
-                          style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.5),
-                            fontSize: 12,
-                          ),
-                        ),
-
-                      // Space if both exist
-                      if (profile['lastLogin'] != null &&
-                          !isLoading &&
-                          roles.isNotEmpty &&
-                          !_selectionMode)
-                        const SizedBox(width: 10),
-
-                      // 🔥 FIX: Show ALL roles as chips
-                      if (roles.isNotEmpty && !_selectionMode && !isLoading)
-                        Expanded(
-                          child: Wrap(
-                            spacing: 4,
-                            runSpacing: 4,
-                            children: roles.map((role) {
-                              return Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 2,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: _getRoleColor(role.toString()).withValues(alpha: 0.2),
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: Text(
-                                  role.toString().toUpperCase(),
-                                  style: TextStyle(
-                                    color: _getRoleColor(role.toString()),
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                              );
-                            }).toList(),
-                          ),
-                        ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-
-            // Arrow indicator
-            if (!_selectionMode && !isLoading)
-              const Padding(
-                padding: EdgeInsets.only(left: 8),
-                child: Icon(
-                  Icons.chevron_right,
-                  color: Colors.white38,
-                  size: 24,
-                ),
-              ),
-          ],
-        ),
-      ),
-    ),
-  );
-}
-
-// 🔥 Helper function to get role color
-Color _getRoleColor(String role) {
-  switch (role.toLowerCase()) {
-    case 'owner':
-      return Colors.blueAccent;
-    case 'barber':
-      return Colors.orangeAccent;
-    case 'customer':
-      return Colors.greenAccent;
-    default:
-      return Colors.grey;
-  }
-}
-
+  // ============================================================
+  // 🔥 UI BUILD METHODS
+  // ============================================================
   @override
   Widget build(BuildContext context) {
     final Size screenSize = MediaQuery.of(context).size;
@@ -1359,64 +993,53 @@ Color _getRoleColor(String role) {
               ),
               child: Column(
                 children: [
-                  // Logo at the top
+                  // Logo
                   Stack(
                     children: [
                       Container(
                         margin: const EdgeInsets.only(top: 10, bottom: 25),
                         child: Center(
-                          child: Column(
-                            children: [
-                              Container(
-                                width: 80,
-                                height: 80,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color: Colors.white24,
-                                    width: 2,
-                                  ),
-                                  gradient: const LinearGradient(
-                                    colors: [
-                                      Color(0xFF1877F2),
-                                      Color(0xFF0A58CA),
-                                    ],
-                                    begin: Alignment.topCenter,
-                                    end: Alignment.bottomCenter,
-                                  ),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: const Color(
-                                        0xFF1877F2,
-                                      ).withValues(alpha: 0.4),
-                                      blurRadius: 20,
-                                      spreadRadius: 5,
-                                    ),
-                                  ],
-                                ),
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(40),
-                                  child: Image.asset(
-                                    'logo.png',
-                                    fit: BoxFit.cover,
-                                    errorBuilder: (context, error, stackTrace) {
-                                      return Center(
-                                        child: Icon(
-                                          Icons.account_circle,
-                                          color: Colors.white,
-                                          size: 40,
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                ),
+                          child: Container(
+                            width: 80,
+                            height: 80,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: Colors.white24,
+                                width: 2,
                               ),
-                            ],
+                              gradient: const LinearGradient(
+                                colors: [Color(0xFF1877F2), Color(0xFF0A58CA)],
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: const Color(
+                                    0xFF1877F2,
+                                  ).withValues(alpha: 0.4),
+                                  blurRadius: 20,
+                                  spreadRadius: 5,
+                                ),
+                              ],
+                            ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(40),
+                              child: Image.asset(
+                                'logo.png',
+                                fit: BoxFit.cover,
+                                errorBuilder: (context, error, stackTrace) {
+                                  return Center(
+                                    child: Icon(
+                                      Icons.account_circle,
+                                      color: Colors.white,
+                                      size: 40,
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
                           ),
                         ),
                       ),
-
-                      // 3-dot menu at top right corner
                       if (profiles.isNotEmpty && !_selectionMode)
                         Positioned(
                           top: 0,
@@ -1491,7 +1114,7 @@ Color _getRoleColor(String role) {
                     ],
                   ),
 
-                  // Card for profiles
+                  // Profiles list
                   Expanded(
                     child: Container(
                       decoration: BoxDecoration(
@@ -1501,7 +1124,6 @@ Color _getRoleColor(String role) {
                       ),
                       child: Column(
                         children: [
-                          // Header with selection mode
                           if (_selectionMode)
                             Container(
                               padding: const EdgeInsets.all(16),
@@ -1517,8 +1139,6 @@ Color _getRoleColor(String role) {
                               ),
                               child: _buildSelectionModeHeader(),
                             ),
-
-                          // Profiles List
                           Expanded(
                             child: _loading && _selectedEmail != null
                                 ? _buildLoadingState()
@@ -1531,7 +1151,6 @@ Color _getRoleColor(String role) {
                     ),
                   ),
 
-                  // Footer
                   if (!_selectionMode) _buildFooter(),
                 ],
               ),
@@ -1708,9 +1327,7 @@ Color _getRoleColor(String role) {
               ),
             ),
           ),
-
           const SizedBox(height: 16),
-
           SizedBox(
             width: double.infinity,
             child: OutlinedButton(
@@ -1731,9 +1348,7 @@ Color _getRoleColor(String role) {
               ),
             ),
           ),
-
           const SizedBox(height: 20),
-
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
@@ -1770,7 +1385,6 @@ Color _getRoleColor(String role) {
   }
 }
 
-// Security Compliant Password Dialog (unchanged)
 class SecurityCompliantPasswordDialog extends StatefulWidget {
   final String email;
   const SecurityCompliantPasswordDialog({super.key, required this.email});
@@ -1796,41 +1410,26 @@ class _SecurityCompliantPasswordDialogState
 
   void _onTextChanged() {
     final newLength = _controller.text.length;
-
-    if (newLength > _typedCharacters) {
-      _typedCharacters = newLength;
-    }
-
-    setState(() {
-      _isValid = newLength >= 6;
-    });
-
+    if (newLength > _typedCharacters) _typedCharacters = newLength;
+    setState(() => _isValid = newLength >= 6);
     _handleAutoSubmit();
   }
 
   void _handleAutoSubmit() {
     _typingTimer?.cancel();
-
     if (_controller.text.length >= 6 && !_isSubmitting && mounted) {
       _typingTimer = Timer(const Duration(milliseconds: 2000), () {
-        if (!_isSubmitting && mounted) {
-          _submitPassword();
-        }
+        if (!_isSubmitting && mounted) _submitPassword();
       });
     }
   }
 
   Future<void> _submitPassword() async {
     if (_isSubmitting || !_isValid) return;
-
     setState(() => _isSubmitting = true);
-
     _typingTimer?.cancel();
-
     await Future.delayed(const Duration(milliseconds: 200));
-
     if (!mounted) return;
-
     final enteredPassword = _controller.text.trim();
     Navigator.pop(context, enteredPassword);
   }
@@ -1838,9 +1437,7 @@ class _SecurityCompliantPasswordDialogState
   void _clearPassword() {
     _controller.clear();
     _typedCharacters = 0;
-    setState(() {
-      _isValid = false;
-    });
+    setState(() => _isValid = false);
   }
 
   @override
@@ -1854,7 +1451,6 @@ class _SecurityCompliantPasswordDialogState
   Widget build(BuildContext context) {
     final Size screenSize = MediaQuery.of(context).size;
     final bool isWeb = screenSize.width > 700;
-
     double dialogWidth = isWeb
         ? screenSize.width * 0.25
         : screenSize.width * 0.85;
@@ -1953,11 +1549,10 @@ class _SecurityCompliantPasswordDialogState
                                 ),
                                 onPressed: _isSubmitting
                                     ? null
-                                    : () {
-                                        setState(() {
-                                          _obscurePassword = !_obscurePassword;
-                                        });
-                                      },
+                                    : () => setState(
+                                        () => _obscurePassword =
+                                            !_obscurePassword,
+                                      ),
                               ),
                             if (_isValid && !_isSubmitting)
                               Container(

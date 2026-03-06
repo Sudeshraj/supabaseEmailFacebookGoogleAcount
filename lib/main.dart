@@ -13,6 +13,8 @@ import 'package:flutter_application_1/screens/authantication/command/reset_passw
 import 'package:flutter_application_1/screens/authantication/command/reset_password_form.dart';
 import 'package:flutter_application_1/screens/authantication/command/reset_password_request.dart';
 import 'package:flutter_application_1/screens/authantication/command/role_selector_screen.dart';
+import 'package:flutter_application_1/screens/owner/add_barber_screen.dart';
+import 'package:flutter_application_1/screens/owner/add_category_screen.dart';
 import 'package:flutter_application_1/services/notification_service.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -105,6 +107,25 @@ Future<void> _validateSessionOnResume() async {
 }
 
 // ====================
+// 🔥 NEW HELPER FUNCTION - Check local profile
+// ====================
+Future<bool> _hasLocalProfile(String? email) async {
+  if (email == null) return false;
+
+  try {
+    // Check if profile exists in SessionManager
+    final profile = await SessionManager.getProfileByEmail(email);
+    final hasProfile = profile != null && profile.isNotEmpty;
+
+    debugPrint('📱 Checking local profile for $email: $hasProfile');
+    return hasProfile;
+  } catch (e) {
+    debugPrint('❌ Error checking local profile: $e');
+    return false;
+  }
+}
+
+// ====================
 // MAIN METHOD
 // ====================
 Future<void> main() async {
@@ -162,12 +183,12 @@ Future<void> main() async {
 }
 
 // ====================
-// FIXED AUTH STATE LISTENER
+// FIXED AUTH STATE LISTENER - UPDATED
 // ====================
 void _setupAuthStateListener() {
   final supabase = Supabase.instance.client;
   bool? lastKnownEmailVerified;
-  bool isRedirecting = false; // Prevent multiple redirects
+  bool isRedirecting = false;
 
   supabase.auth.onAuthStateChange.listen((data) {
     final event = data.event;
@@ -186,7 +207,20 @@ void _setupAuthStateListener() {
         isRedirecting = true;
         WidgetsBinding.instance.addPostFrameCallback((_) async {
           try {
-            // FIXED: Get ALL profiles with role names
+            // 🔥 STEP 1: Check if local profile exists
+            final hasLocalProfile = await SessionManager.hasProfile();
+            debugPrint('📱 Has local profile: $hasLocalProfile');
+
+            // 🔥 STEP 2: If local profile exists, go to continue screen
+            if (hasLocalProfile) {
+              debugPrint('Local profile exists → /continue');
+              _navigateTo('/');
+              return;
+            }
+
+            // 🔥 STEP 3: No local profile - check database
+            debugPrint('No local profile - checking database...');
+            
             final profiles = await supabase
                 .from('profiles')
                 .select('''
@@ -201,13 +235,14 @@ void _setupAuthStateListener() {
                 .eq('is_active', true)
                 .eq('is_blocked', false);
 
+            // 🔥 STEP 4: No profiles in DB - go to registration
             if (profiles.isEmpty) {
-              debugPrint('No active profiles - redirecting to /reg');
+              debugPrint('❌ No profiles in DB - redirecting to /reg');
               _navigateTo('/reg', extra: user);
               return;
             }
 
-            //  Extract ALL role names
+            // 🔥 STEP 5: Extract role names from profiles
             final List<String> roleNames = [];
             for (var profile in profiles) {
               final role = profile['roles'] as Map?;
@@ -216,25 +251,26 @@ void _setupAuthStateListener() {
               }
             }
 
-            debugPrint(' User roles: $roleNames');
+            debugPrint('📋 Database roles found: $roleNames');
 
-            // Save to SessionManager
+            // Save roles to SessionManager
             await SessionManager.saveUserRoles(
               email: user.email!,
               roles: roleNames,
             );
 
+            // 🔥 STEP 6: Check if roles exist
             if (roleNames.isEmpty) {
+              debugPrint('❌ No roles in profiles - redirecting to /reg');
               _navigateTo('/reg', extra: user);
               return;
             }
-
-            // Get saved current role if any
-            String? savedRole = await SessionManager.getCurrentRole();
-
-            // If single role, redirect directly
+            
+            // 🔥 STEP 7: Single role - direct to dashboard
             if (roleNames.length == 1) {
               final singleRole = roleNames.first;
+              debugPrint('✅ Single role: $singleRole → /$singleRole');
+              
               await SessionManager.saveCurrentRole(singleRole);
               await appState.refreshState();
 
@@ -252,30 +288,13 @@ void _setupAuthStateListener() {
               return;
             }
 
-            // If multiple roles
+            // 🔥 STEP 8: Multiple roles - go to role selector
             if (roleNames.length > 1) {
-              // If saved role exists and is valid, use it
-              if (savedRole != null && roleNames.contains(savedRole)) {
-                debugPrint(' Using saved role: $savedRole');
-                await SessionManager.saveCurrentRole(savedRole);
-                await appState.refreshState();
-
-                switch (savedRole) {
-                  case 'owner':
-                    _navigateTo('/owner');
-                    break;
-                  case 'barber':
-                    _navigateTo('/barber');
-                    break;
-                  default:
-                    _navigateTo('/customer');
-                    break;
-                }
-                return;
-              }
-
-              // Otherwise show role selector
-              debugPrint('Multiple roles - showing role selector');
+              debugPrint('🔄 Multiple roles: $roleNames → /role-selector');
+              
+              // Don't save any role yet
+              await SessionManager.saveCurrentRole(null);
+              
               _navigateTo(
                 '/role-selector',
                 extra: {
@@ -287,10 +306,9 @@ void _setupAuthStateListener() {
               return;
             }
 
-            // Fallback
             _navigateTo('/');
           } catch (e) {
-            debugPrint('Error checking profile: $e');
+            debugPrint('❌ Error checking profile: $e');
             _navigateTo('/reg', extra: user);
           } finally {
             isRedirecting = false;
@@ -311,6 +329,14 @@ void _setupAuthStateListener() {
 
         WidgetsBinding.instance.addPostFrameCallback((_) async {
           try {
+            // Same logic as above
+            final hasLocalProfile = await SessionManager.hasProfile();
+            
+            if (hasLocalProfile) {
+              _navigateTo('/continue');
+              return;
+            }
+
             final profiles = await supabase
                 .from('profiles')
                 .select('''
@@ -326,6 +352,7 @@ void _setupAuthStateListener() {
                 .eq('is_blocked', false);
 
             if (profiles.isEmpty) {
+              debugPrint('No profiles in DB - redirecting to /reg');
               _navigateTo('/reg', extra: user);
               return;
             }
@@ -345,7 +372,10 @@ void _setupAuthStateListener() {
 
             if (roleNames.isEmpty) {
               _navigateTo('/reg', extra: user);
-            } else if (roleNames.length == 1) {
+              return;
+            }
+
+            if (roleNames.length == 1) {
               final singleRole = roleNames.first;
               await SessionManager.saveCurrentRole(singleRole);
               await appState.refreshState();
@@ -361,7 +391,12 @@ void _setupAuthStateListener() {
                   _navigateTo('/customer');
                   break;
               }
-            } else {
+              return;
+            }
+
+            if (roleNames.length > 1) {
+              debugPrint('Multiple roles - showing role selector');
+              await SessionManager.saveCurrentRole(null);
               _navigateTo(
                 '/role-selector',
                 extra: {
@@ -370,7 +405,10 @@ void _setupAuthStateListener() {
                   'userId': user.id,
                 },
               );
+              return;
             }
+
+            _navigateTo('/');
           } catch (e) {
             debugPrint('Error: $e');
             _navigateTo('/reg', extra: user);
@@ -392,7 +430,6 @@ void _setupAuthStateListener() {
       debugPrint('User signed out');
       lastKnownEmailVerified = null;
       isRedirecting = false;
-      // Refresh app state immediately
       WidgetsBinding.instance.addPostFrameCallback((_) {
         appState.refreshState();
       });
@@ -400,86 +437,149 @@ void _setupAuthStateListener() {
   });
 
   // Check current user on app start
-  final currentUser = supabase.auth.currentUser;
-  if (currentUser != null && !isRedirecting) {
-    lastKnownEmailVerified = currentUser.emailConfirmedAt != null;
-    if (lastKnownEmailVerified == true) {
-      isRedirecting = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) async {
-        try {
-          final profiles = await supabase
-              .from('profiles')
-              .select('''
-                role_id,
-                is_active,
-                is_blocked,
-                roles!inner (
-                  name
-                )
-              ''')
-              .eq('id', currentUser.id)
-              .eq('is_active', true)
-              .eq('is_blocked', false);
-
-          if (profiles.isEmpty) {
-            _navigateTo('/reg', extra: currentUser);
-            return;
-          }
-
-          final List<String> roleNames = [];
-          for (var profile in profiles) {
-            final role = profile['roles'] as Map?;
-            if (role != null && role['name'] != null) {
-              roleNames.add(role['name'].toString());
-            }
-          }
-
-          await SessionManager.saveUserRoles(
-            email: currentUser.email!,
-            roles: roleNames,
-          );
-
-          if (roleNames.isEmpty) {
-            _navigateTo('/reg', extra: currentUser);
-          } else if (roleNames.length == 1) {
-            final singleRole = roleNames.first;
-            await SessionManager.saveCurrentRole(singleRole);
-            await appState.refreshState();
-
-            switch (singleRole) {
-              case 'owner':
-                _navigateTo('/owner');
-                break;
-              case 'barber':
-                _navigateTo('/barber');
-                break;
-              default:
-                _navigateTo('/customer');
-                break;
-            }
-          } else {
-            _navigateTo(
-              '/role-selector',
-              extra: {
-                'roles': roleNames,
-                'email': currentUser.email,
-                'userId': currentUser.id,
-              },
-            );
-          }
-        } catch (e) {
-          debugPrint('Error checking profile on start: $e');
-          _navigateTo('/reg', extra: currentUser);
-        } finally {
+// Check current user on app start
+final currentUser = supabase.auth.currentUser;
+if (currentUser != null && !isRedirecting) {
+  lastKnownEmailVerified = currentUser.emailConfirmedAt != null;
+  if (lastKnownEmailVerified == true) {
+    isRedirecting = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      try {
+        // 🔥 IMPORTANT: Check current route first
+        final currentRoute = router.routerDelegate.currentConfiguration.last.matchedLocation;
+        
+        // If already on a dashboard, don't redirect
+        if (currentRoute == '/owner' || 
+            currentRoute == '/barber' || 
+            currentRoute == '/customer') {
+          debugPrint('Already on dashboard: $currentRoute - skipping app start check');
           isRedirecting = false;
+          return;
         }
-      });
-    }
+        
+        // If already on continue screen, don't redirect again
+        if (currentRoute == '/continue') {
+          debugPrint('Already on continue screen - skipping app start check');
+          isRedirecting = false;
+          return;
+        }
+        
+        final hasLocalProfile = await SessionManager.hasProfile();
+        
+        if (hasLocalProfile) {
+          debugPrint('App start - local profile exists → /continue');
+          _navigateTo('/continue');
+          return;
+        }
+
+        final profiles = await supabase
+            .from('profiles')
+            .select('''
+              role_id,
+              is_active,
+              is_blocked,
+              roles!inner (
+                name
+              )
+            ''')
+            .eq('id', currentUser.id)
+            .eq('is_active', true)
+            .eq('is_blocked', false);
+
+        if (profiles.isEmpty) {
+          debugPrint('App start - No profiles in DB → /reg');
+          _navigateTo('/reg', extra: currentUser);
+          return;
+        }
+
+        final List<String> roleNames = [];
+        for (var profile in profiles) {
+          final role = profile['roles'] as Map?;
+          if (role != null && role['name'] != null) {
+            roleNames.add(role['name'].toString());
+          }
+        }
+
+        await SessionManager.saveUserRoles(
+          email: currentUser.email!,
+          roles: roleNames,
+        );
+
+        if (roleNames.isEmpty) {
+          debugPrint('App start - No roles in profiles → /reg');
+          _navigateTo('/reg', extra: currentUser);
+          return;
+        }
+
+        if (roleNames.length == 1) {
+          final singleRole = roleNames.first;
+          debugPrint('App start - Single role: $singleRole → /$singleRole');
+          await SessionManager.saveCurrentRole(singleRole);
+          await appState.refreshState();
+
+          switch (singleRole) {
+            case 'owner':
+              _navigateTo('/owner');
+              break;
+            case 'barber':
+              _navigateTo('/barber');
+              break;
+            default:
+              _navigateTo('/customer');
+              break;
+          }
+          return;
+        }
+
+        if (roleNames.length > 1) {
+          debugPrint('App start - Multiple roles: $roleNames → /role-selector');
+          await SessionManager.saveCurrentRole(null);
+          _navigateTo(
+            '/role-selector',
+            extra: {
+              'roles': roleNames,
+              'email': currentUser.email,
+              'userId': currentUser.id,
+            },
+          );
+          return;
+        }
+
+        _navigateTo('/');
+      } catch (e) {
+        debugPrint('Error checking profile on start: $e');
+        _navigateTo('/reg', extra: currentUser);
+      } finally {
+        isRedirecting = false;
+      }
+    });
   }
+}
 }
 
 // Helper method for navigation
+// Helper method for navigation
 void _navigateTo(String location, {Object? extra}) {
+  // Check if we're already on this route
+  try {
+    final currentRoute = router.routerDelegate.currentConfiguration.last.matchedLocation;
+    
+    // Don't navigate if already on the same route
+    if (currentRoute == location) {
+      debugPrint('Already on $location - skipping navigation');
+      return;
+    }
+    
+    // Don't redirect if already on a dashboard
+    if ((currentRoute == '/owner' || currentRoute == '/barber' || currentRoute == '/customer') && 
+        (location == '/continue' || location == '/role-selector')) {
+      debugPrint('Already on dashboard - staying here');
+      return;
+    }
+  } catch (e) {
+    // Ignore error
+  }
+  
   if (router.canPop()) {
     router.go(location, extra: extra);
   } else {
@@ -519,7 +619,7 @@ Future<void> _setupMobileDeepLinks() async {
 }
 
 // ====================
-// FIXED ROUTER
+// FIXED ROUTER - UPDATED
 // ====================
 GoRouter _createRouter() {
   return GoRouter(
@@ -536,6 +636,12 @@ GoRouter _createRouter() {
       debugPrint(
         'AppState: loading=${appState.loading}, loggedIn=${appState.loggedIn}',
       );
+
+      // 🔥 PREVENT REDIRECT LOOPS - If already on the target route, don't redirect again
+      if (path == '/owner' || path == '/barber' || path == '/customer') {
+        debugPrint('Already on dashboard route: $path - no redirect');
+        return null;
+      }
 
       // 🔥 NEVER redirect auth callbacks
       if (path == '/auth/callback' ||
@@ -575,44 +681,21 @@ GoRouter _createRouter() {
         '/reset-password-confirm',
         '/reset-password-form',
         '/auth/callback',
+        '/reg',
+        '/role-selector',
       ];
-
-      // SPECIAL HANDLING FOR /reg
-      if (path == '/reg') {
-        final user = state.extra as User?;
-        if (user == null) {
-          debugPrint('/reg accessed without user → redirecting to /login');
-          return '/login';
-        }
-        return null;
-      }
 
       // Role selector route
       if (path == '/role-selector') {
         if (!appState.loggedIn) {
           return '/login';
         }
-        if (appState.roles.length <= 1) {
-          if (appState.roles.isNotEmpty) {
-            final role = appState.roles.first;
-            switch (role) {
-              case 'owner':
-                return '/owner';
-              case 'barber':
-                return '/barber';
-              default:
-                return '/customer';
-            }
-          }
-          return '/';
-        }
         return null;
       }
 
       if (publicRoutes.contains(path)) {
         if (path == '/') {
-          // SPLASH SCREEN - මෙතනදි තීරණය කරනවා කොහෙද යන්නේ කියලා
-
+          // SPLASH SCREEN
           if (appState.loggedIn) {
             // User logged in
             if (!appState.emailVerified) {
@@ -627,7 +710,7 @@ GoRouter _createRouter() {
 
             // Check roles
             if (appState.roles.isEmpty) {
-              debugPrint(' No roles found → /reg');
+              debugPrint('No roles found → /reg');
               return '/reg';
             }
 
@@ -637,17 +720,25 @@ GoRouter _createRouter() {
               debugPrint('Single role: $role → /$role');
               return '/$role';
             } else {
-              // Multiple roles
-              final savedRole = appState.currentRole;
+              // Multiple roles - check if local profile exists
+              final hasLocalProfile = await _hasLocalProfile(
+                appState.currentUser?.email,
+              );
 
-              if (savedRole != null && appState.roles.contains(savedRole)) {
-                // Use saved role
-                debugPrint('Using saved role: $savedRole → /$savedRole');
-                return '/$savedRole';
-              } else {
-                // Show role selector
-                debugPrint('Multiple roles → /role-selector');
+              if (!hasLocalProfile) {
+                debugPrint('No local profile found → /role-selector');
                 return '/role-selector';
+              } else {
+                // Has local profile - use saved role
+                final savedRole = appState.currentRole;
+                if (savedRole != null && appState.roles.contains(savedRole)) {
+                  debugPrint('Using saved role: $savedRole → /$savedRole');
+                  return '/$savedRole';
+                } else {
+                  // Fallback to role selector
+                  debugPrint('No saved role → /role-selector');
+                  return '/role-selector';
+                }
               }
             }
           } else {
@@ -657,11 +748,22 @@ GoRouter _createRouter() {
               debugPrint('Has saved profiles → /continue');
               return '/continue';
             } else {
-              debugPrint(' No saved profiles → /login');
+              debugPrint('No saved profiles → /login');
               return '/login';
             }
           }
         }
+
+        // 🔥 SPECIAL HANDLING FOR /reg
+        if (path == '/reg') {
+          if (!appState.loggedIn) {
+            debugPrint('/reg requires login → redirecting to /login');
+            return '/login';
+          }
+          debugPrint('Allowing access to /reg');
+          return null;
+        }
+
         return null;
       }
 
@@ -682,16 +784,40 @@ GoRouter _createRouter() {
           return '/reg';
         }
 
+        // 🔥 CHECK IF ALREADY ON CORRECT DASHBOARD
+        if (path == '/owner' && appState.currentRole == 'owner') {
+          debugPrint('Already on owner dashboard - no redirect');
+          return null;
+        }
+        if (path == '/barber' && appState.currentRole == 'barber') {
+          debugPrint('Already on barber dashboard - no redirect');
+          return null;
+        }
+        if (path == '/customer' && appState.currentRole == 'customer') {
+          debugPrint('Already on customer dashboard - no redirect');
+          return null;
+        }
+
+        // Wrong dashboard for current role
         if (path == '/owner' && appState.currentRole != 'owner') {
-          return '/';
+          debugPrint(
+            'Wrong dashboard - redirecting to /${appState.currentRole}',
+          );
+          return '/${appState.currentRole}';
         }
         if (path == '/barber' && appState.currentRole != 'barber') {
-          return '/';
+          debugPrint(
+            'Wrong dashboard - redirecting to /${appState.currentRole}',
+          );
+          return '/${appState.currentRole}';
         }
         if (path == '/customer' &&
             appState.currentRole != 'customer' &&
             appState.currentRole != null) {
-          return '/';
+          debugPrint(
+            'Wrong dashboard - redirecting to /${appState.currentRole}',
+          );
+          return '/${appState.currentRole}';
         }
       }
 
@@ -713,10 +839,14 @@ GoRouter _createRouter() {
       GoRoute(path: '/signup', builder: (_, __) => const SignupFlow()),
       GoRoute(
         path: '/reg',
-        builder: (context, state) {
+        name: 'registration',
+        pageBuilder: (context, state) {
+          debugPrint('📍 /registration route called');
+
+          // Get user from Supabase
           final user = appState.currentUser;
-          debugPrint('RegistrationFlow with user from AppState: ${user?.email}');
-          return RegistrationFlow(user: user);
+
+          return MaterialPage(child: RegistrationFlow(user: user));
         },
       ),
       GoRoute(
@@ -728,32 +858,52 @@ GoRouter _createRouter() {
         builder: (_, __) => const VerifyInvalidScreen(),
       ),
       GoRoute(path: '/continue', builder: (_, __) => const ContinueScreen()),
-      GoRoute(
-        path: '/role-selector',
-        name: 'roleSelector',
-        builder: (context, state) {
-          final extra = state.extra as Map?;
-          final roles = extra?['roles'] as List<String>? ?? appState.roles;
-          final email =
-              extra?['email'] as String? ?? appState.currentEmail ?? '';
-          final userId =
-              extra?['userId'] as String? ?? appState.currentUser?.id ?? '';
+     GoRoute(
+  path: '/role-selector',
+  name: 'roleSelector',
+  builder: (context, state) {
+    final extra = state.extra as Map?;
+    
+    // 🔥 Safely convert roles to List<String>
+    final dynamic rolesFromExtra = extra?['roles'];
+    List<String> roles = [];
+    
+    if (rolesFromExtra != null) {
+      if (rolesFromExtra is List<String>) {
+        roles = rolesFromExtra;
+      } else if (rolesFromExtra is List) {
+        // Convert List<dynamic> to List<String>
+        roles = rolesFromExtra.map((e) => e.toString()).toList();
+      }
+    }
+    
+    // If no roles in extra, use appState.roles
+    if (roles.isEmpty) {
+      roles = appState.roles;
+    }
+    
+    final email = extra?['email'] as String? ?? appState.currentEmail ?? '';
+    final userId = extra?['userId'] as String? ?? appState.currentUser?.id ?? '';
 
-          return RoleSelectorScreen(roles: roles, email: email, userId: userId);
-        },
-      ),
+    return RoleSelectorScreen(
+      roles: roles,
+      email: email,
+      userId: userId,
+    );
+  },
+),
       GoRoute(path: '/customer', builder: (_, __) => const CustomerHome()),
       GoRoute(path: '/barber', builder: (_, __) => const EmployeeDashboard()),
       GoRoute(path: '/owner', builder: (_, __) => const OwnerDashboard()),
       GoRoute(
         path: '/privacy',
-        builder: (context, state) {          
+        builder: (context, state) {
           return const PolicyScreen(isPrivacyPolicy: true);
         },
       ),
       GoRoute(
         path: '/terms',
-        builder: (context, state) {         
+        builder: (context, state) {
           return const PolicyScreen(isPrivacyPolicy: false);
         },
       ),
@@ -809,6 +959,18 @@ GoRouter _createRouter() {
           final extra = state.extra as Map<String, dynamic>?;
           return ResetPasswordConfirmScreen(email: extra?['email'] ?? '');
         },
+      ),
+      GoRoute(
+        path: '/owner/add-barber',
+        name: 'addBarber',
+        pageBuilder: (context, state) =>
+            MaterialPage(child: const AddBarberScreen()),
+      ),
+      GoRoute(
+        path: '/owner/categories/add',
+        name: 'addCategory',
+        pageBuilder: (context, state) =>
+            MaterialPage(child: const AddCategoryScreen()),
       ),
     ],
   );
