@@ -209,7 +209,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
       // 🔥 TRY AUTO-LOGIN FIRST - FIXED
       debugPrint('🔄 Attempting auto login for: $email');
       final autoSuccess = await SessionManager.tryAutoLogin(email);
-      
+
       if (autoSuccess) {
         debugPrint('✅ Auto login successful!');
         loginSuccess = true;
@@ -225,18 +225,20 @@ class _ContinueScreenState extends State<ContinueScreen> {
           debugPrint('📊 Email login success: $loginSuccess');
         }
       } else {
-        debugPrint('🔐 OAuth login flow started for $provider (auto-login failed)');
+        debugPrint(
+          '🔐 OAuth login flow started for $provider (auto-login failed)',
+        );
         loginSuccess = await _handleOAuthLoginForProfile(profile);
         debugPrint('📊 OAuth login success: $loginSuccess');
       }
 
       if (loginSuccess && mounted) {
         debugPrint('✅ Login successful for role: $role');
-        
+
         // 🔥 Check current user after login
         final currentUser = supabase.auth.currentUser;
         debugPrint('👤 Current user after login: ${currentUser?.email}');
-        
+
         // Check if profile completed
         final hasProfile = await SessionManager.hasProfile();
         debugPrint('📋 Has local profile: $hasProfile');
@@ -259,7 +261,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
         // Refresh app state
         await appState.refreshState();
-        debugPrint('🔄 AppState refreshed - currentRole: ${appState.currentRole}');
+        debugPrint(
+          '🔄 AppState refreshed - currentRole: ${appState.currentRole}',
+        );
 
         // Redirect based on role
         String dashboardRoute;
@@ -461,6 +465,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
           return;
         } else {
           debugPrint('🚀 Starting login for role: $profileRole');
+          SessionManager.saveCurrentRole(profileRole);
           _handleProfileLogin(profile, profileRole, uniqueId);
         }
       },
