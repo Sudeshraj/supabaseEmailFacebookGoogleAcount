@@ -323,6 +323,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
             redirectTo: _env.getRedirectUrl(),
             scopes: 'email profile',
           );
+          SessionManager.setLocationContinuesc(true);
           break;
         case 'facebook':
           await supabase.auth.signInWithOAuth(
@@ -330,6 +331,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
             redirectTo: _env.getRedirectUrl(),
             scopes: 'email',
           );
+          SessionManager.setLocationContinuesc(true);
           break;
         case 'apple':
           await supabase.auth.signInWithOAuth(
@@ -337,6 +339,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
             redirectTo: _env.getRedirectUrl(),
             scopes: 'email name',
           );
+          SessionManager.setLocationContinuesc(true);
           break;
         default:
           return false;

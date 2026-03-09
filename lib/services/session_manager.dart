@@ -11,6 +11,7 @@ class SessionManager {
   static const String _currentUserKey = 'current_user';
   static const String _showContinueKey = 'show_continue_screen';
   static const String _rememberMeKey = 'remember_me_enabled';
+  static const String _locationcontinuesc = '_location_continue_sc';
   
   // Keys for profile switching
   static const String _keyUserRoles = '_all_roles';
@@ -815,6 +816,15 @@ static Future<String?> getCurrentRole() async {
 
   static Future<bool> isRememberMeEnabled() async {
     return _prefs.getBool(_rememberMeKey) ?? false;
+  }
+
+    static Future<void> setLocationContinuesc(bool enabled) async {
+    await _prefs.setBool(_locationcontinuesc, enabled);
+    debugPrint('✅ location continue sc set to: $enabled');
+  }
+
+   static Future<bool> isLocationContinuesc() async {
+    return _prefs.getBool(_locationcontinuesc) ?? false;
   }
 
   static Future<bool> shouldShowContinueScreen() async {
