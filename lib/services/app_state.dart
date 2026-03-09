@@ -170,7 +170,7 @@ class AppState extends ChangeNotifier {
       _setCurrentUser(Supabase.instance.client.auth.currentUser);
 
       await _checkAuthenticationState();
-      // await _updateUserProfile();
+      await _updateUserProfile();
 
       _lastUpdateTime = DateTime.now();
 
