@@ -26,6 +26,12 @@ class SessionManager {
   // Current consent version
   static const String _currentConsentVersion = '2.1';
 
+  // 🔥 FIX: Operation locks to prevent infinite loops
+  static bool _isSavingProfile = false;
+  static bool _isSavingRoles = false;
+  static bool _isUpdatingAvailableProfiles = false;
+  static Map<String, DateTime> _lastOperationTimes = {};
+
   // Initialize
   static Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
@@ -131,10 +137,10 @@ class SessionManager {
   }
 
   // =====================================================
-  // ✅ MAIN PROFILE FUNCTIONS
+  // ✅ MAIN PROFILE FUNCTIONS - FIXED VERSION
   // =====================================================
 
-  // 🔥 Save COMPLETE user profile locally (with role array)
+  // 🔥 FIXED: Save COMPLETE user profile locally (with role array) - NO LOOP
   static Future<void> saveUserProfile({
     required String email,
     required String userId,
@@ -151,6 +157,25 @@ class SessionManager {
     DateTime? marketingConsentAt,
     String? appVersion,
   }) async {
+    // 🔥 PREVENT RECURSIVE CALLS
+    if (_isSavingProfile) {
+      debugPrint('⏭️ Already saving profile for $email, skipping recursive call');
+      return;
+    }
+
+    // 🔥 THROTTLE: Prevent too frequent saves
+    final operationKey = 'profile_$email';
+    final now = DateTime.now();
+    final lastOp = _lastOperationTimes[operationKey];
+    if (lastOp != null && now.difference(lastOp) < Duration(milliseconds: 500)) {
+      debugPrint('⏭️ Too frequent save for $email, skipping');
+      return;
+    }
+
+    // Set locks
+    _isSavingProfile = true;
+    _lastOperationTimes[operationKey] = now;
+    
     debugPrint('📝 Saving profile for: $email');
     debugPrint('📸 Photo URL provided: ${photo ?? "NULL"}');   
     debugPrint('🔑 Provider provided: $provider');
@@ -160,8 +185,6 @@ class SessionManager {
       final profiles = await getProfiles();
       final index = profiles.indexWhere((p) => p['email'] == email);
       final existingProfile = index != -1 ? profiles[index] : <String, dynamic>{};
-
-      final now = DateTime.now();
 
       // MERGE roles properly - this is key for multiple roles
       List<String> userRoles = [];
@@ -280,9 +303,41 @@ class SessionManager {
 
       await _prefs.setString(_keyProfiles, jsonEncode(profiles));
 
-      // Save user roles separately for quick access (with merge)
+      // 🔥 FIX: Save roles WITHOUT triggering recursion
       if (rememberMe && userRoles.isNotEmpty) {
-        await saveUserRoles(email: email, roles: userRoles);
+        // Directly save to prefs without calling saveUserRoles
+        await _prefs.setStringList('$email$_keyUserRoles', userRoles);
+        
+        // Update available profiles WITHOUT recursion
+        final currentUserId = await getCurrentUserId();
+        if (currentUserId != null) {
+          final existingProfiles = await getAvailableProfiles();
+          final currentRole = await getCurrentRole();
+          
+          for (String role in userRoles) {
+            final profileData = {
+              'id': currentUserId,
+              'email': email,
+              'role': role,
+              'role_id': _getRoleIdFromName(role),
+              'is_active': true,
+              'last_used': role == currentRole ? now.toIso8601String() : null,
+            };
+            
+            final roleIndex = existingProfiles.indexWhere((p) => 
+              p['role'] == role && p['email'] == email
+            );
+            
+            if (roleIndex == -1) {
+              existingProfiles.add(profileData);
+            } else {
+              existingProfiles[roleIndex] = {...existingProfiles[roleIndex], ...profileData};
+            }
+          }
+          
+          await _prefs.setString(_keyAvailableProfiles, jsonEncode(existingProfiles));
+          debugPrint('✅ Updated available profiles directly');
+        }
       }
 
       // Set current user
@@ -327,6 +382,10 @@ class SessionManager {
       debugPrint('❌ Error saving profile: $e');
       debugPrint('📚 Stack trace: $stackTrace');
       rethrow;
+    } finally {
+      // 🔥 IMPORTANT: Always release locks
+      _isSavingProfile = false;
+      debugPrint('🔓 Profile saving lock released for $email');
     }
   }
 
@@ -364,14 +423,32 @@ class SessionManager {
   }
 
   // =====================================================
-  // ✅ ROLE MANAGEMENT FUNCTIONS
+  // ✅ ROLE MANAGEMENT FUNCTIONS - FIXED
   // =====================================================
 
-  // 🔥 Save ALL user roles (with merge)
+  // 🔥 FIXED: Save ALL user roles (with merge) - SAFE VERSION
   static Future<void> saveUserRoles({
     required String email,
     required List<String> roles,
   }) async {
+    // 🔥 PREVENT RECURSIVE CALLS
+    if (_isSavingRoles) {
+      debugPrint('⏭️ Already saving roles for $email, skipping recursive call');
+      return;
+    }
+
+    // 🔥 THROTTLE
+    final operationKey = 'roles_$email';
+    final now = DateTime.now();
+    final lastOp = _lastOperationTimes[operationKey];
+    if (lastOp != null && now.difference(lastOp) < Duration(milliseconds: 500)) {
+      debugPrint('⏭️ Too frequent roles save for $email, skipping');
+      return;
+    }
+
+    _isSavingRoles = true;
+    _lastOperationTimes[operationKey] = now;
+
     try {
       debugPrint('📝 SessionManager.saveUserRoles START');  
       debugPrint('   - Email: $email');
@@ -402,12 +479,16 @@ class SessionManager {
       // Save as separate key for quick access
       await _prefs.setStringList('$email$_keyUserRoles', mergedRoles);
       
-      // Update available profiles
-      await _updateAvailableProfiles(email, mergedRoles);
+      // Update available profiles - SAFELY
+      if (!_isUpdatingAvailableProfiles) {
+        await _updateAvailableProfiles(email, mergedRoles);
+      }
       
       debugPrint('✅ SessionManager: Saved all roles for $email: $mergedRoles');
     } catch (e) {
       debugPrint('❌ SessionManager: Error saving user roles: $e');
+    } finally {
+      _isSavingRoles = false;
     }
   }
 
@@ -578,7 +659,7 @@ class SessionManager {
   }
 
   // =====================================================
-  // ✅ AVAILABLE PROFILES FUNCTIONS
+  // ✅ AVAILABLE PROFILES FUNCTIONS - FIXED
   // =====================================================
 
   // Save all available profiles
@@ -605,8 +686,16 @@ class SessionManager {
     }
   }
 
-  // Update available profiles list
+  // 🔥 FIXED: Update available profiles list - SAFE VERSION
   static Future<void> _updateAvailableProfiles(String email, List<String> roles) async {
+    // 🔥 PREVENT RECURSIVE CALLS
+    if (_isUpdatingAvailableProfiles) {
+      debugPrint('⏭️ Already updating available profiles, skipping');
+      return;
+    }
+
+    _isUpdatingAvailableProfiles = true;
+
     try {
       final currentUserId = await getCurrentUserId();
       if (currentUserId == null) return;
@@ -639,6 +728,8 @@ class SessionManager {
       await saveAvailableProfiles(existingProfiles);
     } catch (e) {
       debugPrint('❌ Error updating available profiles: $e');
+    } finally {
+      _isUpdatingAvailableProfiles = false;
     }
   }
 
