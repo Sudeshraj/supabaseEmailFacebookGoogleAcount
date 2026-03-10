@@ -4,6 +4,7 @@ import 'package:flutter_application_1/config/environment_manager.dart';
 import 'package:flutter_application_1/main.dart';
 import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
 import 'package:flutter_application_1/services/session_manager.dart';
+import 'package:flutter_svg/svg.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:go_router/go_router.dart';
 
@@ -392,16 +393,17 @@ class _ContinueScreenState extends State<ContinueScreen> {
   // ... (ඉතිරි කොටස් සියල්ලම පෙර පරිදිම තබන්න - _buildProfileCard, _buildFooter, SecurityCompliantPasswordDialog ආදිය)
 
   Color _getProviderColor(String? provider) {
-    switch (provider?.toLowerCase()) {
-      case 'google':
-        return const Color(0xFFDB4437);
-      case 'facebook':
-        return const Color(0xFF1877F2);
-      case 'apple':
-        return Colors.black;
-      default:
-        return Colors.blueAccent;
-    }
+     return const Color.fromARGB(255, 242, 241, 241);
+    // switch (provider?.toLowerCase()) {
+    //   case 'google':
+    //     return const Color.fromARGB(255, 242, 241, 241);
+    //   case 'facebook':
+    //     return const Color(0xFF1877F2);
+    //   case 'apple':
+    //     return Colors.black;
+    //   default:
+    //     return Colors.blueAccent;
+    // }
   }
 
   Color _getRoleColor(String role) {
@@ -460,9 +462,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
   }
 
   // ============================================================
-  // 🔥 PROFILE CARD
-  // ============================================================
-  // ============================================================
   // 🔥 PROFILE CARD - WITH PROVIDER & ROLE ICONS ON PHOTO
   // ============================================================
   Widget _buildProfileCard(Map<String, dynamic> profile, int index) {
@@ -484,6 +483,8 @@ class _ContinueScreenState extends State<ContinueScreen> {
     final roleIcon = _getRoleIcon(profileRole);
     final roleDisplayName = _getRoleDisplayName(profileRole);
     final providerColor = _getProviderColor(provider);
+
+    // 🔥 All users get a provider icon now (email users get email icon)
 
     return GestureDetector(
       onTap: () {
@@ -556,8 +557,8 @@ class _ContinueScreenState extends State<ContinueScreen> {
                     ),
                   ),
 
-                  // Provider Icon Badge (Top Left)
-                  if (provider != 'email' && !isLoading && !_selectionMode)
+                  // 🔥 Provider Icon Badge (Top Left) - NOW FOR ALL USERS
+                  if (!isLoading && !_selectionMode)
                     Positioned(
                       top: -4,
                       left: -4,
@@ -583,7 +584,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                       ),
                     ),
 
-                  // Role Icon Badge (Bottom Right)
+                  // Role Icon Badge (Bottom Right) - Always show for all users
                   if (!isLoading && !_selectionMode)
                     Positioned(
                       bottom: -4,
@@ -665,47 +666,22 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
               const SizedBox(width: 16),
 
-              // Profile Info - Simplified
+              // Profile Info - Simple
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // Name with small provider indicator
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            name,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w600,
-                              fontSize: 12,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        // Small provider text for email logins
-                        if (provider == 'email' && !isLoading)
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 3,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.1),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Text(
-                              'email',
-                              style: TextStyle(
-                                color: Colors.white.withValues(alpha: 0.5),
-                                fontSize: 10,
-                              ),
-                            ),
-                          ),
-                      ],
+                    // Name only - NO email label
+                    Text(
+                      name,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 18,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
 
                     const SizedBox(height: 8),
@@ -773,27 +749,78 @@ class _ContinueScreenState extends State<ContinueScreen> {
   Widget _buildProviderIcon(String provider) {
     switch (provider.toLowerCase()) {
       case 'google':
-        return const Text(
-          'G',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 12,
-            fontWeight: FontWeight.bold,
-          ),
-        );
+        return SvgPicture.asset('icons/google.svg', width: 18, height: 18);
       case 'facebook':
-        return const Text(
-          'f',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 14,
-            fontWeight: FontWeight.bold,
-          ),
-        );
+        return SvgPicture.asset('icons/facebook.svg', width: 18, height: 18);
       case 'apple':
-        return const Icon(Icons.apple, color: Colors.white, size: 14);
+        // return const Icon(Icons.apple, size: 18);
+        return SvgPicture.asset('icons/apple.svg', width: 20, height: 20);
+      case 'email':
+        return Icon(
+          Icons.email_rounded,
+          size: 18,
+          color: _getButtonColor(provider.toLowerCase()),
+        );
       default:
-        return const Icon(Icons.email, color: Colors.white, size: 12);
+        return const SizedBox();
+
+      // case 'google':
+      //   return const Text(
+      //     'G',
+      //     style: TextStyle(
+      //       color: Colors.white,
+      //       fontSize: 12,
+      //       fontWeight: FontWeight.bold,
+      //     ),
+      //   );
+      // case 'facebook':
+      //   return const Text(
+      //     'f',
+      //     style: TextStyle(
+      //       color: Colors.white,
+      //       fontSize: 14,
+      //       fontWeight: FontWeight.bold,
+      //     ),
+      //   );
+      //  case 'apple':
+      //   return const Icon(
+      //     Icons.apple,
+      //     color: Colors.white,
+      //     size: 14,
+      //   );
+      // case 'email':
+      //   return const Text(
+      //     'E',  // 🔥 Email users get 'E'
+      //     style: TextStyle(
+      //       color: Colors.white,
+      //       fontSize: 12,
+      //       fontWeight: FontWeight.bold,
+      //     ),
+      //   );
+      // default:
+      //   return const Text(
+      //     '?',
+      //     style: TextStyle(
+      //       color: Colors.white,
+      //       fontSize: 12,
+      //       fontWeight: FontWeight.bold,
+      //     ),
+      //   );
+    }
+  }
+
+  Color _getButtonColor(provider) {
+    switch (provider) {
+      case 'google':
+        return const Color.fromARGB(255, 227, 44, 8);
+      case 'facebook':
+        return const Color(0xFF1877F2);
+      case 'apple':
+        return const Color.fromARGB(255, 227, 227, 227);
+      case 'email':
+        return const Color.fromARGB(255, 30, 30, 31);
+      default:
+        return const Color.fromARGB(255, 228, 230, 234);
     }
   }
 
