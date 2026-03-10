@@ -213,13 +213,26 @@ class SessionManager {
         actualProvider = existingProfile['provider'] as String? ?? 'email';
       }
 
+      // 🔥 IMPORTANT: Get existing lastLogin or set new one
+      String? lastLogin;
+      
+      if (existingProfile.containsKey('lastLogin') && existingProfile['lastLogin'] != null) {
+        // Update existing lastLogin
+        lastLogin = now.toIso8601String();
+        debugPrint('⏰ Updating lastLogin for $email from ${existingProfile['lastLogin']} to $lastLogin');
+      } else {
+        // First time login
+        lastLogin = now.toIso8601String();
+        debugPrint('⏰ Setting first lastLogin for $email: $lastLogin');
+      }
+
       final profileData = <String, dynamic>{
         'email': email,
         'userId': userId,
         'name': name ?? existingProfile['name'] ?? email.split('@').first,
         'photo': finalPhoto,
-        'roles': userRoles,  // 👈 This is the array of ALL roles
-        'lastLogin': now.toIso8601String(),
+        'roles': userRoles,
+        'lastLogin': lastLogin,
         'createdAt': existingProfile['createdAt'] ?? now.toIso8601String(),
         'rememberMe': rememberMe,
         'provider': actualProvider,
@@ -246,6 +259,7 @@ class SessionManager {
         print('   - Roles: $userRoles');
         print('   - Photo: ${profileData['photo']}');
         print('   - Provider: $actualProvider');
+        print('   - LastLogin: $lastLogin');
       }
 
       // Save or update profile in local storage
@@ -421,63 +435,51 @@ class SessionManager {
   }
 
   // Save current selected role
-// Save current selected role - UPDATED to notify AppState
-// Save current selected role - WITH STACK TRACE
-static Future<void> saveCurrentRole(String? role) async {
-  try {
+  static Future<void> saveCurrentRole(String? role) async {
+    try {
       debugPrint('💾 saveCurrentRole called with: $role');
-    debugPrint('📞 CALL STACK:');
-    final stackTrace = StackTrace.current;
-    final stackLines = stackTrace.toString().split('\n');
-    for (int i = 0; i < stackLines.length && i < 10; i++) {
-      final line = stackLines[i].trim();
-      if (line.isNotEmpty && !line.contains('package:flutter/') && 
-          !line.contains('dart:') && !line.contains('_')) {
-        debugPrint('   $line');
+      
+      if (role == null) {
+        await _prefs.remove(_keyCurrentRole);
+        debugPrint('✅ Cleared current role');
+      } else {
+        final email = await getCurrentUserEmail();
+        debugPrint('💾 Saving current role: $role for user: $email');
+        
+        await _prefs.setString(_keyCurrentRole, role);
+        
+        final savedRole = _prefs.getString(_keyCurrentRole);
+        debugPrint('✅ Verified saved role: $savedRole');
+        
+        appState.refreshState(silent: true);
+        
+        if (email != null) {
+          final profiles = await getAvailableProfiles();
+          final updatedProfiles = profiles.map((p) {
+            if (p['email'] == email && p['role'] == role) {
+              return {...p, 'last_used': DateTime.now().toIso8601String()};
+            }
+            return p;
+          }).toList();
+          await saveAvailableProfiles(updatedProfiles);
+        }
       }
+    } catch (e) {
+      debugPrint('❌ Error saving current role: $e');
     }
-    
-    if (role == null) {
-      await _prefs.remove(_keyCurrentRole);
-      debugPrint('✅ Cleared current role');
-    } else {
-      final email = await getCurrentUserEmail();
-      debugPrint('💾 Saving current role: $role for user: $email');
-      
-      await _prefs.setString(_keyCurrentRole, role);
-      
-      final savedRole = _prefs.getString(_keyCurrentRole);
-      debugPrint('✅ Verified saved role: $savedRole');
-      
-      appState.refreshState(silent: true);
-      
-      if (email != null) {
-        final profiles = await getAvailableProfiles();
-        final updatedProfiles = profiles.map((p) {
-          if (p['email'] == email && p['role'] == role) {
-            return {...p, 'last_used': DateTime.now().toIso8601String()};
-          }
-          return p;
-        }).toList();
-        await saveAvailableProfiles(updatedProfiles);
-      }
-    }
-  } catch (e) {
-    debugPrint('❌ Error saving current role: $e');
   }
-}
 
-// Get current selected role - FIXED
-static Future<String?> getCurrentRole() async {
-  try {
-    final role = _prefs.getString(_keyCurrentRole);
-    debugPrint('📖 Getting current role: $role');
-    return role;
-  } catch (e) {
-    debugPrint('❌ Error getting current role: $e');
-    return null;
+  // Get current selected role
+  static Future<String?> getCurrentRole() async {
+    try {
+      final role = _prefs.getString(_keyCurrentRole);
+      debugPrint('📖 Getting current role: $role');
+      return role;
+    } catch (e) {
+      debugPrint('❌ Error getting current role: $e');
+      return null;
+    }
   }
-}
 
   // Update user role (switch role)
   static Future<void> updateUserRole(String newRole) async {
@@ -716,16 +718,19 @@ static Future<String?> getCurrentRole() async {
     return profiles.isNotEmpty;
   }
 
-  // Update last login
+  // 🔥 UPDATE LAST LOGIN - IMPORTANT FIX
   static Future<void> updateLastLogin(String email) async {
     try {
       final profiles = await getProfiles();
       final index = profiles.indexWhere((p) => p['email'] == email);
 
       if (index != -1) {
-        profiles[index]['lastLogin'] = DateTime.now().toIso8601String();
+        final now = DateTime.now().toIso8601String();
+        profiles[index]['lastLogin'] = now;
         await _prefs.setString(_keyProfiles, jsonEncode(profiles));
-        debugPrint('✅ Last login updated for: $email');
+        debugPrint('✅ Last login updated for: $email -> $now');
+      } else {
+        debugPrint('⚠️ Profile not found for lastLogin update: $email');
       }
     } catch (e) {
       debugPrint('❌ Error updating last login: $e');
@@ -818,12 +823,12 @@ static Future<String?> getCurrentRole() async {
     return _prefs.getBool(_rememberMeKey) ?? false;
   }
 
-    static Future<void> setLocationContinuesc(bool enabled) async {
+  static Future<void> setLocationContinuesc(bool enabled) async {
     await _prefs.setBool(_locationcontinuesc, enabled);
     debugPrint('✅ location continue sc set to: $enabled');
   }
 
-   static Future<bool> isLocationContinuesc() async {
+  static Future<bool> isLocationContinuesc() async {
     return _prefs.getBool(_locationcontinuesc) ?? false;
   }
 
@@ -841,6 +846,8 @@ static Future<String?> getCurrentRole() async {
   // =====================================================
   // ✅ AUTO-LOGIN & SESSION MANAGEMENT
   // =====================================================
+  
+  // 🔥 UPDATED AUTO-LOGIN METHOD
   static Future<bool> tryAutoLogin(String email) async {
     try {
       debugPrint('===== ATTEMPTING AUTO-LOGIN =====');
@@ -856,11 +863,15 @@ static Future<String?> getCurrentRole() async {
       final currentUser = supabase.auth.currentUser;
       final currentSession = supabase.auth.currentSession;
 
+      // 🔥 Check if already logged in with valid session
       if (currentUser?.email == email && currentSession != null) {
         if (isSessionValid(currentSession)) {
           debugPrint('✅ AUTO-LOGIN SUCCESS: Already logged in');
+          
+          // Update lastLogin time
           await updateLastLogin(email);
           
+          // Update roles if needed
           final roles = await getUserRoles(email);
           if (roles.isNotEmpty && await getCurrentRole() == null) {
             final primaryRole = await getPrimaryRole(email);
@@ -870,6 +881,8 @@ static Future<String?> getCurrentRole() async {
           }
           
           return true;
+        } else {
+          debugPrint('⏰ Session expired, attempting refresh...');
         }
       }
 
@@ -879,6 +892,7 @@ static Future<String?> getCurrentRole() async {
         return false;
       }
 
+      // 🔥 Try to refresh session using refresh token
       final refreshToken = await _secureStorage.read(
         key: '${userId}_refresh_token',
       );
@@ -890,6 +904,33 @@ static Future<String?> getCurrentRole() async {
 
       try {
         debugPrint('🔄 Attempting to restore session with secure token...');
+        
+        // First try to refresh the session
+        final response = await supabase.auth.refreshSession();
+        
+        if (response.session != null && response.user?.email == email) {
+          debugPrint('✅ AUTO-LOGIN SUCCESS: Session refreshed');
+          
+          // Update lastLogin time
+          await updateLastLogin(email);
+          
+          // Update secure tokens
+          await _updateSecureTokens(userId, response.session!);
+          
+          // Update roles
+          final roles = await getUserRoles(email);
+          if (roles.isNotEmpty && await getCurrentRole() == null) {
+            final primaryRole = await getPrimaryRole(email);
+            if (primaryRole != null) {
+              await saveCurrentRole(primaryRole);
+            }
+          }
+          
+          return true;
+        }
+        
+        // If refresh fails, try setSession with refresh token
+        debugPrint('🔄 Refresh failed, attempting setSession...');
         await supabase.auth.setSession(refreshToken);
         await Future.delayed(const Duration(milliseconds: 500));
 
@@ -898,9 +939,14 @@ static Future<String?> getCurrentRole() async {
 
         if (restoredUser?.email == email && restoredSession != null) {
           debugPrint('✅ AUTO-LOGIN SUCCESS: Session restored securely');
+          
+          // Update lastLogin time
           await updateLastLogin(email);
+          
+          // Update secure tokens
           await _updateSecureTokens(userId, restoredSession);
           
+          // Update roles
           final roles = await getUserRoles(email);
           if (roles.isNotEmpty && await getCurrentRole() == null) {
             final primaryRole = await getPrimaryRole(email);
@@ -925,55 +971,7 @@ static Future<String?> getCurrentRole() async {
     }
   }
 
-  // Logout for continue
-// Logout for continue
-// static Future<void> logoutForContinue() async {
-//   try {
-//     final supabase = Supabase.instance.client;
-//     final user = supabase.auth.currentUser;
-//     final email = await getCurrentUserEmail();
-//     final rememberMe = await isRememberMeEnabled();
-
-//     if (user != null && email != null && email == user.email) {
-//       final currentSession = supabase.auth.currentSession;
-
-//       if (rememberMe && currentSession != null) {
-//         await saveUserProfile(
-//           email: email,
-//           userId: user.id,
-//           name: user.userMetadata?['full_name'] ?? email.split('@').first,
-//           rememberMe: rememberMe,
-//           refreshToken: currentSession.refreshToken,
-//           accessToken: currentSession.accessToken,
-//           provider: await _getUserProvider(email),
-//         );
-//         debugPrint('✅ Refresh token saved before continue logout');
-//       }
-//     }
-
-//     await supabase.auth.signOut();
-
-//     // 🔥 CRITICAL: Clear current role on logout
-//     await _prefs.remove(_keyCurrentRole);
-//     debugPrint('✅ Cleared current role on logout');
-
-//     if (email != null && rememberMe) {
-//       await setCurrentUser(email);
-//       await _prefs.setBool(_showContinueKey, true);
-//       debugPrint('👤 User prepared for continue screen');
-//     } else {
-//       await _prefs.remove(_currentUserKey);
-//       await clearContinueScreen();
-      
-//       if (email != null) {
-//         await clearUserRoles(email);
-//       }
-//     }
-//   } catch (e) {
-//     debugPrint('❌ Error during continue logout: $e');
-//   }
-// }
-
+  // 🔥 UPDATED LOGOUT FOR CONTINUE
   static Future<void> logoutForContinue() async {
     try {
       final supabase = Supabase.instance.client;
@@ -993,27 +991,32 @@ static Future<String?> getCurrentRole() async {
             userId: user.id,
             name: user.userMetadata?['full_name'] ?? email.split('@').first,
             rememberMe: rememberMe,
-            refreshToken: refreshToken, // Save token for future auto-login
+            refreshToken: refreshToken,
+            provider: await _getUserProvider(email),
           );
-          print('✅ Refresh token saved before continue logout');
+          debugPrint('✅ Refresh token saved before continue logout');
         }
       }
 
       // Sign out from Supabase
       await supabase.auth.signOut();
 
+      // 🔥 CRITICAL: Clear current role on logout
+      await _prefs.remove(_keyCurrentRole);
+      debugPrint('✅ Cleared current role on logout');
+
       // Save current user for continue screen if remember me is enabled
       if (email != null && rememberMe) {
         await setCurrentUser(email);
         await _prefs.setBool(_showContinueKey, true);
-        print('✅ User prepared for continue screen (Remember Me: $rememberMe)');
+        debugPrint('✅ User prepared for continue screen (Remember Me: $rememberMe)');
       } else {
         await _prefs.remove(_currentUserKey);
         await clearContinueScreen();
-        print('✅ User cleared for continue screen');
+        debugPrint('✅ User cleared for continue screen');
       }
     } catch (e) {
-      print('❌ Error during continue logout: $e');
+      debugPrint('❌ Error during continue logout: $e');
     }
   }
 
@@ -1093,6 +1096,7 @@ static Future<String?> getCurrentRole() async {
         debugPrint('  - Roles: ${profile['roles']}');
         debugPrint('  - Name: ${profile['name']}');
         debugPrint('  - Provider: ${profile['provider']}');
+        debugPrint('  - LastLogin: ${profile['lastLogin']}');
       }
       debugPrint('📋 ================================');
     } catch (e) {

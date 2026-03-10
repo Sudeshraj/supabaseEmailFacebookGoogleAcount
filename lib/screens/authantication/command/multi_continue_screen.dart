@@ -6,7 +6,6 @@ import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
 import 'package:flutter_application_1/services/session_manager.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:go_router/go_router.dart';
-import 'package:flutter/foundation.dart' show kDebugMode;
 
 final supabase = Supabase.instance.client;
 
@@ -20,13 +19,13 @@ class ContinueScreen extends StatefulWidget {
 class _ContinueScreenState extends State<ContinueScreen> {
   final EnvironmentManager _env = EnvironmentManager();
   List<Map<String, dynamic>> profiles = [];
-  bool _loading = false;
+  final bool _loading = false;
   String? _selectedEmail;
   final Map<String, bool> _profileLoadingStates = {};
   bool _isGoogleImageRateLimited = false;
   DateTime? _lastGoogleImageError;
   bool _selectionMode = false;
-  Set<String> _selectedProfiles = {};
+  final Set<String> _selectedProfiles = {};
   int _selectedCount = 0;
 
   @override
@@ -37,9 +36,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
     _checkCompliance();
   }
 
-  // ============================================================
-  // 🔥 LOAD PROFILES - FIXED VERSION
-  // ============================================================
   Future<void> _loadProfiles() async {
     try {
       final allProfiles = await SessionManager.getProfiles();
@@ -51,21 +47,49 @@ class _ContinueScreenState extends State<ContinueScreen> {
         final roles = profile['roles'] as List? ?? [];
         final email = profile['email'] as String? ?? 'unknown';
 
-        debugPrint('📋 Processing profile: $email, roles: $roles');
+        // 🔥 එක් එක් profile එකට අදාළ last login time එක දැනටමත් profile එකේ තියෙනවා
+        // අපිට ආයෙත් _getLastLoginForProfile() call කරන්න ඕනේ නැහැ
+        final profileLastLogin = profile['lastLogin'] as String?;
+
+        debugPrint(
+          '📋 Processing profile: $email, roles: $roles, original lastLogin: $profileLastLogin',
+        );
 
         if (roles.isEmpty) {
-          expandedProfiles.add(Map.from(profile));
-          debugPrint('  → Added profile with no roles');
+          final newProfile = Map<String, dynamic>.from(profile);
+          newProfile['lastLogin'] =
+              profileLastLogin; // Ensure lastLogin is copied
+          expandedProfiles.add(newProfile);
+          debugPrint(
+            '  → Added profile with no roles, lastLogin: $profileLastLogin',
+          );
         } else if (roles.length == 1) {
-          expandedProfiles.add(Map.from(profile));
-          debugPrint('  → Added profile with single role: ${roles.first}');
+          final newProfile = Map<String, dynamic>.from(profile);
+          newProfile['lastLogin'] =
+              profileLastLogin; // Ensure lastLogin is copied
+          expandedProfiles.add(newProfile);
+          debugPrint(
+            '  → Added profile with single role: ${roles.first}, lastLogin: $profileLastLogin',
+          );
         } else {
           debugPrint('  → Splitting into ${roles.length} profiles');
+
+          // 🔥 IMPORTANT FIX: එක් එක් role profile එක සෑදීමේදී,
+          // අපි එකම lastLogin value එක copy කරනවා නම් හැම role profile එකටම එකම time එක පෙන්වයි.
+          // නමුත් මෙතන තියෙන problem එක තමයි - අපිට එක් එක් role එකට වෙනම lastLogin time එකක් නැහැ.
+          // එකම user එකේ විවිධ roles වලට වෙනම lastLogin times තියෙන්නේ නැහැ.
+          // ඒක නිසා අපිට කරන්න පුළුවන් හොඳම දේ තමයි එකම user එකේ හැම role එකටම එකම lastLogin time එක පෙන්වීම.
+          // එහෙමත් නැත්නම්, අපිට role-specific lastLogin times තියාගන්න වෙනම storage system එකක් හදන්න වෙනවා.
+
           for (var role in roles) {
             final roleProfile = Map<String, dynamic>.from(profile);
             roleProfile['roles'] = [role.toString()];
+            roleProfile['lastLogin'] =
+                profileLastLogin; // Copy the same lastLogin for all roles of this user
             expandedProfiles.add(roleProfile);
-            debugPrint('    → Created profile for role: $role');
+            debugPrint(
+              '    → Created profile for role: $role, lastLogin: $profileLastLogin',
+            );
           }
         }
       }
@@ -88,7 +112,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
         debugPrint('✅ Final profiles count: ${expandedProfiles.length}');
         for (var i = 0; i < expandedProfiles.length; i++) {
           debugPrint(
-            '  Profile $i: ${expandedProfiles[i]['email']} - Role: ${expandedProfiles[i]['roles']?.first}',
+            '  Profile $i: ${expandedProfiles[i]['email']} - Role: ${expandedProfiles[i]['roles']?.first} - LastLogin: ${expandedProfiles[i]['lastLogin']}',
           );
         }
       });
@@ -215,6 +239,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
         loginSuccess = true;
       } else if (provider == 'email') {
         debugPrint('🔐 Email login flow started (auto-login failed)');
+        SessionManager.setLocationContinuesc(true);
         final password = await _showPasswordDialog(email);
         if (password != null) {
           final response = await supabase.auth.signInWithPassword(
@@ -279,7 +304,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
         }
 
         debugPrint('📍 Redirecting to: $dashboardRoute');
-        context.go(dashboardRoute);
+        if (mounted) {
+          context.go(dashboardRoute);
+        }
       } else {
         debugPrint('❌ Login failed for role: $role');
       }
@@ -435,6 +462,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
   // ============================================================
   // 🔥 PROFILE CARD
   // ============================================================
+  // ============================================================
+  // 🔥 PROFILE CARD - WITH PROVIDER & ROLE ICONS ON PHOTO
+  // ============================================================
   Widget _buildProfileCard(Map<String, dynamic> profile, int index) {
     final email = profile['email'] as String? ?? 'Unknown';
     final provider = profile['provider'] as String? ?? 'email';
@@ -448,32 +478,25 @@ class _ContinueScreenState extends State<ContinueScreen> {
     final photoUrl = profile['photo'] as String?;
     final name = profile['name'] as String? ?? email.split('@').first;
     final hasPhoto = photoUrl != null && photoUrl.isNotEmpty;
+    final lastLogin = profile['lastLogin'] as String?;
 
     final roleColor = _getRoleColor(profileRole);
     final roleIcon = _getRoleIcon(profileRole);
     final roleDisplayName = _getRoleDisplayName(profileRole);
-
-    debugPrint(
-      '📱 Building profile card $index - Role: $profileRole, Email: $email, UniqueId: $uniqueId',
-    );
+    final providerColor = _getProviderColor(provider);
 
     return GestureDetector(
       onTap: () {
-        debugPrint('🎯 TAPPED - Profile card $index, Role: $profileRole');
-
         if (_selectionMode) {
           _toggleProfileSelection(profile, uniqueId);
         } else if (isLoading) {
-          debugPrint('⏳ Already loading');
           return;
         } else {
-          debugPrint('🚀 Starting login for role: $profileRole');
           SessionManager.saveCurrentRole(profileRole);
           _handleProfileLogin(profile, profileRole, uniqueId);
         }
       },
       onLongPress: () {
-        debugPrint('👆 Long press on profile $index');
         if (!_selectionMode) {
           _startSelectionMode();
           _toggleProfileSelection(profile, uniqueId);
@@ -482,52 +505,48 @@ class _ContinueScreenState extends State<ContinueScreen> {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 300),
         curve: Curves.easeInOut,
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: BoxDecoration(
           color: isSelected
-              ? roleColor.withValues(alpha: 0.2)
+              ? roleColor.withValues(alpha: 0.15)
               : isLoading
               ? roleColor.withValues(alpha: 0.1)
-              : Colors.white.withValues(alpha: 0.03),
-          borderRadius: BorderRadius.circular(16),
+              : Colors.white.withValues(alpha: 0.05),
+          borderRadius: BorderRadius.circular(20),
           border: Border.all(
             color: isLoading
                 ? roleColor
                 : isSelected
-                ? roleColor
+                ? roleColor.withValues(alpha: 0.5)
                 : Colors.white.withValues(alpha: 0.1),
-            width: isLoading ? 2 : (isSelected ? 2 : 1.5),
+            width: isLoading ? 2 : 1.5,
           ),
-          boxShadow: isLoading
-              ? [
-                  BoxShadow(
-                    color: roleColor.withValues(alpha: 0.5),
-                    blurRadius: 8,
-                    spreadRadius: 1,
-                  ),
-                ]
-              : isSelected
-              ? [
-                  BoxShadow(
-                    color: roleColor.withValues(alpha: 0.3),
-                    blurRadius: 8,
-                    spreadRadius: 1,
-                  ),
-                ]
-              : null,
         ),
         child: Padding(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(12),
           child: Row(
             children: [
-              // Profile Image with Role Badge
+              // Profile Image with Provider and Role Icons
               Stack(
+                clipBehavior: Clip.none, // Allow icons to extend outside
                 children: [
+                  // Main Profile Photo
                   Container(
                     width: 70,
                     height: 70,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: _getProviderColor(provider).withValues(alpha: 0.2),
+                      border: Border.all(
+                        color: roleColor.withValues(alpha: 0.3),
+                        width: 2,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: roleColor.withValues(alpha: 0.2),
+                          blurRadius: 8,
+                          spreadRadius: 0,
+                        ),
+                      ],
                     ),
                     child: _buildLargeProfileImage(
                       profile,
@@ -537,93 +556,63 @@ class _ContinueScreenState extends State<ContinueScreen> {
                     ),
                   ),
 
-                  // ROLE BADGE
-                  Positioned(
-                    bottom: 0,
-                    right: 0,
-                    child: Container(
-                      width: 30,
-                      height: 30,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: roleColor,
-                        border: Border.all(
-                          color: const Color(0xFF0F1820),
-                          width: 2,
-                        ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: roleColor.withValues(alpha: 0.5),
-                            blurRadius: 4,
-                          ),
-                        ],
-                      ),
-                      child: Center(
-                        child: isLoading
-                            ? SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
-                            : Icon(roleIcon, color: Colors.white, size: 16),
-                      ),
-                    ),
-                  ),
-
-                  // Provider icon badge
-                  if (provider != 'email' && !_selectionMode && !isLoading)
+                  // Provider Icon Badge (Top Left)
+                  if (provider != 'email' && !isLoading && !_selectionMode)
                     Positioned(
-                      top: 0,
-                      left: 0,
+                      top: -4,
+                      left: -4,
                       child: Container(
-                        width: 24,
-                        height: 24,
+                        width: 26,
+                        height: 26,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: _getProviderColor(provider),
+                          color: providerColor,
                           border: Border.all(
                             color: const Color(0xFF0F1820),
-                            width: 2,
+                            width: 2.5,
                           ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: providerColor.withValues(alpha: 0.5),
+                              blurRadius: 4,
+                              spreadRadius: 0,
+                            ),
+                          ],
+                        ),
+                        child: Center(child: _buildProviderIcon(provider)),
+                      ),
+                    ),
+
+                  // Role Icon Badge (Bottom Right)
+                  if (!isLoading && !_selectionMode)
+                    Positioned(
+                      bottom: -4,
+                      right: -4,
+                      child: Container(
+                        width: 28,
+                        height: 28,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: roleColor,
+                          border: Border.all(
+                            color: const Color(0xFF0F1820),
+                            width: 2.5,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: roleColor.withValues(alpha: 0.5),
+                              blurRadius: 4,
+                              spreadRadius: 0,
+                            ),
+                          ],
                         ),
                         child: Center(
-                          child: provider == 'google'
-                              ? Text(
-                                  'G',
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                )
-                              : provider == 'facebook'
-                              ? Text(
-                                  'f',
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                )
-                              : provider == 'apple'
-                              ? const Icon(
-                                  Icons.apple,
-                                  color: Colors.white,
-                                  size: 14,
-                                )
-                              : const Icon(
-                                  Icons.email,
-                                  color: Colors.white,
-                                  size: 12,
-                                ),
+                          child: Icon(roleIcon, color: Colors.white, size: 16),
                         ),
                       ),
                     ),
 
-                  // Selection check badge
+                  // Selection check badge (only in selection mode)
                   if (isSelected && _selectionMode)
                     Positioned(
                       top: 0,
@@ -631,9 +620,13 @@ class _ContinueScreenState extends State<ContinueScreen> {
                       child: Container(
                         width: 24,
                         height: 24,
-                        decoration: const BoxDecoration(
+                        decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: Colors.blueAccent,
+                          color: roleColor,
+                          border: Border.all(
+                            color: const Color(0xFF0F1820),
+                            width: 2,
+                          ),
                         ),
                         child: const Center(
                           child: Icon(
@@ -644,99 +637,130 @@ class _ContinueScreenState extends State<ContinueScreen> {
                         ),
                       ),
                     ),
+
+                  // Loading indicator (overlay)
+                  if (isLoading)
+                    Positioned.fill(
+                      child: Container(
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Colors.black.withValues(alpha: 0.6),
+                        ),
+                        child: Center(
+                          child: SizedBox(
+                            width: 30,
+                            height: 30,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 3,
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                roleColor,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
                 ],
               ),
 
               const SizedBox(width: 16),
 
-              // Profile Info
+              // Profile Info - Simplified
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      name,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 18,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      email,
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.7),
-                        fontSize: 14,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: roleColor.withValues(alpha: 0.2),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: roleColor.withValues(alpha: 0.5),
-                          width: 1,
+                    // Name with small provider indicator
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            name,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 12,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(roleIcon, color: roleColor, size: 16),
-                          const SizedBox(width: 6),
-                          Text(
-                            roleDisplayName,
-                            style: TextStyle(
-                              color: roleColor,
-                              fontSize: 14,
-                              fontWeight: FontWeight.bold,
+                        // Small provider text for email logins
+                        if (provider == 'email' && !isLoading)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 3,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              'email',
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.5),
+                                fontSize: 10,
+                              ),
                             ),
                           ),
-                        ],
-                      ),
+                      ],
                     ),
-                    if (profile['lastLogin'] != null && !isLoading)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: Text(
-                          _formatLastLogin(profile['lastLogin'] as String?),
+
+                    const SizedBox(height: 8),
+
+                    // Role and Last Login in one line
+                    Row(
+                      children: [
+                        // Role name
+                        Text(
+                          roleDisplayName,
                           style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.5),
-                            fontSize: 12,
+                            color: roleColor,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
-                      ),
+                        const SizedBox(width: 8),
+                        // Dot separator
+                        Container(
+                          width: 4,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: Colors.white.withValues(alpha: 0.3),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        // Last login time
+                        if (lastLogin != null && !isLoading)
+                          Text(
+                            _formatLastLogin(lastLogin),
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.5),
+                              fontSize: 13,
+                            ),
+                          ),
+                      ],
+                    ),
                   ],
                 ),
               ),
 
-              // Loading indicator or arrow
-              if (isLoading)
-                const Padding(
-                  padding: EdgeInsets.only(left: 8),
-                  child: SizedBox(
-                    width: 24,
-                    height: 24,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                    ),
+              // Simple arrow indicator (only when not loading and not selection mode)
+              if (!isLoading && !_selectionMode)
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: roleColor.withValues(alpha: 0.1),
+                    shape: BoxShape.circle,
                   ),
-                )
-              else if (!_selectionMode)
-                const Padding(
-                  padding: EdgeInsets.only(left: 8),
                   child: Icon(
-                    Icons.chevron_right,
-                    color: Colors.white38,
-                    size: 24,
+                    Icons.arrow_forward_ios,
+                    color: roleColor.withValues(alpha: 0.7),
+                    size: 14,
                   ),
                 ),
             ],
@@ -744,6 +768,33 @@ class _ContinueScreenState extends State<ContinueScreen> {
         ),
       ),
     );
+  }
+
+  Widget _buildProviderIcon(String provider) {
+    switch (provider.toLowerCase()) {
+      case 'google':
+        return const Text(
+          'G',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+          ),
+        );
+      case 'facebook':
+        return const Text(
+          'f',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 14,
+            fontWeight: FontWeight.bold,
+          ),
+        );
+      case 'apple':
+        return const Icon(Icons.apple, color: Colors.white, size: 14);
+      default:
+        return const Icon(Icons.email, color: Colors.white, size: 12);
+    }
   }
 
   Widget _buildLargeProfileImage(
