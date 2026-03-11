@@ -407,13 +407,13 @@ Future<void> _createNewProfile() async {
       
       switch (role) {
         case 'owner':
-          context.go('/owner/dashboard');
+          context.go('/owner');
           break;
         case 'barber':
-          context.go('/barber/dashboard');
+          context.go('/barber');
           break;
         case 'customer':
-          context.go('/customer/home');
+          context.go('/customer');
           break;
         default:
           context.go('/');
@@ -911,7 +911,7 @@ Future<void> _createNewProfile() async {
 
   List<Map<String, dynamic>> _getOwnerMenuItems() {
     return [
-      {'icon': Icons.dashboard_outlined, 'title': 'Dashboard', 'route': '/owner/dashboard', 'color': Colors.blue},
+      {'icon': Icons.dashboard_outlined, 'title': 'Dashboard', 'route': '/owner', 'color': Colors.blue},
       {'icon': Icons.calendar_month_outlined, 'title': 'Appointments', 'route': '/owner/appointments', 'color': Colors.green, 'badge': 5},
       {'icon': Icons.people_outline, 'title': 'Customers', 'route': '/owner/customers', 'color': Colors.purple},
       {'icon': Icons.content_cut_outlined, 'title': 'Barbers', 'route': '/owner/barbers', 'color': Colors.orange},
@@ -923,7 +923,7 @@ Future<void> _createNewProfile() async {
 
   List<Map<String, dynamic>> _getBarberMenuItems() {
     return [
-      {'icon': Icons.dashboard_outlined, 'title': 'My Dashboard', 'route': '/barber/dashboard', 'color': Colors.blue},
+      {'icon': Icons.dashboard_outlined, 'title': 'My Dashboard', 'route': '/barber', 'color': Colors.blue},
       {'icon': Icons.calendar_month_outlined, 'title': 'My Schedule', 'route': '/barber/schedule', 'color': Colors.green},
       {'icon': Icons.pending_actions_outlined, 'title': 'Pending Jobs', 'route': '/barber/pending', 'color': Colors.orange, 'badge': 3},
       {'icon': Icons.history_outlined, 'title': 'Completed', 'route': '/barber/completed', 'color': Colors.purple},
@@ -934,7 +934,7 @@ Future<void> _createNewProfile() async {
 
   List<Map<String, dynamic>> _getCustomerMenuItems() {
     return [
-      {'icon': Icons.home_outlined, 'title': 'Home', 'route': '/customer/home', 'color': Colors.blue},
+      {'icon': Icons.home_outlined, 'title': 'Home', 'route': '/customer', 'color': Colors.blue},
       {'icon': Icons.calendar_month_outlined, 'title': 'My Bookings', 'route': '/customer/bookings', 'color': Colors.green, 'badge': 2},
       {'icon': Icons.history_outlined, 'title': 'History', 'route': '/customer/history', 'color': Colors.orange},
       {'icon': Icons.favorite_outline, 'title': 'Favorite Barbers', 'route': '/customer/favorites', 'color': Colors.red},

@@ -36,37 +36,41 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
 
   // Customer Dashboard Data
   int _upcomingBookings = 2;
-  int _completedBookings = 15;
+  final int _completedBookings = 15;
   int _cancelledBookings = 1;
-  int _loyaltyPoints = 450;
-  int _totalSpent = 24500;
+  final int _loyaltyPoints = 450;
+  final int _totalSpent = 24500;
   String _customerName = 'Guest User';
   String _customerEmail = '';
   String? _customerImage;
-  
+
   // Favorite barbers/services
   final List<Map<String, dynamic>> _favoriteBarbers = [
     {'name': 'Kamal', 'specialty': 'Hair Cut Specialist', 'rating': 4.9},
     {'name': 'Sunil', 'specialty': 'Facial Expert', 'rating': 4.8},
   ];
-  
+
   // Special offers
   final List<Map<String, dynamic>> _offers = [
-    {'title': '20% Off', 'description': 'On your next hair cut', 'code': 'HAIR20'},
+    {
+      'title': '20% Off',
+      'description': 'On your next hair cut',
+      'code': 'HAIR20',
+    },
     {'title': 'Buy 1 Get 1', 'description': 'On facials', 'code': 'FACIALB1G1'},
   ];
 
   @override
   void initState() {
     super.initState();
-    
+
     // Load customer data
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final role = await SessionManager.getCurrentRole();
       final appStateRole = appState.currentRole;
       debugPrint('🔍 CustomerDashboard - SessionManager role: $role');
       debugPrint('🔍 CustomerDashboard - AppState role: $appStateRole');
-      
+
       // Load customer name from session
       try {
         final email = await SessionManager.getCurrentUserEmail();
@@ -101,7 +105,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
     setState(() => _isLoading = true);
 
     try {
-      print('📊 Loading customer dashboard data...');
+      debugPrint('📊 Loading customer dashboard data...');
 
       _hasPermission = await _notificationService.hasPermission();
 
@@ -118,13 +122,13 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
 
       if (mounted) {
         setState(() => _isLoading = false);
-        print('✅ Customer data loaded successfully');
+        debugPrint('✅ Customer data loaded successfully');
       }
     } catch (e) {
-      print('❌ Error loading customer data: $e');
+      debugPrint('❌ Error loading customer data: $e');
       if (mounted) {
         setState(() => _isLoading = false);
-        
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Error loading data: $e'),
@@ -139,7 +143,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
   void _setupNotificationListeners() {
     try {
       FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-        print('📨 New message: ${message.data}');
+        debugPrint('📨 New message: ${message.data}');
 
         if (message.data['type'] == 'booking_confirmed') {
           _showBookingUpdateAlert(message, 'confirmed');
@@ -153,7 +157,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
         }
       });
     } catch (e) {
-      print('❌ Error setting up notification listeners: $e');
+      debugPrint('❌ Error setting up notification listeners: $e');
     }
   }
 
@@ -170,7 +174,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: type == 'confirmed' 
+                color: type == 'confirmed'
                     ? Colors.green.withValues(alpha: 0.1)
                     : Colors.blue.withValues(alpha: 0.1),
                 shape: BoxShape.circle,
@@ -228,7 +232,9 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
             const Icon(Icons.access_time, color: Colors.white),
             const SizedBox(width: 8),
             Expanded(
-              child: Text(message.notification?.body ?? 'Upcoming appointment in 1 hour'),
+              child: Text(
+                message.notification?.body ?? 'Upcoming appointment in 1 hour',
+              ),
             ),
           ],
         ),
@@ -308,7 +314,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
         _showSettingsDialog();
         return;
       }
-
+      if (!mounted) return;
       await _permissionService.requestPermissionAtAction(
         context: context,
         action: 'customer_dashboard',
@@ -343,7 +349,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
         },
       );
     } catch (e) {
-      print('❌ Error enabling notifications: $e');
+      debugPrint('❌ Error enabling notifications: $e');
     }
   }
 
@@ -449,7 +455,9 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Cancel Appointment'),
-        content: const Text('Are you sure you want to cancel this appointment?'),
+        content: const Text(
+          'Are you sure you want to cancel this appointment?',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -469,9 +477,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                 ),
               );
             },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-            ),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             child: const Text('Yes, Cancel'),
           ),
         ],
@@ -494,13 +500,13 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
     try {
       if (_scaffoldKey.currentState != null) {
         _scaffoldKey.currentState!.openDrawer();
-        print('✅ Drawer opened via GlobalKey');
+        debugPrint('✅ Drawer opened via GlobalKey');
       } else {
         Scaffold.of(context).openDrawer();
-        print('✅ Drawer opened via Scaffold.of');
+        debugPrint('✅ Drawer opened via Scaffold.of');
       }
     } catch (e) {
-      print('❌ Error opening drawer: $e');
+      debugPrint('❌ Error opening drawer: $e');
       _showMenuDialog();
     }
   }
@@ -657,19 +663,13 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
           const SizedBox(height: 4),
           Text(
             offer['description'],
-            style: const TextStyle(
-              fontSize: 12,
-              color: Colors.white70,
-            ),
+            style: const TextStyle(fontSize: 12, color: Colors.white70),
           ),
           const SizedBox(height: 8),
           Row(
             children: [
               Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: 4,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(8),
@@ -723,17 +723,11 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
           const SizedBox(height: 8),
           Text(
             barber['name'],
-            style: const TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-            ),
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
           ),
           Text(
             barber['specialty'],
-            style: TextStyle(
-              fontSize: 11,
-              color: Colors.grey[600],
-            ),
+            style: TextStyle(fontSize: 11, color: Colors.grey[600]),
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 4),
@@ -797,7 +791,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
             onPressed: _bookAppointment,
             tooltip: 'Book Appointment',
           ),
-          
+
           // Notification bell with badge
           Stack(
             clipBehavior: Clip.none,
@@ -879,7 +873,9 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                         children: [
                           CircleAvatar(
                             radius: 30,
-                            backgroundColor: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                            backgroundColor: const Color(
+                              0xFFFF6B8B,
+                            ).withValues(alpha: 0.1),
                             backgroundImage: _customerImage != null
                                 ? NetworkImage(_customerImage!)
                                 : null,
@@ -937,7 +933,10 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
-                          colors: [Colors.purple.shade400, Colors.purple.shade700],
+                          colors: [
+                            Colors.purple.shade400,
+                            Colors.purple.shade700,
+                          ],
                           begin: Alignment.topLeft,
                           end: Alignment.bottomRight,
                         ),
@@ -1048,10 +1047,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                     const SizedBox(height: 16),
 
                     // Quick Actions
-                    const SectionHeader(
-                      title: 'Quick Actions',
-                      actionText: '',
-                    ),
+                    const SectionHeader(title: 'Quick Actions', actionText: ''),
                     const SizedBox(height: 8),
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -1108,7 +1104,8 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                                   statusColor: Colors.green,
                                   barberName: 'Kamal',
                                   price: 1800,
-                                  onTap: () => _viewBookingDetails('Your Booking'),
+                                  onTap: () =>
+                                      _viewBookingDetails('Your Booking'),
                                 ),
                                 BookingTile(
                                   customerName: 'You',
@@ -1118,7 +1115,8 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                                   statusColor: Colors.orange,
                                   barberName: 'Sunil',
                                   price: 2500,
-                                  onTap: () => _viewBookingDetails('Your Booking'),
+                                  onTap: () =>
+                                      _viewBookingDetails('Your Booking'),
                                 ),
                               ],
                             )
@@ -1193,7 +1191,9 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                         padding: const EdgeInsets.symmetric(horizontal: 16),
                         itemCount: _favoriteBarbers.length,
                         itemBuilder: (context, index) {
-                          return _buildFavoriteBarberCard(_favoriteBarbers[index]);
+                          return _buildFavoriteBarberCard(
+                            _favoriteBarbers[index],
+                          );
                         },
                       ),
                     ),
@@ -1345,13 +1345,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
             color: color,
           ),
         ),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            color: Colors.grey[600],
-          ),
-        ),
+        Text(label, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
       ],
     );
   }
