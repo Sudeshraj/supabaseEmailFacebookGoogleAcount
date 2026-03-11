@@ -27,9 +27,9 @@ import 'screens/authantication/command/sign_in.dart';
 import 'screens/authantication/command/signup_flow.dart';
 import 'screens/authantication/command/email_verify_checker.dart';
 import 'screens/authantication/command/multi_continue_screen.dart';
-import 'screens/home/customer_home.dart';
-import 'screens/home/employee_dashboard.dart';
-import 'screens/home/owner_dashboard.dart';
+import 'screens/dashboard/customer_dashboard.dart';
+import 'screens/dashboard/employee_dashboard.dart';
+import 'screens/dashboard/owner_dashboard.dart';
 
 // Services
 import 'services/network_service.dart';
@@ -109,21 +109,21 @@ Future<void> _validateSessionOnResume() async {
 // ====================
 // 🔥 NEW HELPER FUNCTION - Check local profile
 // ====================
-Future<bool> _hasLocalProfile(String? email) async {
-  if (email == null) return false;
+// Future<bool> _hasLocalProfile(String? email) async {
+//   if (email == null) return false;
 
-  try {
-    // Check if profile exists in SessionManager
-    final profile = await SessionManager.getProfileByEmail(email);
-    final hasProfile = profile != null && profile.isNotEmpty;
+//   try {
+//     // Check if profile exists in SessionManager
+//     final profile = await SessionManager.getProfileByEmail(email);
+//     final hasProfile = profile != null && profile.isNotEmpty;
 
-    debugPrint('📱 Checking local profile for $email: $hasProfile');
-    return hasProfile;
-  } catch (e) {
-    debugPrint('❌ Error checking local profile: $e');
-    return false;
-  }
-}
+//     debugPrint('📱 Checking local profile for $email: $hasProfile');
+//     return hasProfile;
+//   } catch (e) {
+//     debugPrint('❌ Error checking local profile: $e');
+//     return false;
+//   }
+// }
 
 // ====================
 // MAIN METHOD
@@ -979,7 +979,7 @@ GoRouter _createRouter() {
           return RoleSelectorScreen(roles: roles, email: email, userId: userId);
         },
       ),
-      GoRoute(path: '/customer', builder: (_, __) => const CustomerHome()),
+      GoRoute(path: '/customer', builder: (_, __) => const CustomerDashboard()),
       GoRoute(path: '/barber', builder: (_, __) => const EmployeeDashboard()),
       GoRoute(path: '/owner', builder: (_, __) => const OwnerDashboard()),
       GoRoute(

@@ -29,14 +29,12 @@ class _SideMenuState extends State<SideMenu> {
   bool _showProfileSwitcher = false;
   List<Map<String, dynamic>> _availableProfiles = [];
   bool _isLoading = false;
-  String? _currentUserId;
   
   final supabase = Supabase.instance.client;
 
   @override
   void initState() {
     super.initState();
-    _currentUserId = supabase.auth.currentUser?.id;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         _loadProfilesFromDatabase();
@@ -192,11 +190,13 @@ class _SideMenuState extends State<SideMenu> {
       if (photo.contains('googleusercontent.com')) return 'google';
       if (photo.contains('fbcdn.net') || 
           photo.contains('facebook.com') ||
-          photo.contains('platform-lookaside.fbsbx.com')) return 'facebook';
+          photo.contains('platform-lookaside.fbsbx.com')) {
+        return 'facebook';
+      }
       if (photo.contains('apple.com')) return 'apple';
     }
     
-    final provider = currentUser.appMetadata?['provider'];
+    final provider = currentUser.appMetadata['provider'];
     if (provider != null) return provider.toString();
     
     return 'email';
@@ -974,35 +974,61 @@ Future<void> _createNewProfile() async {
   }
 
   Future<void> _logout(BuildContext context) async {
-    if (!mounted) return;
-    
     showLogoutConfirmation(
       context,
       onLogoutConfirmed: () async {
-        if (!mounted) return;
-        
+        // Show loading dialog
         showDialog(
           context: context,
           barrierDismissible: false,
-          builder: (context) => const Center(
-            child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+          builder: (context) => const Dialog(
+            backgroundColor: Colors.transparent,
+            insetPadding: EdgeInsets.all(0),
+            child: Center(
+              child: CircularProgressIndicator(color: Colors.white),
+            ),
           ),
         );
 
         try {
+          // Call your logout function
           await SessionManager.logoutForContinue();
-          
-          if (!mounted) return;
-          
-          Navigator.popUntil(context, (route) => route.isFirst);
-          context.go('/');
+
+          // Close loading dialog safely
+          if (context.mounted) {
+            // Check if we can pop before trying
+            if (Navigator.canPop(context)) {
+              Navigator.pop(context);
+            }
+          }
+
+          // Update app state
+          await appState.refreshState();
+
+          // Navigate to login/splash screen using post frame callback
+          if (context.mounted) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (context.mounted) {
+                // Clear all routes and go to login
+                context.go('/');
+              }
+            });
+          }
         } catch (e) {
-          if (mounted) {
-            Navigator.pop(context);
+          // Close loading dialog safely
+          if (context.mounted) {
+            if (Navigator.canPop(context)) {
+              Navigator.pop(context);
+            }
+          }
+
+          // Show error message
+          if (context.mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text('Logout failed: $e'),
+                content: Text('Logout failed: ${e.toString()}'),
                 backgroundColor: Colors.red,
+                duration: const Duration(seconds: 3),
               ),
             );
           }

@@ -33,6 +33,8 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
   bool _isLoading = true;
 
   // Dashboard data
+  int completedToday = 3;
+  int pendingAppointments = 2;
   int _pendingBookings = 3;
   final int _todayAppointments = 8;
   final int _totalRevenue = 24500;
@@ -274,6 +276,39 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
       SnackBar(
         content: Text('Viewing $customerName\'s booking'),
         duration: const Duration(seconds: 1),
+      ),
+    );
+  }
+
+  void _markAppointmentComplete() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Complete Appointment'),
+        content: const Text('Mark this appointment as completed?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              setState(() {
+                completedToday++;
+                pendingAppointments--;
+              });
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('✅ Appointment marked as completed'),
+                  backgroundColor: Colors.green,
+                ),
+              );
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+            child: const Text('Complete'),
+          ),
+        ],
       ),
     );
   }
@@ -776,6 +811,7 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
                             barberName: 'Kamal',
                             price: 1500,
                             onTap: () => _viewBookingDetails('Nimal Perera'),
+                            onComplete: _markAppointmentComplete,
                           ),
                           BookingTile(
                             customerName: 'Kamal Silva',
@@ -786,6 +822,7 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
                             barberName: 'Sunil',
                             price: 2500,
                             onTap: () => _viewBookingDetails('Kamal Silva'),
+                            onComplete: _markAppointmentComplete,
                           ),
                           BookingTile(
                             customerName: 'Sunil Weerasinghe',
@@ -797,6 +834,7 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
                             price: 3000,
                             onTap: () =>
                                 _viewBookingDetails('Sunil Weerasinghe'),
+                            onComplete: _markAppointmentComplete,
                           ),
                         ],
                       ),
