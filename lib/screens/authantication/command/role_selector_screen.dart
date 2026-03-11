@@ -336,11 +336,9 @@ class _RoleSelectorScreenState extends State<RoleSelectorScreen>
             },
             child: _buildRoleCard(
               title: config['title'],
-
               icon: config['icon'],
               gradient: config['gradient'],
-              color: config['color'],
-              badge: config['badge'],
+              color: config['color'],             
               onTap: () => _selectRole(role),
             ),
           ),
@@ -359,8 +357,7 @@ class _RoleSelectorScreenState extends State<RoleSelectorScreen>
     required String title,
     required IconData icon,
     required List<Color> gradient,
-    required Color color,
-    required String badge,
+    required Color color,   
     required VoidCallback onTap,
   }) {
     final isSmallScreen = MediaQuery.of(context).size.width < 360;
@@ -432,10 +429,7 @@ class _RoleSelectorScreenState extends State<RoleSelectorScreen>
                             color: Colors.white,
                             shape: BoxShape.circle,
                           ),
-                          child: Text(
-                            badge,
-                            style: TextStyle(fontSize: isSmallScreen ? 10 : 12),
-                          ),
+                        
                         ),
                       ),
                     ],
