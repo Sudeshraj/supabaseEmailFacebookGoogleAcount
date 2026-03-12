@@ -15,6 +15,7 @@ import 'package:flutter_application_1/screens/authantication/command/reset_passw
 import 'package:flutter_application_1/screens/authantication/command/role_selector_screen.dart';
 import 'package:flutter_application_1/screens/owner/add_barber_screen.dart';
 import 'package:flutter_application_1/screens/owner/add_category_screen.dart';
+import 'package:flutter_application_1/screens/owner/create_salon.dart';
 import 'package:flutter_application_1/services/notification_service.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -1059,6 +1060,11 @@ GoRouter _createRouter() {
         pageBuilder: (context, state) =>
             MaterialPage(child: const AddCategoryScreen()),
       ),
+     GoRoute(
+      path: '/owner/salon/create',
+      name: 'createSalon',
+      builder: (context, state) => const CreateSalonScreen(),
+    ),
     ],
   );
 }

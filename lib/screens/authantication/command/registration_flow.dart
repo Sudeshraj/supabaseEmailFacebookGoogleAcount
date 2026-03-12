@@ -67,7 +67,7 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
   }
 
   // ============================================================
-  // 🔥 CHECK QUERY PARAMETERS (from side menu)
+  // CHECK QUERY PARAMETERS (from side menu)
   // ============================================================
   void _checkQueryParameters() {
     try {
@@ -83,7 +83,7 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
       debugPrint('📱 Extracted - role: $role, isNew: $isNew');
       
       if (role != null && role.isNotEmpty) {
-        // 🔥 CASE 1: New profile creation from side menu
+        // CASE 1: New profile creation from side menu
         setState(() {
           roles = role;
           _isNewProfile = isNew;
@@ -118,9 +118,6 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
   // ============================================================
   // 🔥 HANDLE BACK BUTTON (Called from child screens)
   // ============================================================
-// ============================================================
-// 🔥 HANDLE BACK BUTTON (Called from child screens)
-// ============================================================
 void _handleBack() {
   debugPrint('📍 _handleBack called');
   debugPrint('📍 _isNewProfile: $_isNewProfile');
@@ -129,7 +126,7 @@ void _handleBack() {
   
   if (_isNewProfile) {
     // New profile creation - go back to appropriate dashboard
-    debugPrint('📍 New profile - going to ${roles} dashboard');
+    debugPrint('📍 New profile - going to $roles dashboard');
     
     if (context.canPop()) {
       context.pop();
@@ -257,7 +254,7 @@ void _handleBack() {
   }
 
   // ============================================================
-  // 🔥 CREATE PROFILE IN DATABASE
+  // 🔥 CREATE PROFILE IN DATABASE (UPDATED WITH EMAIL)
   // ============================================================
   Future<void> _createProfile() async {
     if (!mounted) return;
@@ -340,7 +337,11 @@ void _handleBack() {
 
       Map<String, dynamic> extraData = {};
 
+      // 🔥 Generate full name based on role
+      String? fullName;
+      
       if (roles == 'owner') {
+        fullName = companyName!.trim();
         extraData = {
           'company_name': companyName!.trim(),
           'business_type': 'salon',
@@ -349,16 +350,18 @@ void _handleBack() {
         };
         if (phone != null && phone!.isNotEmpty) extraData['phone'] = phone;
       } else if (roles == 'barber') {
+        fullName = "${firstName!.trim()} ${lastName!.trim()}";
         extraData = {
-          'full_name': "${firstName!.trim()} ${lastName!.trim()}",
+          'full_name': fullName,
           'first_name': firstName!.trim(),
           'last_name': lastName!.trim(),
           'role': 'barber',
         };
         if (phone != null && phone!.isNotEmpty) extraData['phone'] = phone;
       } else {
+        fullName = "${firstName!.trim()} ${lastName!.trim()}";
         extraData = {
-          'full_name': "${firstName!.trim()} ${lastName!.trim()}",
+          'full_name': fullName,
           'first_name': firstName!.trim(),
           'last_name': lastName!.trim(),
           'registered_at': DateTime.now().toIso8601String(),
@@ -435,9 +438,12 @@ void _handleBack() {
           'updated_at': DateTime.now().toIso8601String(),
         };
 
+        // 🔥 UPDATE: Include email in the update
         await supabase
             .from('profiles')
             .update({
+              'email': email,  // 🔥 Email column එක update කරනවා
+              'full_name': fullName,  // 🔥 Full name column එක update කරනවා
               'extra_data': mergedExtraData,
               'platform': platform,
               'is_active': true,
@@ -452,8 +458,11 @@ void _handleBack() {
       } else {
         debugPrint('➕ Creating new profile for role: $dbRole');
 
+        // 🔥 NEW: Insert with email column
         await supabase.from('profiles').insert({
           'id': user.id,
+          'email': email,  // 🔥 Email column එකට දානවා
+          'full_name': fullName,  // 🔥 Full name column එකට දානවා
           'role_id': roleId,
           'extra_data': {
             ...extraData,
@@ -492,9 +501,7 @@ void _handleBack() {
       await SessionManager.saveUserProfile(
         email: email,
         userId: user.id,
-        name: roles == 'owner' 
-            ? companyName 
-            : "${firstName ?? ''} ${lastName ?? ''}".trim(),
+        name: fullName,
         photo: photoUrl,
         roles: existingRoleNames,
         rememberMe: true,
@@ -563,11 +570,13 @@ void _handleBack() {
       if (photoUrl.contains('googleusercontent.com')) return 'google';
       if (photoUrl.contains('fbcdn.net') || 
           photoUrl.contains('facebook.com') ||
-          photoUrl.contains('platform-lookaside.fbsbx.com')) return 'facebook';
+          photoUrl.contains('platform-lookaside.fbsbx.com')) {
+        return 'facebook';
+      }
       if (photoUrl.contains('apple.com')) return 'apple';
     }
     
-    final provider = user.appMetadata?['provider'];
+    final provider = user.appMetadata['provider'];
     if (provider != null) return provider.toString();
     
     return 'email';

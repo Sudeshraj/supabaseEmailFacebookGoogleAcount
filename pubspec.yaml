@@ -60,6 +60,7 @@ dependencies:
 
   # Settings
   app_settings: ^7.0.0
+  image_picker: ^1.2.1
  
 
 dev_dependencies:
