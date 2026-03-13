@@ -34,7 +34,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
 
   // Responsive layout helpers
   bool get _isWeb => MediaQuery.of(context).size.width > 800;
-  bool get _isTablet => MediaQuery.of(context).size.width > 600 && MediaQuery.of(context).size.width <= 800;
+  bool get _isTablet =>
+      MediaQuery.of(context).size.width > 600 &&
+      MediaQuery.of(context).size.width <= 800;
 
   final supabase = Supabase.instance.client;
   final picker = ImagePicker();
@@ -88,20 +90,25 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
       // Create unique file name
       final fileExt = path.extension(_imageFile!.path);
       const timestamp = 'salon_';
-      final fileName = '${timestamp}${DateTime.now().millisecondsSinceEpoch}$fileExt';
+      final fileName =
+          '${timestamp}${DateTime.now().millisecondsSinceEpoch}$fileExt';
       final filePath = 'salons/$userId/$fileName';
 
       debugPrint('📤 Uploading image to: $filePath');
 
       // Upload to Supabase Storage
-      await supabase.storage.from('salon-images').upload(
-        filePath,
-        _imageFile!,
-        fileOptions: const FileOptions(cacheControl: '3600'),
-      );
+      await supabase.storage
+          .from('salon-images')
+          .upload(
+            filePath,
+            _imageFile!,
+            fileOptions: const FileOptions(cacheControl: '3600'),
+          );
 
       // Get public URL
-      final imageUrl = supabase.storage.from('salon-images').getPublicUrl(filePath);
+      final imageUrl = supabase.storage
+          .from('salon-images')
+          .getPublicUrl(filePath);
       debugPrint('✅ Image uploaded: $imageUrl');
 
       return imageUrl;
@@ -142,19 +149,29 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
         imageUrl = await _uploadImage();
         if (imageUrl == null) {
           // Image upload failed but we can still continue without image
-          _showSnackBar('Image upload failed, but salon will be created without image', Colors.orange);
+          _showSnackBar(
+            'Image upload failed, but salon will be created without image',
+            Colors.orange,
+          );
         }
       }
 
       // Prepare salon data
       final salonData = {
         'name': _nameController.text.trim(),
-        'address': _addressController.text.trim().isNotEmpty ? _addressController.text.trim() : null,
-        'phone': _phoneController.text.trim().isNotEmpty ? _phoneController.text.trim() : null,
-        'email': _emailController.text.trim().isNotEmpty ? _emailController.text.trim() : null,
+        'address': _addressController.text.trim().isNotEmpty
+            ? _addressController.text.trim()
+            : null,
+        'phone': _phoneController.text.trim().isNotEmpty
+            ? _phoneController.text.trim()
+            : null,
+        'email': _emailController.text.trim().isNotEmpty
+            ? _emailController.text.trim()
+            : null,
         'owner_id': userId,
         'extra_data': {
-          if (_descriptionController.text.trim().isNotEmpty) 'description': _descriptionController.text.trim(),
+          if (_descriptionController.text.trim().isNotEmpty)
+            'description': _descriptionController.text.trim(),
           if (imageUrl != null) 'image_url': imageUrl,
           'created_from': _isWeb ? 'web' : 'mobile',
         },
@@ -172,18 +189,19 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
 
       debugPrint('✅ Salon created successfully: $response');
 
+      // CreateSalonScreen එකේ success වුනාම
       if (mounted) {
-        // Show success message
         await showCustomAlert(
           context: context,
           title: "🎉 Salon Created!",
-          message: "${_nameController.text.trim()} has been created successfully.",
+          message:
+              "${_nameController.text.trim()} has been created successfully.",
           isError: false,
         );
 
-        // Go back to previous screen
         if (context.mounted) {
-          context.pop();
+          // 🔥 Return true to indicate success
+          Navigator.pop(context, true);
         }
       }
     } catch (e) {
@@ -251,7 +269,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                               Container(
                                 padding: const EdgeInsets.all(16),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                                  color: const Color(
+                                    0xFFFF6B8B,
+                                  ).withValues(alpha: 0.1),
                                   shape: BoxShape.circle,
                                 ),
                                 child: const Icon(
@@ -314,21 +334,15 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
       children: [
         const Text(
           'Salon Profile Image',
-          style: TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
-          ),
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: 8),
         const Text(
           'Upload a photo of your salon (optional)',
-          style: TextStyle(
-            fontSize: 12,
-            color: Colors.grey,
-          ),
+          style: TextStyle(fontSize: 12, color: Colors.grey),
         ),
         const SizedBox(height: 12),
-        
+
         Center(
           child: Stack(
             children: [
@@ -339,21 +353,18 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                 decoration: BoxDecoration(
                   color: Colors.grey[200],
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                    color: Colors.grey[300]!,
-                    width: 2,
-                  ),
+                  border: Border.all(color: Colors.grey[300]!, width: 2),
                   image: _imageFile != null
                       ? DecorationImage(
                           image: FileImage(_imageFile!),
                           fit: BoxFit.cover,
                         )
                       : (_imageUrl != null
-                          ? DecorationImage(
-                              image: NetworkImage(_imageUrl!),
-                              fit: BoxFit.cover,
-                            )
-                          : null),
+                            ? DecorationImage(
+                                image: NetworkImage(_imageUrl!),
+                                fit: BoxFit.cover,
+                              )
+                            : null),
                 ),
                 child: _imageFile == null && _imageUrl == null
                     ? const Column(
@@ -367,10 +378,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                           SizedBox(height: 8),
                           Text(
                             'Add Photo',
-                            style: TextStyle(
-                              color: Colors.grey,
-                              fontSize: 12,
-                            ),
+                            style: TextStyle(color: Colors.grey, fontSize: 12),
                           ),
                         ],
                       )
@@ -404,7 +412,11 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                       shape: BoxShape.circle,
                     ),
                     child: IconButton(
-                      icon: const Icon(Icons.edit, color: Colors.white, size: 20),
+                      icon: const Icon(
+                        Icons.edit,
+                        color: Colors.white,
+                        size: 20,
+                      ),
                       onPressed: _showImageSourceDialog,
                       constraints: const BoxConstraints(
                         minWidth: 36,
@@ -430,10 +442,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
         // Salon Name (Required)
         const Text(
           'Salon Name *',
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-          ),
+          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: 8),
         TextFormField(
@@ -441,9 +450,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
           decoration: InputDecoration(
             hintText: 'Enter your salon name',
             prefixIcon: const Icon(Icons.store, color: Colors.grey),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: const BorderSide(color: Color(0xFFFF6B8B), width: 2),
@@ -466,10 +473,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
         // Address
         const Text(
           'Address',
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-          ),
+          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: 8),
         TextFormField(
@@ -478,9 +482,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
           decoration: InputDecoration(
             hintText: 'Enter salon address',
             prefixIcon: const Icon(Icons.location_on, color: Colors.grey),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: const BorderSide(color: Color(0xFFFF6B8B), width: 2),
@@ -511,13 +513,19 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                           keyboardType: TextInputType.phone,
                           decoration: InputDecoration(
                             hintText: 'Enter phone number',
-                            prefixIcon: const Icon(Icons.phone, color: Colors.grey),
+                            prefixIcon: const Icon(
+                              Icons.phone,
+                              color: Colors.grey,
+                            ),
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(12),
                             ),
                             focusedBorder: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(12),
-                              borderSide: const BorderSide(color: Color(0xFFFF6B8B), width: 2),
+                              borderSide: const BorderSide(
+                                color: Color(0xFFFF6B8B),
+                                width: 2,
+                              ),
                             ),
                           ),
                         ),
@@ -542,18 +550,26 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                           keyboardType: TextInputType.emailAddress,
                           decoration: InputDecoration(
                             hintText: 'Enter email address',
-                            prefixIcon: const Icon(Icons.email, color: Colors.grey),
+                            prefixIcon: const Icon(
+                              Icons.email,
+                              color: Colors.grey,
+                            ),
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(12),
                             ),
                             focusedBorder: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(12),
-                              borderSide: const BorderSide(color: Color(0xFFFF6B8B), width: 2),
+                              borderSide: const BorderSide(
+                                color: Color(0xFFFF6B8B),
+                                width: 2,
+                              ),
                             ),
                           ),
                           validator: (value) {
                             if (value != null && value.isNotEmpty) {
-                              if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value)) {
+                              if (!RegExp(
+                                r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$',
+                              ).hasMatch(value)) {
                                 return 'Enter a valid email';
                               }
                             }
@@ -570,10 +586,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                 children: [
                   const Text(
                     'Phone Number',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                    ),
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
                   ),
                   const SizedBox(height: 8),
                   TextFormField(
@@ -587,17 +600,17 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
-                        borderSide: const BorderSide(color: Color(0xFFFF6B8B), width: 2),
+                        borderSide: const BorderSide(
+                          color: Color(0xFFFF6B8B),
+                          width: 2,
+                        ),
                       ),
                     ),
                   ),
                   const SizedBox(height: 16),
                   const Text(
                     'Email Address',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                    ),
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
                   ),
                   const SizedBox(height: 8),
                   TextFormField(
@@ -611,12 +624,17 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
-                        borderSide: const BorderSide(color: Color(0xFFFF6B8B), width: 2),
+                        borderSide: const BorderSide(
+                          color: Color(0xFFFF6B8B),
+                          width: 2,
+                        ),
                       ),
                     ),
                     validator: (value) {
                       if (value != null && value.isNotEmpty) {
-                        if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value)) {
+                        if (!RegExp(
+                          r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$',
+                        ).hasMatch(value)) {
                           return 'Enter a valid email';
                         }
                       }
@@ -631,10 +649,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
         // Description
         const Text(
           'Description (Optional)',
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-          ),
+          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: 8),
         TextFormField(
@@ -642,9 +657,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
           maxLines: 3,
           decoration: InputDecoration(
             hintText: 'Tell customers about your salon...',
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: const BorderSide(color: Color(0xFFFF6B8B), width: 2),
@@ -693,10 +706,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                   SizedBox(width: 8),
                   Text(
                     'Create Salon',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                   ),
                 ],
               ),
@@ -719,14 +729,14 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
               padding: EdgeInsets.all(16),
               child: Text(
                 'Select Image Source',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
             ),
             ListTile(
-              leading: const Icon(Icons.photo_library, color: Color(0xFFFF6B8B)),
+              leading: const Icon(
+                Icons.photo_library,
+                color: Color(0xFFFF6B8B),
+              ),
               title: const Text('Choose from Gallery'),
               onTap: () {
                 Navigator.pop(context);
@@ -744,7 +754,10 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
             if (_imageFile != null || _imageUrl != null)
               ListTile(
                 leading: const Icon(Icons.delete, color: Colors.red),
-                title: const Text('Remove Image', style: TextStyle(color: Colors.red)),
+                title: const Text(
+                  'Remove Image',
+                  style: TextStyle(color: Colors.red),
+                ),
                 onTap: () {
                   Navigator.pop(context);
                   setState(() {

@@ -5,25 +5,27 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_application_1/models/category_model.dart';
 
 class AddBarberScreen extends StatefulWidget {
-  const AddBarberScreen({super.key});
+  final bool refresh;  // 🔥 New parameter for refresh trigger
+  
+  const AddBarberScreen({super.key, this.refresh = false});
 
   @override
   State<AddBarberScreen> createState() => _AddBarberScreenState();
 }
 
-class _AddBarberScreenState extends State<AddBarberScreen> {
+class _AddBarberScreenState extends State<AddBarberScreen> with RouteAware {  // 🔥 RouteAware added
   final TextEditingController _searchController = TextEditingController();
   List<Map<String, dynamic>> _searchResults = [];
   bool _isSearching = false;
   bool _isLoading = false;
   String? _selectedBarberId;
-
+  
   // Salon selection
   List<Map<String, dynamic>> _ownerSalons = [];
   String? _selectedSalonId;
   bool _isLoadingSalons = false;
-
-  // Debounce timer
+  
+  // Debounce timer for search
   Timer? _debounceTimer;
 
   // Categories from database
@@ -45,30 +47,81 @@ class _AddBarberScreenState extends State<AddBarberScreen> {
 
   // Responsive layout helpers
   bool get _isWeb => MediaQuery.of(context).size.width > 800;
-  bool get _isTablet =>
-      MediaQuery.of(context).size.width > 600 &&
-      MediaQuery.of(context).size.width <= 800;
+  bool get _isTablet => MediaQuery.of(context).size.width > 600 && MediaQuery.of(context).size.width <= 800;
 
   @override
   void initState() {
     super.initState();
-    _loadCategoriesAndServices();
-    _loadOwnerSalons();
+    _loadInitialData();
     _searchController.addListener(_onSearchChanged);
+    
+    // 🔥 If widget.refresh is true, refresh data after build
+    if (widget.refresh) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _refreshData();
+      });
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // 🔥 Subscribe to route changes
+    final route = ModalRoute.of(context);
+    if (route is PageRoute) {
+      routeObserver.subscribe(this, route);
+    }
   }
 
   @override
   void dispose() {
+    // 🔥 Unsubscribe from route changes
+    routeObserver.unsubscribe(this);
     _debounceTimer?.cancel();
     _searchController.removeListener(_onSearchChanged);
     _searchController.dispose();
     super.dispose();
   }
 
+  // 🔥 Called when this route is popped back to
+  @override
+  void didPopNext() {
+    debugPrint('📍 AddBarberScreen came to foreground - refreshing data');
+    _refreshData();
+  }
+
+  // 🔥 Load initial data
+  Future<void> _loadInitialData() async {
+    await Future.wait([
+      _loadCategoriesAndServices(),
+      _loadOwnerSalons(),
+    ]);
+  }
+
+  // 🔥 Refresh all data
+  Future<void> _refreshData() async {
+    debugPrint('🔄 Refreshing AddBarberScreen data...');
+    setState(() {
+      _isLoading = true;
+    });
+    
+    await Future.wait([
+      _loadCategoriesAndServices(),
+      _loadOwnerSalons(),
+    ]);
+    
+    if (mounted) {
+      setState(() {
+        _isLoading = false;
+      });
+      _showSnackBar('Data refreshed successfully!', Colors.green);
+    }
+  }
+
   // Load owner's salons
   Future<void> _loadOwnerSalons() async {
     if (!mounted) return;
-
+    
     setState(() {
       _isLoadingSalons = true;
     });
@@ -109,11 +162,12 @@ class _AddBarberScreenState extends State<AddBarberScreen> {
     }
   }
 
+  // 🔥 Optimized search with faster response
   void _onSearchChanged() {
     final query = _searchController.text.trim();
-
+    
     _debounceTimer?.cancel();
-
+    
     if (query.isEmpty) {
       if (mounted) {
         setState(() {
@@ -123,15 +177,16 @@ class _AddBarberScreenState extends State<AddBarberScreen> {
       }
       return;
     }
-
+    
     if (query.length >= 2) {
       if (mounted) {
         setState(() {
           _isSearching = true;
         });
       }
-
-      _debounceTimer = Timer(const Duration(milliseconds: 400), () {
+      
+      // 🔥 Faster debounce (150ms for instant feel)
+      _debounceTimer = Timer(const Duration(milliseconds: 150), () {
         if (mounted) {
           _searchUsers(query);
         }
@@ -149,7 +204,7 @@ class _AddBarberScreenState extends State<AddBarberScreen> {
   // Load categories and services
   Future<void> _loadCategoriesAndServices() async {
     if (!mounted) return;
-
+    
     setState(() {
       _isLoadingCategories = true;
       _isLoadingServices = true;
@@ -263,10 +318,7 @@ class _AddBarberScreenState extends State<AddBarberScreen> {
           _servicesByCategory = {};
         });
 
-        _showSnackBar(
-          'No services found. Please add services first.',
-          Colors.orange,
-        );
+        _showSnackBar('No services found. Please add services first.', Colors.orange);
       }
     } catch (e) {
       debugPrint('❌ Error loading services: $e');
@@ -283,46 +335,28 @@ class _AddBarberScreenState extends State<AddBarberScreen> {
   // 🎨 Get icon from name
   IconData _getIconFromName(String iconName) {
     switch (iconName) {
-      case 'content_cut':
-        return Icons.content_cut;
-      case 'face':
-        return Icons.face;
-      case 'face_retouching_natural':
-        return Icons.face_retouching_natural;
-      case 'spa':
-        return Icons.spa;
-      case 'handshake':
-        return Icons.handshake;
-      case 'build_circle_outlined':
-        return Icons.build_circle_outlined;
-      case 'brush':
-        return Icons.brush;
-      case 'cleaning_services':
-        return Icons.cleaning_services;
-      case 'local_hospital':
-        return Icons.local_hospital;
-      case 'sports_kabaddi':
-        return Icons.sports_kabaddi;
-      default:
-        return Icons.category_outlined;
+      case 'content_cut': return Icons.content_cut;
+      case 'face': return Icons.face;
+      case 'face_retouching_natural': return Icons.face_retouching_natural;
+      case 'spa': return Icons.spa;
+      case 'handshake': return Icons.handshake;
+      case 'build_circle_outlined': return Icons.build_circle_outlined;
+      case 'brush': return Icons.brush;
+      case 'cleaning_services': return Icons.cleaning_services;
+      case 'local_hospital': return Icons.local_hospital;
+      case 'sports_kabaddi': return Icons.sports_kabaddi;
+      default: return Icons.category_outlined;
     }
   }
 
-  // Search users
+  // 🔍 Search users - Optimized version
   Future<void> _searchUsers(String query) async {
     if (!mounted) return;
-
-    if (query.length < 2) {
-      setState(() {
-        _searchResults = [];
-        _isSearching = false;
-      });
-      return;
+    
+    // Don't show loading for empty results
+    if (_searchResults.isEmpty) {
+      setState(() {});
     }
-
-    setState(() {
-      _isLoading = true;
-    });
 
     try {
       final roleResponse = await supabase
@@ -338,6 +372,7 @@ class _AddBarberScreenState extends State<AddBarberScreen> {
       final barberRoleId = roleResponse['id'];
       final searchPattern = '%$query%';
 
+      // 🔥 Optimized query with limit 10 for faster results
       final response = await supabase
           .from('profiles')
           .select('''
@@ -354,24 +389,22 @@ class _AddBarberScreenState extends State<AddBarberScreen> {
           .eq('is_active', true)
           .or('full_name.ilike.$searchPattern,email.ilike.$searchPattern')
           .order('full_name', ascending: true)
-          .limit(20);
+          .limit(10);  // Limit to 10 for faster response
 
       if (mounted) {
-        if (response.isNotEmpty) {
-          setState(() {
+        setState(() {
+          if (response.isNotEmpty) {
             _searchResults = response.map((profile) {
-              final extraData =
-                  profile['extra_data'] as Map<String, dynamic>? ?? {};
-
+              final extraData = profile['extra_data'] as Map<String, dynamic>? ?? {};
+              
               String displayName = profile['full_name'] ?? '';
               if (displayName.isEmpty) {
-                displayName =
-                    extraData['full_name'] ??
-                    extraData['company_name'] ??
-                    extraData['name'] ??
-                    'Unknown Barber';
+                displayName = extraData['full_name'] ?? 
+                             extraData['company_name'] ?? 
+                             extraData['name'] ?? 
+                             'Unknown Barber';
               }
-
+              
               return {
                 'id': profile['id'],
                 'email': profile['email'] ?? extraData['email'] ?? 'No email',
@@ -381,17 +414,320 @@ class _AddBarberScreenState extends State<AddBarberScreen> {
                 'services': extraData['services'] ?? [],
               };
             }).toList();
-          });
-        } else {
-          setState(() {
+          } else {
             _searchResults = [];
-          });
-        }
+          }
+          _isLoading = false;
+        });
       }
     } catch (e) {
       debugPrint('❌ Error searching barbers: $e');
       if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
         _showSnackBar('Error searching barbers: $e', Colors.red);
+      }
+    }
+  }
+
+  // Check if barber already exists in selected salon
+  Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
+    try {
+      final existing = await supabase
+          .from('salon_barbers')
+          .select('id')
+          .eq('salon_id', salonId)
+          .eq('barber_id', barberId)
+          .maybeSingle();
+      
+      return existing != null;
+    } catch (e) {
+      debugPrint('❌ Error checking existing barber: $e');
+      return false;
+    }
+  }
+
+  // ✅ Add barber to salon - COMPLETE FIXED VERSION WITH SALON_ID
+  Future<void> _addBarberToSalon() async {
+    if (!mounted) return;
+    
+    // Validation
+    if (_selectedBarberId == null) {
+      _showSnackBar('Please select a barber first', Colors.red);
+      return;
+    }
+
+    if (_selectedSalonId == null) {
+      _showSnackBar('Please select a salon', Colors.red);
+      return;
+    }
+
+    if (_selectedServiceIds.isEmpty) {
+      _showSnackBar('Please select at least one service', Colors.red);
+      return;
+    }
+
+    final selectedBarber = _searchResults.firstWhere(
+      (b) => b['id'] == _selectedBarberId,
+    );
+    
+    final selectedServices = _availableServices
+        .where((s) => _selectedServiceIds.contains(s['id']))
+        .toList();
+
+    final selectedSalon = _ownerSalons.firstWhere(
+      (s) => s['id'].toString() == _selectedSalonId,
+    );
+
+    // Check if barber already exists in this salon
+    final salonIdInt = int.parse(_selectedSalonId!);
+    final alreadyExists = await _isBarberAlreadyInSalon(_selectedBarberId!, salonIdInt);
+    
+    if (alreadyExists) {
+      _showSnackBar('This barber is already added to this salon', Colors.orange);
+      return;
+    }
+
+    // Show confirmation dialog
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Confirm Add Barber'),
+        content: Container(
+          width: _isWeb ? 400 : null,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Add ${selectedBarber['name']} to ${selectedSalon['name']}?'),
+              const SizedBox(height: 8),
+              Text('Salon: ${selectedSalon['name']}', 
+                style: const TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 16),
+              const Text(
+                'Services:',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              ...selectedServices.map(
+                (s) => Padding(
+                  padding: const EdgeInsets.only(left: 8, bottom: 4),
+                  child: Row(
+                    children: [
+                      Icon(s['icon'], size: 16, color: Colors.green),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(s['name'], style: const TextStyle(fontSize: 13)),
+                            Text(
+                              '${s['category_name']} • Rs. ${s['price']} • ${s['duration']} min',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.grey[600],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFFF6B8B),
+            ),
+            child: const Text('Confirm'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    if (!mounted) return;
+    
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      // STEP 1: Get barber role ID
+      final roleList = await supabase
+          .from('roles')
+          .select('id')
+          .eq('name', 'barber');
+
+      if (roleList.isEmpty) {
+        throw Exception('Barber role not found in database');
+      }
+      final barberRoleId = roleList[0]['id'];
+      debugPrint('✅ Barber role ID: $barberRoleId');
+
+      // STEP 2: Get current profile - with role_id filter
+      final profileList = await supabase
+          .from('profiles')
+          .select()
+          .eq('id', _selectedBarberId!)
+          .eq('role_id', barberRoleId);
+
+      if (profileList.isEmpty) {
+        throw Exception('Barber profile not found');
+      }
+      final currentProfile = profileList[0];
+      debugPrint('✅ Current profile found');
+
+      // STEP 3: Get salon
+      final salonIdInt = int.parse(_selectedSalonId!);
+      
+      final salonList = await supabase
+          .from('salons')
+          .select('id, name')
+          .eq('id', salonIdInt);
+
+      if (salonList.isEmpty) {
+        throw Exception('Salon not found');
+      }
+
+      final salonData = salonList[0];
+      final salonId = salonData['id'];
+      final salonName = salonData['name'];
+      debugPrint('✅ Using salon: $salonName (ID: $salonId)');
+
+      // Get existing services from extra_data
+      final existingServices = currentProfile['extra_data']?['services'] ?? [];
+      
+      // Prepare extra_data - merge existing services with new ones
+      final updatedExtraData = {
+        ...currentProfile['extra_data'] ?? {},
+        'services': [
+          ...existingServices,
+          ...selectedServices.map(
+            (s) => {
+              'id': int.parse(s['id']),
+              'name': s['name'],
+              'price': s['price'],
+              'duration': s['duration'],
+              'category_id': s['category_id'],
+              'category_name': s['category_name'],
+              'salon_id': salonId,  // 🔥 Add salon_id to extra_data
+            },
+          ),
+        ],
+        'added_by': supabase.auth.currentUser?.id,
+        'added_at': DateTime.now().toIso8601String(),
+        'salon_id': _selectedSalonId,
+        'salon_name': salonName,
+        'previous_role': currentProfile['role_id'],
+      };
+
+      // STEP 4: Update profile - WITH role_id filter
+      await supabase
+          .from('profiles')
+          .update({
+            'extra_data': updatedExtraData,
+            'updated_at': DateTime.now().toIso8601String(),
+          })
+          .eq('id', _selectedBarberId!)
+          .eq('role_id', barberRoleId);
+
+      debugPrint('✅ Profile updated');
+
+      // STEP 5: Add to salon_barbers
+      try {
+        final salonBarberList = await supabase
+            .from('salon_barbers')
+            .select()
+            .eq('salon_id', salonId)
+            .eq('barber_id', _selectedBarberId!);
+
+        if (salonBarberList.isEmpty) {
+          debugPrint('📝 Attempting to insert into salon_barbers...');
+          
+          await supabase
+              .from('salon_barbers')
+              .insert({
+                'salon_id': salonId,
+                'barber_id': _selectedBarberId!,
+                'is_active': true,
+              });
+          
+          debugPrint('✅ Added to salon_barbers');
+        } else {
+          debugPrint('ℹ️ Already in salon_barbers');
+        }
+      } catch (e) {
+        debugPrint('⚠️ Warning with salon_barbers: $e');
+        // Don't throw - continue with service addition
+      }
+
+      // STEP 6: Add services to barber_services - WITH SALON_ID
+      for (var service in selectedServices) {
+        try {
+          // Check if service already exists for this barber in this salon
+          final serviceList = await supabase
+              .from('barber_services')
+              .select()
+              .eq('barber_id', _selectedBarberId!)
+              .eq('service_id', int.parse(service['id']))
+              .eq('salon_id', salonId);  // 🔥 Check with salon_id
+
+          if (serviceList.isEmpty) {
+            // Insert with salon_id
+            final insertData = {
+              'barber_id': _selectedBarberId!,
+              'service_id': int.parse(service['id']),
+              'custom_price': service['price'],
+              'salon_id': salonId,  // 🔥 Add salon_id
+              'is_active': true,
+            };
+            
+            debugPrint('📝 Inserting barber service: $insertData');
+            
+            await supabase
+                .from('barber_services')
+                .insert(insertData);
+            
+            debugPrint('✅ Service added: ${service['name']} for salon ID: $salonId');
+          } else {
+            debugPrint('ℹ️ Service already exists for this barber in this salon: ${service['name']}');
+          }
+        } catch (e) {
+          debugPrint('⚠️ Error adding service ${service['name']}: $e');
+        }
+      }
+
+      // Success!
+      if (mounted) {
+        _showSnackBar(
+          '✅ ${selectedBarber['name']} added to $salonName successfully!',
+          Colors.green,
+        );
+
+        // Clear selection and go back after 2 seconds
+        Future.delayed(const Duration(seconds: 2), () {
+          if (context.mounted) {
+            context.pop();
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ Error adding barber: $e');
+      if (mounted) {
+        _showSnackBar('Error adding barber: ${e.toString()}', Colors.red);
       }
     } finally {
       if (mounted) {
@@ -401,279 +737,6 @@ class _AddBarberScreenState extends State<AddBarberScreen> {
       }
     }
   }
-
-// ✅ Add barber to salon - FINAL FIX WITH ROLE_ID FILTER
-Future<void> _addBarberToSalon() async {
-  if (!mounted) return;
-  
-  // Validation
-  if (_selectedBarberId == null) {
-    _showSnackBar('Please select a barber first', Colors.red);
-    return;
-  }
-
-  if (_selectedSalonId == null) {
-    _showSnackBar('Please select a salon', Colors.red);
-    return;
-  }
-
-  if (_selectedServiceIds.isEmpty) {
-    _showSnackBar('Please select at least one service', Colors.red);
-    return;
-  }
-
-  final selectedBarber = _searchResults.firstWhere(
-    (b) => b['id'] == _selectedBarberId,
-  );
-  
-  final selectedServices = _availableServices
-      .where((s) => _selectedServiceIds.contains(s['id']))
-      .toList();
-
-  final selectedSalon = _ownerSalons.firstWhere(
-    (s) => s['id'].toString() == _selectedSalonId,
-  );
-
-  // Show confirmation dialog
-  final confirm = await showDialog<bool>(
-    context: context,
-    builder: (context) => AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      title: const Text('Confirm Add Barber'),
-      content: Container(
-        width: _isWeb ? 400 : null,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Add ${selectedBarber['name']} to ${selectedSalon['name']}?'),
-            const SizedBox(height: 8),
-            Text('Salon: ${selectedSalon['name']}', 
-              style: const TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 16),
-            const Text(
-              'Services:',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            ...selectedServices.map(
-              (s) => Padding(
-                padding: const EdgeInsets.only(left: 8, bottom: 4),
-                child: Row(
-                  children: [
-                    Icon(s['icon'], size: 16, color: Colors.green),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(s['name'], style: const TextStyle(fontSize: 13)),
-                          Text(
-                            '${s['category_name']} • Rs. ${s['price']} • ${s['duration']} min',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: Colors.grey[600],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context, false),
-          child: const Text('Cancel'),
-        ),
-        ElevatedButton(
-          onPressed: () => Navigator.pop(context, true),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFFFF6B8B),
-          ),
-          child: const Text('Confirm'),
-        ),
-      ],
-    ),
-  );
-
-  if (confirm != true) return;
-
-  if (!mounted) return;
-  
-  setState(() {
-    _isLoading = true;
-  });
-
-  try {
-    // STEP 1: Get barber role ID
-    final roleList = await supabase
-        .from('roles')
-        .select('id')
-        .eq('name', 'barber');
-
-    if (roleList.isEmpty) {
-      throw Exception('Barber role not found in database');
-    }
-    final barberRoleId = roleList[0]['id'];
-    debugPrint('✅ Barber role ID: $barberRoleId');
-
-    // STEP 2: Get current profile - with role_id filter
-    final profileList = await supabase
-        .from('profiles')
-        .select()
-        .eq('id', _selectedBarberId!)
-        .eq('role_id', 2); // Barber role ID
-
-    if (profileList.isEmpty) {
-      throw Exception('Barber profile not found');
-    }
-    final currentProfile = profileList[0];
-    debugPrint('✅ Current profile found');
-
-    // STEP 3: Get salon
-    final salonIdInt = int.parse(_selectedSalonId!);
-    
-    final salonList = await supabase
-        .from('salons')
-        .select('id, name')
-        .eq('id', salonIdInt);
-
-    if (salonList.isEmpty) {
-      throw Exception('Salon not found');
-    }
-
-    final salonData = salonList[0];
-    final salonId = salonData['id'];
-    final salonName = salonData['name'];
-    debugPrint('✅ Using salon: $salonName (ID: $salonId)');
-
-    // Get existing services from extra_data
-    final existingServices = currentProfile['extra_data']?['services'] ?? [];
-    
-    // Prepare extra_data
-    final updatedExtraData = {
-      ...currentProfile['extra_data'] ?? {},
-      'services': [
-        ...existingServices,
-        ...selectedServices.map(
-          (s) => {
-            'id': int.parse(s['id']),
-            'name': s['name'],
-            'price': s['price'],
-            'duration': s['duration'],
-            'category_id': s['category_id'],
-            'category_name': s['category_name'],
-          },
-        ),
-      ],
-      'added_by': supabase.auth.currentUser?.id,
-      'added_at': DateTime.now().toIso8601String(),
-      'salon_id': _selectedSalonId,
-      'salon_name': salonName,
-      'previous_role': currentProfile['role_id'],
-    };
-
-    // 🔥 STEP 4: Update profile - WITH role_id filter (CRITICAL!)
-    await supabase
-        .from('profiles')
-        .update({
-          'extra_data': updatedExtraData,
-          'updated_at': DateTime.now().toIso8601String(),
-        })
-        .eq('id', _selectedBarberId!)
-        .eq('role_id', 2);  // 🔥 අනිවාර්යයෙන්ම role_id filter කරන්න
-
-    debugPrint('✅ Profile updated');
-
-    // STEP 5: Add to salon_barbers
-    final salonBarberList = await supabase
-        .from('salon_barbers')
-        .select()
-        .eq('salon_id', salonId)
-        .eq('barber_id', _selectedBarberId!);
-
-    if (salonBarberList.isEmpty) {
-      await supabase.from('salon_barbers').insert({
-        'salon_id': salonId,
-        'barber_id': _selectedBarberId!,
-        'is_active': true,
-      });
-      debugPrint('✅ Added to salon_barbers');
-    } else {
-      debugPrint('ℹ️ Already in salon_barbers');
-    }
-
-    // STEP 6: Add services
-    for (var service in selectedServices) {
-      final serviceList = await supabase
-          .from('barber_services')
-          .select()
-          .eq('barber_id', _selectedBarberId!)
-          .eq('service_id', int.parse(service['id']));
-
-      if (serviceList.isEmpty) {
-        await supabase.from('barber_services').insert({
-          'barber_id': _selectedBarberId!,
-          'service_id': int.parse(service['id']),
-          'custom_price': service['price'],
-          'salon_id': salonId,
-          'is_active': true,
-        });
-        debugPrint('✅ Service added: ${service['name']}');
-      } else {
-        debugPrint('ℹ️ Service already exists: ${service['name']}');
-      }
-    }
-
-    // Success!
-    if (mounted) {
-      _showSnackBar(
-        '✅ ${selectedBarber['name']} added to $salonName successfully!',
-        Colors.green,
-      );
-
-      Future.delayed(const Duration(seconds: 2), () {
-        if (context.mounted) {
-          context.pop();
-        }
-      });
-    }
-  } catch (e) {
-    debugPrint('❌ Error adding barber: $e');
-    if (mounted) {
-      _showSnackBar('Error adding barber: ${e.toString()}', Colors.red);
-    }
-  } finally {
-    if (mounted) {
-      setState(() {
-        _isLoading = false;
-      });
-    }
-  }
-}
-
-// Helper function to check if barber already exists in salon
-Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
-  try {
-    final existing = await supabase
-        .from('salon_barbers')
-        .select('id')
-        .eq('salon_id', salonId)
-        .eq('barber_id', barberId)
-        .maybeSingle();
-    
-    return existing != null;
-  } catch (e) {
-    debugPrint('❌ Error checking existing barber: $e');
-    return false;
-  }
-}
-
 
   void _showSnackBar(String message, Color color) {
     if (!mounted) return;
@@ -702,11 +765,7 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
 
   @override
   Widget build(BuildContext context) {
-    final isLoading =
-        _isLoading ||
-        _isLoadingServices ||
-        _isLoadingCategories ||
-        _isLoadingSalons;
+    final isLoading = _isLoading || _isLoadingServices || _isLoadingCategories || _isLoadingSalons;
     final screenWidth = MediaQuery.of(context).size.width;
 
     return Scaffold(
@@ -718,16 +777,10 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
-            onPressed: () {
-              _loadCategoriesAndServices();
-              _loadOwnerSalons();
-            },
+            onPressed: _refreshData,
             tooltip: 'Refresh',
           ),
-          if (_selectedBarberId != null &&
-              _selectedServiceIds.isNotEmpty &&
-              _selectedSalonId != null &&
-              !isLoading)
+          if (_selectedBarberId != null && _selectedServiceIds.isNotEmpty && _selectedSalonId != null && !isLoading)
             IconButton(
               icon: const Icon(Icons.check),
               onPressed: _addBarberToSalon,
@@ -736,49 +789,49 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
         ],
       ),
       body: isLoading
-          ? const Center(
-              child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
-            )
-          : Container(
-              color: Colors.grey[50],
-              child: Center(
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(
-                    maxWidth: _isWeb ? 1200 : double.infinity,
-                  ),
-                  child: SingleChildScrollView(
-                    padding: EdgeInsets.all(_isWeb ? 24 : 16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Salon Selection Section
-                        _buildSalonSelectionSection(screenWidth),
-
-                        const SizedBox(height: 24),
-
-                        // Search Section
-                        _buildSearchSection(screenWidth),
-
-                        const SizedBox(height: 24),
-
-                        // Selected Barber
-                        if (_selectedBarberId != null) ...[
-                          _buildSelectedBarber(),
+          ? const Center(child: CircularProgressIndicator(color: Color(0xFFFF6B8B)))
+          : RefreshIndicator(  // 🔥 Pull-to-refresh added
+              onRefresh: _refreshData,
+              color: const Color(0xFFFF6B8B),
+              child: Container(
+                color: Colors.grey[50],
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxWidth: _isWeb ? 1200 : double.infinity,
+                    ),
+                    child: SingleChildScrollView(
+                      physics: const AlwaysScrollableScrollPhysics(), // 🔥 Important for RefreshIndicator
+                      padding: EdgeInsets.all(_isWeb ? 24 : 16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Salon Selection Section
+                          _buildSalonSelectionSection(screenWidth),
+                          
                           const SizedBox(height: 24),
+                          
+                          // Search Section
+                          _buildSearchSection(screenWidth),
+                          
+                          const SizedBox(height: 24),
+                          
+                          // Selected Barber
+                          if (_selectedBarberId != null) ...[
+                            _buildSelectedBarber(),
+                            const SizedBox(height: 24),
+                          ],
+
+                          // Services Section
+                          _buildServicesSection(screenWidth),
+
+                          const SizedBox(height: 24),
+
+                          // Add Button
+                          if (_selectedBarberId != null && _selectedServiceIds.isNotEmpty && _selectedSalonId != null && _availableServices.isNotEmpty)
+                            _buildAddButton(),
                         ],
-
-                        // Services Section
-                        _buildServicesSection(screenWidth),
-
-                        const SizedBox(height: 24),
-
-                        // Add Button
-                        if (_selectedBarberId != null &&
-                            _selectedServiceIds.isNotEmpty &&
-                            _selectedSalonId != null &&
-                            _availableServices.isNotEmpty)
-                          _buildAddButton(),
-                      ],
+                      ),
                     ),
                   ),
                 ),
@@ -787,7 +840,7 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
     );
   }
 
-  // Salon Selection Section - FIXED with SizedBox instead of Container for whitespace
+  // Salon Selection Section
   Widget _buildSalonSelectionSection(double screenWidth) {
     return Card(
       elevation: 2,
@@ -800,7 +853,7 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
             Row(
               children: [
                 Icon(Icons.store, color: const Color(0xFFFF6B8B), size: 24),
-                const SizedBox(width: 8), // ✅ SizedBox for whitespace
+                const SizedBox(width: 8),
                 Text(
                   'Select Salon',
                   style: TextStyle(
@@ -810,7 +863,7 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
                 ),
               ],
             ),
-            const SizedBox(height: 16), // ✅ SizedBox for whitespace
+            const SizedBox(height: 16),
 
             if (_ownerSalons.isEmpty)
               Container(
@@ -822,7 +875,7 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
                 child: Column(
                   children: [
                     Icon(Icons.storefront, size: 48, color: Colors.grey[400]),
-                    const SizedBox(height: 12), // ✅ SizedBox for whitespace
+                    const SizedBox(height: 12),
                     Text(
                       'No salons found',
                       style: TextStyle(
@@ -831,15 +884,22 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
                         fontWeight: FontWeight.w500,
                       ),
                     ),
-                    const SizedBox(height: 4), // ✅ SizedBox for whitespace
+                    const SizedBox(height: 4),
                     Text(
                       'Please create a salon first',
                       style: TextStyle(fontSize: 14, color: Colors.grey[500]),
                     ),
-                    const SizedBox(height: 16), // ✅ SizedBox for whitespace
+                    const SizedBox(height: 16),
                     ElevatedButton(
-                      onPressed: () {
-                        context.push('/owner/salon/create');
+                      onPressed: () async {
+                        // 🔥 Navigate to create salon and wait for result
+                        final result = await context.push<bool>('/owner/salon/create');
+                        
+                        // If salon created successfully, refresh data
+                        if (result == true) {
+                          _refreshData();
+                          _showSnackBar('Salon created successfully! Refreshing...', Colors.green);
+                        }
                       },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFFFF6B8B),
@@ -863,8 +923,7 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
                       itemCount: _ownerSalons.length,
                       itemBuilder: (context, index) {
                         final salon = _ownerSalons[index];
-                        final isSelected =
-                            _selectedSalonId == salon['id'].toString();
+                        final isSelected = _selectedSalonId == salon['id'].toString();
                         return _buildSalonCard(salon, isSelected);
                       },
                     )
@@ -872,13 +931,10 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
                       itemCount: _ownerSalons.length,
-                      separatorBuilder: (context, index) => const SizedBox(
-                        height: 8,
-                      ), // ✅ SizedBox for whitespace
+                      separatorBuilder: (context, index) => const SizedBox(height: 8),
                       itemBuilder: (context, index) {
                         final salon = _ownerSalons[index];
-                        final isSelected =
-                            _selectedSalonId == salon['id'].toString();
+                        final isSelected = _selectedSalonId == salon['id'].toString();
                         return _buildSalonTile(salon, isSelected);
                       },
                     ),
@@ -899,9 +955,7 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: isSelected
-              ? const Color(0xFFFF6B8B).withValues(alpha: 0.05)
-              : Colors.white,
+          color: isSelected ? const Color(0xFFFF6B8B).withValues(alpha: 0.05) : Colors.white,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[300]!,
@@ -922,7 +976,7 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
                 size: 20,
               ),
             ),
-            const SizedBox(width: 12), // ✅ SizedBox for whitespace
+            const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -930,16 +984,17 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
                   Text(
                     salon['name'] ?? 'Unnamed Salon',
                     style: TextStyle(
-                      fontWeight: isSelected
-                          ? FontWeight.bold
-                          : FontWeight.w500,
+                      fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
                       fontSize: 15,
                     ),
                   ),
                   if (salon['address'] != null)
                     Text(
                       salon['address'],
-                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey[600],
+                      ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -947,11 +1002,7 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
               ),
             ),
             if (isSelected)
-              const Icon(
-                Icons.check_circle,
-                color: Color(0xFFFF6B8B),
-                size: 24,
-              ),
+              const Icon(Icons.check_circle, color: Color(0xFFFF6B8B), size: 24),
           ],
         ),
       ),
@@ -983,9 +1034,7 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: isSelected
-                      ? const Color(0xFFFF6B8B)
-                      : Colors.grey[100],
+                  color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[100],
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
@@ -994,7 +1043,7 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
                   size: 20,
                 ),
               ),
-              const SizedBox(width: 12), // ✅ SizedBox for whitespace
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1002,9 +1051,7 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
                     Text(
                       salon['name'] ?? 'Unnamed Salon',
                       style: TextStyle(
-                        fontWeight: isSelected
-                            ? FontWeight.bold
-                            : FontWeight.w600,
+                        fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
                         fontSize: 14,
                       ),
                       maxLines: 1,
@@ -1013,7 +1060,10 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
                     if (salon['address'] != null)
                       Text(
                         salon['address'],
-                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey[600],
+                        ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -1021,11 +1071,7 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
                 ),
               ),
               if (isSelected)
-                const Icon(
-                  Icons.check_circle,
-                  color: Color(0xFFFF6B8B),
-                  size: 20,
-                ),
+                const Icon(Icons.check_circle, color: Color(0xFFFF6B8B), size: 20),
             ],
           ),
         ),
@@ -1048,7 +1094,7 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
             Row(
               children: [
                 Icon(Icons.search, color: const Color(0xFFFF6B8B), size: 24),
-                const SizedBox(width: 8), // ✅ SizedBox for whitespace
+                const SizedBox(width: 8),
                 Text(
                   'Search Barbers',
                   style: TextStyle(
@@ -1058,8 +1104,8 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
                 ),
               ],
             ),
-            const SizedBox(height: 16), // ✅ SizedBox for whitespace
-
+            const SizedBox(height: 16),
+            
             Container(
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(12),
@@ -1092,10 +1138,9 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
               ),
             ),
 
-            const SizedBox(height: 8), // ✅ SizedBox for whitespace
+            const SizedBox(height: 8),
 
-            if (_searchController.text.isNotEmpty &&
-                _searchController.text.length < 2)
+            if (_searchController.text.isNotEmpty && _searchController.text.length < 2)
               Padding(
                 padding: const EdgeInsets.only(left: 12),
                 child: Text(
@@ -1109,7 +1154,7 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
               ),
 
             if (_isSearching) ...[
-              const SizedBox(height: 20), // ✅ SizedBox for whitespace
+              const SizedBox(height: 20),
               Row(
                 children: [
                   Text(
@@ -1119,7 +1164,7 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
                       fontWeight: FontWeight.w600,
                     ),
                   ),
-                  const SizedBox(width: 8), // ✅ SizedBox for whitespace
+                  const SizedBox(width: 8),
                   if (_isLoading)
                     const SizedBox(
                       height: 20,
@@ -1133,11 +1178,14 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
                   if (_searchResults.isNotEmpty)
                     Text(
                       '${_searchResults.length} found',
-                      style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Colors.grey[600],
+                      ),
                     ),
                 ],
               ),
-              const SizedBox(height: 12), // ✅ SizedBox for whitespace
+              const SizedBox(height: 12),
 
               if (_searchResults.isEmpty && !_isLoading)
                 Container(
@@ -1149,7 +1197,7 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
                         size: 64,
                         color: Colors.grey[400],
                       ),
-                      const SizedBox(height: 16), // ✅ SizedBox for whitespace
+                      const SizedBox(height: 16),
                       Text(
                         'No barbers found',
                         style: TextStyle(
@@ -1158,10 +1206,13 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
                           fontWeight: FontWeight.w500,
                         ),
                       ),
-                      const SizedBox(height: 4), // ✅ SizedBox for whitespace
+                      const SizedBox(height: 4),
                       Text(
                         'Try a different name or email',
-                        style: TextStyle(fontSize: 14, color: Colors.grey[500]),
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.grey[500],
+                        ),
                       ),
                     ],
                   ),
@@ -1188,8 +1239,7 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
                         shrinkWrap: true,
                         physics: const NeverScrollableScrollPhysics(),
                         itemCount: _searchResults.length,
-                        separatorBuilder: (context, index) =>
-                            const Divider(height: 1),
+                        separatorBuilder: (context, index) => const Divider(height: 1),
                         itemBuilder: (context, index) {
                           final barber = _searchResults[index];
                           final isSelected = _selectedBarberId == barber['id'];
@@ -1207,12 +1257,8 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
   Widget _buildBarberTile(Map<String, dynamic> barber, bool isSelected) {
     return ListTile(
       leading: CircleAvatar(
-        backgroundColor: isSelected
-            ? const Color(0xFFFF6B8B)
-            : Colors.grey[200],
-        backgroundImage: barber['photo'] != null
-            ? NetworkImage(barber['photo'])
-            : null,
+        backgroundColor: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[200],
+        backgroundImage: barber['photo'] != null ? NetworkImage(barber['photo']) : null,
         child: barber['photo'] == null
             ? Text(
                 barber['name'][0].toUpperCase(),
@@ -1231,7 +1277,9 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
       ),
       subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: [Text(barber['email'], style: const TextStyle(fontSize: 12))],
+        children: [
+          Text(barber['email'], style: const TextStyle(fontSize: 12)),
+        ],
       ),
       trailing: isSelected
           ? const Icon(Icons.check_circle, color: Color(0xFFFF6B8B))
@@ -1277,12 +1325,8 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
             children: [
               CircleAvatar(
                 radius: 24,
-                backgroundColor: isSelected
-                    ? const Color(0xFFFF6B8B)
-                    : Colors.grey[200],
-                backgroundImage: barber['photo'] != null
-                    ? NetworkImage(barber['photo'])
-                    : null,
+                backgroundColor: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[200],
+                backgroundImage: barber['photo'] != null ? NetworkImage(barber['photo']) : null,
                 child: barber['photo'] == null
                     ? Text(
                         barber['name'][0].toUpperCase(),
@@ -1294,7 +1338,7 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
                       )
                     : null,
               ),
-              const SizedBox(width: 12), // ✅ SizedBox for whitespace
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1303,18 +1347,19 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
                     Text(
                       barber['name'],
                       style: TextStyle(
-                        fontWeight: isSelected
-                            ? FontWeight.bold
-                            : FontWeight.w600,
+                        fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
                         fontSize: 14,
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    const SizedBox(height: 2), // ✅ SizedBox for whitespace
+                    const SizedBox(height: 2),
                     Text(
                       barber['email'],
-                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey[600],
+                      ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -1322,11 +1367,7 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
                 ),
               ),
               if (isSelected)
-                const Icon(
-                  Icons.check_circle,
-                  color: Color(0xFFFF6B8B),
-                  size: 20,
-                ),
+                const Icon(Icons.check_circle, color: Color(0xFFFF6B8B), size: 20),
             ],
           ),
         ),
@@ -1366,7 +1407,7 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
                   )
                 : null,
           ),
-          const SizedBox(width: 16), // ✅ SizedBox for whitespace
+          const SizedBox(width: 16),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1408,12 +1449,8 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
           children: [
             Row(
               children: [
-                const Icon(
-                  Icons.build_circle_outlined,
-                  color: Color(0xFFFF6B8B),
-                  size: 28,
-                ),
-                const SizedBox(width: 8), // ✅ SizedBox for whitespace
+                const Icon(Icons.build_circle_outlined, color: Color(0xFFFF6B8B), size: 28),
+                const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     'Select Services',
@@ -1425,10 +1462,7 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
                 ),
                 if (_selectedServiceIds.isNotEmpty)
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
-                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                     decoration: BoxDecoration(
                       color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(20),
@@ -1444,7 +1478,7 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
                   ),
               ],
             ),
-            const SizedBox(height: 16), // ✅ SizedBox for whitespace
+            const SizedBox(height: 16),
 
             if (_availableServices.isEmpty)
               _buildEmptyServices()
@@ -1467,40 +1501,32 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
                           color: Colors.green,
                         ),
                       ),
-                      const SizedBox(height: 8), // ✅ SizedBox for whitespace
+                      const SizedBox(height: 8),
                       Wrap(
                         spacing: 8,
                         runSpacing: 8,
                         children: _availableServices
                             .where((s) => _selectedServiceIds.contains(s['id']))
-                            .map(
-                              (service) => Chip(
-                                label: Text(service['name']),
-                                deleteIcon: const Icon(Icons.close, size: 16),
-                                onDeleted: () => _toggleService(service),
-                                backgroundColor: Colors.green.withValues(
-                                  alpha: 0.1,
-                                ),
-                                labelStyle: const TextStyle(fontSize: 12),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(16),
-                                ),
-                              ),
-                            )
+                            .map((service) => Chip(
+                                  label: Text(service['name']),
+                                  deleteIcon: const Icon(Icons.close, size: 16),
+                                  onDeleted: () => _toggleService(service),
+                                  backgroundColor: Colors.green.withValues(alpha: 0.1),
+                                  labelStyle: const TextStyle(fontSize: 12),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(16),
+                                  ),
+                                ))
                             .toList(),
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(height: 20), // ✅ SizedBox for whitespace
+                const SizedBox(height: 20),
               ],
 
               ..._servicesByCategory.entries.map((entry) {
-                return _buildCategorySection(
-                  entry.key,
-                  entry.value,
-                  screenWidth,
-                );
+                return _buildCategorySection(entry.key, entry.value, screenWidth);
               }),
             ],
           ],
@@ -1521,7 +1547,7 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
               size: 64,
               color: Colors.grey[400],
             ),
-            const SizedBox(height: 16), // ✅ SizedBox for whitespace
+            const SizedBox(height: 16),
             Text(
               'No services available',
               style: TextStyle(
@@ -1530,20 +1556,17 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
                 fontWeight: FontWeight.w500,
               ),
             ),
-            const SizedBox(height: 8), // ✅ SizedBox for whitespace
+            const SizedBox(height: 8),
             Text(
               'Please add services first',
               style: TextStyle(fontSize: 14, color: Colors.grey[500]),
             ),
-            const SizedBox(height: 16), // ✅ SizedBox for whitespace
+            const SizedBox(height: 16),
             ElevatedButton(
               onPressed: () => context.push('/owner/services/add'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFFFF6B8B),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 24,
-                  vertical: 12,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
               ),
               child: const Text('Add Services'),
             ),
@@ -1554,11 +1577,7 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
   }
 
   // Category Section
-  Widget _buildCategorySection(
-    String categoryName,
-    List<Map<String, dynamic>> services,
-    double screenWidth,
-  ) {
+  Widget _buildCategorySection(String categoryName, List<Map<String, dynamic>> services, double screenWidth) {
     final isSmallScreen = screenWidth < 600;
 
     final category = _categories.firstWhere(
@@ -1589,7 +1608,7 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
           child: Row(
             children: [
               Icon(category.icon, size: 20, color: const Color(0xFFFF6B8B)),
-              const SizedBox(width: 8), // ✅ SizedBox for whitespace
+              const SizedBox(width: 8),
               Text(
                 categoryName[0].toUpperCase() + categoryName.substring(1),
                 style: const TextStyle(
@@ -1597,7 +1616,7 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
                   fontWeight: FontWeight.w600,
                 ),
               ),
-              const SizedBox(width: 8), // ✅ SizedBox for whitespace
+              const SizedBox(width: 8),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                 decoration: BoxDecoration(
@@ -1656,9 +1675,7 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
                                 : Colors.grey[600],
                             size: isSmallScreen ? 24 : 28,
                           ),
-                          const SizedBox(
-                            height: 4,
-                          ), // ✅ SizedBox for whitespace
+                          const SizedBox(height: 4),
                           Text(
                             service['name'],
                             style: TextStyle(
@@ -1689,9 +1706,7 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
                               style: TextStyle(
                                 fontSize: isSmallScreen ? 8 : 9,
                                 color: isSelected
-                                    ? const Color(
-                                        0xFFFF6B8B,
-                                      ).withValues(alpha: 0.8)
+                                    ? const Color(0xFFFF6B8B).withValues(alpha: 0.8)
                                     : Colors.grey[500],
                               ),
                             ),
@@ -1721,7 +1736,7 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
             );
           },
         ),
-        const SizedBox(height: 20), // ✅ SizedBox for whitespace
+        const SizedBox(height: 20),
       ],
     );
   }
@@ -1730,7 +1745,10 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
   Widget _buildAddButton() {
     return Container(
       width: double.infinity,
-      padding: EdgeInsets.symmetric(horizontal: _isWeb ? 0 : 16, vertical: 8),
+      padding: EdgeInsets.symmetric(
+        horizontal: _isWeb ? 0 : 16,
+        vertical: 8,
+      ),
       child: ElevatedButton(
         onPressed: _isLoading ? null : _addBarberToSalon,
         style: ElevatedButton.styleFrom(
@@ -1755,7 +1773,7 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   const Icon(Icons.person_add, size: 20),
-                  const SizedBox(width: 8), // ✅ SizedBox for whitespace
+                  const SizedBox(width: 8),
                   Text(
                     _isWeb ? 'Add Barber to Selected Salon' : 'Add Barber',
                     style: const TextStyle(
@@ -1769,3 +1787,6 @@ Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
     );
   }
 }
+
+// 🔥 RouteObserver for route awareness
+final RouteObserver<ModalRoute<void>> routeObserver = RouteObserver<ModalRoute<void>>();

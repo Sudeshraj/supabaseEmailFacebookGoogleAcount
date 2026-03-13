@@ -1051,8 +1051,11 @@ GoRouter _createRouter() {
       GoRoute(
         path: '/owner/add-barber',
         name: 'addBarber',
-        pageBuilder: (context, state) =>
-            MaterialPage(child: const AddBarberScreen()),
+        builder: (context, state) {
+          // Query parameters check කරන්න
+          final refresh = state.uri.queryParameters['refresh'] == 'true';
+          return AddBarberScreen(refresh: refresh); // Parameter එක pass කරන්න
+        },
       ),
       GoRoute(
         path: '/owner/categories/add',
@@ -1060,11 +1063,11 @@ GoRouter _createRouter() {
         pageBuilder: (context, state) =>
             MaterialPage(child: const AddCategoryScreen()),
       ),
-     GoRoute(
-      path: '/owner/salon/create',
-      name: 'createSalon',
-      builder: (context, state) => const CreateSalonScreen(),
-    ),
+      GoRoute(
+        path: '/owner/salon/create',
+        name: 'createSalon',
+        builder: (context, state) => const CreateSalonScreen(),
+      ),
     ],
   );
 }
