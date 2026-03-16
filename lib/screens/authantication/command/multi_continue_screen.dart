@@ -37,6 +37,60 @@ class _ContinueScreenState extends State<ContinueScreen> {
     _checkCompliance();
   }
 
+  // ============================================================
+  // 🔥 GET DISPLAY NAME FROM PROFILE - HELPER FUNCTION
+  // ============================================================
+  String _getDisplayName(Map<String, dynamic> profile) {
+    final email = profile['email'] as String? ?? 'User';
+    
+    // 1. Try to get from full_name (database column)
+    if (profile['full_name'] != null && profile['full_name'].toString().isNotEmpty) {
+      return profile['full_name'].toString();
+    }
+    
+    // 2. Try to get from name field
+    if (profile['name'] != null && profile['name'].toString().isNotEmpty) {
+      return profile['name'].toString();
+    }
+    
+    // 3. Try to get from extra_data
+    if (profile['extra_data'] != null) {
+      final extraData = profile['extra_data'] as Map<String, dynamic>;
+      
+      // Check for full_name in extra_data
+      if (extraData['full_name'] != null && extraData['full_name'].toString().isNotEmpty) {
+        return extraData['full_name'].toString();
+      }
+      
+      // Check for company_name (for owners)
+      if (extraData['company_name'] != null && extraData['company_name'].toString().isNotEmpty) {
+        return extraData['company_name'].toString();
+      }
+      
+      // Check for name in extra_data
+      if (extraData['name'] != null && extraData['name'].toString().isNotEmpty) {
+        return extraData['name'].toString();
+      }
+    }
+    
+    // 4. Try to get from user_metadata (if available)
+    if (profile['user_metadata'] != null) {
+      final metadata = profile['user_metadata'] as Map<String, dynamic>;
+      if (metadata['full_name'] != null && metadata['full_name'].toString().isNotEmpty) {
+        return metadata['full_name'].toString();
+      }
+      if (metadata['name'] != null && metadata['name'].toString().isNotEmpty) {
+        return metadata['name'].toString();
+      }
+    }
+    
+    // 5. Fallback to email username
+    return email.split('@').first;
+  }
+
+  // ============================================================
+  // 🔥 LOAD PROFILES - FIXED WITH DISPLAY NAME
+  // ============================================================
   Future<void> _loadProfiles() async {
     try {
       final allProfiles = await SessionManager.getProfiles();
@@ -47,54 +101,43 @@ class _ContinueScreenState extends State<ContinueScreen> {
       for (var profile in allProfiles.where((p) => p['rememberMe'] == true)) {
         final roles = profile['roles'] as List? ?? [];
         final email = profile['email'] as String? ?? 'unknown';
-
-        // 🔥 එක් එක් profile එකට අදාළ last login time එක දැනටමත් profile එකේ තියෙනවා
-        // අපිට ආයෙත් _getLastLoginForProfile() call කරන්න ඕනේ නැහැ
         final profileLastLogin = profile['lastLogin'] as String?;
+        
+        // 🔥 Get display name properly
+        final displayName = _getDisplayName(profile);
+        
+        // Add display name to profile
+        profile['display_name'] = displayName;
 
-        debugPrint(
-          '📋 Processing profile: $email, roles: $roles, original lastLogin: $profileLastLogin',
-        );
+        debugPrint('📋 Processing profile: $email, name: $displayName, roles: $roles, lastLogin: $profileLastLogin');
 
         if (roles.isEmpty) {
           final newProfile = Map<String, dynamic>.from(profile);
-          newProfile['lastLogin'] =
-              profileLastLogin; // Ensure lastLogin is copied
+          newProfile['lastLogin'] = profileLastLogin;
+          newProfile['display_name'] = displayName;
           expandedProfiles.add(newProfile);
-          debugPrint(
-            '  → Added profile with no roles, lastLogin: $profileLastLogin',
-          );
+          debugPrint('  → Added profile with no roles, name: $displayName');
         } else if (roles.length == 1) {
           final newProfile = Map<String, dynamic>.from(profile);
-          newProfile['lastLogin'] =
-              profileLastLogin; // Ensure lastLogin is copied
+          newProfile['lastLogin'] = profileLastLogin;
+          newProfile['display_name'] = displayName;
           expandedProfiles.add(newProfile);
-          debugPrint(
-            '  → Added profile with single role: ${roles.first}, lastLogin: $profileLastLogin',
-          );
+          debugPrint('  → Added profile with single role: ${roles.first}, name: $displayName');
         } else {
           debugPrint('  → Splitting into ${roles.length} profiles');
-
-          // 🔥 IMPORTANT FIX: එක් එක් role profile එක සෑදීමේදී,
-          // අපි එකම lastLogin value එක copy කරනවා නම් හැම role profile එකටම එකම time එක පෙන්වයි.
-          // නමුත් මෙතන තියෙන problem එක තමයි - අපිට එක් එක් role එකට වෙනම lastLogin time එකක් නැහැ.
-          // එකම user එකේ විවිධ roles වලට වෙනම lastLogin times තියෙන්නේ නැහැ.
-          // ඒක නිසා අපිට කරන්න පුළුවන් හොඳම දේ තමයි එකම user එකේ හැම role එකටම එකම lastLogin time එක පෙන්වීම.
-          // එහෙමත් නැත්නම්, අපිට role-specific lastLogin times තියාගන්න වෙනම storage system එකක් හදන්න වෙනවා.
 
           for (var role in roles) {
             final roleProfile = Map<String, dynamic>.from(profile);
             roleProfile['roles'] = [role.toString()];
-            roleProfile['lastLogin'] =
-                profileLastLogin; // Copy the same lastLogin for all roles of this user
+            roleProfile['lastLogin'] = profileLastLogin;
+            roleProfile['display_name'] = displayName;
             expandedProfiles.add(roleProfile);
-            debugPrint(
-              '    → Created profile for role: $role, lastLogin: $profileLastLogin',
-            );
+            debugPrint('    → Created profile for role: $role, name: $displayName');
           }
         }
       }
 
+      // Sort profiles (OAuth first)
       expandedProfiles.sort((a, b) {
         final aProvider = a['provider'] as String? ?? 'email';
         final bProvider = b['provider'] as String? ?? 'email';
@@ -103,6 +146,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
         return 0;
       });
 
+      // Optimize images
       for (var profile in expandedProfiles) {
         await _optimizeProfileImage(profile);
       }
@@ -113,7 +157,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
         debugPrint('✅ Final profiles count: ${expandedProfiles.length}');
         for (var i = 0; i < expandedProfiles.length; i++) {
           debugPrint(
-            '  Profile $i: ${expandedProfiles[i]['email']} - Role: ${expandedProfiles[i]['roles']?.first} - LastLogin: ${expandedProfiles[i]['lastLogin']}',
+            '  Profile $i: ${expandedProfiles[i]['email']} - Name: ${expandedProfiles[i]['display_name']} - Role: ${expandedProfiles[i]['roles']?.first}',
           );
         }
       });
@@ -204,14 +248,15 @@ class _ContinueScreenState extends State<ContinueScreen> {
   }
 
   // ============================================================
-  // 🔥 HANDLE PROFILE LOGIN - FIXED WITH AUTO-LOGIN
+  // 🔥 HANDLE PROFILE LOGIN
   // ============================================================
   Future<void> _handleProfileLogin(
     Map<String, dynamic> profile,
     String role,
     String uniqueId,
   ) async {
-    debugPrint('🔐 _handleProfileLogin - Role: $role, UniqueId: $uniqueId');
+    debugPrint('🔐 ===== _handleProfileLogin START =====');
+    debugPrint('🔐 Role: $role, UniqueId: $uniqueId');
     debugPrint('📧 Email: ${profile['email']}');
     debugPrint('🔑 Provider: ${profile['provider']}');
 
@@ -231,7 +276,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
     try {
       bool loginSuccess = false;
 
-      // 🔥 TRY AUTO-LOGIN FIRST - FIXED
+      // Try auto-login first
       debugPrint('🔄 Attempting auto login for: $email');
       final autoSuccess = await SessionManager.tryAutoLogin(email);
 
@@ -251,9 +296,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
           debugPrint('📊 Email login success: $loginSuccess');
         }
       } else {
-        debugPrint(
-          '🔐 OAuth login flow started for $provider (auto-login failed)',
-        );
+        debugPrint('🔐 OAuth login flow started for $provider (auto-login failed)');
         loginSuccess = await _handleOAuthLoginForProfile(profile);
         debugPrint('📊 OAuth login success: $loginSuccess');
       }
@@ -261,35 +304,31 @@ class _ContinueScreenState extends State<ContinueScreen> {
       if (loginSuccess && mounted) {
         debugPrint('✅ Login successful for role: $role');
 
-        // 🔥 Check current user after login
-        final currentUser = supabase.auth.currentUser;
-        debugPrint('👤 Current user after login: ${currentUser?.email}');
-
-        // Check if profile completed
-        final hasProfile = await SessionManager.hasProfile();
-        debugPrint('📋 Has local profile: $hasProfile');
-
-        // Save this role
+        // Save the selected role
         await SessionManager.saveCurrentRole(role);
-        debugPrint('💾 Saved role: $role');
+        debugPrint('💾 Saved role: $role to SessionManager');
 
+        // Verify it was saved
         final savedRole = await SessionManager.getCurrentRole();
         debugPrint('✅ Verified saved role: $savedRole');
 
+        // Update user metadata
+        final currentUser = supabase.auth.currentUser;
         if (currentUser != null) {
           await supabase.auth.updateUser(
             UserAttributes(
-              data: {...currentUser.userMetadata ?? {}, 'current_role': role},
+              data: {
+                ...currentUser.userMetadata ?? {},
+                'current_role': role,
+              },
             ),
           );
           debugPrint('📝 Updated user metadata with role: $role');
         }
 
-        // Refresh app state
+        // Force refresh app state
         await appState.refreshState();
-        debugPrint(
-          '🔄 AppState refreshed - currentRole: ${appState.currentRole}',
-        );
+        await Future.delayed(const Duration(milliseconds: 300));
 
         // Redirect based on role
         String dashboardRoute;
@@ -305,11 +344,20 @@ class _ContinueScreenState extends State<ContinueScreen> {
         }
 
         debugPrint('📍 Redirecting to: $dashboardRoute');
+        
         if (mounted) {
           context.go(dashboardRoute);
         }
       } else {
         debugPrint('❌ Login failed for role: $role');
+        if (mounted) {
+          await showCustomAlert(
+            context: context,
+            title: "Login Failed",
+            message: "Could not log in with this profile. Please try again.",
+            isError: true,
+          );
+        }
       }
     } catch (e) {
       debugPrint('❌ Login error: $e');
@@ -328,6 +376,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
           _selectedEmail = null;
         });
       }
+      debugPrint('🔐 ===== _handleProfileLogin END =====');
     }
   }
 
@@ -340,7 +389,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
       final currentUser = supabase.auth.currentUser;
       if (currentUser?.email == email) return true;
 
-      // 🔥 Try auto-login first for OAuth too
       final autoSuccess = await SessionManager.tryAutoLogin(email);
       if (autoSuccess) return true;
 
@@ -373,9 +421,15 @@ class _ContinueScreenState extends State<ContinueScreen> {
           return false;
       }
 
-      await Future.delayed(const Duration(seconds: 2));
-      final user = supabase.auth.currentUser;
-      return user?.email == email;
+      for (int i = 0; i < 10; i++) {
+        await Future.delayed(const Duration(milliseconds: 500));
+        final user = supabase.auth.currentUser;
+        if (user?.email == email) {
+          return true;
+        }
+      }
+      
+      return false;
     } catch (e) {
       debugPrint('OAuth error: $e');
       return false;
@@ -390,20 +444,11 @@ class _ContinueScreenState extends State<ContinueScreen> {
     );
   }
 
-  // ... (ඉතිරි කොටස් සියල්ලම පෙර පරිදිම තබන්න - _buildProfileCard, _buildFooter, SecurityCompliantPasswordDialog ආදිය)
-
+  // ============================================================
+  // 🔥 HELPER METHODS
+  // ============================================================
   Color _getProviderColor(String? provider) {
-     return const Color.fromARGB(255, 242, 241, 241);
-    // switch (provider?.toLowerCase()) {
-    //   case 'google':
-    //     return const Color.fromARGB(255, 242, 241, 241);
-    //   case 'facebook':
-    //     return const Color(0xFF1877F2);
-    //   case 'apple':
-    //     return Colors.black;
-    //   default:
-    //     return Colors.blueAccent;
-    // }
+    return const Color.fromARGB(255, 242, 241, 241);
   }
 
   Color _getRoleColor(String role) {
@@ -461,30 +506,62 @@ class _ContinueScreenState extends State<ContinueScreen> {
     }
   }
 
+  Widget _buildProviderIcon(String provider) {
+    switch (provider.toLowerCase()) {
+      case 'google':
+        return SvgPicture.asset('icons/google.svg', width: 18, height: 18);
+      case 'facebook':
+        return SvgPicture.asset('icons/facebook.svg', width: 18, height: 18);
+      case 'apple':
+        return SvgPicture.asset('icons/apple.svg', width: 20, height: 20);
+      case 'email':
+        return Icon(
+          Icons.email_rounded,
+          size: 18,
+          color: _getButtonColor(provider.toLowerCase()),
+        );
+      default:
+        return const SizedBox();
+    }
+  }
+
+  Color _getButtonColor(provider) {
+    switch (provider) {
+      case 'google':
+        return const Color.fromARGB(255, 227, 44, 8);
+      case 'facebook':
+        return const Color(0xFF1877F2);
+      case 'apple':
+        return const Color.fromARGB(255, 227, 227, 227);
+      case 'email':
+        return const Color.fromARGB(255, 30, 30, 31);
+      default:
+        return const Color.fromARGB(255, 228, 230, 234);
+    }
+  }
+
   // ============================================================
-  // 🔥 PROFILE CARD - WITH PROVIDER & ROLE ICONS ON PHOTO
+  // 🔥 PROFILE CARD - UPDATED WITH DISPLAY NAME
   // ============================================================
   Widget _buildProfileCard(Map<String, dynamic> profile, int index) {
     final email = profile['email'] as String? ?? 'Unknown';
     final provider = profile['provider'] as String? ?? 'email';
-
     final roles = profile['roles'] as List? ?? [];
     final profileRole = roles.isNotEmpty ? roles.first.toString() : 'customer';
-
     final uniqueId = '$email-$index-$profileRole';
     final isLoading = _profileLoadingStates[uniqueId] == true;
     final isSelected = _selectedProfiles.contains(uniqueId);
     final photoUrl = profile['photo'] as String?;
-    final name = profile['name'] as String? ?? email.split('@').first;
+    
+    // 🔥 Use display_name instead of name
+    final displayName = profile['display_name'] as String? ?? email.split('@').first;
+    
     final hasPhoto = photoUrl != null && photoUrl.isNotEmpty;
     final lastLogin = profile['lastLogin'] as String?;
-
     final roleColor = _getRoleColor(profileRole);
     final roleIcon = _getRoleIcon(profileRole);
     final roleDisplayName = _getRoleDisplayName(profileRole);
     final providerColor = _getProviderColor(provider);
-
-    // 🔥 All users get a provider icon now (email users get email icon)
 
     return GestureDetector(
       onTap: () {
@@ -493,7 +570,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
         } else if (isLoading) {
           return;
         } else {
-          SessionManager.saveCurrentRole(profileRole);
           _handleProfileLogin(profile, profileRole, uniqueId);
         }
       },
@@ -527,11 +603,10 @@ class _ContinueScreenState extends State<ContinueScreen> {
           padding: const EdgeInsets.all(12),
           child: Row(
             children: [
-              // Profile Image with Provider and Role Icons
+              // Profile Image with Icons
               Stack(
-                clipBehavior: Clip.none, // Allow icons to extend outside
+                clipBehavior: Clip.none,
                 children: [
-                  // Main Profile Photo
                   Container(
                     width: 70,
                     height: 70,
@@ -557,7 +632,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                     ),
                   ),
 
-                  // 🔥 Provider Icon Badge (Top Left) - NOW FOR ALL USERS
+                  // Provider Icon Badge
                   if (!isLoading && !_selectionMode)
                     Positioned(
                       top: -4,
@@ -584,7 +659,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                       ),
                     ),
 
-                  // Role Icon Badge (Bottom Right) - Always show for all users
+                  // Role Icon Badge
                   if (!isLoading && !_selectionMode)
                     Positioned(
                       bottom: -4,
@@ -613,7 +688,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                       ),
                     ),
 
-                  // Selection check badge (only in selection mode)
+                  // Selection check badge
                   if (isSelected && _selectionMode)
                     Positioned(
                       top: 0,
@@ -639,7 +714,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                       ),
                     ),
 
-                  // Loading indicator (overlay)
+                  // Loading indicator
                   if (isLoading)
                     Positioned.fill(
                       child: Container(
@@ -666,15 +741,14 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
               const SizedBox(width: 16),
 
-              // Profile Info - Simple
+              // Profile Info - Using displayName
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // Name only - NO email label
                     Text(
-                      name,
+                      displayName, // 🔥 Using displayName
                       style: const TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.w600,
@@ -686,10 +760,8 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
                     const SizedBox(height: 8),
 
-                    // Role and Last Login in one line
                     Row(
                       children: [
-                        // Role name
                         Text(
                           roleDisplayName,
                           style: TextStyle(
@@ -699,7 +771,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
                           ),
                         ),
                         const SizedBox(width: 8),
-                        // Dot separator
                         Container(
                           width: 4,
                           height: 4,
@@ -709,7 +780,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
                           ),
                         ),
                         const SizedBox(width: 8),
-                        // Last login time
                         if (lastLogin != null && !isLoading)
                           Text(
                             _formatLastLogin(lastLogin),
@@ -724,7 +794,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                 ),
               ),
 
-              // Simple arrow indicator (only when not loading and not selection mode)
+              // Arrow indicator
               if (!isLoading && !_selectionMode)
                 Container(
                   width: 32,
@@ -744,84 +814,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
         ),
       ),
     );
-  }
-
-  Widget _buildProviderIcon(String provider) {
-    switch (provider.toLowerCase()) {
-      case 'google':
-        return SvgPicture.asset('icons/google.svg', width: 18, height: 18);
-      case 'facebook':
-        return SvgPicture.asset('icons/facebook.svg', width: 18, height: 18);
-      case 'apple':
-        // return const Icon(Icons.apple, size: 18);
-        return SvgPicture.asset('icons/apple.svg', width: 20, height: 20);
-      case 'email':
-        return Icon(
-          Icons.email_rounded,
-          size: 18,
-          color: _getButtonColor(provider.toLowerCase()),
-        );
-      default:
-        return const SizedBox();
-
-      // case 'google':
-      //   return const Text(
-      //     'G',
-      //     style: TextStyle(
-      //       color: Colors.white,
-      //       fontSize: 12,
-      //       fontWeight: FontWeight.bold,
-      //     ),
-      //   );
-      // case 'facebook':
-      //   return const Text(
-      //     'f',
-      //     style: TextStyle(
-      //       color: Colors.white,
-      //       fontSize: 14,
-      //       fontWeight: FontWeight.bold,
-      //     ),
-      //   );
-      //  case 'apple':
-      //   return const Icon(
-      //     Icons.apple,
-      //     color: Colors.white,
-      //     size: 14,
-      //   );
-      // case 'email':
-      //   return const Text(
-      //     'E',  // 🔥 Email users get 'E'
-      //     style: TextStyle(
-      //       color: Colors.white,
-      //       fontSize: 12,
-      //       fontWeight: FontWeight.bold,
-      //     ),
-      //   );
-      // default:
-      //   return const Text(
-      //     '?',
-      //     style: TextStyle(
-      //       color: Colors.white,
-      //       fontSize: 12,
-      //       fontWeight: FontWeight.bold,
-      //     ),
-      //   );
-    }
-  }
-
-  Color _getButtonColor(provider) {
-    switch (provider) {
-      case 'google':
-        return const Color.fromARGB(255, 227, 44, 8);
-      case 'facebook':
-        return const Color(0xFF1877F2);
-      case 'apple':
-        return const Color.fromARGB(255, 227, 227, 227);
-      case 'email':
-        return const Color.fromARGB(255, 30, 30, 31);
-      default:
-        return const Color.fromARGB(255, 228, 230, 234);
-    }
   }
 
   Widget _buildLargeProfileImage(
@@ -880,9 +872,12 @@ class _ContinueScreenState extends State<ContinueScreen> {
     }
   }
 
+  // ============================================================
+  // 🔥 FALLBACK AVATAR - UPDATED WITH DISPLAY NAME
+  // ============================================================
   Widget _getFallbackAvatar(Map<String, dynamic> profile, String? provider) {
     final email = profile['email'] as String? ?? 'Unknown';
-    final name = profile['name'] as String? ?? email.split('@').first;
+    final displayName = profile['display_name'] as String? ?? email.split('@').first;
     final isOAuth = provider != 'email';
 
     if (isOAuth) {
@@ -928,7 +923,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
       ),
       child: Center(
         child: Text(
-          name[0].toUpperCase(),
+          displayName[0].toUpperCase(), // 🔥 Using first letter of display name
           style: const TextStyle(
             color: Colors.white,
             fontWeight: FontWeight.bold,
@@ -939,6 +934,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
     );
   }
 
+  // ============================================================
+  // 🔥 SELECTION METHODS
+  // ============================================================
   void _toggleProfileSelection(Map<String, dynamic> profile, String uniqueId) {
     setState(() {
       if (_selectedProfiles.contains(uniqueId)) {
@@ -1471,6 +1469,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
   }
 }
 
+// ============================================================
+// 🔥 PASSWORD DIALOG
+// ============================================================
 class SecurityCompliantPasswordDialog extends StatefulWidget {
   final String email;
   const SecurityCompliantPasswordDialog({super.key, required this.email});

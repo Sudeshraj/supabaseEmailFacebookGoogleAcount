@@ -28,6 +28,7 @@ class SideMenu extends StatefulWidget {
 class _SideMenuState extends State<SideMenu> {
   bool _showProfileSwitcher = false;
   List<Map<String, dynamic>> _availableProfiles = [];
+  List<String> _allUserRoles = [];
   bool _isLoading = false;
   
   final supabase = Supabase.instance.client;
@@ -37,7 +38,7 @@ class _SideMenuState extends State<SideMenu> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
-        _loadProfilesFromDatabase();
+        _loadUserRolesFromDatabase();
       }
     });
   }
@@ -48,16 +49,16 @@ class _SideMenuState extends State<SideMenu> {
     if (widget.userRole != oldWidget.userRole) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
-          _loadProfilesFromDatabase();
+          _loadUserRolesFromDatabase();
         }
       });
     }
   }
 
   // ============================================================
-  // 🔥 LOAD PROFILES FROM DATABASE
+  // 🔥 LOAD USER ROLES FROM DATABASE (UPDATED - uses user_roles)
   // ============================================================
-  Future<void> _loadProfilesFromDatabase() async {
+  Future<void> _loadUserRolesFromDatabase() async {
     if (!mounted) return;
     
     setState(() => _isLoading = true);
@@ -69,62 +70,101 @@ class _SideMenuState extends State<SideMenu> {
         return;
       }
 
-      debugPrint('📋 Loading profiles for user: ${currentUser.id}');
+      debugPrint('📋 Loading roles for user: ${currentUser.id}');
 
-      final response = await supabase
-          .from('profiles')
+      // 🔥 NEW: Get user roles from user_roles table
+      final userRolesResponse = await supabase
+          .from('user_roles')
           .select('''
-            id,
             role_id,
-            full_name,
-            avatar_url,
-            extra_data,
-            is_active,
             roles!inner (
               id,
               name,
               description
             )
           ''')
-          .eq('id', currentUser.id)
-          .eq('is_active', true);
+          .eq('user_id', currentUser.id);
 
-      if (response.isNotEmpty && mounted) {
+      // Extract role names
+      final List<String> roleNames = [];
+      for (var roleEntry in userRolesResponse) {
+        final role = roleEntry['roles'] as Map?;
+        if (role != null && role['name'] != null) {
+          roleNames.add(role['name'].toString());
+        }
+      }
+      
+      _allUserRoles = roleNames.toSet().toList(); // Remove duplicates
+      
+      debugPrint('📋 User roles from database: $_allUserRoles');
+
+      // 🔥 Get profile data for each role
+      final List<Map<String, dynamic>> profiles = [];
+
+      for (var roleName in _allUserRoles) {
+        // Get role ID
+        final roleResponse = await supabase
+            .from('roles')
+            .select('id')
+            .eq('name', roleName)
+            .single();
+        
+        final roleId = roleResponse['id'];
+
+        // Get profile for this user (profiles table doesn't have role_id anymore)
+        // We just get the main profile
+        final profileResponse = await supabase
+            .from('profiles')
+            .select('''
+              id,
+              full_name,
+              avatar_url,
+              email,
+              extra_data,
+              is_active,
+              is_blocked
+            ''')
+            .eq('id', currentUser.id)
+            .maybeSingle();
+
+        if (profileResponse != null) {
+          final isCurrent = roleName == widget.userRole;
+          
+          String displayName = profileResponse['full_name'] ?? widget.userName;
+          if (displayName.isEmpty) {
+            displayName = profileResponse['extra_data']?['full_name'] ?? 
+                         profileResponse['extra_data']?['company_name'] ?? 
+                         widget.userName;
+          }
+          
+          profiles.add({
+            'id': profileResponse['id'],
+            'email': profileResponse['email'] ?? widget.userEmail ?? currentUser.email,
+            'role': roleName,
+            'role_id': roleId,
+            'name': displayName,
+            'photo': profileResponse['avatar_url'] ?? widget.profileImageUrl,
+            'is_current': isCurrent,
+            'is_active': profileResponse['is_active'] ?? true,
+            'is_blocked': profileResponse['is_blocked'] ?? false,
+            'extra_data': profileResponse['extra_data'],
+          });
+        }
+      }
+
+      if (mounted) {
         setState(() {
-          _availableProfiles = response.map((profile) {
-            final roleName = profile['roles']?['name'] ?? 'customer';
-            final isCurrent = roleName == widget.userRole;
-            
-            String displayName = profile['full_name'] ?? '';
-            if (displayName.isEmpty) {
-              displayName = profile['extra_data']?['full_name'] ?? 
-                           profile['extra_data']?['company_name'] ?? 
-                           widget.userName;
-            }
-            
-            return {
-              'id': profile['id'],
-              'email': profile['extra_data']?['email'] ?? widget.userEmail ?? currentUser.email,
-              'role': roleName,
-              'role_id': profile['role_id'],
-              'name': displayName,
-              'photo': profile['avatar_url'] ?? widget.profileImageUrl,
-              'is_current': isCurrent,
-              'extra_data': profile['extra_data'],
-            };
-          }).toList();
+          _availableProfiles = profiles;
         });
 
-        final allRoles = _availableProfiles.map((p) => p['role'] as String).toList();
+        // Save to SessionManager
         await SessionManager.saveUserRoles(
           email: widget.userEmail ?? currentUser.email ?? '',
-          roles: allRoles,
+          roles: _allUserRoles,
         );
-      } else {
-        await _createDefaultProfile();
       }
     } catch (e) {
-      debugPrint('❌ Error loading profiles from database: $e');
+      debugPrint('❌ Error loading user roles: $e');
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -133,83 +173,39 @@ class _SideMenuState extends State<SideMenu> {
   }
 
   // ============================================================
-  // 🔥 CREATE DEFAULT PROFILE
-  // ============================================================
-  Future<void> _createDefaultProfile() async {
-    try {
-      final currentUser = supabase.auth.currentUser;
-      if (currentUser == null) return;
-
-      final roleResponse = await supabase
-          .from('roles')
-          .select('id')
-          .eq('name', widget.userRole)
-          .single();
-
-      final roleId = roleResponse['id'];
-
-      final newProfile = {
-        'id': currentUser.id,
-        'role_id': roleId,
-        'full_name': widget.userName,
-        'avatar_url': widget.profileImageUrl,
-        'extra_data': {
-          'email': widget.userEmail ?? currentUser.email,
-          'created_at': DateTime.now().toIso8601String(),
-        },
-        'is_active': true,
-      };
-
-      await supabase.from('profiles').insert(newProfile);
-      
-      await SessionManager.saveUserProfile(
-        email: widget.userEmail ?? currentUser.email ?? '',
-        userId: currentUser.id,
-        name: widget.userName,
-        photo: widget.profileImageUrl,
-        roles: [widget.userRole],
-        rememberMe: true,
-        provider: await _getUserProvider(),
-      );
-      
-      await _loadProfilesFromDatabase();
-    } catch (e) {
-      debugPrint('❌ Error creating default profile: $e');
-    }
-  }
-
-  // ============================================================
-  // 🔥 GET USER PROVIDER
-  // ============================================================
-  Future<String> _getUserProvider() async {
-    final currentUser = supabase.auth.currentUser;
-    if (currentUser == null) return 'email';
-    
-    final photo = widget.profileImageUrl;
-    if (photo != null && photo.isNotEmpty) {
-      if (photo.contains('googleusercontent.com')) return 'google';
-      if (photo.contains('fbcdn.net') || 
-          photo.contains('facebook.com') ||
-          photo.contains('platform-lookaside.fbsbx.com')) {
-        return 'facebook';
-      }
-      if (photo.contains('apple.com')) return 'apple';
-    }
-    
-    final provider = currentUser.appMetadata['provider'];
-    if (provider != null) return provider.toString();
-    
-    return 'email';
-  }
-
-  // ============================================================
-  // 🔥 SWITCH PROFILE
+  // 🔥 SWITCH PROFILE (UPDATED)
   // ============================================================
   Future<void> _switchProfile(Map<String, dynamic> profile) async {
     if (!mounted) return;
     
     if (profile['is_current'] == true) {
       setState(() => _showProfileSwitcher = false);
+      return;
+    }
+
+    // Check if profile is active
+    if (profile['is_active'] == false) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('This profile is inactive'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+      return;
+    }
+
+    // Check if profile is blocked
+    if (profile['is_blocked'] == true) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('This profile is blocked'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
       return;
     }
 
@@ -223,8 +219,10 @@ class _SideMenuState extends State<SideMenu> {
       
       if (email == null) throw Exception('No email found');
       
+      // 🔥 Update current role in SessionManager
       await SessionManager.updateUserRole(profile['role']);
       
+      // Update user metadata
       if (currentUser != null) {
         final currentMetadata = currentUser.userMetadata ?? {};
         await supabase.auth.updateUser(
@@ -239,12 +237,10 @@ class _SideMenuState extends State<SideMenu> {
       
       if (!mounted) return;
       
+      // Close drawer
       Navigator.pop(context);
       
-      await Future.delayed(const Duration(milliseconds: 100));
-      
-      if (!mounted) return;
-      
+      // Show success message
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Switched to ${_getRoleDisplayName(profile['role'])} profile'),
@@ -253,6 +249,12 @@ class _SideMenuState extends State<SideMenu> {
         ),
       );
       
+      // Refresh app state
+      await appState.refreshState();
+      
+      if (!mounted) return;
+      
+      // Navigate to appropriate dashboard
       _navigateToDashboard(profile['role']);
     } catch (e) {
       debugPrint('❌ Error switching profile: $e');
@@ -269,74 +271,116 @@ class _SideMenuState extends State<SideMenu> {
   }
 
   // ============================================================
-  // 🔥 CREATE NEW PROFILE - FIXED NAVIGATION
+  // 🔥 CREATE NEW PROFILE (FIXED NAVIGATION)
   // ============================================================
-Future<void> _createNewProfile() async {
-  if (!mounted) return;
-  
-  setState(() => _showProfileSwitcher = false);
-  
-  final selectedRole = await showDialog<String>(
-    context: context,
-    builder: (context) => AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      title: const Text('Create New Profile'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Text('What type of profile would you like to create?'),
-          const SizedBox(height: 20),
-          _buildProfileTypeOption(
-            icon: Icons.work_outline,
-            color: Colors.blue,
-            title: 'Owner',
-            description: 'Manage your salon',
-            role: 'owner',
+  Future<void> _createNewProfile() async {
+    if (!mounted) return;
+    
+    setState(() => _showProfileSwitcher = false);
+    
+    // Get available roles (roles user doesn't have yet)
+    final allRoles = ['owner', 'barber', 'customer'];
+    final availableRoles = allRoles
+        .where((role) => !_allUserRoles.contains(role))
+        .toList();
+
+    if (availableRoles.isEmpty) {
+      // User already has all roles
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('You already have all profile types'),
+            backgroundColor: Colors.orange,
           ),
-          const SizedBox(height: 12),
-          _buildProfileTypeOption(
-            icon: Icons.content_cut,
-            color: Colors.orange,
-            title: 'Barber',
-            description: 'Work as a barber',
-            role: 'barber',
-          ),
-          const SizedBox(height: 12),
-          _buildProfileTypeOption(
-            icon: Icons.person_outline,
-            color: Colors.green,
-            title: 'Customer',
-            description: 'Book appointments',
-            role: 'customer',
+        );
+      }
+      return;
+    }
+    
+    final selectedRole = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Create New Profile'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('What type of profile would you like to create?'),
+            const SizedBox(height: 20),
+            ...availableRoles.map((role) => Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: _buildProfileTypeOption(
+                icon: _getRoleIcon(role),
+                color: _getRoleColor(role),
+                title: _getRoleDisplayName(role),
+                description: _getRoleDescription(role),
+                role: role,
+              ),
+            )),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
           ),
         ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
-      ],
-    ),
-  );
+    );
 
-  if (selectedRole == null || !mounted) return;
+    if (selectedRole == null || !mounted) return;
 
-  debugPrint('🔄 Selected role for new profile: $selectedRole');
+    debugPrint('🔄 Selected role for new profile: $selectedRole');
 
-  // Close drawer
-  Navigator.pop(context);
-  
-  // Small delay
-  await Future.delayed(const Duration(milliseconds: 100));
-  
-  if (!mounted) return;
+    // Close drawer
+    Navigator.pop(context);
+    
+    // Small delay
+    await Future.delayed(const Duration(milliseconds: 100));
+    
+    if (!mounted) return;
 
-  debugPrint('➡️ Navigating to registration flow for role: $selectedRole');
-  
-  // 🔥 SIMPLE FIX: Use query parameters instead of extra data
-  context.push('/reg?role=$selectedRole&new=true');
-}
+    debugPrint('➡️ Navigating to registration flow for role: $selectedRole');
+    
+    // Navigate to registration with query parameters
+    context.push('/reg?role=$selectedRole&new=true');
+  }
+
+  // ============================================================
+  // 🔥 HELPER: Get role icon
+  // ============================================================
+  IconData _getRoleIcon(String role) {
+    switch (role) {
+      case 'owner': return Icons.work_outline;
+      case 'barber': return Icons.content_cut;
+      case 'customer': return Icons.person_outline;
+      default: return Icons.error_outline;
+    }
+  }
+
+  // ============================================================
+  // 🔥 HELPER: Get role color
+  // ============================================================
+  Color _getRoleColor(String role) {
+    switch (role) {
+      case 'owner': return Colors.blue;
+      case 'barber': return Colors.orange;
+      case 'customer': return Colors.green;
+      default: return Colors.grey;
+    }
+  }
+
+  // ============================================================
+  // 🔥 HELPER: Get role description
+  // ============================================================
+  String _getRoleDescription(String role) {
+    switch (role) {
+      case 'owner': return 'Manage your salon';
+      case 'barber': return 'Work as a barber';
+      case 'customer': return 'Book appointments';
+      default: return '';
+    }
+  }
 
   // ============================================================
   // 🔥 PROFILE TYPE OPTION WIDGET
@@ -450,9 +494,14 @@ Future<void> _createNewProfile() async {
   }
 
   // ============================================================
-  // 🔥 PROFILE HEADER
+  // 🔥 PROFILE HEADER (UPDATED)
   // ============================================================
   Widget _buildProfileHeader() {
+    // Count available profiles (excluding current)
+    final otherProfilesCount = _availableProfiles
+        .where((p) => p['is_current'] != true)
+        .length;
+
     return Container(
       decoration: const BoxDecoration(
         gradient: LinearGradient(
@@ -508,7 +557,7 @@ Future<void> _createNewProfile() async {
                                 )
                               : null,
                         ),
-                        if (_showProfileSwitcher)
+                        if (otherProfilesCount > 0)
                           Positioned(
                             bottom: 0,
                             right: 0,
@@ -519,10 +568,13 @@ Future<void> _createNewProfile() async {
                                 shape: BoxShape.circle,
                                 border: Border.all(color: Colors.white, width: 2),
                               ),
-                              child: const Icon(
-                                Icons.swap_horiz,
-                                color: Colors.white,
-                                size: 12,
+                              child: Text(
+                                '+$otherProfilesCount',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
                             ),
                           ),
@@ -547,42 +599,43 @@ Future<void> _createNewProfile() async {
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),
-                            GestureDetector(
-                              onTap: () {
-                                if (mounted) {
-                                  setState(() {
-                                    _showProfileSwitcher = !_showProfileSwitcher;
-                                  });
-                                }
-                              },
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 4,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withValues(alpha: 0.2),
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: Row(
-                                  children: [
-                                    const Icon(
-                                      Icons.swap_horiz,
-                                      color: Colors.white,
-                                      size: 14,
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      'Switch',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: Colors.white.withValues(alpha: 0.9),
+                            if (otherProfilesCount > 0)
+                              GestureDetector(
+                                onTap: () {
+                                  if (mounted) {
+                                    setState(() {
+                                      _showProfileSwitcher = !_showProfileSwitcher;
+                                    });
+                                  }
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 4,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withValues(alpha: 0.2),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      const Icon(
+                                        Icons.swap_horiz,
+                                        color: Colors.white,
+                                        size: 14,
                                       ),
-                                    ),
-                                  ],
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        'Switch',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.white.withValues(alpha: 0.9),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ),
-                            ),
                           ],
                         ),
                         if (widget.userEmail != null && widget.userEmail!.isNotEmpty) ...[
@@ -628,10 +681,15 @@ Future<void> _createNewProfile() async {
   }
 
   // ============================================================
-  // 🔥 PROFILE SWITCHER
+  // 🔥 PROFILE SWITCHER (UPDATED)
   // ============================================================
   Widget _buildProfileSwitcher() {
-    if (_availableProfiles.isEmpty) {
+    // Filter out current profile
+    final otherProfiles = _availableProfiles
+        .where((p) => p['is_current'] != true)
+        .toList();
+
+    if (otherProfiles.isEmpty) {
       return Container(
         color: Colors.grey[50],
         padding: const EdgeInsets.all(16),
@@ -670,10 +728,18 @@ Future<void> _createNewProfile() async {
                     color: Colors.grey[700],
                   ),
                 ),
+                const Spacer(),
+                Text(
+                  '${otherProfiles.length} available',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey[500],
+                  ),
+                ),
               ],
             ),
           ),
-          ..._availableProfiles.map((profile) => ListTile(
+          ...otherProfiles.map((profile) => ListTile(
             leading: CircleAvatar(
               radius: 18,
               backgroundImage: profile['photo'] != null
@@ -690,20 +756,32 @@ Future<void> _createNewProfile() async {
               children: [
                 Text(
                   _getRoleDisplayName(profile['role']),
-                  style: TextStyle(
-                    fontWeight: profile['is_current'] ? FontWeight.bold : FontWeight.normal,
-                  ),
+                  style: const TextStyle(fontWeight: FontWeight.w500),
                 ),
-                if (profile['is_current']) ...[
+                if (profile['is_active'] == false) ...[
                   const SizedBox(width: 8),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
-                      color: Colors.green,
+                      color: Colors.orange,
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: const Text(
-                      'Current',
+                      'Inactive',
+                      style: TextStyle(fontSize: 8, color: Colors.white, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ],
+                if (profile['is_blocked'] == true) ...[
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.red,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Text(
+                      'Blocked',
                       style: TextStyle(fontSize: 8, color: Colors.white, fontWeight: FontWeight.bold),
                     ),
                   ),
@@ -711,6 +789,7 @@ Future<void> _createNewProfile() async {
               ],
             ),
             subtitle: Text(profile['email'] ?? ''),
+            enabled: profile['is_active'] == true && profile['is_blocked'] == false,
             onTap: () => _switchProfile(profile),
           )),
           Padding(

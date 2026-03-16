@@ -42,12 +42,33 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
   
   bool _didCheckQueryParams = false;
 
+  // Cache role IDs
+  Map<String, int>? _roleIds;
+
   @override
   void initState() {
     super.initState();
     debugPrint('📍 RegistrationFlow initState');
     
     _controller = PageController(initialPage: 0);
+    _loadRoleIds();
+  }
+  
+  // 🔥 Load role IDs from database
+  Future<void> _loadRoleIds() async {
+    try {
+      final response = await Supabase.instance.client
+          .from('roles')
+          .select('id, name');
+      
+      _roleIds = {
+        for (var role in response) role['name'] as String: role['id'] as int
+      };
+      
+      debugPrint('✅ Role IDs loaded: $_roleIds');
+    } catch (e) {
+      debugPrint('❌ Error loading role IDs: $e');
+    }
   }
   
   @override
@@ -83,7 +104,6 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
       debugPrint('📱 Extracted - role: $role, isNew: $isNew');
       
       if (role != null && role.isNotEmpty) {
-        // CASE 1: New profile creation from side menu
         setState(() {
           roles = role;
           _isNewProfile = isNew;
@@ -91,14 +111,12 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
         
         debugPrint('📱 New profile creation for role: $role');
         
-        // Jump to page 1 (skip welcome)
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!mounted) return;
           debugPrint('📍 Jumping to page 1 (skip welcome)');
           _controller.jumpToPage(1);
         });
       } else {
-        // 🔥 CASE 2: First time registration
         setState(() {
           roles = null;
           _isNewProfile = false;
@@ -116,62 +134,59 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
   }
 
   // ============================================================
-  // 🔥 HANDLE BACK BUTTON (Called from child screens)
+  // HANDLE BACK BUTTON
   // ============================================================
-void _handleBack() {
-  debugPrint('📍 _handleBack called');
-  debugPrint('📍 _isNewProfile: $_isNewProfile');
-  debugPrint('📍 Current page: ${_controller.page}');
-  debugPrint('📍 Current role: $roles');
-  
-  if (_isNewProfile) {
-    // New profile creation - go back to appropriate dashboard
-    debugPrint('📍 New profile - going to $roles dashboard');
+  void _handleBack() {
+    debugPrint('📍 _handleBack called');
+    debugPrint('📍 _isNewProfile: $_isNewProfile');
+    debugPrint('📍 Current page: ${_controller.page}');
+    debugPrint('📍 Current role: $roles');
     
-    if (context.canPop()) {
-      context.pop();
-    } else {
-      switch (roles) {
-        case 'owner':
-          context.go('/owner');
-          break;
-        case 'barber':
-          context.go('/barber');
-          break;
-        case 'customer':
-          context.go('/customer');
-          break;
-        default:
-          context.go('/');
-      }
-    }
-  } else {
-    // First time registration - use PageController
-    if (_controller.hasClients) {
-      if (_controller.page! > 0) {
-        debugPrint('📍 Going to previous page in flow');
-        
-        // 🔥 IMPORTANT: Clear the role when going back to WelcomeScreen
-        setState(() {
-          roles = null; // Clear role to show WelcomeScreen
-        });
-        
-        _controller.previousPage(
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.ease,
-        ).then((_) {
-          debugPrint('📍 Navigation complete, roles cleared');
-        });
+    if (_isNewProfile) {
+      debugPrint('📍 New profile - going to $roles dashboard');
+      
+      if (context.canPop()) {
+        context.pop();
       } else {
-        debugPrint('📍 At page 0 - going back to login');
-        context.go('/login');
+        switch (roles) {
+          case 'owner':
+            context.go('/owner');
+            break;
+          case 'barber':
+            context.go('/barber');
+            break;
+          case 'customer':
+            context.go('/customer');
+            break;
+          default:
+            context.go('/');
+        }
       }
     } else {
-      debugPrint('📍 No clients - using pop');
-      context.pop();
+      if (_controller.hasClients) {
+        if (_controller.page! > 0) {
+          debugPrint('📍 Going to previous page in flow');
+          
+          setState(() {
+            roles = null;
+          });
+          
+          _controller.previousPage(
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.ease,
+          ).then((_) {
+            debugPrint('📍 Navigation complete, roles cleared');
+          });
+        } else {
+          debugPrint('📍 At page 0 - going back to login');
+          context.go('/login');
+        }
+      } else {
+        debugPrint('📍 No clients - using pop');
+        context.pop();
+      }
     }
   }
-}
 
   @override
   Widget build(BuildContext context) {
@@ -188,9 +203,7 @@ void _handleBack() {
               controller: _controller,
               physics: const NeverScrollableScrollPhysics(),
               children: [
-                // =====================================================
-                // PAGE 0: WELCOME SCREEN (Role Selection)
-                // =====================================================
+                // PAGE 0: WELCOME SCREEN
                 if (roles == null)
                   WelcomeScreen(
                     onNext: (selectedRole) {
@@ -205,9 +218,7 @@ void _handleBack() {
                 else
                   const SizedBox.shrink(),
                 
-                // =====================================================
                 // PAGE 1: ROLE-SPECIFIC FORMS
-                // =====================================================
                 if (roles == 'customer') ...[
                   NameEntry(
                     onNext: (f, l) {
@@ -254,7 +265,69 @@ void _handleBack() {
   }
 
   // ============================================================
-  // 🔥 CREATE PROFILE IN DATABASE (UPDATED WITH EMAIL)
+  // 🔥 GET ROLE ID FROM CACHE OR DATABASE
+  // ============================================================
+  Future<int> _getRoleId(String roleName) async {
+    // Check cache first
+    if (_roleIds != null && _roleIds!.containsKey(roleName)) {
+      return _roleIds![roleName]!;
+    }
+    
+    // If not in cache, fetch from database
+    final response = await Supabase.instance.client
+        .from('roles')
+        .select('id')
+        .eq('name', roleName)
+        .single();
+    
+    return response['id'];
+  }
+
+  // ============================================================
+  // 🔥 CHECK IF USER ALREADY HAS THIS ROLE
+  // ============================================================
+  Future<bool> _userHasRole(String userId, int roleId) async {
+    try {
+      final response = await Supabase.instance.client
+          .from('user_roles')
+          .select()
+          .eq('user_id', userId)
+          .eq('role_id', roleId)
+          .maybeSingle();
+      
+      return response != null;
+    } catch (e) {
+      debugPrint('Error checking user role: $e');
+      return false;
+    }
+  }
+
+  // ============================================================
+  // 🔥 GET USER'S EXISTING ROLES
+  // ============================================================
+  Future<List<String>> _getUserRoles(String userId) async {
+    try {
+      final response = await Supabase.instance.client
+          .from('user_roles')
+          .select('''
+            role_id,
+            roles!inner (
+              name
+            )
+          ''')
+          .eq('user_id', userId);
+
+      return response
+          .map((r) => r['roles']['name'] as String)
+          .toList();
+    } catch (e) {
+      debugPrint('Error getting user roles: $e');
+      return [];
+    }
+  }
+
+  // ============================================================
+  // 🔥 CREATE PROFILE IN DATABASE (UPDATED FOR NEW SCHEMA)
   // ============================================================
   Future<void> _createProfile() async {
     if (!mounted) return;
@@ -335,10 +408,12 @@ void _handleBack() {
     try {
       final supabase = Supabase.instance.client;
 
-      Map<String, dynamic> extraData = {};
+      // 🔥 Get role ID
+      final roleId = await _getRoleId(roles!);
 
-      // 🔥 Generate full name based on role
+      // 🔥 Generate full name
       String? fullName;
+      Map<String, dynamic> extraData = {};
       
       if (roles == 'owner') {
         fullName = companyName!.trim();
@@ -349,15 +424,6 @@ void _handleBack() {
           'role': 'owner',
         };
         if (phone != null && phone!.isNotEmpty) extraData['phone'] = phone;
-      } else if (roles == 'barber') {
-        fullName = "${firstName!.trim()} ${lastName!.trim()}";
-        extraData = {
-          'full_name': fullName,
-          'first_name': firstName!.trim(),
-          'last_name': lastName!.trim(),
-          'role': 'barber',
-        };
-        if (phone != null && phone!.isNotEmpty) extraData['phone'] = phone;
       } else {
         fullName = "${firstName!.trim()} ${lastName!.trim()}";
         extraData = {
@@ -365,126 +431,85 @@ void _handleBack() {
           'first_name': firstName!.trim(),
           'last_name': lastName!.trim(),
           'registered_at': DateTime.now().toIso8601String(),
-          'role': 'customer',
+          'role': roles,
         };
         if (phone != null && phone!.isNotEmpty) extraData['phone'] = phone;
       }
 
-      String dbRole;
-      if (roles == 'owner') {
-        dbRole = 'owner';
-      } else if (roles == 'barber') {
-        dbRole = 'barber';
-      } else {
-        dbRole = 'customer';
-      }
+      String platform = isWeb ? 'web' : (isAndroid ? 'android' : (isIOS ? 'ios' : 'mobile'));
 
-      final roleResponse = await supabase
-          .from('roles')
-          .select('id')
-          .eq('name', dbRole)
-          .maybeSingle();
-
-      if (roleResponse == null) {
-        throw Exception('Role "$dbRole" not found in database');
-      }
-
-      final roleId = roleResponse['id'];
-
-      String platform = 'mobile';
-      if (isWeb) {
-        platform = 'web';
-      } else if (isAndroid) {
-        platform = 'android';
-      } else if (isIOS) {
-        platform = 'ios';
-      }
-
-      final existingCombination = await supabase
+      // 🔥 STEP 1: Check if profile exists
+      final existingProfile = await supabase
           .from('profiles')
           .select()
           .eq('id', user.id)
-          .eq('role_id', roleId)
           .maybeSingle();
 
-      final allProfiles = await supabase
-          .from('profiles')
-          .select('''
-            role_id,
-            roles!inner (
-              name
-            )
-          ''')
-          .eq('id', user.id)
-          .eq('is_active', true);
-
-      List<String> existingRoleNames = [];
-      for (var profile in allProfiles) {
-        final role = profile['roles'] as Map?;
-        if (role != null && role['name'] != null) {
-          existingRoleNames.add(role['name'].toString());
-        }
-      }
-
-      if (existingCombination != null) {
-        debugPrint('🔄 Updating existing profile for role: $dbRole');
-
-        final existingExtraData =
-            existingCombination['extra_data'] as Map<String, dynamic>? ?? {};
-
-        final mergedExtraData = {
-          ...existingExtraData,
-          ...extraData,
-          'updated_at': DateTime.now().toIso8601String(),
-        };
-
-        // 🔥 UPDATE: Include email in the update
-        await supabase
-            .from('profiles')
-            .update({
-              'email': email,  // 🔥 Email column එක update කරනවා
-              'full_name': fullName,  // 🔥 Full name column එක update කරනවා
-              'extra_data': mergedExtraData,
-              'platform': platform,
-              'is_active': true,
-              'updated_at': DateTime.now().toIso8601String(),
-            })
-            .eq('id', user.id)
-            .eq('role_id', roleId);
-
-        if (!existingRoleNames.contains(dbRole)) {
-          existingRoleNames.add(dbRole);
-        }
-      } else {
-        debugPrint('➕ Creating new profile for role: $dbRole');
-
-        // 🔥 NEW: Insert with email column
+      if (existingProfile == null) {
+        // 🔥 NEW USER - Create profile first
+        debugPrint('➕ Creating new profile for user');
+        
         await supabase.from('profiles').insert({
           'id': user.id,
-          'email': email,  // 🔥 Email column එකට දානවා
-          'full_name': fullName,  // 🔥 Full name column එකට දානවා
-          'role_id': roleId,
-          'extra_data': {
-            ...extraData,
-            'created_at': DateTime.now().toIso8601String(),
-          },
+          'email': email,
+          'full_name': fullName,
+          'avatar_url': user.userMetadata?['avatar_url'] ?? user.userMetadata?['picture'],
+          'extra_data': extraData,
           'platform': platform,
           'is_active': true,
           'is_blocked': false,
           'created_at': DateTime.now().toIso8601String(),
           'updated_at': DateTime.now().toIso8601String(),
         });
-
-        existingRoleNames.add(dbRole);
+      } else {
+        // 🔥 EXISTING USER - Update profile
+        debugPrint('🔄 Updating existing profile');
+        
+        final existingExtra = existingProfile['extra_data'] as Map<String, dynamic>? ?? {};
+        
+        await supabase
+            .from('profiles')
+            .update({
+              'email': email,
+              'full_name': fullName,
+              'avatar_url': user.userMetadata?['avatar_url'] ?? user.userMetadata?['picture'],
+              'extra_data': {
+                ...existingExtra,
+                ...extraData,
+                'updated_at': DateTime.now().toIso8601String(),
+              },
+              'platform': platform,
+              'is_active': true,
+              'updated_at': DateTime.now().toIso8601String(),
+            })
+            .eq('id', user.id);
       }
 
-      debugPrint('📝 Updating user metadata with roles: $existingRoleNames');
+      // 🔥 STEP 2: Check if user already has this role
+      final hasRole = await _userHasRole(user.id, roleId);
+      
+      if (!hasRole) {
+        // 🔥 Assign role to user
+        debugPrint('➕ Assigning role ${roles!} to user');
+        
+        await supabase.from('user_roles').insert({
+          'user_id': user.id,
+          'role_id': roleId,
+          'created_at': DateTime.now().toIso8601String(),
+        });
+      }
 
+      // 🔥 STEP 3: Get all user roles
+      final userRoles = await _getUserRoles(user.id);
+      
+      debugPrint('📝 User roles after update: $userRoles');
+
+      // 🔥 STEP 4: Update user metadata
       final currentMetadata = user.userMetadata ?? {};
       Map<String, dynamic> metadataUpdate = {
         ...currentMetadata,
-        'roles': existingRoleNames,
-        'current_role': dbRole,
+        'roles': userRoles,
+        'current_role': roles,
         'profile_created_at': DateTime.now().toIso8601String(),
         'profile_created': true,
         'needs_profile': false,
@@ -493,6 +518,7 @@ void _handleBack() {
 
       await supabase.auth.updateUser(UserAttributes(data: metadataUpdate));
 
+      // 🔥 STEP 5: Save to SessionManager
       debugPrint('📱 Saving profile to SessionManager');
 
       String? photoUrl = user.userMetadata?['avatar_url'] ?? 
@@ -503,27 +529,28 @@ void _handleBack() {
         userId: user.id,
         name: fullName,
         photo: photoUrl,
-        roles: existingRoleNames,
+        roles: userRoles,
         rememberMe: true,
         provider: await _getUserProvider(user, photoUrl),
       );
 
-      await SessionManager.saveCurrentRole(dbRole);
+      await SessionManager.saveCurrentRole(roles!);
       await appState.refreshState();
 
       if (mounted) {
         LoadingOverlay.hide();
         setState(() => _isLoading = false);
 
+        // Show success message
         String title;
         String message;
         
         if (roles == 'owner') {
           title = "🎉 Business Created!";
-          message = "Your business profile has been created.";
+          message = "Your business profile has been created successfully.";
         } else if (roles == 'barber') {
           title = "👋 Welcome Barber!";
-          message = "Welcome to the team!";
+          message = "Your barber profile has been created successfully.";
         } else {
           title = "🎉 Welcome!";
           message = "Your profile has been created successfully.";
@@ -536,15 +563,18 @@ void _handleBack() {
           isError: false,
         );
 
+        // 🔥 STEP 6: Navigate based on roles
         if (mounted) {
-          if (existingRoleNames.length > 1 && !_isNewProfile) {
+          if (userRoles.length > 1 && !_isNewProfile) {
+            // Multiple roles - show role selector
             context.go('/role-selector', extra: {
-              'roles': existingRoleNames,
+              'roles': userRoles,
               'email': email,
               'userId': user.id,
             });
           } else {
-            _redirectBasedOnRole(dbRole);
+            // Single role - go to appropriate dashboard
+            _redirectBasedOnRole(roles!);
           }
         }
       }
@@ -565,6 +595,9 @@ void _handleBack() {
     }
   }
 
+  // ============================================================
+  // HELPER: Get user provider
+  // ============================================================
   Future<String> _getUserProvider(User user, String? photoUrl) async {
     if (photoUrl != null && photoUrl.isNotEmpty) {
       if (photoUrl.contains('googleusercontent.com')) return 'google';
@@ -582,6 +615,9 @@ void _handleBack() {
     return 'email';
   }
 
+  // ============================================================
+  // REDIRECT BASED ON ROLE
+  // ============================================================
   void _redirectBasedOnRole(String role) {
     if (!mounted) return;
 

@@ -5,60 +5,91 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_application_1/models/category_model.dart';
 
 class AddBarberScreen extends StatefulWidget {
-  final bool refresh;  // 🔥 New parameter for refresh trigger
-  
+  final bool refresh;
+
   const AddBarberScreen({super.key, this.refresh = false});
 
   @override
   State<AddBarberScreen> createState() => _AddBarberScreenState();
 }
 
-class _AddBarberScreenState extends State<AddBarberScreen> with RouteAware {  // 🔥 RouteAware added
+class _AddBarberScreenState extends State<AddBarberScreen>
+    with RouteAware, AutomaticKeepAliveClientMixin {
+  // ==================== CONTROLLERS ====================
   final TextEditingController _searchController = TextEditingController();
-  List<Map<String, dynamic>> _searchResults = [];
-  bool _isSearching = false;
-  bool _isLoading = false;
-  String? _selectedBarberId;
-  
-  // Salon selection
-  List<Map<String, dynamic>> _ownerSalons = [];
-  String? _selectedSalonId;
-  bool _isLoadingSalons = false;
-  
-  // Debounce timer for search
-  Timer? _debounceTimer;
 
-  // Categories from database
+  // ==================== DATA LISTS ====================
+  List<Map<String, dynamic>> _searchResults = [];
+  List<Map<String, dynamic>> _ownerSalons = [];
   List<CategoryModel> _categories = [];
 
-  // Services grouped by category
-  Map<String, List<Map<String, dynamic>>> _servicesByCategory = {};
+  // Services with their variants
+  List<Map<String, dynamic>> _services = [];
 
-  // Available services list
-  List<Map<String, dynamic>> _availableServices = [];
+  // Selected items: serviceId -> list of selected variantIds (empty list means service itself selected)
+  final Map<String, List<int>> _selectedItems = {};
 
-  // Selected services for the barber
-  final Set<String> _selectedServiceIds = {};
+  // ==================== SELECTED ITEMS ====================
+  String? _selectedBarberId;
+  String? _selectedSalonId;
 
+  // ==================== UI STATES ====================
+  bool _isLoading = true;
+  bool _isSearching = false;
+  bool _isLoadingSalons = false;
   bool _isLoadingServices = true;
-  bool _isLoadingCategories = true;
 
+  // ==================== EXPANSION STATE ====================
+  final Set<String> _expandedServices = {};
+
+  // ==================== TIMERS ====================
+  Timer? _debounceTimer;
+
+  // ==================== SUPABASE CLIENT ====================
   final supabase = Supabase.instance.client;
 
-  // Responsive layout helpers
+  // ==================== RESPONSIVE HELPERS ====================
   bool get _isWeb => MediaQuery.of(context).size.width > 800;
-  bool get _isTablet => MediaQuery.of(context).size.width > 600 && MediaQuery.of(context).size.width <= 800;
+
+  // ==================== COMPUTED PROPERTIES ====================
+  int get _totalSelectedItems {
+    int total = 0;
+    _selectedItems.forEach((serviceId, variantList) {
+      // For services without variants, variantList is empty
+      // We should count them as 1 item
+      if (variantList.isEmpty) {
+        total += 1;
+        debugPrint('🧮 Counting service without variants: $serviceId as 1');
+      } else {
+        total += variantList.length;
+        debugPrint(
+          '🧮 Counting variants for $serviceId: ${variantList.length}',
+        );
+      }
+    });
+    debugPrint('🧮 TOTAL SELECTED ITEMS: $total');
+    return total;
+  }
+
+  int get _totalSelectedServices {
+    return _selectedItems.keys.length;
+  }
+
+  @override
+  bool get wantKeepAlive => true;
 
   @override
   void initState() {
     super.initState();
+    debugPrint('📍 AddBarberScreen initState');
     _loadInitialData();
     _searchController.addListener(_onSearchChanged);
-    
-    // 🔥 If widget.refresh is true, refresh data after build
+
     if (widget.refresh) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        _refreshData();
+        if (mounted) {
+          _refreshData();
+        }
       });
     }
   }
@@ -66,7 +97,6 @@ class _AddBarberScreenState extends State<AddBarberScreen> with RouteAware {  //
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // 🔥 Subscribe to route changes
     final route = ModalRoute.of(context);
     if (route is PageRoute) {
       routeObserver.subscribe(this, route);
@@ -75,7 +105,6 @@ class _AddBarberScreenState extends State<AddBarberScreen> with RouteAware {  //
 
   @override
   void dispose() {
-    // 🔥 Unsubscribe from route changes
     routeObserver.unsubscribe(this);
     _debounceTimer?.cancel();
     _searchController.removeListener(_onSearchChanged);
@@ -83,165 +112,226 @@ class _AddBarberScreenState extends State<AddBarberScreen> with RouteAware {  //
     super.dispose();
   }
 
-  // 🔥 Called when this route is popped back to
   @override
   void didPopNext() {
     debugPrint('📍 AddBarberScreen came to foreground - refreshing data');
     _refreshData();
   }
 
-  // 🔥 Load initial data
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+
+    final isLoading = _isLoading || _isLoadingServices || _isLoadingSalons;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isWeb = screenWidth > 800;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(
+          'Add New Barber',
+          style: TextStyle(
+            fontSize: isWeb ? 20 : 18,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        backgroundColor: const Color(0xFFFF6B8B),
+        foregroundColor: Colors.white,
+        centerTitle: isWeb,
+        automaticallyImplyLeading: true,
+        elevation: 4,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _refreshData,
+            tooltip: 'Refresh',
+          ),
+          if (_totalSelectedItems > 0)
+            Container(
+              margin: const EdgeInsets.only(right: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.check_circle, size: 16, color: Colors.white),
+                  const SizedBox(width: 4),
+                  Text(
+                    '$_totalSelectedItems',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          if (_selectedBarberId != null &&
+              _selectedSalonId != null &&
+              _totalSelectedItems > 0 &&
+              !isLoading)
+            IconButton(
+              icon: const Icon(Icons.check, color: Colors.white),
+              onPressed: _isLoading ? null : _addBarber,
+              tooltip: 'Add Barber',
+            ),
+        ],
+      ),
+      body: isLoading
+          ? const Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+                  SizedBox(height: 16),
+                  Text('Loading...', style: TextStyle(color: Colors.grey)),
+                ],
+              ),
+            )
+          : Container(
+              color: Colors.grey[50],
+              child: isWeb ? _buildWebLayout() : _buildMobileLayout(),
+            ),
+    );
+  }
+
+  // ==================== WEB LAYOUT ====================
+  Widget _buildWebLayout() {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 380,
+          margin: const EdgeInsets.all(16),
+          child: SingleChildScrollView(
+            child: Column(
+              children: [
+                _buildSalonSection(),
+                const SizedBox(height: 16),
+                _buildSearchSection(),
+              ],
+            ),
+          ),
+        ),
+        Container(
+          width: 1,
+          height: MediaQuery.of(context).size.height - 80,
+          color: Colors.grey[300],
+        ),
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (_selectedBarberId != null) ...[
+                  _buildSelectedBarber(),
+                  const SizedBox(height: 24),
+                ],
+                _buildServicesSection(),
+                const SizedBox(height: 24),
+                if (_selectedBarberId != null &&
+                    _selectedSalonId != null &&
+                    _totalSelectedItems > 0)
+                  _buildAddButton(),
+                const SizedBox(height: 40),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ==================== MOBILE LAYOUT ====================
+  Widget _buildMobileLayout() {
+    return SingleChildScrollView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildSalonSection(),
+          const SizedBox(height: 24),
+          _buildSearchSection(),
+          const SizedBox(height: 24),
+          if (_selectedBarberId != null) _buildSelectedBarber(),
+          const SizedBox(height: 24),
+          _buildServicesSection(),
+          const SizedBox(height: 24),
+          if (_selectedBarberId != null &&
+              _selectedSalonId != null &&
+              _totalSelectedItems > 0)
+            _buildAddButton(),
+          const SizedBox(height: 32),
+        ],
+      ),
+    );
+  }
+
+  // ==================== DATA LOADING ====================
   Future<void> _loadInitialData() async {
-    await Future.wait([
-      _loadCategoriesAndServices(),
-      _loadOwnerSalons(),
-    ]);
+    debugPrint('📥 Loading initial data...');
+
+    setState(() => _isLoading = true);
+
+    try {
+      await Future.wait([
+        _loadCategories(),
+        _loadServicesWithVariants(),
+        _loadOwnerSalons(),
+      ]);
+    } catch (e) {
+      debugPrint('❌ Error loading initial data: $e');
+      if (mounted) {
+        _showSnackBar('Error loading data: $e', Colors.red);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
   }
 
-  // 🔥 Refresh all data
   Future<void> _refreshData() async {
-    debugPrint('🔄 Refreshing AddBarberScreen data...');
-    setState(() {
-      _isLoading = true;
-    });
-    
-    await Future.wait([
-      _loadCategoriesAndServices(),
-      _loadOwnerSalons(),
-    ]);
-    
-    if (mounted) {
-      setState(() {
-        _isLoading = false;
-      });
-      _showSnackBar('Data refreshed successfully!', Colors.green);
-    }
-  }
-
-  // Load owner's salons
-  Future<void> _loadOwnerSalons() async {
+    debugPrint('🔄 Refreshing data...');
     if (!mounted) return;
-    
-    setState(() {
-      _isLoadingSalons = true;
-    });
+
+    setState(() => _isLoading = true);
 
     try {
-      final userId = supabase.auth.currentUser?.id;
-      if (userId == null) return;
-
-      final response = await supabase
-          .from('salons')
-          .select('id, name, address, phone, is_active')
-          .eq('owner_id', userId)
-          .eq('is_active', true)
-          .order('name', ascending: true);
-
-      debugPrint('📊 Owner salons loaded: ${response.length}');
-
-      if (mounted) {
-        setState(() {
-          _ownerSalons = List<Map<String, dynamic>>.from(response);
-          // Auto-select if only one salon
-          if (_ownerSalons.length == 1) {
-            _selectedSalonId = _ownerSalons[0]['id'].toString();
-          }
-        });
-      }
+      await Future.wait([
+        _loadCategories(),
+        _loadServicesWithVariants(),
+        _loadOwnerSalons(),
+      ]);
     } catch (e) {
-      debugPrint('❌ Error loading salons: $e');
-      if (mounted) {
-        _showSnackBar('Error loading salons: $e', Colors.red);
-      }
+      debugPrint('❌ Error refreshing data: $e');
     } finally {
       if (mounted) {
-        setState(() {
-          _isLoadingSalons = false;
-        });
-      }
-    }
-  }
-
-  // 🔥 Optimized search with faster response
-  void _onSearchChanged() {
-    final query = _searchController.text.trim();
-    
-    _debounceTimer?.cancel();
-    
-    if (query.isEmpty) {
-      if (mounted) {
-        setState(() {
-          _searchResults = [];
-          _isSearching = false;
-        });
-      }
-      return;
-    }
-    
-    if (query.length >= 2) {
-      if (mounted) {
-        setState(() {
-          _isSearching = true;
-        });
-      }
-      
-      // 🔥 Faster debounce (150ms for instant feel)
-      _debounceTimer = Timer(const Duration(milliseconds: 150), () {
-        if (mounted) {
-          _searchUsers(query);
-        }
-      });
-    } else {
-      if (mounted) {
-        setState(() {
-          _searchResults = [];
-          _isSearching = true;
-        });
-      }
-    }
-  }
-
-  // Load categories and services
-  Future<void> _loadCategoriesAndServices() async {
-    if (!mounted) return;
-    
-    setState(() {
-      _isLoadingCategories = true;
-      _isLoadingServices = true;
-    });
-
-    try {
-      await _loadCategories();
-      await _loadServicesFromDatabase();
-    } catch (e) {
-      debugPrint('❌ Error loading categories and services: $e');
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoadingCategories = false;
-          _isLoadingServices = false;
-        });
+        setState(() => _isLoading = false);
+        _showSnackBar('Data refreshed!', Colors.green);
       }
     }
   }
 
   Future<void> _loadCategories() async {
     try {
+      debugPrint('📥 Loading categories...');
+
       final response = await supabase
           .from('categories')
-          .select('''
-            id,
-            name,
-            description,
-            icon_name,
-            color,
-            display_order,
-            is_active
-          ''')
+          .select()
           .eq('is_active', true)
           .order('display_order', ascending: true);
 
-      if (response.isNotEmpty && mounted) {
+      debugPrint('📊 Categories loaded: ${response.length}');
+
+      if (mounted) {
         setState(() {
           _categories = response
               .map((cat) => CategoryModel.fromJson(cat))
@@ -250,20 +340,21 @@ class _AddBarberScreenState extends State<AddBarberScreen> with RouteAware {  //
       }
     } catch (e) {
       debugPrint('❌ Error loading categories: $e');
-      rethrow;
     }
   }
 
-  Future<void> _loadServicesFromDatabase() async {
+  Future<void> _loadServicesWithVariants() async {
+    if (!mounted) return;
+
     try {
-      final response = await supabase
+      debugPrint('📥 Loading services...');
+
+      final servicesResponse = await supabase
           .from('services')
           .select('''
             id,
             name,
             description,
-            price,
-            duration,
             category_id,
             image_url,
             is_active,
@@ -277,87 +368,205 @@ class _AddBarberScreenState extends State<AddBarberScreen> with RouteAware {  //
           .eq('is_active', true)
           .order('name', ascending: true);
 
-      if (response.isNotEmpty && mounted) {
-        final List<Map<String, dynamic>> services = [];
-        final Map<String, List<Map<String, dynamic>>> grouped = {};
+      debugPrint('📊 Services loaded: ${servicesResponse.length}');
 
-        for (var service in response) {
-          final categoryData = service['categories'] as Map<String, dynamic>;
-          final categoryName = categoryData['name'] ?? 'other';
-          final iconName = categoryData['icon_name'] ?? 'build_circle_outlined';
+      final variantsResponse = await supabase
+          .from('service_variants')
+          .select('''
+            id,
+            service_id,
+            price,
+            duration,
+            is_active,
+            genders!inner (
+              id,
+              name,
+              display_name
+            ),
+            age_categories!inner (
+              id,
+              name,
+              display_name,
+              min_age,
+              max_age
+            )
+          ''')
+          .eq('is_active', true);
 
-          final serviceMap = {
-            'id': service['id'].toString(),
-            'name': service['name'] ?? 'Unknown Service',
-            'price': (service['price'] as num?)?.toDouble() ?? 0.0,
-            'duration': service['duration'] ?? 30,
-            'description': service['description'] ?? '',
-            'category_id': service['category_id'],
-            'category_name': categoryName,
-            'icon': _getIconFromName(iconName),
-            'image_url': service['image_url'],
-          };
+      debugPrint('📊 Variants loaded: ${variantsResponse.length}');
 
-          services.add(serviceMap);
+      final Map<int, List<Map<String, dynamic>>> variantsByService = {};
+      for (var variant in variantsResponse) {
+        final serviceId = variant['service_id'] as int;
+        if (!variantsByService.containsKey(serviceId)) {
+          variantsByService[serviceId] = [];
+        }
 
-          if (!grouped.containsKey(categoryName)) {
-            grouped[categoryName] = [];
+        final gender = variant['genders'] as Map<String, dynamic>;
+        final age = variant['age_categories'] as Map<String, dynamic>;
+
+        variantsByService[serviceId]!.add({
+          'id': variant['id'],
+          'price': variant['price'],
+          'duration': variant['duration'],
+          'gender_id': gender['id'],
+          'gender_name': gender['display_name'],
+          'gender_original': gender['name'],
+          'age_category_id': age['id'],
+          'age_category_name': age['display_name'],
+          'age_category_original': age['name'],
+          'age_range': '${age['min_age']}-${age['max_age']}',
+          'display_text': '${gender['display_name']} • ${age['display_name']}',
+        });
+      }
+
+      final List<Map<String, dynamic>> processedServices = [];
+
+      for (var service in servicesResponse) {
+        final categoryData = service['categories'] as Map<String, dynamic>;
+        final categoryName = categoryData['name'] ?? 'other';
+        final iconName = categoryData['icon_name'] ?? 'build_circle_outlined';
+
+        final serviceId = service['id'] as int;
+        final variants = variantsByService[serviceId] ?? [];
+
+        variants.sort((a, b) {
+          if (a['gender_original'] != b['gender_original']) {
+            return a['gender_original'].compareTo(b['gender_original']);
           }
-          grouped[categoryName]!.add(serviceMap);
-        }
-
-        if (mounted) {
-          setState(() {
-            _availableServices = services;
-            _servicesByCategory = grouped;
-          });
-        }
-      } else if (mounted) {
-        setState(() {
-          _availableServices = [];
-          _servicesByCategory = {};
+          return a['age_category_original'].compareTo(
+            b['age_category_original'],
+          );
         });
 
-        _showSnackBar('No services found. Please add services first.', Colors.orange);
+        processedServices.add({
+          'id': serviceId.toString(),
+          'name': service['name'] ?? 'Unknown Service',
+          'description': service['description'] ?? '',
+          'category_id': service['category_id'],
+          'category_name': categoryName,
+          'icon': _getIconFromName(iconName),
+          'icon_name': iconName,
+          'image_url': service['image_url'],
+          'variants': variants,
+          'hasVariants': variants.isNotEmpty,
+          'variant_count': variants.length,
+          'min_price': variants.isNotEmpty
+              ? variants
+                    .map((v) => v['price'] as double)
+                    .reduce((a, b) => a < b ? a : b)
+              : 0,
+          'max_price': variants.isNotEmpty
+              ? variants
+                    .map((v) => v['price'] as double)
+                    .reduce((a, b) => a > b ? a : b)
+              : 0,
+        });
+      }
+
+      if (mounted) {
+        setState(() {
+          _services = processedServices;
+          _isLoadingServices = false;
+        });
+        debugPrint('✅ Services processed: ${processedServices.length}');
       }
     } catch (e) {
       debugPrint('❌ Error loading services: $e');
       if (mounted) {
+        setState(() => _isLoadingServices = false);
+        _showSnackBar('Error loading services: $e', Colors.red);
+      }
+    }
+  }
+
+  Future<void> _loadOwnerSalons() async {
+    setState(() => _isLoadingSalons = true);
+
+    try {
+      final userId = supabase.auth.currentUser?.id;
+      if (userId == null) return;
+
+      final response = await supabase
+          .from('salons')
+          .select('id, name, address, is_active')
+          .eq('owner_id', userId)
+          .eq('is_active', true)
+          .order('name');
+
+      debugPrint('📊 Owner salons loaded: ${response.length}');
+
+      if (mounted) {
         setState(() {
-          _availableServices = [];
-          _servicesByCategory = {};
+          _ownerSalons = List<Map<String, dynamic>>.from(response);
+          if (_ownerSalons.length == 1) {
+            _selectedSalonId = _ownerSalons[0]['id'].toString();
+          }
+          _isLoadingSalons = false;
         });
       }
-      rethrow;
+    } catch (e) {
+      debugPrint('❌ Error loading salons: $e');
+      if (mounted) {
+        setState(() => _isLoadingSalons = false);
+        _showSnackBar('Error loading salons: $e', Colors.red);
+      }
     }
   }
 
-  // 🎨 Get icon from name
   IconData _getIconFromName(String iconName) {
     switch (iconName) {
-      case 'content_cut': return Icons.content_cut;
-      case 'face': return Icons.face;
-      case 'face_retouching_natural': return Icons.face_retouching_natural;
-      case 'spa': return Icons.spa;
-      case 'handshake': return Icons.handshake;
-      case 'build_circle_outlined': return Icons.build_circle_outlined;
-      case 'brush': return Icons.brush;
-      case 'cleaning_services': return Icons.cleaning_services;
-      case 'local_hospital': return Icons.local_hospital;
-      case 'sports_kabaddi': return Icons.sports_kabaddi;
-      default: return Icons.category_outlined;
+      case 'content_cut':
+        return Icons.content_cut;
+      case 'face':
+        return Icons.face;
+      case 'face_retouching_natural':
+        return Icons.face_retouching_natural;
+      case 'spa':
+        return Icons.spa;
+      case 'handshake':
+        return Icons.handshake;
+      case 'build_circle_outlined':
+        return Icons.build_circle_outlined;
+      case 'brush':
+        return Icons.brush;
+      case 'cleaning_services':
+        return Icons.cleaning_services;
+      case 'local_hospital':
+        return Icons.local_hospital;
+      case 'sports_kabaddi':
+        return Icons.sports_kabaddi;
+      default:
+        return Icons.category;
     }
   }
 
-  // 🔍 Search users - Optimized version
-  Future<void> _searchUsers(String query) async {
-    if (!mounted) return;
-    
-    // Don't show loading for empty results
-    if (_searchResults.isEmpty) {
-      setState(() {});
+  void _onSearchChanged() {
+    final query = _searchController.text.trim();
+    _debounceTimer?.cancel();
+
+    if (query.isEmpty) {
+      setState(() {
+        _searchResults = [];
+        _isSearching = false;
+      });
+      return;
     }
 
+    if (query.length >= 2) {
+      if (!_isSearching) {
+        setState(() => _isSearching = true);
+      }
+
+      _debounceTimer = Timer(const Duration(milliseconds: 300), () {
+        if (mounted) {
+          _searchUsers(query);
+        }
+      });
+    }
+  }
+
+  Future<void> _searchUsers(String query) async {
     try {
       final roleResponse = await supabase
           .from('roles')
@@ -366,95 +575,154 @@ class _AddBarberScreenState extends State<AddBarberScreen> with RouteAware {  //
           .maybeSingle();
 
       if (roleResponse == null) {
-        throw Exception('Barber role not found');
+        debugPrint('❌ Barber role not found');
+        return;
       }
 
       final barberRoleId = roleResponse['id'];
-      final searchPattern = '%$query%';
 
-      // 🔥 Optimized query with limit 10 for faster results
-      final response = await supabase
-          .from('profiles')
-          .select('''
-            id,
-            role_id,
-            full_name,
-            email,
-            phone,
-            avatar_url,
-            extra_data,
-            is_active
-          ''')
-          .eq('role_id', barberRoleId)
-          .eq('is_active', true)
-          .or('full_name.ilike.$searchPattern,email.ilike.$searchPattern')
-          .order('full_name', ascending: true)
-          .limit(10);  // Limit to 10 for faster response
+      final userRolesResponse = await supabase
+          .from('user_roles')
+          .select('user_id')
+          .eq('role_id', barberRoleId);
 
-      if (mounted) {
-        setState(() {
-          if (response.isNotEmpty) {
-            _searchResults = response.map((profile) {
-              final extraData = profile['extra_data'] as Map<String, dynamic>? ?? {};
-              
-              String displayName = profile['full_name'] ?? '';
-              if (displayName.isEmpty) {
-                displayName = extraData['full_name'] ?? 
-                             extraData['company_name'] ?? 
-                             extraData['name'] ?? 
-                             'Unknown Barber';
-              }
-              
-              return {
-                'id': profile['id'],
-                'email': profile['email'] ?? extraData['email'] ?? 'No email',
-                'name': displayName,
-                'photo': profile['avatar_url'] ?? extraData['avatar_url'],
-                'role': 'barber',
-                'services': extraData['services'] ?? [],
-              };
-            }).toList();
-          } else {
+      if (userRolesResponse.isEmpty) {
+        if (mounted) {
+          setState(() {
             _searchResults = [];
-          }
-          _isLoading = false;
-        });
+          });
+        }
+        return;
       }
-    } catch (e) {
-      debugPrint('❌ Error searching barbers: $e');
+
+      final barberUserIds = userRolesResponse
+          .map((ur) => ur['user_id'] as String)
+          .toList();
+
+      final List<Map<String, dynamic>> results = [];
+      final queryLower = query.toLowerCase();
+
+      for (String userId in barberUserIds) {
+        final profile = await supabase
+            .from('profiles')
+            .select('id, full_name, email, avatar_url')
+            .eq('id', userId)
+            .maybeSingle();
+
+        if (profile != null) {
+          final fullName = profile['full_name']?.toString().toLowerCase() ?? '';
+          final email = profile['email']?.toString().toLowerCase() ?? '';
+
+          if (fullName.contains(queryLower) || email.contains(queryLower)) {
+            results.add({
+              'id': profile['id'],
+              'full_name': profile['full_name'],
+              'email': profile['email'],
+              'avatar_url': profile['avatar_url'],
+            });
+          }
+        }
+      }
+
       if (mounted) {
         setState(() {
-          _isLoading = false;
+          _searchResults = results;
         });
-        _showSnackBar('Error searching barbers: $e', Colors.red);
+      }
+    } catch (e) {
+      debugPrint('❌ Search error: $e');
+      if (mounted) {
+        setState(() {
+          _searchResults = [];
+        });
       }
     }
   }
 
-  // Check if barber already exists in selected salon
-  Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
-    try {
-      final existing = await supabase
-          .from('salon_barbers')
-          .select('id')
-          .eq('salon_id', salonId)
-          .eq('barber_id', barberId)
-          .maybeSingle();
-      
-      return existing != null;
-    } catch (e) {
-      debugPrint('❌ Error checking existing barber: $e');
-      return false;
+  void _toggleSelection(String serviceId, [int? variantId]) {
+    setState(() {
+      debugPrint(
+        '🔵 _toggleSelection called - serviceId: $serviceId, variantId: $variantId',
+      );
+
+      if (variantId == null) {
+        // Service without variants - toggle service itself
+        if (_selectedItems.containsKey(serviceId)) {
+          _selectedItems.remove(serviceId);
+          debugPrint('🗑️ Removed service: $serviceId');
+        } else {
+          _selectedItems[serviceId] =
+              []; // Empty list means service itself selected
+          debugPrint('✅ Selected service: $serviceId with empty list');
+        }
+      } else {
+        // Service with variants - toggle specific variant
+        if (!_selectedItems.containsKey(serviceId)) {
+          _selectedItems[serviceId] = [];
+        }
+
+        if (_selectedItems[serviceId]!.contains(variantId)) {
+          _selectedItems[serviceId]!.remove(variantId);
+          debugPrint(
+            '🗑️ Removed variant: $variantId from service: $serviceId',
+          );
+
+          if (_selectedItems[serviceId]!.isEmpty) {
+            _selectedItems.remove(serviceId);
+            debugPrint('🗑️ Service empty, removed: $serviceId');
+          }
+        } else {
+          _selectedItems[serviceId]!.add(variantId);
+          debugPrint('✅ Selected variant: $variantId for service: $serviceId');
+        }
+      }
+
+      debugPrint('📊 _selectedItems map after change: $_selectedItems');
+      debugPrint('📊 Total selected items: $_totalSelectedItems');
+    });
+  }
+
+  void _toggleExpand(String serviceId) {
+    setState(() {
+      if (_expandedServices.contains(serviceId)) {
+        _expandedServices.remove(serviceId);
+      } else {
+        _expandedServices.add(serviceId);
+      }
+    });
+  }
+
+  bool _isSelected(String serviceId, [int? variantId]) {
+    if (variantId == null) {
+      // Service itself selected - check if key exists and value is empty list
+      final exists = _selectedItems.containsKey(serviceId);
+      final isEmptyList = exists && _selectedItems[serviceId]!.isEmpty;
+
+      debugPrint(
+        '🔍 _isSelected check - serviceId: $serviceId, exists: $exists, isEmptyList: $isEmptyList',
+      );
+      return isEmptyList;
+    } else {
+      // Variant selected
+      final isSelected =
+          _selectedItems[serviceId]?.contains(variantId) ?? false;
+      debugPrint(
+        '🔍 _isSelected check - serviceId: $serviceId, variantId: $variantId, isSelected: $isSelected',
+      );
+      return isSelected;
     }
   }
 
-  // ✅ Add barber to salon - COMPLETE FIXED VERSION WITH SALON_ID
-  Future<void> _addBarberToSalon() async {
-    if (!mounted) return;
-    
-    // Validation
+  int _getSelectedCount(String serviceId) {
+    final count = _selectedItems[serviceId]?.length ?? 0;
+    debugPrint('🔢 _getSelectedCount - serviceId: $serviceId, count: $count');
+    return count;
+  }
+
+  // ==================== ADD BARBER FUNCTION - FIXED ====================
+  Future<void> _addBarber() async {
     if (_selectedBarberId == null) {
-      _showSnackBar('Please select a barber first', Colors.red);
+      _showSnackBar('Please select a barber', Colors.red);
       return;
     }
 
@@ -463,80 +731,93 @@ class _AddBarberScreenState extends State<AddBarberScreen> with RouteAware {  //
       return;
     }
 
-    if (_selectedServiceIds.isEmpty) {
+    if (_totalSelectedItems == 0) {
       _showSnackBar('Please select at least one service', Colors.red);
       return;
     }
 
-    final selectedBarber = _searchResults.firstWhere(
-      (b) => b['id'] == _selectedBarberId,
-    );
-    
-    final selectedServices = _availableServices
-        .where((s) => _selectedServiceIds.contains(s['id']))
-        .toList();
-
-    final selectedSalon = _ownerSalons.firstWhere(
-      (s) => s['id'].toString() == _selectedSalonId,
-    );
-
-    // Check if barber already exists in this salon
-    final salonIdInt = int.parse(_selectedSalonId!);
-    final alreadyExists = await _isBarberAlreadyInSalon(_selectedBarberId!, salonIdInt);
-    
-    if (alreadyExists) {
-      _showSnackBar('This barber is already added to this salon', Colors.orange);
-      return;
-    }
-
-    // Show confirmation dialog
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Confirm Add Barber'),
-        content: Container(
+        content: SizedBox(
           width: _isWeb ? 400 : null,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Add ${selectedBarber['name']} to ${selectedSalon['name']}?'),
-              const SizedBox(height: 8),
-              Text('Salon: ${selectedSalon['name']}', 
-                style: const TextStyle(fontWeight: FontWeight.bold)),
+              Text('Add ${_getBarberName()} to selected salon?'),
               const SizedBox(height: 16),
               const Text(
-                'Services:',
+                'Selected services:',
                 style: TextStyle(fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 8),
-              ...selectedServices.map(
-                (s) => Padding(
-                  padding: const EdgeInsets.only(left: 8, bottom: 4),
-                  child: Row(
+              ..._selectedItems.entries.map((entry) {
+                final serviceId = entry.key;
+                final variantIds = entry.value;
+                final service = _services.firstWhere(
+                  (s) => s['id'] == serviceId,
+                  orElse: () => {},
+                );
+
+                if (service.isEmpty) return const SizedBox.shrink();
+
+                if (variantIds.isEmpty) {
+                  return Padding(
+                    padding: const EdgeInsets.only(left: 8, bottom: 4),
+                    child: Row(
+                      children: [
+                        Icon(Icons.check_circle, size: 16, color: Colors.green),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            service['name'] ?? 'Service',
+                            style: const TextStyle(fontWeight: FontWeight.w500),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                } else {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(s['icon'], size: 16, color: Colors.green),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(s['name'], style: const TextStyle(fontSize: 13)),
-                            Text(
-                              '${s['category_name']} • Rs. ${s['price']} • ${s['duration']} min',
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: Colors.grey[600],
-                              ),
-                            ),
-                          ],
+                      Padding(
+                        padding: const EdgeInsets.only(left: 8, top: 4),
+                        child: Text(
+                          service['name'] ?? 'Service',
+                          style: const TextStyle(fontWeight: FontWeight.w600),
                         ),
                       ),
+                      ...variantIds.map((variantId) {
+                        final variant = _findVariantById(serviceId, variantId);
+                        if (variant == null) return const SizedBox.shrink();
+                        return Padding(
+                          padding: const EdgeInsets.only(left: 24, bottom: 2),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.check_circle,
+                                size: 14,
+                                color: Colors.green,
+                              ),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  '${variant['gender_name']} - ${variant['age_category_name']}',
+                                  style: TextStyle(fontSize: 13),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
                     ],
-                  ),
-                ),
-              ),
+                  );
+                }
+              }),
             ],
           ),
         ),
@@ -558,184 +839,153 @@ class _AddBarberScreenState extends State<AddBarberScreen> with RouteAware {  //
 
     if (confirm != true) return;
 
-    if (!mounted) return;
-    
-    setState(() {
-      _isLoading = true;
-    });
+    setState(() => _isLoading = true);
 
     try {
-      // STEP 1: Get barber role ID
-      final roleList = await supabase
-          .from('roles')
+      final salonBarberResponse = await supabase
+          .from('salon_barbers')
           .select('id')
-          .eq('name', 'barber');
+          .eq('salon_id', int.parse(_selectedSalonId!))
+          .eq('barber_id', _selectedBarberId!)
+          .maybeSingle();
 
-      if (roleList.isEmpty) {
-        throw Exception('Barber role not found in database');
-      }
-      final barberRoleId = roleList[0]['id'];
-      debugPrint('✅ Barber role ID: $barberRoleId');
+      int salonBarberId;
 
-      // STEP 2: Get current profile - with role_id filter
-      final profileList = await supabase
-          .from('profiles')
-          .select()
-          .eq('id', _selectedBarberId!)
-          .eq('role_id', barberRoleId);
-
-      if (profileList.isEmpty) {
-        throw Exception('Barber profile not found');
-      }
-      final currentProfile = profileList[0];
-      debugPrint('✅ Current profile found');
-
-      // STEP 3: Get salon
-      final salonIdInt = int.parse(_selectedSalonId!);
-      
-      final salonList = await supabase
-          .from('salons')
-          .select('id, name')
-          .eq('id', salonIdInt);
-
-      if (salonList.isEmpty) {
-        throw Exception('Salon not found');
-      }
-
-      final salonData = salonList[0];
-      final salonId = salonData['id'];
-      final salonName = salonData['name'];
-      debugPrint('✅ Using salon: $salonName (ID: $salonId)');
-
-      // Get existing services from extra_data
-      final existingServices = currentProfile['extra_data']?['services'] ?? [];
-      
-      // Prepare extra_data - merge existing services with new ones
-      final updatedExtraData = {
-        ...currentProfile['extra_data'] ?? {},
-        'services': [
-          ...existingServices,
-          ...selectedServices.map(
-            (s) => {
-              'id': int.parse(s['id']),
-              'name': s['name'],
-              'price': s['price'],
-              'duration': s['duration'],
-              'category_id': s['category_id'],
-              'category_name': s['category_name'],
-              'salon_id': salonId,  // 🔥 Add salon_id to extra_data
-            },
-          ),
-        ],
-        'added_by': supabase.auth.currentUser?.id,
-        'added_at': DateTime.now().toIso8601String(),
-        'salon_id': _selectedSalonId,
-        'salon_name': salonName,
-        'previous_role': currentProfile['role_id'],
-      };
-
-      // STEP 4: Update profile - WITH role_id filter
-      await supabase
-          .from('profiles')
-          .update({
-            'extra_data': updatedExtraData,
-            'updated_at': DateTime.now().toIso8601String(),
-          })
-          .eq('id', _selectedBarberId!)
-          .eq('role_id', barberRoleId);
-
-      debugPrint('✅ Profile updated');
-
-      // STEP 5: Add to salon_barbers
-      try {
-        final salonBarberList = await supabase
+      if (salonBarberResponse == null) {
+        final newSalonBarber = await supabase
             .from('salon_barbers')
-            .select()
-            .eq('salon_id', salonId)
-            .eq('barber_id', _selectedBarberId!);
+            .insert({
+              'salon_id': int.parse(_selectedSalonId!),
+              'barber_id': _selectedBarberId!,
+              'is_active': true,
+            })
+            .select('id')
+            .single();
 
-        if (salonBarberList.isEmpty) {
-          debugPrint('📝 Attempting to insert into salon_barbers...');
-          
-          await supabase
-              .from('salon_barbers')
-              .insert({
-                'salon_id': salonId,
-                'barber_id': _selectedBarberId!,
-                'is_active': true,
-              });
-          
-          debugPrint('✅ Added to salon_barbers');
-        } else {
-          debugPrint('ℹ️ Already in salon_barbers');
-        }
-      } catch (e) {
-        debugPrint('⚠️ Warning with salon_barbers: $e');
-        // Don't throw - continue with service addition
+        salonBarberId = newSalonBarber['id'];
+      } else {
+        salonBarberId = salonBarberResponse['id'];
       }
 
-      // STEP 6: Add services to barber_services - WITH SALON_ID
-      for (var service in selectedServices) {
-        try {
-          // Check if service already exists for this barber in this salon
-          final serviceList = await supabase
+      final userRoleCheckResponse = await supabase
+          .from('user_roles')
+          .select()
+          .eq('user_id', _selectedBarberId!);
+
+      if (userRoleCheckResponse.isEmpty) {
+        final roleResponse = await supabase
+            .from('roles')
+            .select('id')
+            .eq('name', 'barber')
+            .maybeSingle();
+
+        if (roleResponse == null) throw Exception('Barber role not found');
+
+        await supabase.from('user_roles').insert({
+          'user_id': _selectedBarberId!,
+          'role_id': roleResponse['id'],
+        });
+      }
+
+      for (var entry in _selectedItems.entries) {
+        final serviceId = int.parse(entry.key);
+        final variantIds = entry.value;
+
+        if (variantIds.isEmpty) {
+          final existingServiceResponse = await supabase
               .from('barber_services')
               .select()
-              .eq('barber_id', _selectedBarberId!)
-              .eq('service_id', int.parse(service['id']))
-              .eq('salon_id', salonId);  // 🔥 Check with salon_id
+              .eq('salon_barber_id', salonBarberId)
+              .eq('service_id', serviceId)
+              .filter('variant_id', 'is', null);
 
-          if (serviceList.isEmpty) {
-            // Insert with salon_id
-            final insertData = {
-              'barber_id': _selectedBarberId!,
-              'service_id': int.parse(service['id']),
-              'custom_price': service['price'],
-              'salon_id': salonId,  // 🔥 Add salon_id
+          if (existingServiceResponse.isEmpty) {
+            await supabase.from('barber_services').insert({
+              'salon_barber_id': salonBarberId,
+              'service_id': serviceId,
+              'variant_id': null,
               'is_active': true,
-            };
-            
-            debugPrint('📝 Inserting barber service: $insertData');
-            
-            await supabase
-                .from('barber_services')
-                .insert(insertData);
-            
-            debugPrint('✅ Service added: ${service['name']} for salon ID: $salonId');
-          } else {
-            debugPrint('ℹ️ Service already exists for this barber in this salon: ${service['name']}');
+            });
           }
-        } catch (e) {
-          debugPrint('⚠️ Error adding service ${service['name']}: $e');
+        } else {
+          for (var variantId in variantIds) {
+            final existingVariantResponse = await supabase
+                .from('barber_services')
+                .select()
+                .eq('salon_barber_id', salonBarberId)
+                .eq('variant_id', variantId);
+
+            if (existingVariantResponse.isEmpty) {
+              await supabase.from('barber_services').insert({
+                'salon_barber_id': salonBarberId,
+                'service_id': serviceId,
+                'variant_id': variantId,
+                'is_active': true,
+              });
+            }
+          }
         }
       }
 
-      // Success!
-      if (mounted) {
-        _showSnackBar(
-          '✅ ${selectedBarber['name']} added to $salonName successfully!',
-          Colors.green,
-        );
+      await supabase.from('owner_activity_log').insert({
+        'owner_id': supabase.auth.currentUser?.id,
+        'action_type': 'add_barber',
+        'target_type': 'barber',
+        'target_id': _selectedBarberId,
+        'details': {
+          'barber_name': _getBarberName(),
+          'salon_id': int.parse(_selectedSalonId!),
+          'salon_barber_id': salonBarberId,
+          'selected_items': _selectedItems.length,
+        },
+      });
 
-        // Clear selection and go back after 2 seconds
-        Future.delayed(const Duration(seconds: 2), () {
-          if (context.mounted) {
-            context.pop();
-          }
+      if (mounted) {
+        _showSnackBar('Barber added successfully!', Colors.green);
+
+        setState(() {
+          _selectedBarberId = null;
+          _selectedItems.clear();
+          _expandedServices.clear();
+          _searchController.clear();
+          _searchResults = [];
+          _isSearching = false;
         });
       }
     } catch (e) {
       debugPrint('❌ Error adding barber: $e');
-      if (mounted) {
-        _showSnackBar('Error adding barber: ${e.toString()}', Colors.red);
-      }
+      _showSnackBar('Error: $e', Colors.red);
     } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Map<String, dynamic>? _findVariantById(String serviceId, int variantId) {
+    final service = _services.firstWhere(
+      (s) => s['id'] == serviceId,
+      orElse: () => {},
+    );
+    if (service.isEmpty) return null;
+
+    final variants = service['variants'] as List? ?? [];
+    for (var variant in variants) {
+      if (variant['id'] == variantId) {
+        return {
+          ...variant,
+          'service_id': serviceId,
+          'service_name': service['name'],
+        };
       }
     }
+    return null;
+  }
+
+  String _getBarberName() {
+    final barber = _searchResults.firstWhere(
+      (b) => b['id'] == _selectedBarberId,
+      orElse: () => {},
+    );
+    return barber['full_name'] ?? barber['email'] ?? 'Barber';
   }
 
   void _showSnackBar(String message, Color color) {
@@ -750,114 +1000,37 @@ class _AddBarberScreenState extends State<AddBarberScreen> with RouteAware {  //
     );
   }
 
-  void _toggleService(Map<String, dynamic> service) {
-    if (!mounted) return;
-    setState(() {
-      if (_selectedServiceIds.contains(service['id'])) {
-        _selectedServiceIds.remove(service['id']);
-        _showSnackBar('${service['name']} removed', Colors.orange);
-      } else {
-        _selectedServiceIds.add(service['id']);
-        _showSnackBar('${service['name']} added', Colors.green);
-      }
-    });
-  }
+  // ==================== UI BUILDERS ====================
 
-  @override
-  Widget build(BuildContext context) {
-    final isLoading = _isLoading || _isLoadingServices || _isLoadingCategories || _isLoadingSalons;
-    final screenWidth = MediaQuery.of(context).size.width;
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Add New Barber'),
-        backgroundColor: const Color(0xFFFF6B8B),
-        foregroundColor: Colors.white,
-        centerTitle: _isWeb,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _refreshData,
-            tooltip: 'Refresh',
-          ),
-          if (_selectedBarberId != null && _selectedServiceIds.isNotEmpty && _selectedSalonId != null && !isLoading)
-            IconButton(
-              icon: const Icon(Icons.check),
-              onPressed: _addBarberToSalon,
-              tooltip: 'Add Barber',
-            ),
-        ],
-      ),
-      body: isLoading
-          ? const Center(child: CircularProgressIndicator(color: Color(0xFFFF6B8B)))
-          : RefreshIndicator(  // 🔥 Pull-to-refresh added
-              onRefresh: _refreshData,
-              color: const Color(0xFFFF6B8B),
-              child: Container(
-                color: Colors.grey[50],
-                child: Center(
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(
-                      maxWidth: _isWeb ? 1200 : double.infinity,
-                    ),
-                    child: SingleChildScrollView(
-                      physics: const AlwaysScrollableScrollPhysics(), // 🔥 Important for RefreshIndicator
-                      padding: EdgeInsets.all(_isWeb ? 24 : 16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Salon Selection Section
-                          _buildSalonSelectionSection(screenWidth),
-                          
-                          const SizedBox(height: 24),
-                          
-                          // Search Section
-                          _buildSearchSection(screenWidth),
-                          
-                          const SizedBox(height: 24),
-                          
-                          // Selected Barber
-                          if (_selectedBarberId != null) ...[
-                            _buildSelectedBarber(),
-                            const SizedBox(height: 24),
-                          ],
-
-                          // Services Section
-                          _buildServicesSection(screenWidth),
-
-                          const SizedBox(height: 24),
-
-                          // Add Button
-                          if (_selectedBarberId != null && _selectedServiceIds.isNotEmpty && _selectedSalonId != null && _availableServices.isNotEmpty)
-                            _buildAddButton(),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-    );
-  }
-
-  // Salon Selection Section
-  Widget _buildSalonSelectionSection(double screenWidth) {
+  Widget _buildSalonSection() {
     return Card(
-      elevation: 2,
+      elevation: _isWeb ? 4 : 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.all(_isWeb ? 20 : 16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
             Row(
               children: [
-                Icon(Icons.store, color: const Color(0xFFFF6B8B), size: 24),
-                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(
+                    Icons.store,
+                    color: Color(0xFFFF6B8B),
+                    size: 24,
+                  ),
+                ),
+                const SizedBox(width: 12),
                 Text(
                   'Select Salon',
                   style: TextStyle(
-                    fontSize: _isWeb ? 18 : 16,
+                    fontSize: _isWeb ? 20 : 18,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
@@ -866,96 +1039,85 @@ class _AddBarberScreenState extends State<AddBarberScreen> with RouteAware {  //
             const SizedBox(height: 16),
 
             if (_ownerSalons.isEmpty)
-              Container(
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(
-                  color: Colors.grey[100],
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Column(
-                  children: [
-                    Icon(Icons.storefront, size: 48, color: Colors.grey[400]),
-                    const SizedBox(height: 12),
-                    Text(
-                      'No salons found',
-                      style: TextStyle(
-                        fontSize: 16,
-                        color: Colors.grey[600],
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Please create a salon first',
-                      style: TextStyle(fontSize: 14, color: Colors.grey[500]),
-                    ),
-                    const SizedBox(height: 16),
-                    ElevatedButton(
-                      onPressed: () async {
-                        // 🔥 Navigate to create salon and wait for result
-                        final result = await context.push<bool>('/owner/salon/create');
-                        
-                        // If salon created successfully, refresh data
-                        if (result == true) {
-                          _refreshData();
-                          _showSnackBar('Salon created successfully! Refreshing...', Colors.green);
-                        }
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFFFF6B8B),
-                      ),
-                      child: const Text('Create Salon'),
-                    ),
-                  ],
-                ),
-              )
+              _buildNoSalonWarning()
             else
-              _isWeb
-                  ? GridView.builder(
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: screenWidth > 1000 ? 3 : 2,
-                        childAspectRatio: 3,
-                        crossAxisSpacing: 12,
-                        mainAxisSpacing: 12,
-                      ),
-                      itemCount: _ownerSalons.length,
-                      itemBuilder: (context, index) {
-                        final salon = _ownerSalons[index];
-                        final isSelected = _selectedSalonId == salon['id'].toString();
-                        return _buildSalonCard(salon, isSelected);
-                      },
-                    )
-                  : ListView.separated(
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      itemCount: _ownerSalons.length,
-                      separatorBuilder: (context, index) => const SizedBox(height: 8),
-                      itemBuilder: (context, index) {
-                        final salon = _ownerSalons[index];
-                        final isSelected = _selectedSalonId == salon['id'].toString();
-                        return _buildSalonTile(salon, isSelected);
-                      },
-                    ),
+              ListView.separated(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: _ownerSalons.length,
+                separatorBuilder: (context, index) => const SizedBox(height: 8),
+                itemBuilder: (context, index) {
+                  final salon = _ownerSalons[index];
+                  final isSelected = _selectedSalonId == salon['id'].toString();
+                  return _buildSalonTile(salon, isSelected);
+                },
+              ),
           ],
         ),
       ),
     );
   }
 
-  // 🏢 Salon Tile for mobile
+  Widget _buildNoSalonWarning() {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: Colors.grey[100],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.orange[200]!, width: 1),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.warning_amber_rounded,
+            size: 48,
+            color: Colors.orange[700],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'No Salons Found',
+            style: TextStyle(
+              fontSize: _isWeb ? 18 : 16,
+              color: Colors.grey[800],
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'You need to create a salon first before adding barbers.',
+            style: TextStyle(
+              fontSize: _isWeb ? 14 : 12,
+              color: Colors.grey[600],
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 16),
+          ElevatedButton.icon(
+            onPressed: () {
+              context.push('/owner/salon/create');
+            },
+            icon: const Icon(Icons.add_business),
+            label: const Text('Create Salon'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFFF6B8B),
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildSalonTile(Map<String, dynamic> salon, bool isSelected) {
     return InkWell(
-      onTap: () {
-        setState(() {
-          _selectedSalonId = salon['id'].toString();
-        });
-      },
+      onTap: () => setState(() => _selectedSalonId = salon['id'].toString()),
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFFFF6B8B).withValues(alpha: 0.05) : Colors.white,
+          color: isSelected
+              ? const Color(0xFFFF6B8B).withValues(alpha: 0.05)
+              : Colors.white,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[300]!,
@@ -980,21 +1142,23 @@ class _AddBarberScreenState extends State<AddBarberScreen> with RouteAware {  //
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
                     salon['name'] ?? 'Unnamed Salon',
                     style: TextStyle(
-                      fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                      fontWeight: isSelected
+                          ? FontWeight.bold
+                          : FontWeight.w500,
                       fontSize: 15,
                     ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                   if (salon['address'] != null)
                     Text(
                       salon['address'],
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey[600],
-                      ),
+                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -1002,151 +1166,98 @@ class _AddBarberScreenState extends State<AddBarberScreen> with RouteAware {  //
               ),
             ),
             if (isSelected)
-              const Icon(Icons.check_circle, color: Color(0xFFFF6B8B), size: 24),
+              const Icon(
+                Icons.check_circle,
+                color: Color(0xFFFF6B8B),
+                size: 24,
+              ),
           ],
         ),
       ),
     );
   }
 
-  // 🏢 Salon Card for web
-  Widget _buildSalonCard(Map<String, dynamic> salon, bool isSelected) {
+  Widget _buildSearchSection() {
     return Card(
-      elevation: isSelected ? 4 : 1,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(
-          color: isSelected ? const Color(0xFFFF6B8B) : Colors.transparent,
-          width: 2,
-        ),
-      ),
-      child: InkWell(
-        onTap: () {
-          setState(() {
-            _selectedSalonId = salon['id'].toString();
-          });
-        },
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[100],
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  Icons.store,
-                  color: isSelected ? Colors.white : Colors.grey[600],
-                  size: 20,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      salon['name'] ?? 'Unnamed Salon',
-                      style: TextStyle(
-                        fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
-                        fontSize: 14,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    if (salon['address'] != null)
-                      Text(
-                        salon['address'],
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey[600],
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                  ],
-                ),
-              ),
-              if (isSelected)
-                const Icon(Icons.check_circle, color: Color(0xFFFF6B8B), size: 20),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  // 🔍 Search Section
-  Widget _buildSearchSection(double screenWidth) {
-    final isSmallScreen = screenWidth < 600;
-
-    return Card(
-      elevation: 2,
+      elevation: _isWeb ? 4 : 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
-        padding: EdgeInsets.all(isSmallScreen ? 16 : 20),
+        padding: EdgeInsets.all(_isWeb ? 20 : 16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
             Row(
               children: [
-                Icon(Icons.search, color: const Color(0xFFFF6B8B), size: 24),
-                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(
+                    Icons.search,
+                    color: Color(0xFFFF6B8B),
+                    size: 24,
+                  ),
+                ),
+                const SizedBox(width: 12),
                 Text(
                   'Search Barbers',
                   style: TextStyle(
-                    fontSize: isSmallScreen ? 18 : 20,
+                    fontSize: _isWeb ? 20 : 18,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 16),
-            
-            Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.grey[300]!),
-              ),
-              child: TextField(
-                controller: _searchController,
-                decoration: InputDecoration(
-                  hintText: 'Type name or email...',
-                  prefixIcon: const Icon(Icons.search, color: Colors.grey),
-                  suffixIcon: _searchController.text.isNotEmpty
-                      ? IconButton(
-                          icon: const Icon(Icons.clear, color: Colors.grey),
-                          onPressed: () {
-                            _searchController.clear();
-                            setState(() {
-                              _searchResults = [];
-                              _isSearching = false;
-                              _selectedBarberId = null;
-                            });
-                          },
-                        )
-                      : null,
-                  border: InputBorder.none,
-                  contentPadding: EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: isSmallScreen ? 12 : 14,
+
+            TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                hintText: 'Type name or email...',
+                prefixIcon: const Icon(Icons.search, color: Colors.grey),
+                suffixIcon: _searchController.text.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear, color: Colors.grey),
+                        onPressed: () {
+                          _searchController.clear();
+                          setState(() {
+                            _searchResults = [];
+                            _isSearching = false;
+                            _selectedBarberId = null;
+                          });
+                        },
+                      )
+                    : null,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(
+                    color: Color(0xFFFF6B8B),
+                    width: 2,
                   ),
                 ),
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: _isWeb ? 16 : 12,
+                ),
+                filled: true,
+                fillColor: Colors.grey[50],
               ),
             ),
 
-            const SizedBox(height: 8),
-
-            if (_searchController.text.isNotEmpty && _searchController.text.length < 2)
+            if (_searchController.text.isNotEmpty &&
+                _searchController.text.length < 2)
               Padding(
-                padding: const EdgeInsets.only(left: 12),
+                padding: const EdgeInsets.only(left: 12, top: 8),
                 child: Text(
                   '🔍 Type at least 2 characters to search',
                   style: TextStyle(
-                    fontSize: 13,
+                    fontSize: _isWeb ? 13 : 12,
                     color: Colors.grey[600],
                     fontStyle: FontStyle.italic,
                   ),
@@ -1154,98 +1265,43 @@ class _AddBarberScreenState extends State<AddBarberScreen> with RouteAware {  //
               ),
 
             if (_isSearching) ...[
-              const SizedBox(height: 20),
-              Row(
-                children: [
-                  Text(
-                    'Search Results',
-                    style: TextStyle(
-                      fontSize: isSmallScreen ? 16 : 18,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  if (_isLoading)
-                    const SizedBox(
-                      height: 20,
-                      width: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Color(0xFFFF6B8B),
-                      ),
-                    ),
-                  const Spacer(),
-                  if (_searchResults.isNotEmpty)
-                    Text(
-                      '${_searchResults.length} found',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: Colors.grey[600],
-                      ),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 12),
-
-              if (_searchResults.isEmpty && !_isLoading)
-                Container(
-                  padding: const EdgeInsets.all(32),
-                  child: Column(
-                    children: [
-                      Icon(
-                        Icons.person_search,
-                        size: 64,
-                        color: Colors.grey[400],
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        'No barbers found',
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: Colors.grey[600],
-                          fontWeight: FontWeight.w500,
+              const SizedBox(height: 16),
+              if (_searchResults.isEmpty)
+                Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(32),
+                    child: Column(
+                      children: [
+                        Icon(
+                          Icons.person_search,
+                          size: 48,
+                          color: Colors.grey[400],
                         ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Try a different name or email',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Colors.grey[500],
+                        const SizedBox(height: 8),
+                        Text(
+                          'No barbers found',
+                          style: TextStyle(
+                            fontSize: _isWeb ? 16 : 14,
+                            color: Colors.grey[600],
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 )
-              else if (_searchResults.isNotEmpty)
-                _isWeb && !isSmallScreen
-                    ? GridView.builder(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: screenWidth > 1000 ? 3 : 2,
-                          childAspectRatio: 3,
-                          crossAxisSpacing: 12,
-                          mainAxisSpacing: 12,
-                        ),
-                        itemCount: _searchResults.length,
-                        itemBuilder: (context, index) {
-                          final barber = _searchResults[index];
-                          final isSelected = _selectedBarberId == barber['id'];
-                          return _buildBarberCard(barber, isSelected);
-                        },
-                      )
-                    : ListView.separated(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        itemCount: _searchResults.length,
-                        separatorBuilder: (context, index) => const Divider(height: 1),
-                        itemBuilder: (context, index) {
-                          final barber = _searchResults[index];
-                          final isSelected = _selectedBarberId == barber['id'];
-                          return _buildBarberTile(barber, isSelected);
-                        },
-                      ),
+              else
+                ListView.separated(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: _searchResults.length,
+                  separatorBuilder: (context, index) =>
+                      const Divider(height: 1),
+                  itemBuilder: (context, index) {
+                    final barber = _searchResults[index];
+                    final isSelected = _selectedBarberId == barber['id'];
+                    return _buildBarberTile(barber, isSelected);
+                  },
+                ),
             ],
           ],
         ),
@@ -1253,156 +1309,81 @@ class _AddBarberScreenState extends State<AddBarberScreen> with RouteAware {  //
     );
   }
 
-  // 👤 Barber Tile for mobile
   Widget _buildBarberTile(Map<String, dynamic> barber, bool isSelected) {
     return ListTile(
       leading: CircleAvatar(
-        backgroundColor: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[200],
-        backgroundImage: barber['photo'] != null ? NetworkImage(barber['photo']) : null,
-        child: barber['photo'] == null
+        radius: 24,
+        backgroundColor: isSelected
+            ? const Color(0xFFFF6B8B)
+            : Colors.grey[200],
+        backgroundImage: barber['avatar_url'] != null
+            ? NetworkImage(barber['avatar_url'])
+            : null,
+        child: barber['avatar_url'] == null
             ? Text(
-                barber['name'][0].toUpperCase(),
+                barber['full_name']?[0]?.toUpperCase() ?? '?',
                 style: TextStyle(
                   color: isSelected ? Colors.white : Colors.grey[700],
                   fontWeight: FontWeight.bold,
+                  fontSize: 16,
                 ),
               )
             : null,
       ),
       title: Text(
-        barber['name'],
+        barber['full_name'] ?? 'Unknown',
         style: TextStyle(
           fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+          fontSize: _isWeb ? 16 : 14,
         ),
       ),
-      subtitle: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(barber['email'], style: const TextStyle(fontSize: 12)),
-        ],
+      subtitle: Text(
+        barber['email'] ?? '',
+        style: TextStyle(fontSize: _isWeb ? 14 : 12),
       ),
       trailing: isSelected
-          ? const Icon(Icons.check_circle, color: Color(0xFFFF6B8B))
-          : Radio<String>(
-              value: barber['id'],
-              groupValue: _selectedBarberId,
-              onChanged: (value) {
-                setState(() {
-                  _selectedBarberId = value;
-                });
-              },
-              activeColor: const Color(0xFFFF6B8B),
-            ),
+          ? Container(
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFF6B8B),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.check, color: Colors.white, size: 16),
+            )
+          : const Icon(Icons.radio_button_unchecked, color: Colors.grey),
       onTap: () {
-        setState(() {
-          _selectedBarberId = barber['id'];
-        });
+        setState(() => _selectedBarberId = barber['id']);
       },
     );
   }
 
-  // 👤 Barber Card for web/tablet
-  Widget _buildBarberCard(Map<String, dynamic> barber, bool isSelected) {
-    return Card(
-      elevation: isSelected ? 4 : 1,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(
-          color: isSelected ? const Color(0xFFFF6B8B) : Colors.transparent,
-          width: 2,
-        ),
-      ),
-      child: InkWell(
-        onTap: () {
-          setState(() {
-            _selectedBarberId = barber['id'];
-          });
-        },
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Row(
-            children: [
-              CircleAvatar(
-                radius: 24,
-                backgroundColor: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[200],
-                backgroundImage: barber['photo'] != null ? NetworkImage(barber['photo']) : null,
-                child: barber['photo'] == null
-                    ? Text(
-                        barber['name'][0].toUpperCase(),
-                        style: TextStyle(
-                          color: isSelected ? Colors.white : Colors.grey[700],
-                          fontWeight: FontWeight.bold,
-                          fontSize: 18,
-                        ),
-                      )
-                    : null,
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      barber['name'],
-                      style: TextStyle(
-                        fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
-                        fontSize: 14,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      barber['email'],
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey[600],
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
-              ),
-              if (isSelected)
-                const Icon(Icons.check_circle, color: Color(0xFFFF6B8B), size: 20),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  // 💇 Selected Barber Widget
   Widget _buildSelectedBarber() {
-    final selectedBarber = _searchResults.firstWhere(
-      (u) => u['id'] == _selectedBarberId,
+    final barber = _searchResults.firstWhere(
+      (b) => b['id'] == _selectedBarberId,
     );
 
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.all(_isWeb ? 20 : 16),
       decoration: BoxDecoration(
         color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: const Color(0xFFFF6B8B), width: 1.5),
       ),
       child: Row(
         children: [
           CircleAvatar(
-            radius: 24,
+            radius: _isWeb ? 32 : 28,
             backgroundColor: const Color(0xFFFF6B8B),
-            backgroundImage: selectedBarber['photo'] != null
-                ? NetworkImage(selectedBarber['photo'])
+            backgroundImage: barber['avatar_url'] != null
+                ? NetworkImage(barber['avatar_url'])
                 : null,
-            child: selectedBarber['photo'] == null
+            child: barber['avatar_url'] == null
                 ? Text(
-                    selectedBarber['name'][0].toUpperCase(),
-                    style: const TextStyle(
+                    barber['full_name']?[0]?.toUpperCase() ?? '?',
+                    style: TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.bold,
-                      fontSize: 20,
+                      fontSize: _isWeb ? 20 : 16,
                     ),
                   )
                 : null,
@@ -1417,15 +1398,18 @@ class _AddBarberScreenState extends State<AddBarberScreen> with RouteAware {  //
                   style: TextStyle(fontSize: 12, color: Colors.grey),
                 ),
                 Text(
-                  selectedBarber['name'],
-                  style: const TextStyle(
-                    fontSize: 18,
+                  barber['full_name'] ?? 'Unknown',
+                  style: TextStyle(
+                    fontSize: _isWeb ? 20 : 18,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
                 Text(
-                  selectedBarber['email'],
-                  style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+                  barber['email'] ?? '',
+                  style: TextStyle(
+                    fontSize: _isWeb ? 14 : 12,
+                    color: Colors.grey[600],
+                  ),
                 ),
               ],
             ),
@@ -1435,184 +1419,156 @@ class _AddBarberScreenState extends State<AddBarberScreen> with RouteAware {  //
     );
   }
 
-  // 🛠️ Services Section
-  Widget _buildServicesSection(double screenWidth) {
-    final isSmallScreen = screenWidth < 600;
+  // 🛠️ SERVICES SECTION - FIXED
+  Widget _buildServicesSection() {
+    if (_services.isEmpty) {
+      return Card(
+        elevation: _isWeb ? 4 : 2,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Center(
+            child: Column(
+              children: [
+                Icon(
+                  Icons.build_circle_outlined,
+                  size: 64,
+                  color: Colors.grey[400],
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'No services available',
+                  style: TextStyle(
+                    fontSize: _isWeb ? 18 : 16,
+                    color: Colors.grey[600],
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    final Map<String, List<Map<String, dynamic>>> groupedServices = {};
+    for (var service in _services) {
+      final category = service['category_name'] as String;
+      if (!groupedServices.containsKey(category)) {
+        groupedServices[category] = [];
+      }
+      groupedServices[category]!.add(service);
+    }
 
     return Card(
-      elevation: 2,
+      elevation: _isWeb ? 4 : 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
-        padding: EdgeInsets.all(isSmallScreen ? 16 : 20),
+        padding: EdgeInsets.all(_isWeb ? 24 : 16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
             Row(
               children: [
-                const Icon(Icons.build_circle_outlined, color: Color(0xFFFF6B8B), size: 28),
-                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(
+                    Icons.build_circle_outlined,
+                    color: Color(0xFFFF6B8B),
+                    size: 24,
+                  ),
+                ),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Text(
                     'Select Services',
                     style: TextStyle(
-                      fontSize: isSmallScreen ? 18 : 20,
+                      fontSize: _isWeb ? 22 : 18,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
                 ),
-                if (_selectedServiceIds.isNotEmpty)
+                if (_totalSelectedServices > 0)
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
                     decoration: BoxDecoration(
                       color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Text(
-                      '${_selectedServiceIds.length} selected',
-                      style: const TextStyle(
-                        fontSize: 13,
+                      '$_totalSelectedServices service${_totalSelectedServices > 1 ? 's' : ''} selected',
+                      style: TextStyle(
+                        fontSize: _isWeb ? 14 : 12,
                         fontWeight: FontWeight.w600,
-                        color: Color(0xFFFF6B8B),
+                        color: const Color(0xFFFF6B8B),
                       ),
                     ),
                   ),
               ],
             ),
-            const SizedBox(height: 16),
-
-            if (_availableServices.isEmpty)
-              _buildEmptyServices()
-            else ...[
-              if (_selectedServiceIds.isNotEmpty) ...[
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.green.withValues(alpha: 0.05),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Selected Services:',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.green,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: _availableServices
-                            .where((s) => _selectedServiceIds.contains(s['id']))
-                            .map((service) => Chip(
-                                  label: Text(service['name']),
-                                  deleteIcon: const Icon(Icons.close, size: 16),
-                                  onDeleted: () => _toggleService(service),
-                                  backgroundColor: Colors.green.withValues(alpha: 0.1),
-                                  labelStyle: const TextStyle(fontSize: 12),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(16),
-                                  ),
-                                ))
-                            .toList(),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 20),
-              ],
-
-              ..._servicesByCategory.entries.map((entry) {
-                return _buildCategorySection(entry.key, entry.value, screenWidth);
-              }),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  // Empty Services Widget
-  Widget _buildEmptyServices() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          children: [
-            Icon(
-              Icons.build_circle_outlined,
-              size: 64,
-              color: Colors.grey[400],
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'No services available',
-              style: TextStyle(
-                color: Colors.grey[600],
-                fontSize: 16,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
             const SizedBox(height: 8),
-            Text(
-              'Please add services first',
-              style: TextStyle(fontSize: 14, color: Colors.grey[500]),
+            const Text(
+              'Click on a service to select it, or expand to choose specific variants',
+              style: TextStyle(fontSize: 13, color: Colors.grey),
             ),
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: () => context.push('/owner/services/add'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFFF6B8B),
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              ),
-              child: const Text('Add Services'),
-            ),
+            const SizedBox(height: 24),
+
+            ...groupedServices.entries.map((entry) {
+              return _buildCategorySection(entry.key, entry.value);
+            }),
           ],
         ),
       ),
     );
   }
 
-  // Category Section
-  Widget _buildCategorySection(String categoryName, List<Map<String, dynamic>> services, double screenWidth) {
-    final isSmallScreen = screenWidth < 600;
-
+  Widget _buildCategorySection(
+    String categoryName,
+    List<Map<String, dynamic>> services,
+  ) {
     final category = _categories.firstWhere(
       (c) => c.name == categoryName,
       orElse: () => CategoryModel(
         id: 0,
         name: categoryName,
-        iconName: 'category_outlined',
+        description: '',
+        iconName: 'category',
         displayOrder: 999,
         isActive: true,
       ),
     );
 
-    int crossAxisCount;
-    if (_isWeb) {
-      crossAxisCount = screenWidth > 1200 ? 6 : (screenWidth > 800 ? 4 : 3);
-    } else if (_isTablet) {
-      crossAxisCount = 3;
-    } else {
-      crossAxisCount = 2;
-    }
+    final categorySelectedCount = services.fold<int>(
+      0,
+      (sum, service) => sum + _getSelectedCount(service['id'] as String),
+    );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12),
+        Container(
+          margin: const EdgeInsets.only(bottom: 12, top: 8),
           child: Row(
             children: [
-              Icon(category.icon, size: 20, color: const Color(0xFFFF6B8B)),
+              Icon(
+                category.icon,
+                size: _isWeb ? 24 : 20,
+                color: const Color(0xFFFF6B8B),
+              ),
               const SizedBox(width: 8),
               Text(
                 categoryName[0].toUpperCase() + categoryName.substring(1),
-                style: const TextStyle(
-                  fontSize: 16,
+                style: TextStyle(
+                  fontSize: _isWeb ? 20 : 16,
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -1625,140 +1581,647 @@ class _AddBarberScreenState extends State<AddBarberScreen> with RouteAware {  //
                 ),
                 child: Text(
                   '${services.length}',
-                  style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+                  style: TextStyle(
+                    fontSize: _isWeb ? 14 : 12,
+                    color: Colors.grey[700],
+                  ),
+                ),
+              ),
+              if (categorySelectedCount > 0) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    '$categorySelectedCount selected',
+                    style: TextStyle(
+                      fontSize: _isWeb ? 13 : 11,
+                      color: const Color(0xFFFF6B8B),
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+
+        _isWeb
+            ? SizedBox(
+                height: 350,
+                child: GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: MediaQuery.of(context).size.width > 1200
+                        ? 3
+                        : 2,
+                    childAspectRatio: 1.2,
+                    crossAxisSpacing: 16,
+                    mainAxisSpacing: 16,
+                  ),
+                  itemCount: services.length,
+                  itemBuilder: (context, index) {
+                    return _buildServiceCard(services[index]);
+                  },
+                ),
+              )
+            : Column(
+                children: services
+                    .map((service) => _buildServiceTile(service))
+                    .toList(),
+              ),
+
+        const SizedBox(height: 24),
+      ],
+    );
+  }
+
+  // 📱 Service Tile for Mobile - FIXED with selection indicator
+  Widget _buildServiceTile(Map<String, dynamic> service) {
+    final serviceId = service['id'] as String;
+    final hasVariants = service['hasVariants'] as bool;
+    final variants = service['variants'] as List;
+    final selectedCount = _getSelectedCount(serviceId);
+    final isExpanded = _expandedServices.contains(serviceId);
+
+    if (!hasVariants) {
+      final isSelected = _isSelected(serviceId);
+      debugPrint(
+        '🎨 Building service tile - $serviceId, isSelected: $isSelected, selectedCount: $selectedCount',
+      );
+
+      return Card(
+        margin: const EdgeInsets.only(bottom: 12),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(
+            color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[200]!,
+            width: isSelected ? 2 : 1,
+          ),
+        ),
+        elevation: isSelected ? 4 : 1,
+        child: InkWell(
+          onTap: () {
+            debugPrint('👆 TAPPED service without variants: $serviceId');
+            _toggleSelection(serviceId);
+          },
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                // Icon
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? const Color(0xFFFF6B8B).withValues(alpha: 0.2)
+                        : Colors.grey[100],
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    service['icon'] ?? Icons.build,
+                    color: isSelected
+                        ? const Color(0xFFFF6B8B)
+                        : Colors.grey[600],
+                    size: 24,
+                  ),
+                ),
+                const SizedBox(width: 16),
+
+                // Service info
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        service['name'] ?? 'Service',
+                        style: TextStyle(
+                          fontWeight: isSelected
+                              ? FontWeight.bold
+                              : FontWeight.w600,
+                          fontSize: 16,
+                          color: isSelected
+                              ? const Color(0xFFFF6B8B)
+                              : Colors.grey[800],
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'No variants',
+                        style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Selection indicator
+                if (isSelected)
+                  Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: const BoxDecoration(
+                      color: Color(0xFFFF6B8B),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.check,
+                      color: Colors.white,
+                      size: 14,
+                    ),
+                  )
+                else
+                  Container(
+                    width: 24,
+                    height: 24,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.grey[400]!, width: 1.5),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      );
+    } else {
+      // Service with variants code (unchanged)
+      return Card(
+        margin: const EdgeInsets.only(bottom: 12),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(
+            color: selectedCount > 0
+                ? const Color(0xFFFF6B8B)
+                : Colors.grey[200]!,
+            width: selectedCount > 0 ? 2 : 1,
+          ),
+        ),
+        elevation: selectedCount > 0 ? 4 : 1,
+        child: Theme(
+          data: Theme.of(context).copyWith(
+            dividerColor: Colors.transparent,
+            splashColor: Colors.transparent,
+            highlightColor: Colors.transparent,
+          ),
+          child: Column(
+            children: [
+              InkWell(
+                onTap: () => _toggleExpand(serviceId),
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: selectedCount > 0
+                              ? const Color(0xFFFF6B8B).withValues(alpha: 0.2)
+                              : Colors.grey[100],
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(
+                          service['icon'] ?? Icons.build,
+                          color: selectedCount > 0
+                              ? const Color(0xFFFF6B8B)
+                              : Colors.grey[600],
+                          size: 24,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              service['name'] ?? 'Service',
+                              style: TextStyle(
+                                fontWeight: selectedCount > 0
+                                    ? FontWeight.bold
+                                    : FontWeight.w600,
+                                fontSize: 16,
+                                color: selectedCount > 0
+                                    ? const Color(0xFFFF6B8B)
+                                    : Colors.grey[800],
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              '${variants.length} variants • Rs. ${service['min_price']} - ${service['max_price']}',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[600],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (selectedCount > 0)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFF6B8B),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            '$selectedCount',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                      Icon(
+                        isExpanded ? Icons.expand_less : Icons.expand_more,
+                        color: selectedCount > 0
+                            ? const Color(0xFFFF6B8B)
+                            : Colors.grey[600],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              if (isExpanded)
+                Container(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Divider(),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Select variants:',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      ...variants.map(
+                        (variant) => _buildVariantTile(serviceId, variant),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+      );
+    }
+  }
+
+  // 💻 Service Card for Web - FIXED with selection indicator
+  Widget _buildServiceCard(Map<String, dynamic> service) {
+    final serviceId = service['id'] as String;
+    final hasVariants = service['hasVariants'] as bool;
+    final variants = service['variants'] as List;
+    final selectedCount = _getSelectedCount(serviceId);
+
+    if (!hasVariants) {
+      final isSelected = _isSelected(serviceId);
+
+      return Card(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(
+            color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[200]!,
+            width: isSelected ? 2 : 1,
+          ),
+        ),
+        elevation: isSelected ? 4 : 1,
+        child: InkWell(
+          onTap: () => _toggleSelection(serviceId),
+          borderRadius: BorderRadius.circular(16),
+          child: Container(
+            constraints: const BoxConstraints(minHeight: 140),
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? const Color(0xFFFF6B8B).withValues(alpha: 0.2)
+                        : Colors.grey[100],
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    service['icon'] ?? Icons.build,
+                    color: isSelected
+                        ? const Color(0xFFFF6B8B)
+                        : Colors.grey[600],
+                    size: 32,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  service['name'] ?? 'Service',
+                  style: TextStyle(
+                    fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                    fontSize: 14,
+                    color: isSelected
+                        ? const Color(0xFFFF6B8B)
+                        : Colors.grey[800],
+                  ),
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'No variants',
+                  style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                ),
+                if (isSelected)
+                  Container(
+                    margin: const EdgeInsets.only(top: 8),
+                    padding: const EdgeInsets.all(4),
+                    decoration: const BoxDecoration(
+                      color: Color(0xFFFF6B8B),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.check,
+                      color: Colors.white,
+                      size: 14,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      );
+    } else {
+      return Card(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(
+            color: selectedCount > 0
+                ? const Color(0xFFFF6B8B)
+                : Colors.grey[200]!,
+            width: selectedCount > 0 ? 2 : 1,
+          ),
+        ),
+        elevation: selectedCount > 0 ? 4 : 1,
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 220),
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: selectedCount > 0
+                          ? const Color(0xFFFF6B8B).withValues(alpha: 0.2)
+                          : Colors.grey[100],
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(
+                      service['icon'] ?? Icons.build,
+                      color: selectedCount > 0
+                          ? const Color(0xFFFF6B8B)
+                          : Colors.grey[600],
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      service['name'] ?? 'Service',
+                      style: TextStyle(
+                        fontWeight: selectedCount > 0
+                            ? FontWeight.bold
+                            : FontWeight.w600,
+                        fontSize: 14,
+                        color: selectedCount > 0
+                            ? const Color(0xFFFF6B8B)
+                            : Colors.grey[800],
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (selectedCount > 0)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFF6B8B),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        '$selectedCount',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Rs. ${service['min_price']} - ${service['max_price']}',
+                style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+              ),
+              const Divider(height: 16),
+              const Text(
+                'Variants:',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
+              ),
+              const SizedBox(height: 8),
+              Expanded(
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: variants
+                        .map(
+                          (variant) => Padding(
+                            padding: const EdgeInsets.only(bottom: 6),
+                            child: GestureDetector(
+                              onTap: () =>
+                                  _toggleSelection(serviceId, variant['id']),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 4,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: _isSelected(serviceId, variant['id'])
+                                      ? const Color(
+                                          0xFFFF6B8B,
+                                        ).withValues(alpha: 0.1)
+                                      : Colors.transparent,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: _isSelected(serviceId, variant['id'])
+                                        ? const Color(0xFFFF6B8B)
+                                        : Colors.transparent,
+                                    width: 1,
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      _isSelected(serviceId, variant['id'])
+                                          ? Icons.check_circle
+                                          : Icons.circle_outlined,
+                                      size: 14,
+                                      color:
+                                          _isSelected(serviceId, variant['id'])
+                                          ? const Color(0xFFFF6B8B)
+                                          : Colors.grey[400],
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Expanded(
+                                      child: Text(
+                                        variant['display_text'] ?? 'Variant',
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          color:
+                                              _isSelected(
+                                                serviceId,
+                                                variant['id'],
+                                              )
+                                              ? const Color(0xFFFF6B8B)
+                                              : Colors.grey[700],
+                                          fontWeight:
+                                              _isSelected(
+                                                serviceId,
+                                                variant['id'],
+                                              )
+                                              ? FontWeight.w500
+                                              : FontWeight.normal,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        )
+                        .toList(),
+                  ),
                 ),
               ),
             ],
           ),
         ),
-        GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: crossAxisCount,
-            childAspectRatio: isSmallScreen ? 1.2 : 1.5,
-            crossAxisSpacing: 10,
-            mainAxisSpacing: 10,
-          ),
-          itemCount: services.length,
-          itemBuilder: (context, index) {
-            final service = services[index];
-            final isSelected = _selectedServiceIds.contains(service['id']);
+      );
+    }
+  }
 
-            return InkWell(
-              onTap: () => _toggleService(service),
-              borderRadius: BorderRadius.circular(12),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: isSelected
-                      ? const Color(0xFFFF6B8B).withValues(alpha: 0.05)
-                      : Colors.white,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: isSelected
-                        ? const Color(0xFFFF6B8B)
-                        : Colors.grey[300]!,
-                    width: isSelected ? 2 : 1,
-                  ),
-                ),
-                child: Stack(
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.all(8),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            service['icon'],
-                            color: isSelected
-                                ? const Color(0xFFFF6B8B)
-                                : Colors.grey[600],
-                            size: isSmallScreen ? 24 : 28,
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            service['name'],
-                            style: TextStyle(
-                              fontSize: isSmallScreen ? 11 : 12,
-                              fontWeight: isSelected
-                                  ? FontWeight.bold
-                                  : FontWeight.normal,
-                              color: isSelected
-                                  ? const Color(0xFFFF6B8B)
-                                  : Colors.grey[800],
-                            ),
-                            textAlign: TextAlign.center,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          Text(
-                            'Rs. ${service['price']}',
-                            style: TextStyle(
-                              fontSize: isSmallScreen ? 9 : 10,
-                              color: isSelected
-                                  ? const Color(0xFFFF6B8B)
-                                  : Colors.grey[600],
-                            ),
-                          ),
-                          if (service['duration'] != null)
-                            Text(
-                              '${service['duration']} min',
-                              style: TextStyle(
-                                fontSize: isSmallScreen ? 8 : 9,
-                                color: isSelected
-                                    ? const Color(0xFFFF6B8B).withValues(alpha: 0.8)
-                                    : Colors.grey[500],
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                    if (isSelected)
-                      Positioned(
-                        top: 4,
-                        right: 4,
-                        child: Container(
-                          padding: const EdgeInsets.all(2),
-                          decoration: const BoxDecoration(
-                            color: Color(0xFFFF6B8B),
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(
-                            Icons.check,
-                            color: Colors.white,
-                            size: 12,
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            );
-          },
+  Widget _buildVariantTile(String serviceId, Map<String, dynamic> variant) {
+    final isSelected = _isSelected(serviceId, variant['id']);
+
+    return GestureDetector(
+      onTap: () => _toggleSelection(serviceId, variant['id']),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? const Color(0xFFFF6B8B).withValues(alpha: 0.1)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[300]!,
+            width: isSelected ? 1.5 : 1,
+          ),
         ),
-        const SizedBox(height: 20),
-      ],
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: isSelected
+                    ? const Color(0xFFFF6B8B).withValues(alpha: 0.2)
+                    : Colors.grey[100],
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                variant['gender_original'] == 'male'
+                    ? Icons.male
+                    : variant['gender_original'] == 'female'
+                    ? Icons.female
+                    : Icons.people,
+                color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[600],
+                size: 14,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    variant['display_text'] ??
+                        '${variant['gender_name']} - ${variant['age_category_name']}',
+                    style: TextStyle(
+                      fontWeight: isSelected
+                          ? FontWeight.w600
+                          : FontWeight.normal,
+                      fontSize: 13,
+                      color: isSelected
+                          ? const Color(0xFFFF6B8B)
+                          : Colors.grey[800],
+                    ),
+                  ),
+                  Text(
+                    'Rs. ${variant['price']} • ${variant['duration']} min',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: isSelected
+                          ? const Color(0xFFFF6B8B).withValues(alpha: 0.8)
+                          : Colors.grey[600],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (isSelected)
+              const Icon(Icons.check_circle, color: Color(0xFFFF6B8B), size: 18)
+            else
+              Icon(Icons.circle_outlined, color: Colors.grey[400], size: 18),
+          ],
+        ),
+      ),
     );
   }
 
-  // ✅ Add Button Widget
   Widget _buildAddButton() {
     return Container(
       width: double.infinity,
-      padding: EdgeInsets.symmetric(
-        horizontal: _isWeb ? 0 : 16,
-        vertical: 8,
-      ),
+      padding: EdgeInsets.symmetric(horizontal: _isWeb ? 0 : 16, vertical: 8),
       child: ElevatedButton(
-        onPressed: _isLoading ? null : _addBarberToSalon,
+        onPressed: _isLoading ? null : _addBarber,
         style: ElevatedButton.styleFrom(
           backgroundColor: const Color(0xFFFF6B8B),
           foregroundColor: Colors.white,
-          minimumSize: Size(_isWeb ? 400 : double.infinity, 54),
+          minimumSize: Size(_isWeb ? 400 : double.infinity, _isWeb ? 60 : 54),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
           ),
-          elevation: 2,
+          elevation: 4,
         ),
         child: _isLoading
             ? const SizedBox(
@@ -1788,5 +2251,6 @@ class _AddBarberScreenState extends State<AddBarberScreen> with RouteAware {  //
   }
 }
 
-// 🔥 RouteObserver for route awareness
-final RouteObserver<ModalRoute<void>> routeObserver = RouteObserver<ModalRoute<void>>();
+// RouteObserver for route awareness
+final RouteObserver<ModalRoute<void>> routeObserver =
+    RouteObserver<ModalRoute<void>>();

@@ -515,25 +515,39 @@ class SessionManager {
     }
   }
 
-  // Save current selected role
+  // 🔥 FIXED: Save current selected role - MOST IMPORTANT FUNCTION
   static Future<void> saveCurrentRole(String? role) async {
     try {
-      debugPrint('💾 saveCurrentRole called with: $role');
+      debugPrint('💾 ===== saveCurrentRole called =====');
+      debugPrint('💾 Role to save: $role');
+      
+      final email = await getCurrentUserEmail();
+      debugPrint('💾 Current user email: $email');
       
       if (role == null) {
         await _prefs.remove(_keyCurrentRole);
         debugPrint('✅ Cleared current role');
       } else {
-        final email = await getCurrentUserEmail();
-        debugPrint('💾 Saving current role: $role for user: $email');
+        // Check if user has this role
+        if (email != null) {
+          final userRoles = await getUserRoles(email);
+          debugPrint('💾 User roles from storage: $userRoles');
+          
+          if (!userRoles.contains(role)) {
+            debugPrint('⚠️ Warning: User does not have role: $role');
+            debugPrint('💾 Available roles: $userRoles');
+          }
+        }
         
+        // Save to SharedPreferences
         await _prefs.setString(_keyCurrentRole, role);
+        debugPrint('✅ Saved current role to SharedPreferences: $role');
         
+        // Verify it was saved
         final savedRole = _prefs.getString(_keyCurrentRole);
         debugPrint('✅ Verified saved role: $savedRole');
         
-        appState.refreshState(silent: true);
-        
+        // Update available profiles with last_used
         if (email != null) {
           final profiles = await getAvailableProfiles();
           final updatedProfiles = profiles.map((p) {
@@ -543,18 +557,37 @@ class SessionManager {
             return p;
           }).toList();
           await saveAvailableProfiles(updatedProfiles);
+          debugPrint('✅ Updated last_used for role: $role');
         }
+        
+        // Refresh app state
+        appState.refreshState(silent: true);
+        debugPrint('✅ AppState refreshed');
       }
+      
+      debugPrint('💾 ===== saveCurrentRole completed =====');
     } catch (e) {
       debugPrint('❌ Error saving current role: $e');
     }
   }
 
-  // Get current selected role
+  // 🔥 FIXED: Get current selected role
   static Future<String?> getCurrentRole() async {
     try {
       final role = _prefs.getString(_keyCurrentRole);
-      debugPrint('📖 Getting current role: $role');
+      debugPrint('📖 Getting current role from SharedPreferences: $role');
+      
+      // Verify with user roles
+      final email = await getCurrentUserEmail();
+      if (email != null && role != null) {
+        final userRoles = await getUserRoles(email);
+        if (!userRoles.contains(role)) {
+          debugPrint('⚠️ Stored role $role not in user roles $userRoles, clearing');
+          await _prefs.remove(_keyCurrentRole);
+          return null;
+        }
+      }
+      
       return role;
     } catch (e) {
       debugPrint('❌ Error getting current role: $e');
@@ -582,16 +615,6 @@ class SessionManager {
       
       // Save as current role
       await saveCurrentRole(newRole);
-      
-      // Update profiles with last_used
-      final profiles = await getAvailableProfiles();
-      final updatedProfiles = profiles.map((p) {
-        if (p['email'] == email && p['role'] == newRole) {
-          return {...p, 'last_used': DateTime.now().toIso8601String()};
-        }
-        return p;
-      }).toList();
-      await saveAvailableProfiles(updatedProfiles);
       
       debugPrint('✅ Successfully updated user role to: $newRole');
     } catch (e) {
