@@ -15,7 +15,11 @@ import 'package:flutter_application_1/screens/authantication/command/reset_passw
 import 'package:flutter_application_1/screens/authantication/command/role_selector_screen.dart';
 import 'package:flutter_application_1/screens/owner/add_barber_screen.dart';
 import 'package:flutter_application_1/screens/owner/add_category_screen.dart';
+import 'package:flutter_application_1/screens/owner/barber_leaves_screen.dart';
+import 'package:flutter_application_1/screens/owner/barber_list_screen.dart';
+import 'package:flutter_application_1/screens/owner/barber_schedule_screen.dart';
 import 'package:flutter_application_1/screens/owner/create_salon.dart';
+import 'package:flutter_application_1/screens/owner/edit_barber_services_screen.dart';
 import 'package:flutter_application_1/services/notification_service.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -374,7 +378,9 @@ GoRouter _createRouter() {
             // 🔥 FIX: Check if current role is valid
             if (appState.currentRole != null) {
               final targetRoute = '/${appState.currentRole}';
-              debugPrint('✅ Has current role: ${appState.currentRole} → $targetRoute');
+              debugPrint(
+                '✅ Has current role: ${appState.currentRole} → $targetRoute',
+              );
               return targetRoute;
             }
 
@@ -458,7 +464,8 @@ GoRouter _createRouter() {
               return null;
             } else {
               // Wrong dashboard - redirect to correct one
-              final correctPath = '/${appState.currentRole ?? appState.roles.first}';
+              final correctPath =
+                  '/${appState.currentRole ?? appState.roles.first}';
               debugPrint('⚠️ Wrong dashboard - redirecting to $correctPath');
               return correctPath;
             }
@@ -534,11 +541,7 @@ GoRouter _createRouter() {
           final userId =
               extra?['userId'] as String? ?? appState.currentUser?.id ?? '';
 
-          return RoleSelectorScreen(
-            roles: roles,
-            email: email,
-            userId: userId,
-          );
+          return RoleSelectorScreen(roles: roles, email: email, userId: userId);
         },
       ),
       GoRoute(
@@ -586,10 +589,7 @@ GoRouter _createRouter() {
         path: '/about',
         builder: (_, __) => const HelpScreen(screenType: 'about'),
       ),
-      GoRoute(
-        path: '/clear-data',
-        builder: (_, __) => const ClearDataScreen(),
-      ),
+      GoRoute(path: '/clear-data', builder: (_, __) => const ClearDataScreen()),
       GoRoute(
         path: '/data-consent',
         builder: (context, state) {
@@ -648,6 +648,40 @@ GoRouter _createRouter() {
         path: '/owner/salon/create',
         name: 'createSalon',
         builder: (context, state) => const CreateSalonScreen(),
+      ),
+      // Barber Schedule
+      GoRoute(
+        path: '/owner/barber-schedule',
+        builder: (context, state) {
+          final salonId = state.uri.queryParameters['salonId'];
+          return BarberScheduleScreen(salonId: salonId);
+        },
+      ),
+
+      // Barber Leaves
+      GoRoute(
+        path: '/owner/barber-leaves',
+        builder: (context, state) {
+          final salonId = state.uri.queryParameters['salonId'];
+          return BarberLeavesScreen(salonId: salonId);
+        },
+      ),
+
+      // Barber List
+      GoRoute(
+        path: '/owner/barbers',
+        builder: (context, state) {
+          final salonId = state.uri.queryParameters['salonId'];
+          return BarberListScreen(salonId: salonId);
+        },
+      ),
+      GoRoute(
+        path: '/owner/edit-barber-services',
+        builder: (context, state) {
+          final barberId = state.uri.queryParameters['barberId']!;
+          final salonId = state.uri.queryParameters['salonId']!;
+          return EditBarberServicesScreen(barberId: barberId, salonId: salonId);
+        },
       ),
     ],
   );
