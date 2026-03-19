@@ -34,12 +34,7 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
   // Store variant details
   Map<int, Map<String, dynamic>> _variantDetailsMap = {};
 
-  // Store service info
-  Map<int, Map<String, dynamic>> _serviceInfoMap = {};
-
-  // Categories
-  List<Map<String, dynamic>> _categories = [];
-
+ 
   // Salon barber ID
   int? _salonBarberId;
 
@@ -80,15 +75,14 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
       }
 
       // Load categories
-      final categoriesResponse = await supabase
-          .from('categories')
-          .select('id, name, icon_name')
-          .eq('is_active', true)
-          .order('display_order');
+      // await supabase
+      //     .from('categories')
+      //     .select('id, name, icon_name')
+      //     .eq('is_active', true)
+      //     .order('display_order');
 
-      _categories = List<Map<String, dynamic>>.from(categoriesResponse);
 
-      // 🔥 STEP 1: Get barber's current active services (with or without variants)
+      // Get barber's current active services
       final currentServices = await supabase
           .from('barber_services')
           .select('''
@@ -102,7 +96,6 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
 
       debugPrint('📋 Current services from DB: $currentServices');
 
-      // If barber has no services, show empty state
       if (currentServices.isEmpty) {
         setState(() {
           _services = [];
@@ -111,7 +104,7 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
         return;
       }
 
-      // 🔥 STEP 2: Separate services with and without variants
+      // Separate services with and without variants
       final servicesWithVariants = currentServices
           .where((s) => s['variant_id'] != null)
           .toList();
@@ -120,16 +113,13 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
           .where((s) => s['variant_id'] == null)
           .toList();
 
-      debugPrint('📋 Services with variants: ${servicesWithVariants.length}');
-      debugPrint('📋 Services without variants: ${servicesWithoutVariants.length}');
-
-      // 🔥 STEP 3: Get unique service IDs
+      // Get unique service IDs
       final allServiceIds = currentServices
           .map((s) => s['service_id'] as int)
           .toSet()
           .toList();
 
-      // 🔥 STEP 4: Load service details
+      // Load service details
       Map<int, Map<String, dynamic>> serviceInfoMap = {};
       for (int serviceId in allServiceIds) {
         final service = await supabase
@@ -157,7 +147,7 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
         }
       }
 
-      // 🔥 STEP 5: Process services with variants
+      // Process services with variants
       final variantIds = servicesWithVariants
           .map((s) => s['variant_id'] as int?)
           .whereType<int>()
@@ -207,17 +197,16 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
             'age_name': age['display_name'],
             'display_text': '${gender['display_name']} • ${age['display_name']}',
             'has_variant': true,
-            'full_text': '${serviceInfo['name']} - ${gender['display_name']} ${age['display_name']}',
           };
         }
       }
 
-      // 🔥 STEP 6: Process services without variants
+      // Process services without variants
       for (var service in servicesWithoutVariants) {
         final serviceId = service['service_id'] as int;
         final serviceInfo = serviceInfoMap[serviceId] ?? {};
         
-        // Create a special entry for service without variant
+        // Create entry for service without variant
         final fakeId = -serviceId; // Negative ID to avoid conflict
         variantDetailsMap[fakeId] = {
           'id': fakeId,
@@ -226,17 +215,14 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
           'category_name': serviceInfo['category_name'] ?? 'other',
           'price': 0,
           'duration': 0,
-          'gender_name': '',
-          'age_name': '',
-          'display_text': 'Full Service',
           'has_variant': false,
-          'full_text': serviceInfo['name'] ?? 'Unknown Service',
+          'is_simple_service': true,
         };
       }
 
       _variantDetailsMap = variantDetailsMap;
 
-      // 🔥 STEP 7: Group by service for display
+      // Group by service for display
       final Map<int, List<Map<String, dynamic>>> variantsByService = {};
       for (var variant in variantDetailsMap.values) {
         final serviceId = variant['service_id'] as int;
@@ -246,7 +232,7 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
         variantsByService[serviceId]!.add(variant);
       }
 
-      // 🔥 STEP 8: Build services list
+      // Build services list
       final List<Map<String, dynamic>> processedServices = [];
       for (int serviceId in allServiceIds) {
         final variants = variantsByService[serviceId] ?? [];
@@ -262,6 +248,7 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
         }
       }
 
+      // Sort services by name within each category (will be done in UI)
       setState(() {
         _services = processedServices;
       });
@@ -362,7 +349,6 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
         // Update services list
         final updatedServices = <Map<String, dynamic>>[];
         for (var service in _services) {
-          final serviceId = service['id'] as int;
           final remainingVariants = service['variants']
               .where((v) => !_selectedForDelete.contains(v['id']))
               .toList();
@@ -372,6 +358,7 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
               ...service,
               'variants': remainingVariants,
               'variantCount': remainingVariants.length,
+              'hasVariants': remainingVariants.any((v) => v['has_variant'] == true),
             });
           }
         }
@@ -405,12 +392,8 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
     }
   }
 
-  // 🔥 NEW: Add service method
+  // Add service method
   Future<void> _addService() async {
-    // Navigate to service selection screen
-    // You can create a new screen for service selection or show a dialog
-    // For now, I'll show a simple dialog to select service type
-    
     final result = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -424,7 +407,6 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
           ElevatedButton(
             onPressed: () {
               Navigator.pop(context, true);
-              // Navigate to add service with variants
               _navigateToAddServiceWithVariants();
             },
             style: ElevatedButton.styleFrom(
@@ -438,33 +420,30 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
     );
 
     if (result == true) {
-      // Handle after adding service (refresh data)
       await _loadData();
     }
   }
 
-  // 🔥 NEW: Navigate to add service with variants
-void _navigateToAddServiceWithVariants() {
-  // Navigate to add service screen
-  context.push(
-    '/owner/salon/${widget.salonId}/barber/${widget.barberId}/add-service',
-    extra: {
-      'salonBarberId': _salonBarberId,
-      'barberName': _barber['full_name'],
-    },
-  ).then((result) {
-    // When coming back, refresh data if result is true (services were added)
-    if (result == true) {
-      _loadData();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Services added successfully!'),
-          backgroundColor: Colors.green,
-        ),
-      );
-    }
-  });
-}
+  // Navigate to add service with variants
+  void _navigateToAddServiceWithVariants() {
+    context.push(
+      '/owner/salon/${widget.salonId}/barber/${widget.barberId}/add-service',
+      extra: {
+        'salonBarberId': _salonBarberId,
+        'barberName': _barber['full_name'],
+      },
+    ).then((result) {
+      if (result == true) {
+        _loadData();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Services added successfully!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    });
+  }
 
   void _toggleSelectMode() {
     setState(() {
@@ -503,7 +482,7 @@ void _navigateToAddServiceWithVariants() {
       case 'grooming': return Icons.face_retouching_natural;
       case 'wellness': return Icons.spa;
       case 'nails': return Icons.handshake;
-      default: return Icons.build_circle_outlined;
+      default: return Icons.category;
     }
   }
 
@@ -558,7 +537,6 @@ void _navigateToAddServiceWithVariants() {
               onPressed: _isDeleting ? null : _deleteSelectedVariants,
               tooltip: 'Delete Selected',
             ),
-          // 🔥 NEW: Add service button in app bar
           IconButton(
             icon: const Icon(Icons.add),
             onPressed: _addService,
@@ -571,124 +549,10 @@ void _navigateToAddServiceWithVariants() {
               child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
             )
           : _services.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.info_outline, size: 64, color: Colors.grey[400]),
-                      const SizedBox(height: 16),
-                      const Text(
-                        'No services found for this barber',
-                        style: TextStyle(fontSize: 16, color: Colors.grey),
-                      ),
-                      const SizedBox(height: 24),
-                      // 🔥 NEW: Add service button in empty state
-                      ElevatedButton.icon(
-                        onPressed: _addService,
-                        icon: const Icon(Icons.add),
-                        label: const Text('Add New Service'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFFF6B8B),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 24,
-                            vertical: 12,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                )
+              ? _buildEmptyState()
               : Column(
                   children: [
-                    // Barber Info Card
-                    Container(
-                      margin: EdgeInsets.all(padding),
-                      padding: EdgeInsets.all(padding),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(12),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.grey.withValues(alpha: 0.1),
-                            blurRadius: 8,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      child: Row(
-                        children: [
-                          CircleAvatar(
-                            radius: 30,
-                            backgroundColor: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
-                            backgroundImage: _barber['avatar_url'] != null
-                                ? NetworkImage(_barber['avatar_url'])
-                                : null,
-                            child: _barber['avatar_url'] == null
-                                ? Text(
-                                    _barber['full_name']?[0]?.toUpperCase() ?? '?',
-                                    style: const TextStyle(
-                                      color: Color(0xFFFF6B8B),
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 24,
-                                    ),
-                                  )
-                                : null,
-                          ),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  _barber['full_name'] ?? 'Unknown Barber',
-                                  style: const TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                Text(
-                                  _barber['email'] ?? '',
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    color: Colors.grey[600],
-                                  ),
-                                ),
-                                if (_isSelectMode) ...[
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    '${_selectedForDelete.length} selected',
-                                    style: const TextStyle(
-                                      fontSize: 12,
-                                      color: Color(0xFFFF6B8B),
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                ],
-                              ],
-                            ),
-                          ),
-                          // 🔥 NEW: Quick add button in barber card
-                          if (!_isSelectMode)
-                            Container(
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: IconButton(
-                                icon: const Icon(
-                                  Icons.add_circle_outline,
-                                  color: Color(0xFFFF6B8B),
-                                ),
-                                onPressed: _addService,
-                                tooltip: 'Add New Service',
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-
-                    // Services List
+                    _buildBarberInfoCard(padding),
                     Expanded(
                       child: _buildServicesList(padding),
                     ),
@@ -697,10 +561,132 @@ void _navigateToAddServiceWithVariants() {
     );
   }
 
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.info_outline, size: 64, color: Colors.grey[400]),
+          const SizedBox(height: 16),
+          const Text(
+            'No services found for this barber',
+            style: TextStyle(fontSize: 16, color: Colors.grey),
+          ),
+          const SizedBox(height: 24),
+          ElevatedButton.icon(
+            onPressed: _addService,
+            icon: const Icon(Icons.add),
+            label: const Text('Add New Service'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFFF6B8B),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(
+                horizontal: 24,
+                vertical: 12,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBarberInfoCard(double padding) {
+    return Container(
+      margin: EdgeInsets.all(padding),
+      padding: EdgeInsets.all(padding),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withValues(alpha: 0.1),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 30,
+            backgroundColor: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+            backgroundImage: _barber['avatar_url'] != null
+                ? NetworkImage(_barber['avatar_url'])
+                : null,
+            child: _barber['avatar_url'] == null
+                ? Text(
+                    _barber['full_name']?[0]?.toUpperCase() ?? '?',
+                    style: const TextStyle(
+                      color: Color(0xFFFF6B8B),
+                      fontWeight: FontWeight.bold,
+                      fontSize: 24,
+                    ),
+                  )
+                : null,
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _barber['full_name'] ?? 'Unknown Barber',
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                Text(
+                  _barber['email'] ?? '',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.grey[600],
+                  ),
+                ),
+                if (_isSelectMode) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    '${_selectedForDelete.length} selected',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Color(0xFFFF6B8B),
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          if (!_isSelectMode)
+            Container(
+              decoration: BoxDecoration(
+                color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: IconButton(
+                icon: const Icon(
+                  Icons.add_circle_outline,
+                  color: Color(0xFFFF6B8B),
+                ),
+                onPressed: _addService,
+                tooltip: 'Add New Service',
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildServicesList(double padding) {
-    // Group services by category
+    // Group services by category and sort
     final Map<String, List<Map<String, dynamic>>> groupedServices = {};
-    for (var service in _services) {
+    
+    // Sort services by name first
+    final sortedServices = List<Map<String, dynamic>>.from(_services);
+    sortedServices.sort((a, b) => (a['name'] as String).compareTo(b['name'] as String));
+    
+    for (var service in sortedServices) {
       final category = service['category_name'] as String;
       if (!groupedServices.containsKey(category)) {
         groupedServices[category] = [];
@@ -708,11 +694,14 @@ void _navigateToAddServiceWithVariants() {
       groupedServices[category]!.add(service);
     }
 
+    // Sort categories by name
+    final sortedCategories = groupedServices.keys.toList()..sort();
+
     return ListView.builder(
       padding: EdgeInsets.all(padding),
-      itemCount: groupedServices.length,
+      itemCount: sortedCategories.length,
       itemBuilder: (context, index) {
-        final category = groupedServices.keys.elementAt(index);
+        final category = sortedCategories[index];
         final services = groupedServices[category]!;
         final categoryIcon = _getCategoryIcon(category);
         final categoryColor = _getCategoryColor(category);
@@ -744,22 +733,25 @@ void _navigateToAddServiceWithVariants() {
                   fontSize: 16,
                 ),
               ),
-              subtitle: Text('${services.length} services'),
+              subtitle: Text('${services.length} service${services.length > 1 ? 's' : ''}'),
               children: services.map((service) {
                 final variants = service['variants'] as List;
-                final hasVariants = service['hasVariants'] ?? false;
+                final simpleServices = variants.where((v) => !v['has_variant']).toList();
+                final variantServices = variants.where((v) => v['has_variant']).toList();
 
-                return Container(
-                  margin: const EdgeInsets.only(left: 16, right: 16, bottom: 8),
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Colors.grey[200]!),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: variants.length == 1 && !hasVariants
-                      // Single service without variants - show as simple tile
-                      ? _buildSimpleServiceTile(service, variants.first)
-                      // Multiple variants - show expandable tile
-                      : _buildVariantServiceTile(service, variants),
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Simple services (without variants) - show as simple tiles
+                    if (simpleServices.isNotEmpty)
+                      ...simpleServices.map((variant) => 
+                        _buildSimpleServiceTile(service, variant)
+                      ),
+                    
+                    // Services with variants - show expandable section
+                    if (variantServices.isNotEmpty)
+                      _buildVariantServiceTile(service, variantServices),
+                  ],
                 );
               }).toList(),
             ),
@@ -773,8 +765,9 @@ void _navigateToAddServiceWithVariants() {
     final isSelected = _selectedForDelete.contains(variant['id']);
     
     return Container(
+      margin: const EdgeInsets.only(left: 16, right: 16, bottom: 8, top: 4),
       decoration: BoxDecoration(
-        color: isSelected ? Colors.red.withValues(alpha: 0.05) : null,
+        color: isSelected ? Colors.red.withValues(alpha: 0.05) : Colors.white,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
           color: isSelected ? Colors.red : Colors.grey[300]!,
@@ -785,7 +778,7 @@ void _navigateToAddServiceWithVariants() {
         onTap: _isSelectMode ? () => _toggleSelection(variant['id']) : null,
         borderRadius: BorderRadius.circular(8),
         child: Padding(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
           child: Row(
             children: [
               if (_isSelectMode) ...[
@@ -812,19 +805,6 @@ void _navigateToAddServiceWithVariants() {
                 ),
                 const SizedBox(width: 12),
               ],
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.grey[100],
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.build_circle_outlined,
-                  color: Colors.grey,
-                  size: 20,
-                ),
-              ),
-              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -833,20 +813,38 @@ void _navigateToAddServiceWithVariants() {
                       service['name'],
                       style: const TextStyle(
                         fontWeight: FontWeight.w600,
-                        fontSize: 16,
+                        fontSize: 15,
                       ),
                     ),
                     const SizedBox(height: 4),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: Colors.grey[200],
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: const Text(
-                        'No variants',
-                        style: TextStyle(fontSize: 10, color: Colors.grey),
-                      ),
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.green[50],
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            'Full Service',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.green[700],
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Icon(Icons.circle, size: 4, color: Colors.grey[400]),
+                        const SizedBox(width: 8),
+                        Text(
+                          'No variants',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -859,132 +857,174 @@ void _navigateToAddServiceWithVariants() {
   }
 
   Widget _buildVariantServiceTile(Map<String, dynamic> service, List variants) {
+    final serviceSelectedCount = variants
+        .where((v) => _selectedForDelete.contains(v['id']))
+        .length;
+
     return Theme(
       data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-      child: ExpansionTile(
-        title: Row(
-          children: [
-            Expanded(
-              child: Text(
-                service['name'],
-                style: const TextStyle(
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-            if (!_isSelectMode)
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: 2,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.grey[200],
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  '${variants.length}',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ),
-          ],
+      child: Container(
+        margin: const EdgeInsets.only(left: 16, right: 16, bottom: 8),
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.grey[200]!),
+          borderRadius: BorderRadius.circular(8),
         ),
-        subtitle: !_isSelectMode ? Text('${variants.length} variants') : null,
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              children: variants.map((variant) {
-                final isSelected = _selectedForDelete.contains(variant['id']);
-                return Container(
-                  margin: const EdgeInsets.only(bottom: 8),
+        child: ExpansionTile(
+          tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          title: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  service['name'],
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 15,
+                  ),
+                ),
+              ),
+              if (_isSelectMode && serviceSelectedCount > 0)
+                Container(
+                  margin: const EdgeInsets.only(right: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                   decoration: BoxDecoration(
-                    color: isSelected ? Colors.red.withValues(alpha: 0.05) : null,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: isSelected ? Colors.red : Colors.grey[300]!,
-                      width: isSelected ? 1.5 : 1,
+                    color: Colors.red,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    '$serviceSelectedCount',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
                     ),
                   ),
-                  child: InkWell(
-                    onTap: _isSelectMode
-                        ? () => _toggleSelection(variant['id'])
-                        : null,
-                    borderRadius: BorderRadius.circular(8),
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Row(
-                        children: [
-                          if (_isSelectMode) ...[
-                            Container(
-                              width: 24,
-                              height: 24,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                  color: isSelected ? Colors.red : Colors.grey[400]!,
-                                  width: 2,
-                                ),
-                                color: isSelected ? Colors.red : Colors.transparent,
-                              ),
-                              child: isSelected
-                                  ? const Center(
-                                      child: Icon(
-                                        Icons.check,
-                                        color: Colors.white,
-                                        size: 16,
-                                      ),
-                                    )
-                                  : null,
-                            ),
-                            const SizedBox(width: 12),
-                          ],
-                          Container(
-                            padding: const EdgeInsets.all(6),
-                            decoration: BoxDecoration(
-                              color: Colors.grey[100],
-                              shape: BoxShape.circle,
-                            ),
-                            child: Icon(
-                              variant['gender_name'] == 'Male' ? Icons.male :
-                              variant['gender_name'] == 'Female' ? Icons.female : Icons.people,
-                              color: Colors.grey[600],
-                              size: 16,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  variant['display_text'],
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                                Text(
-                                  'Rs. ${variant['price']} • ${variant['duration']} min',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.grey[600],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
+                ),
+              if (!_isSelectMode)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.blue[50],
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    '${variants.length} variant${variants.length > 1 ? 's' : ''}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.blue[700],
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
-                );
-              }).toList(),
+                ),
+            ],
+          ),
+          subtitle: Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              'Click to view variants',
+              style: TextStyle(
+                fontSize: 11,
+                color: Colors.grey[500],
+              ),
             ),
           ),
-        ],
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              child: Column(
+                children: variants.map((variant) {
+                  final isSelected = _selectedForDelete.contains(variant['id']);
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    decoration: BoxDecoration(
+                      color: isSelected ? Colors.red.withValues(alpha: 0.05) : null,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: isSelected ? Colors.red : Colors.grey[300]!,
+                        width: isSelected ? 1.5 : 1,
+                      ),
+                    ),
+                    child: InkWell(
+                      onTap: _isSelectMode
+                          ? () => _toggleSelection(variant['id'])
+                          : null,
+                      borderRadius: BorderRadius.circular(8),
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Row(
+                          children: [
+                            if (_isSelectMode) ...[
+                              Container(
+                                width: 24,
+                                height: 24,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: isSelected ? Colors.red : Colors.grey[400]!,
+                                    width: 2,
+                                  ),
+                                  color: isSelected ? Colors.red : Colors.transparent,
+                                ),
+                                child: isSelected
+                                    ? const Center(
+                                        child: Icon(
+                                          Icons.check,
+                                          color: Colors.white,
+                                          size: 16,
+                                        ),
+                                      )
+                                    : null,
+                              ),
+                              const SizedBox(width: 12),
+                            ],
+                            Container(
+                              padding: const EdgeInsets.all(6),
+                              decoration: BoxDecoration(
+                                color: Colors.grey[100],
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(
+                                variant['gender_name'] == 'Male' ? Icons.male :
+                                variant['gender_name'] == 'Female' ? Icons.female : Icons.people,
+                                color: Colors.grey[600],
+                                size: 16,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    variant['display_text'],
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    'Rs. ${variant['price']} • ${variant['duration']} min',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.grey[600],
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
