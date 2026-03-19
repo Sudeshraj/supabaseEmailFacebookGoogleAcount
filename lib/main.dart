@@ -14,6 +14,7 @@ import 'package:flutter_application_1/screens/authantication/command/reset_passw
 import 'package:flutter_application_1/screens/authantication/command/reset_password_request.dart';
 import 'package:flutter_application_1/screens/authantication/command/role_selector_screen.dart';
 import 'package:flutter_application_1/screens/owner/add_barber_screen.dart';
+import 'package:flutter_application_1/screens/owner/add_barber_service_screen.dart';
 import 'package:flutter_application_1/screens/owner/add_category_screen.dart';
 import 'package:flutter_application_1/screens/owner/barber_leaves_screen.dart';
 import 'package:flutter_application_1/screens/owner/barber_list_screen.dart';
@@ -636,6 +637,25 @@ GoRouter _createRouter() {
         builder: (context, state) {
           final refresh = state.uri.queryParameters['refresh'] == 'true';
           return AddBarberScreen(refresh: refresh);
+        },
+      ),
+      GoRoute(
+        path: '/owner/salon/:salonId/barber/:barberId/add-service',
+        name: 'addBarberService',
+        pageBuilder: (context, state) {
+          final salonId = state.pathParameters['salonId']!;
+          final barberId = state.pathParameters['barberId']!;
+          final extra = state.extra as Map<String, dynamic>?;
+
+          return MaterialPage(
+            key: state.pageKey,
+            child: AddBarberServiceScreen(
+              salonId: salonId,
+              barberId: barberId,
+              salonBarberId: extra?['salonBarberId'],
+              barberName: extra?['barberName'],
+            ),
+          );
         },
       ),
       GoRoute(
