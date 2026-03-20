@@ -14,6 +14,8 @@ import 'package:flutter_application_1/widgets/dashboard_stat_card.dart';
 import 'package:flutter_application_1/widgets/booking_tile.dart';
 import 'package:flutter_application_1/widgets/section_header.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class CustomerDashboard extends StatefulWidget {
   const CustomerDashboard({super.key});
@@ -29,86 +31,234 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
   final NotificationService _notificationService = NotificationService();
   final PermissionService _permissionService = PermissionService();
   final PermissionManager _permissionManager = PermissionManager();
+  final supabase = Supabase.instance.client;
 
   bool _hasPermission = false;
   bool _showPermissionCard = false;
   bool _isLoading = true;
 
-  // Customer Dashboard Data
-  int _upcomingBookings = 2;
-  final int _completedBookings = 15;
-  int _cancelledBookings = 1;
-  final int _loyaltyPoints = 450;
-  final int _totalSpent = 24500;
+  // Customer Data
   String _customerName = 'Guest User';
   String _customerEmail = '';
   String? _customerImage;
+  String? _customerId;
 
-  // Favorite barbers/services
-  final List<Map<String, dynamic>> _favoriteBarbers = [
-    {'name': 'Kamal', 'specialty': 'Hair Cut Specialist', 'rating': 4.9},
-    {'name': 'Sunil', 'specialty': 'Facial Expert', 'rating': 4.8},
-  ];
+  // Booking Statistics
+  int _upcomingBookings = 0;
+  int _pendingBookings = 0;
+  int _completedBookings = 0;
+  int _cancelledBookings = 0;
+  int _totalSpent = 0;
+  int _loyaltyPoints = 0;
 
-  // Special offers
-  final List<Map<String, dynamic>> _offers = [
-    {
-      'title': '20% Off',
-      'description': 'On your next hair cut',
-      'code': 'HAIR20',
-    },
-    {'title': 'Buy 1 Get 1', 'description': 'On facials', 'code': 'FACIALB1G1'},
-  ];
+  // VIP Bookings
+  int _vipBookings = 0;
+  int _pendingVipBookings = 0;
+  List<Map<String, dynamic>> _vipRequests = [];
+
+  // Upcoming Appointments
+  List<Map<String, dynamic>> _upcomingAppointments = [];
+
+  // Favorite Barbers
+  List<Map<String, dynamic>> _favoriteBarbers = [];
+
+  // Special Offers
+  List<Map<String, dynamic>> _offers = [];
 
   @override
   void initState() {
     super.initState();
-
-    // Load customer data
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      final role = await SessionManager.getCurrentRole();
-      final appStateRole = appState.currentRole;
-      debugPrint('🔍 CustomerDashboard - SessionManager role: $role');
-      debugPrint('🔍 CustomerDashboard - AppState role: $appStateRole');
-
-      // Load customer name from session
-      try {
-        final email = await SessionManager.getCurrentUserEmail();
-        if (email != null && mounted) {
-          final profile = await SessionManager.getProfileByEmail(email);
-          if (profile != null) {
-            setState(() {
-              _customerName = profile['name'] ?? email.split('@').first;
-              _customerEmail = email;
-              _customerImage = profile['photo'];
-            });
-            debugPrint('✅ Loaded customer: $_customerName');
-          } else {
-            setState(() {
-              _customerName = email.split('@').first;
-              _customerEmail = email;
-            });
-          }
-        }
-      } catch (e) {
-        debugPrint('❌ Error loading customer data: $e');
-      }
-    });
-
-    _loadData();
+    _loadCustomerData();
+    _loadDashboardData();
     _setupNotificationListeners();
     debugPrint('🔄 CustomerDashboard initState completed');
   }
 
-  // 🔥 Load initial data
-  Future<void> _loadData() async {
+  // ==================== LOAD CUSTOMER DATA ====================
+  Future<void> _loadCustomerData() async {
+    try {
+      final user = supabase.auth.currentUser;
+      if (user == null) return;
+
+      _customerId = user.id;
+      _customerEmail = user.email ?? '';
+
+      // Get profile from database
+      final profile = await supabase
+          .from('profiles')
+          .select('full_name, avatar_url')
+          .eq('id', user.id)
+          .maybeSingle();
+
+      if (profile != null) {
+        setState(() {
+          _customerName = profile['full_name'] ?? user.email?.split('@').first ?? 'Guest User';
+          _customerImage = profile['avatar_url'];
+        });
+      } else {
+        setState(() {
+          _customerName = user.email?.split('@').first ?? 'Guest User';
+        });
+      }
+
+      debugPrint('✅ Loaded customer: $_customerName');
+    } catch (e) {
+      debugPrint('❌ Error loading customer data: $e');
+    }
+  }
+
+  // ==================== LOAD DASHBOARD DATA ====================
+  Future<void> _loadDashboardData() async {
     setState(() => _isLoading = true);
 
     try {
-      debugPrint('📊 Loading customer dashboard data...');
+      final user = supabase.auth.currentUser;
+      if (user == null) {
+        setState(() => _isLoading = false);
+        return;
+      }
 
+      // Get all appointments for this customer
+      final appointments = await supabase
+          .from('appointments')
+          .select('''
+            id,
+            booking_number,
+            appointment_date,
+            start_time,
+            end_time,
+            status,
+            is_vip,
+            vip_booking_id,
+            price,
+            queue_number,
+            queue_token,
+            barber_id,
+            service_id,
+            variant_id,
+            barbers:barber_id (
+              full_name,
+              avatar_url
+            ),
+            services (
+              name
+            ),
+            service_variants (
+              price,
+              duration,
+              genders (display_name),
+              age_categories (display_name)
+            )
+          ''')
+          .eq('customer_id', user.id)
+          .order('appointment_date', ascending: false);
+
+      // Calculate statistics
+      int upcoming = 0;
+      int pending = 0;
+      int completed = 0;
+      int cancelled = 0;
+      int vip = 0;
+      int pendingVip = 0;
+      int totalSpent = 0;
+      List<Map<String, dynamic>> upcomingList = [];
+
+      for (var apt in appointments) {
+        final status = apt['status'] as String;
+        final isVip = apt['is_vip'] == true;
+
+        // Count by status
+        if (status == 'confirmed' || status == 'pending') {
+          final dateStr = apt['appointment_date'] as String;
+          final date = DateTime.parse(dateStr);
+          if (date.isAfter(DateTime.now().subtract(const Duration(days: 1)))) {
+            upcoming++;
+            upcomingList.add(apt);
+          }
+        }
+
+        if (status == 'pending') pending++;
+        if (status == 'completed') {
+          completed++;
+          totalSpent += (apt['price'] as num?)?.toInt() ?? 0;
+        }
+        if (status == 'cancelled') cancelled++;
+
+        // VIP counts
+        if (isVip) {
+          vip++;
+          if (status == 'pending') pendingVip++;
+        }
+      }
+
+      // Get VIP booking requests
+      final vipRequests = await supabase
+          .from('vip_bookings')
+          .select('''
+            id,
+            booking_number,
+            event_date,
+            preferred_start_time,
+            status,
+            number_of_guests,
+            special_requirements,
+            vip_booking_types (
+              name,
+              priority_level
+            )
+          ''')
+          .eq('customer_id', user.id)
+          .order('created_at', ascending: false)
+          .limit(5);
+
+      // Calculate loyalty points (example: 10 points per 100 spent)
+      final points = (totalSpent / 10).round();
+
+      // Get favorite barbers (from appointments history)
+      final favoriteBarbers = await _getFavoriteBarbers(user.id);
+
+      // Sample offers (can be from database)
+      final offers = [
+        {
+          'title': '20% Off',
+          'description': 'On your next hair cut',
+          'code': 'HAIR20',
+          'expiry': '2024-12-31',
+          'image': '🎯',
+        },
+        {
+          'title': 'Buy 1 Get 1',
+          'description': 'On facials',
+          'code': 'FACIALB1G1',
+          'expiry': '2024-11-30',
+          'image': '💆',
+        },
+        {
+          'title': 'VIP Treatment',
+          'description': 'Free upgrade to VIP',
+          'code': 'VIPFREE',
+          'expiry': '2024-10-15',
+          'image': '👑',
+        },
+      ];
+
+      setState(() {
+        _upcomingBookings = upcoming;
+        _pendingBookings = pending;
+        _completedBookings = completed;
+        _cancelledBookings = cancelled;
+        _vipBookings = vip;
+        _pendingVipBookings = pendingVip;
+        _totalSpent = totalSpent;
+        _loyaltyPoints = points;
+        _upcomingAppointments = upcomingList.take(3).toList();
+        _vipRequests = List<Map<String, dynamic>>.from(vipRequests);
+        _favoriteBarbers = favoriteBarbers;
+        _offers = offers;
+      });
+
+      // Check notification permission
       _hasPermission = await _notificationService.hasPermission();
-
       if (!_hasPermission) {
         _showPermissionCard = await _permissionManager.shouldShowPermissionCard(
           'customer_dashboard',
@@ -117,51 +267,83 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
         _showPermissionCard = false;
       }
 
-      // TODO: Fetch real booking data from API/Firebase
-      // මෙතනදි අදාල customer ගේ bookings, points etc ගන්න
-
-      if (mounted) {
-        setState(() => _isLoading = false);
-        debugPrint('✅ Customer data loaded successfully');
-      }
+      debugPrint('✅ Dashboard data loaded: $upcoming upcoming, $vip VIP');
     } catch (e) {
-      debugPrint('❌ Error loading customer data: $e');
-      if (mounted) {
-        setState(() => _isLoading = false);
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error loading data: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      debugPrint('❌ Error loading dashboard data: $e');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  // 🔥 Setup notification listeners
+  // ==================== GET FAVORITE BARBERS ====================
+  Future<List<Map<String, dynamic>>> _getFavoriteBarbers(String customerId) async {
+    try {
+      // Get barbers with most completed appointments
+      final response = await supabase
+          .from('appointments')
+          .select('''
+            barber_id,
+            barbers:barber_id (
+              full_name,
+              avatar_url
+            ),
+            count
+          ''')
+          .eq('customer_id', customerId)
+          .eq('status', 'completed')
+          .order('count', ascending: false)
+          .limit(5);
+
+      return response.map<Map<String, dynamic>>((item) {
+        final barber = item['barbers'] as Map<String, dynamic>;
+        return {
+          'id': item['barber_id'],
+          'name': barber['full_name'] ?? 'Unknown',
+          'avatar': barber['avatar_url'],
+          'count': item['count'],
+          'rating': 4.5 + (item['count'] * 0.1), // Example rating calculation
+        };
+      }).toList();
+    } catch (e) {
+      debugPrint('❌ Error getting favorite barbers: $e');
+      return [];
+    }
+  }
+
+  // ==================== SETUP NOTIFICATION LISTENERS ====================
   void _setupNotificationListeners() {
     try {
       FirebaseMessaging.onMessage.listen((RemoteMessage message) {
         debugPrint('📨 New message: ${message.data}');
 
-        if (message.data['type'] == 'booking_confirmed') {
+        final type = message.data['type'];
+
+        if (type == 'booking_confirmed') {
           _showBookingUpdateAlert(message, 'confirmed');
-          setState(() {
-            _upcomingBookings++;
-          });
-        } else if (message.data['type'] == 'booking_reminder') {
+          _loadDashboardData();
+        } else if (type == 'vip_approved') {
+          _showVipApprovedAlert(message);
+          _loadDashboardData();
+        } else if (type == 'booking_reminder') {
           _showReminderAlert(message);
-        } else if (message.data['type'] == 'special_offer') {
+        } else if (type == 'special_offer') {
           _showOfferAlert(message);
+        } else if (type == 'vip_request_update') {
+          _showVipRequestUpdateAlert(message);
+          _loadDashboardData();
         }
+      });
+
+      FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+        debugPrint('👆 Message opened: ${message.data}');
+        _handleNotificationNavigation(message.data);
       });
     } catch (e) {
       debugPrint('❌ Error setting up notification listeners: $e');
     }
   }
 
-  // 🔥 Show booking update alert
+  // ==================== NOTIFICATION HANDLERS ====================
   void _showBookingUpdateAlert(RemoteMessage message, String type) {
     if (!mounted) return;
 
@@ -188,19 +370,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
             Text(type == 'confirmed' ? 'Booking Confirmed!' : 'Booking Update'),
           ],
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(message.notification?.title ?? 'Appointment Update'),
-            const SizedBox(height: 8),
-            Text(
-              message.notification?.body ??
-                  'Your booking has been ${type == 'confirmed' ? 'confirmed' : 'updated'}',
-              style: TextStyle(color: Colors.grey[600]),
-            ),
-          ],
-        ),
+        content: Text(message.notification?.body ?? 'Your booking has been updated'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -221,7 +391,71 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
     );
   }
 
-  // 🔥 Show reminder alert
+  void _showVipApprovedAlert(RemoteMessage message) {
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.amber.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.star, color: Colors.amber),
+            ),
+            const SizedBox(width: 12),
+            const Text('✨ VIP Booking Approved!'),
+          ],
+        ),
+        content: Text(message.notification?.body ?? 'Your VIP request has been approved'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _viewVipBookings();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFFF6B8B),
+            ),
+            child: const Text('View'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showVipRequestUpdateAlert(RemoteMessage message) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.star, color: Colors.amber),
+            const SizedBox(width: 8),
+            Expanded(child: Text(message.notification?.body ?? 'VIP request updated')),
+          ],
+        ),
+        backgroundColor: Colors.amber.shade700,
+        duration: const Duration(seconds: 4),
+        action: SnackBarAction(
+          label: 'View',
+          textColor: Colors.white,
+          onPressed: _viewVipBookings,
+        ),
+      ),
+    );
+  }
+
   void _showReminderAlert(RemoteMessage message) {
     if (!mounted) return;
 
@@ -231,11 +465,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
           children: [
             const Icon(Icons.access_time, color: Colors.white),
             const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                message.notification?.body ?? 'Upcoming appointment in 1 hour',
-              ),
-            ),
+            Expanded(child: Text(message.notification?.body ?? 'Upcoming appointment reminder')),
           ],
         ),
         backgroundColor: Colors.blue,
@@ -249,7 +479,6 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
     );
   }
 
-  // 🔥 Show offer alert
   void _showOfferAlert(RemoteMessage message) {
     if (!mounted) return;
 
@@ -271,18 +500,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
             const Text('Special Offer!'),
           ],
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(message.notification?.title ?? 'New Offer Available'),
-            const SizedBox(height: 8),
-            Text(
-              message.notification?.body ?? 'Check out our latest deals',
-              style: TextStyle(color: Colors.grey[600]),
-            ),
-          ],
-        ),
+        content: Text(message.notification?.body ?? 'New offer available'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -303,7 +521,19 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
     );
   }
 
-  // 🔥 Enable notifications
+  void _handleNotificationNavigation(Map<String, dynamic> data) {
+    final type = data['type'];
+
+    if (type == 'booking_confirmed' || type == 'booking_reminder') {
+      _viewMyBookings();
+    } else if (type == 'vip_approved' || type == 'vip_request_update') {
+      _viewVipBookings();
+    } else if (type == 'special_offer') {
+      _viewOffers();
+    }
+  }
+
+  // ==================== PERMISSION HANDLERS ====================
   Future<void> _enableNotifications() async {
     setState(() => _showPermissionCard = false);
 
@@ -314,13 +544,14 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
         _showSettingsDialog();
         return;
       }
+
       if (!mounted) return;
       await _permissionService.requestPermissionAtAction(
         context: context,
         action: 'customer_dashboard',
         customTitle: '🔔 Get Booking Updates',
         customMessage:
-            'Get instant notifications for booking confirmations, reminders, and special offers',
+            'Get instant notifications for booking confirmations, VIP approvals, and special offers',
         onGranted: () async {
           await _permissionManager.markPermissionGranted();
           setState(() {
@@ -353,7 +584,6 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
     }
   }
 
-  // 🔥 Show settings dialog
   void _showSettingsDialog() {
     showDialog(
       context: context,
@@ -382,19 +612,26 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
     );
   }
 
-  // 🔥 Handle Not Now
   Future<void> _handleNotNow() async {
     setState(() => _showPermissionCard = false);
     await _permissionManager.markPermissionShown('customer_dashboard');
   }
 
-  // 🔥 Navigation methods
+  // ==================== NAVIGATION METHODS ====================
   void _viewMyBookings() {
     context.push('/customer/bookings');
   }
 
+  void _viewVipBookings() {
+    context.push('/customer/vip-bookings');
+  }
+
+  void _createVipBooking() {
+    context.push('/customer/vip-booking');
+  }
+
   void _bookAppointment() {
-    context.push('/customer/book-appointment');
+    context.push('/customer/book');
   }
 
   void _viewOffers() {
@@ -409,80 +646,8 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
     context.push('/customer/favorites');
   }
 
-  void _viewBookingDetails(String customerName) {
-    // TODO: Navigate to booking details
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Viewing booking details'),
-        duration: const Duration(seconds: 1),
-      ),
-    );
-  }
-
-  void _rescheduleBooking() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Reschedule Appointment'),
-        content: const Text('Select new date and time'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('✅ Appointment rescheduled'),
-                  backgroundColor: Colors.green,
-                ),
-              );
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFFF6B8B),
-            ),
-            child: const Text('Confirm'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _cancelBooking() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Cancel Appointment'),
-        content: const Text(
-          'Are you sure you want to cancel this appointment?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('No'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              setState(() {
-                _upcomingBookings--;
-                _cancelledBookings++;
-              });
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('✅ Appointment cancelled'),
-                  backgroundColor: Colors.orange,
-                ),
-              );
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('Yes, Cancel'),
-          ),
-        ],
-      ),
-    );
+  void _viewBookingDetails(String bookingId) {
+    context.push('/customer/booking/$bookingId');
   }
 
   void _applyOffer(String code) {
@@ -495,15 +660,13 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
     );
   }
 
-  // 🔥 Open drawer method
+  // ==================== DRAWER METHODS ====================
   void _openDrawer() {
     try {
       if (_scaffoldKey.currentState != null) {
         _scaffoldKey.currentState!.openDrawer();
-        debugPrint('✅ Drawer opened via GlobalKey');
       } else {
         Scaffold.of(context).openDrawer();
-        debugPrint('✅ Drawer opened via Scaffold.of');
       }
     } catch (e) {
       debugPrint('❌ Error opening drawer: $e');
@@ -511,7 +674,6 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
     }
   }
 
-  // 🔥 Emergency menu dialog
   void _showMenuDialog() {
     showDialog(
       context: context,
@@ -533,6 +695,14 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                 onTap: () {
                   Navigator.pop(context);
                   _viewMyBookings();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.star, color: Colors.amber),
+                title: const Text('VIP Bookings'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _viewVipBookings();
                 },
               ),
               ListTile(
@@ -597,7 +767,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
     );
   }
 
-  // 🔥 Logout
+  // ==================== LOGOUT ====================
   Future<void> _logout(BuildContext context) async {
     showLogoutConfirmation(
       context,
@@ -617,12 +787,12 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
           appState.refreshState();
 
           if (context.mounted) {
-            Navigator.pop(context); // Close loading
+            Navigator.pop(context);
             context.go('/');
           }
         } catch (e) {
           if (context.mounted) {
-            Navigator.pop(context); // Close loading
+            Navigator.pop(context);
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text('Logout failed: $e'),
@@ -635,147 +805,21 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
     );
   }
 
-  // 🔥 Build offer card
-  Widget _buildOfferCard(Map<String, dynamic> offer) {
-    return Container(
-      width: 200,
-      margin: const EdgeInsets.only(right: 12),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [Colors.amber.shade300, Colors.orange.shade300],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            offer['title'],
-            style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            offer['description'],
-            style: const TextStyle(fontSize: 12, color: Colors.white70),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  offer['code'],
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 12,
-                  ),
-                ),
-              ),
-              const Spacer(),
-              IconButton(
-                icon: const Icon(Icons.copy, color: Colors.white, size: 18),
-                onPressed: () => _applyOffer(offer['code']),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  // 🔥 Build favorite barber card
-  Widget _buildFavoriteBarberCard(Map<String, dynamic> barber) {
-    return Container(
-      width: 160,
-      margin: const EdgeInsets.only(right: 12),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.shade200),
-      ),
-      child: Column(
-        children: [
-          CircleAvatar(
-            radius: 30,
-            backgroundColor: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
-            child: Text(
-              barber['name'][0],
-              style: const TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-                color: Color(0xFFFF6B8B),
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            barber['name'],
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-          ),
-          Text(
-            barber['specialty'],
-            style: TextStyle(fontSize: 11, color: Colors.grey[600]),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 4),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.star, color: Colors.amber, size: 14),
-              const SizedBox(width: 2),
-              Text(
-                '${barber['rating']}',
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton(
-              onPressed: _bookAppointment,
-              style: OutlinedButton.styleFrom(
-                foregroundColor: const Color(0xFFFF6B8B),
-                side: const BorderSide(color: Color(0xFFFF6B8B)),
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-              child: const Text('Book', style: TextStyle(fontSize: 12)),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
+  // ==================== UI BUILDERS ====================
   @override
   Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isWeb = screenWidth > 800;
+
     return Scaffold(
       key: _scaffoldKey,
 
       appBar: AppBar(
-        title: const Text('Customer Dashboard'),
+        title: const Text('My Dashboard'),
         backgroundColor: const Color(0xFFFF6B8B),
         foregroundColor: Colors.white,
         elevation: 0,
+        centerTitle: isWeb,
 
         leading: IconButton(
           icon: const Icon(Icons.menu),
@@ -785,6 +829,13 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
         ),
 
         actions: [
+          // VIP Booking Button
+          IconButton(
+            icon: const Icon(Icons.star, color: Colors.white),
+            onPressed: _createVipBooking,
+            tooltip: 'VIP Booking',
+          ),
+
           // Book Appointment button
           IconButton(
             icon: const Icon(Icons.add_circle_outline),
@@ -800,7 +851,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                 icon: const Icon(Icons.notifications_outlined),
                 onPressed: _viewMyBookings,
               ),
-              if (_upcomingBookings > 0)
+              if (_pendingBookings + _pendingVipBookings > 0)
                 Positioned(
                   right: 8,
                   top: 8,
@@ -815,7 +866,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                       minHeight: 18,
                     ),
                     child: Text(
-                      '$_upcomingBookings',
+                      '${_pendingBookings + _pendingVipBookings}',
                       style: const TextStyle(
                         color: Colors.white,
                         fontSize: 10,
@@ -829,18 +880,17 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
           ),
 
           // Refresh button
-          IconButton(icon: const Icon(Icons.refresh), onPressed: _loadData),
+          IconButton(icon: const Icon(Icons.refresh), onPressed: _loadDashboardData),
         ],
       ),
 
-      // Drawer
       drawer: SideMenu(
         userRole: 'customer',
         userName: _customerName,
-        // userEmail: _customerEmail,
+        userEmail: _customerEmail,
         profileImageUrl: _customerImage,
         onMenuItemSelected: () {
-          _loadData();
+          _loadDashboardData();
         },
       ),
 
@@ -849,33 +899,31 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
               child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
             )
           : RefreshIndicator(
-              onRefresh: _loadData,
+              onRefresh: _loadDashboardData,
               color: const Color(0xFFFF6B8B),
               child: SingleChildScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
                 child: Column(
                   children: [
-                    // 🔥 PERMISSION CARD
+                    // Permission Card
                     if (_showPermissionCard && !_hasPermission)
                       PermissionCard(
                         onEnable: _enableNotifications,
                         onNotNow: _handleNotNow,
                         title: '🔔 Get Booking Updates',
                         message:
-                            'Get instant notifications for booking confirmations and special offers',
+                            'Get instant notifications for booking confirmations, VIP approvals, and special offers',
                         compact: false,
                       ),
 
-                    // Welcome Message with Profile
+                    // Welcome Header with Profile
                     Padding(
                       padding: const EdgeInsets.all(16),
                       child: Row(
                         children: [
                           CircleAvatar(
-                            radius: 30,
-                            backgroundColor: const Color(
-                              0xFFFF6B8B,
-                            ).withValues(alpha: 0.1),
+                            radius: 35,
+                            backgroundColor: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
                             backgroundImage: _customerImage != null
                                 ? NetworkImage(_customerImage!)
                                 : null,
@@ -885,7 +933,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                                         ? _customerName[0].toUpperCase()
                                         : '?',
                                     style: const TextStyle(
-                                      fontSize: 24,
+                                      fontSize: 28,
                                       fontWeight: FontWeight.bold,
                                       color: Color(0xFFFF6B8B),
                                     ),
@@ -907,7 +955,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                                 Text(
                                   _customerName,
                                   style: const TextStyle(
-                                    fontSize: 18,
+                                    fontSize: 20,
                                     fontWeight: FontWeight.bold,
                                   ),
                                   overflow: TextOverflow.ellipsis,
@@ -927,74 +975,36 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                       ),
                     ),
 
-                    // Loyalty Points Card
-                    Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 16),
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [
-                            Colors.purple.shade400,
-                            Colors.purple.shade700,
-                          ],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                        borderRadius: BorderRadius.circular(16),
-                      ),
+                    // Quick Action Buttons Row
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
                       child: Row(
                         children: [
-                          Container(
-                            padding: const EdgeInsets.all(10),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.2),
-                              shape: BoxShape.circle,
-                            ),
-                            child: const Icon(
-                              Icons.card_giftcard,
-                              color: Colors.white,
-                              size: 28,
-                            ),
-                          ),
-                          const SizedBox(width: 16),
                           Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                  'Loyalty Points',
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    color: Colors.white70,
-                                  ),
-                                ),
-                                Text(
-                                  '$_loyaltyPoints pts',
-                                  style: const TextStyle(
-                                    fontSize: 28,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                              ],
+                            child: _buildQuickActionButton(
+                              icon: Icons.book_online,
+                              label: 'Book Now',
+                              color: Colors.blue,
+                              onTap: _bookAppointment,
                             ),
                           ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 6,
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _buildQuickActionButton(
+                              icon: Icons.star,
+                              label: 'VIP Booking',
+                              color: Colors.amber,
+                              badge: _pendingVipBookings > 0 ? '$_pendingVipBookings' : null,
+                              onTap: _createVipBooking,
                             ),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.2),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: const Text(
-                              'Gold Member',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w500,
-                                fontSize: 12,
-                              ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _buildQuickActionButton(
+                              icon: Icons.history,
+                              label: 'History',
+                              color: Colors.purple,
+                              onTap: _viewMyBookings,
                             ),
                           ),
                         ],
@@ -1003,7 +1013,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
 
                     const SizedBox(height: 16),
 
-                    // Stats Cards Row
+                    // Stats Cards
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
                       child: Row(
@@ -1021,22 +1031,22 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                           const SizedBox(width: 12),
                           Expanded(
                             child: DashboardStatCard(
-                              title: 'Completed',
-                              value: '$_completedBookings',
-                              icon: Icons.check_circle,
-                              color: Colors.green,
-                              subtitle: 'All time',
-                              onTap: _viewMyBookings,
+                              title: 'VIP Bookings',
+                              value: '$_vipBookings',
+                              icon: Icons.star,
+                              color: Colors.amber,
+                              subtitle: 'Total',
+                              onTap: _viewVipBookings,
                             ),
                           ),
                           const SizedBox(width: 12),
                           Expanded(
                             child: DashboardStatCard(
-                              title: 'Total Spent',
-                              value: 'Rs. $_totalSpent',
-                              icon: Icons.currency_rupee,
-                              color: Colors.purple,
-                              subtitle: 'Lifetime',
+                              title: 'Loyalty',
+                              value: '$_loyaltyPoints',
+                              icon: Icons.card_giftcard,
+                              color: Colors.green,
+                              subtitle: 'Points',
                               onTap: _viewLoyaltyProgram,
                             ),
                           ),
@@ -1046,126 +1056,169 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
 
                     const SizedBox(height: 16),
 
-                    // Quick Actions
-                    const SectionHeader(title: 'Quick Actions', actionText: ''),
-                    const SizedBox(height: 8),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: _buildQuickAction(
-                              icon: Icons.book_online,
-                              label: 'Book Now',
-                              color: Colors.blue,
-                              onTap: _bookAppointment,
-                            ),
+                    // VIP Section (if has pending VIP)
+                    if (_pendingVipBookings > 0)
+                      Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [Colors.amber.shade300, Colors.amber.shade600],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
                           ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: _buildQuickAction(
-                              icon: Icons.history,
-                              label: 'History',
-                              color: Colors.purple,
-                              onTap: _viewMyBookings,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: _buildQuickAction(
-                              icon: Icons.local_offer,
-                              label: 'Offers',
-                              color: Colors.amber,
-                              onTap: _viewOffers,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    const SizedBox(height: 16),
-
-                    // Upcoming Bookings Section
-                    const SectionHeader(
-                      title: 'Upcoming Bookings',
-                      actionText: 'View All',
-                    ),
-                    const SizedBox(height: 8),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: _upcomingBookings > 0
-                          ? Column(
-                              children: [
-                                BookingTile(
-                                  customerName: 'You',
-                                  serviceName: 'Hair Cut & Beard Trim',
-                                  time: 'Tomorrow, 10:30 AM',
-                                  status: 'Confirmed',
-                                  statusColor: Colors.green,
-                                  barberName: 'Kamal',
-                                  price: 1800,
-                                  onTap: () =>
-                                      _viewBookingDetails('Your Booking'),
-                                ),
-                                BookingTile(
-                                  customerName: 'You',
-                                  serviceName: 'Facial Treatment',
-                                  time: 'Mar 15, 2:00 PM',
-                                  status: 'Pending',
-                                  statusColor: Colors.orange,
-                                  barberName: 'Sunil',
-                                  price: 2500,
-                                  onTap: () =>
-                                      _viewBookingDetails('Your Booking'),
-                                ),
-                              ],
-                            )
-                          : Container(
-                              padding: const EdgeInsets.all(24),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(12),
                               decoration: BoxDecoration(
-                                color: Colors.grey[50],
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: Colors.grey[200]!),
+                                color: Colors.white.withValues(alpha: 0.2),
+                                shape: BoxShape.circle,
                               ),
+                              child: const Icon(
+                                Icons.star,
+                                color: Colors.white,
+                                size: 28,
+                              ),
+                            ),
+                            const SizedBox(width: 16),
+                            Expanded(
                               child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Icon(
-                                    Icons.calendar_today,
-                                    size: 48,
-                                    color: Colors.grey[400],
-                                  ),
-                                  const SizedBox(height: 12),
-                                  Text(
-                                    'No upcoming bookings',
+                                  const Text(
+                                    'VIP Request Pending',
                                     style: TextStyle(
                                       fontSize: 16,
-                                      color: Colors.grey[600],
-                                      fontWeight: FontWeight.w500,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.white,
                                     ),
                                   ),
-                                  const SizedBox(height: 8),
-                                  ElevatedButton(
-                                    onPressed: _bookAppointment,
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: const Color(0xFFFF6B8B),
+                                  Text(
+                                    '$_pendingVipBookings VIP booking$_pendingVipBookings != 1 ? "s" : "" waiting for approval',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: Colors.white.withValues(alpha: 0.9),
                                     ),
-                                    child: const Text('Book Now'),
                                   ),
                                 ],
                               ),
                             ),
+                            ElevatedButton(
+                              onPressed: _viewVipBookings,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.white,
+                                foregroundColor: Colors.amber.shade700,
+                              ),
+                              child: const Text('View'),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                    const SizedBox(height: 16),
+
+                    // Upcoming Bookings Section
+                    SectionHeader(
+                      title: 'Upcoming Bookings',
+                      actionText: _upcomingBookings > 3 ? 'View All' : '',
                     ),
+                    const SizedBox(height: 8),
+                    _upcomingAppointments.isNotEmpty
+                        ? ListView.builder(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            itemCount: _upcomingAppointments.length,
+                            itemBuilder: (context, index) {
+                              final apt = _upcomingAppointments[index];
+                              final isVip = apt['is_vip'] == true;
+                              final barber = apt['barbers'] as Map<String, dynamic>?;
+                              final service = apt['services'] as Map<String, dynamic>?;
+                              final variant = apt['service_variants'] as Map<String, dynamic>?;
+                              
+                              String serviceName = service?['name'] ?? 'Service';
+                              if (variant != null) {
+                                final gender = variant['genders'] as Map<String, dynamic>?;
+                                final age = variant['age_categories'] as Map<String, dynamic>?;
+                                if (gender != null && age != null) {
+                                  serviceName += ' • ${gender['display_name']} ${age['display_name']}';
+                                }
+                              }
+
+                              final date = DateTime.parse(apt['appointment_date']);
+                              final dateStr = DateFormat('MMM dd, yyyy').format(date);
+                              final timeStr = apt['start_time'].substring(0, 5);
+
+                              // return BookingTile(
+                              //   customerName: 'You',
+                              //   serviceName: serviceName,
+                              //   time: '$dateStr at $timeStr',
+                              //   status: apt['status'] == 'confirmed' ? 'Confirmed' : 'Pending',
+                              //   statusColor: apt['status'] == 'confirmed' ? Colors.green : Colors.orange,
+                              //   barberName: barber?['full_name'] ?? 'Barber',
+                              //   price: apt['price'] ?? 0,
+                              //   isVip: isVip,
+                              //   queueNumber: apt['queue_number'],
+                              //   onTap: () => _viewBookingDetails(apt['id'].toString()),
+                              // );
+                            },
+                          )
+                        : Container(
+                            margin: const EdgeInsets.symmetric(horizontal: 16),
+                            padding: const EdgeInsets.all(24),
+                            decoration: BoxDecoration(
+                              color: Colors.grey[50],
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: Colors.grey[200]!),
+                            ),
+                            child: Column(
+                              children: [
+                                Icon(Icons.calendar_today, size: 48, color: Colors.grey[400]),
+                                const SizedBox(height: 12),
+                                Text(
+                                  'No upcoming bookings',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    color: Colors.grey[600],
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    ElevatedButton(
+                                      onPressed: _bookAppointment,
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: const Color(0xFFFF6B8B),
+                                      ),
+                                      child: const Text('Book Now'),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    OutlinedButton(
+                                      onPressed: _createVipBooking,
+                                      style: OutlinedButton.styleFrom(
+                                        foregroundColor: Colors.amber,
+                                        side: const BorderSide(color: Colors.amber),
+                                      ),
+                                      child: const Text('VIP Booking'),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
 
                     const SizedBox(height: 16),
 
                     // Special Offers Section
-                    const SectionHeader(
-                      title: 'Special Offers',
-                      actionText: 'View All',
-                    ),
+                    SectionHeader(title: 'Special Offers', actionText: 'View All'),
                     const SizedBox(height: 8),
                     SizedBox(
-                      height: 140,
+                      height: 160,
                       child: ListView.builder(
                         scrollDirection: Axis.horizontal,
                         padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -1179,28 +1232,24 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                     const SizedBox(height: 16),
 
                     // Favorite Barbers Section
-                    const SectionHeader(
-                      title: 'Favorite Barbers',
-                      actionText: 'View All',
-                    ),
-                    const SizedBox(height: 8),
-                    SizedBox(
-                      height: 210,
-                      child: ListView.builder(
-                        scrollDirection: Axis.horizontal,
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        itemCount: _favoriteBarbers.length,
-                        itemBuilder: (context, index) {
-                          return _buildFavoriteBarberCard(
-                            _favoriteBarbers[index],
-                          );
-                        },
+                    if (_favoriteBarbers.isNotEmpty) ...[
+                      SectionHeader(title: 'Favorite Barbers', actionText: 'View All'),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        height: 200,
+                        child: ListView.builder(
+                          scrollDirection: Axis.horizontal,
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          itemCount: _favoriteBarbers.length,
+                          itemBuilder: (context, index) {
+                            return _buildFavoriteBarberCard(_favoriteBarbers[index]);
+                          },
+                        ),
                       ),
-                    ),
+                      const SizedBox(height: 16),
+                    ],
 
-                    const SizedBox(height: 16),
-
-                    // Recent Activity Summary
+                    // Activity Summary
                     Container(
                       margin: const EdgeInsets.all(16),
                       padding: const EdgeInsets.all(16),
@@ -1213,7 +1262,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           const Text(
-                            'Recent Activity',
+                            'Activity Summary',
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.bold,
@@ -1241,9 +1290,30 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                               Expanded(
                                 child: _buildActivityItem(
                                   icon: Icons.star,
-                                  label: 'Points Earned',
-                                  value: '$_loyaltyPoints',
+                                  label: 'VIP',
+                                  value: '$_vipBookings',
                                   color: Colors.amber,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: _buildActivityItem(
+                                  icon: Icons.currency_rupee,
+                                  label: 'Total Spent',
+                                  value: 'Rs. $_totalSpent',
+                                  color: Colors.purple,
+                                ),
+                              ),
+                              Expanded(
+                                child: _buildActivityItem(
+                                  icon: Icons.card_giftcard,
+                                  label: 'Points',
+                                  value: '$_loyaltyPoints',
+                                  color: Colors.blue,
                                 ),
                               ),
                             ],
@@ -1292,41 +1362,242 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
     );
   }
 
-  // 🔥 Build quick action button
-  Widget _buildQuickAction({
+  // ==================== HELPER WIDGETS ====================
+  Widget _buildQuickActionButton({
     required IconData icon,
     required String label,
     required Color color,
+    String? badge,
     required VoidCallback onTap,
   }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.1),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: color.withValues(alpha: 0.3)),
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        GestureDetector(
+          onTap: onTap,
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: color.withValues(alpha: 0.3)),
+            ),
+            child: Column(
+              children: [
+                Icon(icon, color: color, size: 24),
+                const SizedBox(height: 4),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: color,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
-        child: Column(
-          children: [
-            Icon(icon, color: color, size: 24),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 12,
-                color: color,
-                fontWeight: FontWeight.w500,
+        if (badge != null)
+          Positioned(
+            top: -5,
+            right: -5,
+            child: Container(
+              padding: const EdgeInsets.all(4),
+              decoration: const BoxDecoration(
+                color: Colors.red,
+                shape: BoxShape.circle,
+              ),
+              constraints: const BoxConstraints(
+                minWidth: 20,
+                minHeight: 20,
+              ),
+              child: Text(
+                badge,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                ),
+                textAlign: TextAlign.center,
               ),
             ),
-          ],
+          ),
+      ],
+    );
+  }
+
+  Widget _buildOfferCard(Map<String, dynamic> offer) {
+    return Container(
+      width: 220,
+      margin: const EdgeInsets.only(right: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Colors.amber.shade300, Colors.orange.shade400],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
         ),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.orange.withValues(alpha: 0.3),
+            blurRadius: 8,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            offer['image'] ?? '🎯',
+            style: const TextStyle(fontSize: 32),
+          ),
+          const Spacer(),
+          Text(
+            offer['title'],
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            offer['description'],
+            style: const TextStyle(fontSize: 12, color: Colors.white70),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  offer['code'],
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+              const Spacer(),
+              Text(
+                'Exp: ${offer['expiry']}',
+                style: const TextStyle(fontSize: 9, color: Colors.white70),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: () => _applyOffer(offer['code']),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.white,
+                foregroundColor: Colors.orange.shade700,
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
+              ),
+              child: const Text('Apply', style: TextStyle(fontSize: 11)),
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  // 🔥 Build activity item
+  Widget _buildFavoriteBarberCard(Map<String, dynamic> barber) {
+    return Container(
+      width: 160,
+      margin: const EdgeInsets.only(right: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withValues(alpha: 0.1),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          CircleAvatar(
+            radius: 35,
+            backgroundColor: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+            backgroundImage: barber['avatar'] != null
+                ? NetworkImage(barber['avatar'])
+                : null,
+            child: barber['avatar'] == null
+                ? Text(
+                    barber['name'][0].toUpperCase(),
+                    style: const TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFFFF6B8B),
+                    ),
+                  )
+                : null,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            barber['name'],
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 4),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.star, color: Colors.amber, size: 14),
+              const SizedBox(width: 2),
+              Text(
+                barber['rating'].toStringAsFixed(1),
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(width: 4),
+              Text(
+                '(${barber['count']} cuts)',
+                style: TextStyle(fontSize: 10, color: Colors.grey[500]),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton(
+              onPressed: _bookAppointment,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xFFFF6B8B),
+                side: const BorderSide(color: Color(0xFFFF6B8B)),
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: const Text('Book', style: TextStyle(fontSize: 12)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildActivityItem({
     required IconData icon,
     required String label,
@@ -1340,12 +1611,12 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
         Text(
           value,
           style: TextStyle(
-            fontSize: 18,
+            fontSize: 16,
             fontWeight: FontWeight.bold,
             color: color,
           ),
         ),
-        Text(label, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+        Text(label, style: TextStyle(fontSize: 11, color: Colors.grey[600])),
       ],
     );
   }

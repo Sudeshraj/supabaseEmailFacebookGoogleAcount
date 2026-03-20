@@ -13,6 +13,8 @@ import 'package:flutter_application_1/screens/authantication/command/reset_passw
 import 'package:flutter_application_1/screens/authantication/command/reset_password_form.dart';
 import 'package:flutter_application_1/screens/authantication/command/reset_password_request.dart';
 import 'package:flutter_application_1/screens/authantication/command/role_selector_screen.dart';
+import 'package:flutter_application_1/screens/customer/booking_screen.dart';
+import 'package:flutter_application_1/screens/customer/vip_booking_request_screen.dart';
 import 'package:flutter_application_1/screens/owner/add_barber_screen.dart';
 import 'package:flutter_application_1/screens/owner/add_barber_service_screen.dart';
 import 'package:flutter_application_1/screens/owner/add_category_screen.dart';
@@ -21,6 +23,7 @@ import 'package:flutter_application_1/screens/owner/barber_list_screen.dart';
 import 'package:flutter_application_1/screens/owner/barber_schedule_screen.dart';
 import 'package:flutter_application_1/screens/owner/create_salon.dart';
 import 'package:flutter_application_1/screens/owner/edit_barber_services_screen.dart';
+import 'package:flutter_application_1/screens/owner/vip_booking_requests_screen.dart';
 import 'package:flutter_application_1/services/notification_service.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -545,13 +548,7 @@ GoRouter _createRouter() {
           return RoleSelectorScreen(roles: roles, email: email, userId: userId);
         },
       ),
-      GoRoute(
-        path: '/customer',
-        builder: (_, __) {
-          debugPrint('🏠 Navigating to CustomerDashboard');
-          return const CustomerDashboard();
-        },
-      ),
+
       GoRoute(
         path: '/barber',
         builder: (_, __) {
@@ -702,6 +699,31 @@ GoRouter _createRouter() {
           final salonId = state.uri.queryParameters['salonId']!;
           return EditBarberServicesScreen(barberId: barberId, salonId: salonId);
         },
+      ),
+      // Owner side
+      GoRoute(
+        path: '/owner/vip-requests',
+        builder: (context, state) {
+          final salonId = state.uri.queryParameters['salonId']!;
+          return VIPBookingRequestsScreen(salonId: salonId);
+        },
+      ),
+
+      //........................................CUstomer............................................................
+      GoRoute(
+        path: '/customer',
+        builder: (_, __) {
+          debugPrint('🏠 Navigating to CustomerDashboard');
+          return const CustomerDashboard();
+        },
+      ),
+      GoRoute(
+        path: '/customer/book',
+        builder: (context, state) => const BookingScreen(),
+      ),
+      GoRoute(
+        path: '/customer/vip-booking',
+        builder: (context, state) => const VIPBookingRequestScreen(),
       ),
     ],
   );

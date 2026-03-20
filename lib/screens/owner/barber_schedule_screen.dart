@@ -41,39 +41,59 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     setState(() => _isLoading = true);
 
     try {
-      // Load barbers for this salon
-final barbersResponse = await supabase
-    .from('salon_barbers')
-    .select('''
-      id,
-      barber_id,
-      is_active,
-      profiles!salon_barbers_barber_id_fkey (
-        id,
-        full_name,
-        email,
-        avatar_url
-      )
-    ''')
-    .eq('salon_id', int.parse(widget.salonId!))
-    .eq('is_active', true);
+      // 🔥 FIXED: Load barbers for this salon without foreign key issues
+      final salonBarbersResponse = await supabase
+          .from('salon_barbers')
+          .select('''
+            id,
+            barber_id,
+            is_active
+          ''')
+          .eq('salon_id', int.parse(widget.salonId!))
+          .eq('is_active', true);
 
-      _barbers = barbersResponse.map<Map<String, dynamic>>((b) {
-        final profile = b['profiles'] as Map<String, dynamic>? ?? {};
-        return {
-          'id': b['barber_id'],
-          'salon_barber_id': b['id'],
-          'name': profile['full_name'] ?? 'Unknown',
-          'email': profile['email'],
-          'avatar': profile['avatar_url'],
-        };
-      }).toList();
+      if (salonBarbersResponse.isEmpty) {
+        setState(() {
+          _barbers = [];
+          _schedules = [];
+          _isLoading = false;
+        });
+        return;
+      }
+
+      // Get all barber IDs
+      final barberIds = salonBarbersResponse
+          .map((sb) => sb['barber_id'] as String)
+          .toList();
+
+      // Load profiles for these barbers
+      List<Map<String, dynamic>> barbersList = [];
+      for (String barberId in barberIds) {
+        final profile = await supabase
+            .from('profiles')
+            .select('id, full_name, email, avatar_url')
+            .eq('id', barberId)
+            .maybeSingle();
+
+        if (profile != null) {
+          final salonBarber = salonBarbersResponse.firstWhere(
+            (sb) => sb['barber_id'] == barberId,
+          );
+
+          barbersList.add({
+            'id': barberId,
+            'salon_barber_id': salonBarber['id'],
+            'name': profile['full_name'] ?? 'Unknown',
+            'email': profile['email'],
+            'avatar': profile['avatar_url'],
+          });
+        }
+      }
+
+      _barbers = barbersList;
 
       // Load schedules for all barbers
       if (_barbers.isNotEmpty) {
-        final barberIds = _barbers.map((b) => b['id'] as String).toList();
-
-        // Build filter condition manually
         List<Map<String, dynamic>> allSchedules = [];
 
         for (String barberId in barberIds) {
@@ -103,7 +123,10 @@ final barbersResponse = await supabase
       debugPrint('❌ Error loading schedules: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     } finally {
@@ -117,9 +140,8 @@ final barbersResponse = await supabase
       builder: (context) => _AddScheduleDialog(
         barberId: barberId,
         salonId: widget.salonId!,
-        existingSchedules: _schedules
-            .where((s) => s['barber_id'] == barberId)
-            .toList(),
+        existingSchedules:
+            _schedules.where((s) => s['barber_id'] == barberId).toList(),
       ),
     );
 
@@ -233,39 +255,39 @@ final barbersResponse = await supabase
               child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
             )
           : _barbers.isEmpty
-          ? Center(
-              child: Padding(
-                padding: EdgeInsets.all(padding),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.person_off,
-                      size: isWeb ? 80 : 64,
-                      color: Colors.grey[400],
+              ? Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(padding),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.person_off,
+                          size: isWeb ? 80 : 64,
+                          color: Colors.grey[400],
+                        ),
+                        const SizedBox(height: 16),
+                        const Text(
+                          'No barbers found',
+                          style: TextStyle(fontSize: 18, color: Colors.grey),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Add barbers first to manage schedules',
+                          style: TextStyle(color: Colors.grey[600]),
+                        ),
+                        const SizedBox(height: 16),
+                        ElevatedButton(
+                          onPressed: () => context.pop(),
+                          child: const Text('Go Back'),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'No barbers found',
-                      style: TextStyle(fontSize: 18, color: Colors.grey),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Add barbers first to manage schedules',
-                      style: TextStyle(color: Colors.grey[600]),
-                    ),
-                    const SizedBox(height: 16),
-                    ElevatedButton(
-                      onPressed: () => context.pop(),
-                      child: const Text('Go Back'),
-                    ),
-                  ],
-                ),
-              ),
-            )
-          : isWeb
-          ? _buildWebView(padding, screenWidth)
-          : _buildMobileView(padding),
+                  ),
+                )
+              : isWeb
+                  ? _buildWebView(padding, screenWidth)
+                  : _buildMobileView(padding),
     );
   }
 
@@ -340,9 +362,8 @@ final barbersResponse = await supabase
                         children: [
                           CircleAvatar(
                             radius: 24,
-                            backgroundColor: const Color(
-                              0xFFFF6B8B,
-                            ).withValues(alpha: 0.1),
+                            backgroundColor: const Color(0xFFFF6B8B)
+                                .withValues(alpha: 0.1),
                             backgroundImage: barber['avatar'] != null
                                 ? NetworkImage(barber['avatar'])
                                 : null,
@@ -510,7 +531,8 @@ final barbersResponse = await supabase
             data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
             child: ExpansionTile(
               leading: CircleAvatar(
-                backgroundColor: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                backgroundColor:
+                    const Color(0xFFFF6B8B).withValues(alpha: 0.1),
                 backgroundImage: barber['avatar'] != null
                     ? NetworkImage(barber['avatar'])
                     : null,
@@ -550,7 +572,7 @@ final barbersResponse = await supabase
                     ),
                   )
                 else
-                  ...barberSchedules.map<Widget>((schedule) {
+                  ...barberSchedules.map((schedule) {
                     final dayName =
                         _dayNames[schedule['day_of_week']] ?? 'Unknown';
                     final startTime = _formatTime(schedule['start_time']);
@@ -583,9 +605,8 @@ final barbersResponse = await supabase
                       subtitle: Text(
                         '$startTime - $endTime',
                         style: TextStyle(
-                          color: isWorking
-                              ? Colors.grey[700]
-                              : Colors.grey[500],
+                          color:
+                              isWorking ? Colors.grey[700] : Colors.grey[500],
                         ),
                       ),
                       trailing: Row(
@@ -606,7 +627,7 @@ final barbersResponse = await supabase
                         ],
                       ),
                     );
-                  }), // ✅ .toList() removed - spread operator එකට අවශ්‍ය නැහැ
+                  }),
               ],
             ),
           ),
@@ -672,133 +693,139 @@ class _AddScheduleDialogState extends State<_AddScheduleDialog> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Container(
         width: isWeb ? 500 : screenWidth * 0.9,
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.8,
+        ),
         padding: EdgeInsets.all(isWeb ? 24 : 16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Add Schedule',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 20),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Add Schedule',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 20),
 
-            // Day selection
-            const Text(
-              'Select Day',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: _days.map((day) {
-                final isSelected = _selectedDay == day['id'];
-                final isAvailable = _availableDays.contains(day['id']);
+              // Day selection
+              const Text(
+                'Select Day',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: _days.map((day) {
+                  final isSelected = _selectedDay == day['id'];
+                  final isAvailable = _availableDays.contains(day['id']);
 
-                return FilterChip(
-                  label: Text(day['name']),
-                  selected: isSelected,
-                  onSelected: isAvailable
-                      ? (selected) {
-                          setState(() => _selectedDay = day['id']);
-                        }
-                      : null,
-                  backgroundColor: Colors.grey[100],
-                  selectedColor: const Color(0xFFFF6B8B).withValues(alpha: 0.2),
-                  checkmarkColor: const Color(0xFFFF6B8B),
-                  avatar: isAvailable ? null : const Icon(Icons.lock, size: 16),
-                );
-              }).toList(),
-            ),
+                  return FilterChip(
+                    label: Text(day['name']),
+                    selected: isSelected,
+                    onSelected: isAvailable
+                        ? (selected) {
+                            setState(() => _selectedDay = day['id']);
+                          }
+                        : null,
+                    backgroundColor: Colors.grey[100],
+                    selectedColor:
+                        const Color(0xFFFF6B8B).withValues(alpha: 0.2),
+                    checkmarkColor: const Color(0xFFFF6B8B),
+                    avatar:
+                        isAvailable ? null : const Icon(Icons.lock, size: 16),
+                  );
+                }).toList(),
+              ),
 
-            const SizedBox(height: 16),
+              const SizedBox(height: 16),
 
-            // Time selection
-            Row(
-              children: [
-                Expanded(
-                  child: _buildTimePicker(
-                    label: 'Start Time',
-                    time: _startTime,
-                    onTap: () async {
-                      final time = await showTimePicker(
-                        context: context,
-                        initialTime: TimeOfDay.now(),
-                      );
-                      if (time != null) setState(() => _startTime = time);
-                    },
+              // Time selection
+              Row(
+                children: [
+                  Expanded(
+                    child: _buildTimePicker(
+                      label: 'Start Time',
+                      time: _startTime,
+                      onTap: () async {
+                        final time = await showTimePicker(
+                          context: context,
+                          initialTime: TimeOfDay.now(),
+                        );
+                        if (time != null) setState(() => _startTime = time);
+                      },
+                    ),
                   ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _buildTimePicker(
-                    label: 'End Time',
-                    time: _endTime,
-                    onTap: () async {
-                      final time = await showTimePicker(
-                        context: context,
-                        initialTime: TimeOfDay.now(),
-                      );
-                      if (time != null) setState(() => _endTime = time);
-                    },
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _buildTimePicker(
+                      label: 'End Time',
+                      time: _endTime,
+                      onTap: () async {
+                        final time = await showTimePicker(
+                          context: context,
+                          initialTime: TimeOfDay.now(),
+                        );
+                        if (time != null) setState(() => _endTime = time);
+                      },
+                    ),
                   ),
-                ),
-              ],
-            ),
+                ],
+              ),
 
-            const SizedBox(height: 16),
+              const SizedBox(height: 16),
 
-            // Working status
-            Row(
-              children: [
-                Checkbox(
-                  value: _isWorking,
-                  onChanged: (value) =>
-                      setState(() => _isWorking = value ?? true),
-                  activeColor: const Color(0xFFFF6B8B),
-                ),
-                const SizedBox(width: 8),
-                const Text('Working day'),
-              ],
-            ),
-
-            const SizedBox(height: 24),
-
-            // Actions
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('Cancel'),
-                ),
-                const SizedBox(width: 12),
-                ElevatedButton(
-                  onPressed:
-                      _selectedDay != null &&
-                          _startTime != null &&
-                          _endTime != null &&
-                          !_isLoading
-                      ? _saveSchedule
-                      : null,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFFF6B8B),
+              // Working status
+              Row(
+                children: [
+                  Checkbox(
+                    value: _isWorking,
+                    onChanged: (value) =>
+                        setState(() => _isWorking = value ?? true),
+                    activeColor: const Color(0xFFFF6B8B),
                   ),
-                  child: _isLoading
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            color: Colors.white,
-                            strokeWidth: 2,
-                          ),
-                        )
-                      : const Text('Save'),
-                ),
-              ],
-            ),
-          ],
+                  const SizedBox(width: 8),
+                  const Text('Working day'),
+                ],
+              ),
+
+              const SizedBox(height: 24),
+
+              // Actions
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 12),
+                  ElevatedButton(
+                    onPressed: _selectedDay != null &&
+                            _startTime != null &&
+                            _endTime != null &&
+                            !_isLoading
+                        ? _saveSchedule
+                        : null,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFFF6B8B),
+                    ),
+                    child: _isLoading
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : const Text('Save'),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -927,93 +954,98 @@ class _EditScheduleDialogState extends State<_EditScheduleDialog> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Container(
         width: isWeb ? 500 : screenWidth * 0.9,
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.8,
+        ),
         padding: EdgeInsets.all(isWeb ? 24 : 16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Edit Schedule - $dayName',
-              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 20),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Edit Schedule - $dayName',
+                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 20),
 
-            Row(
-              children: [
-                Expanded(
-                  child: _buildTimePicker(
-                    label: 'Start Time',
-                    time: _startTime,
-                    onTap: () async {
-                      final time = await showTimePicker(
-                        context: context,
-                        initialTime: _startTime,
-                      );
-                      if (time != null) setState(() => _startTime = time);
-                    },
+              Row(
+                children: [
+                  Expanded(
+                    child: _buildTimePicker(
+                      label: 'Start Time',
+                      time: _startTime,
+                      onTap: () async {
+                        final time = await showTimePicker(
+                          context: context,
+                          initialTime: _startTime,
+                        );
+                        if (time != null) setState(() => _startTime = time);
+                      },
+                    ),
                   ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _buildTimePicker(
-                    label: 'End Time',
-                    time: _endTime,
-                    onTap: () async {
-                      final time = await showTimePicker(
-                        context: context,
-                        initialTime: _endTime,
-                      );
-                      if (time != null) setState(() => _endTime = time);
-                    },
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _buildTimePicker(
+                      label: 'End Time',
+                      time: _endTime,
+                      onTap: () async {
+                        final time = await showTimePicker(
+                          context: context,
+                          initialTime: _endTime,
+                        );
+                        if (time != null) setState(() => _endTime = time);
+                      },
+                    ),
                   ),
-                ),
-              ],
-            ),
+                ],
+              ),
 
-            const SizedBox(height: 16),
+              const SizedBox(height: 16),
 
-            Row(
-              children: [
-                Checkbox(
-                  value: _isWorking,
-                  onChanged: (value) =>
-                      setState(() => _isWorking = value ?? true),
-                  activeColor: const Color(0xFFFF6B8B),
-                ),
-                const SizedBox(width: 8),
-                const Text('Working day'),
-              ],
-            ),
-
-            const SizedBox(height: 24),
-
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('Cancel'),
-                ),
-                const SizedBox(width: 12),
-                ElevatedButton(
-                  onPressed: _isLoading ? null : _updateSchedule,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFFF6B8B),
+              Row(
+                children: [
+                  Checkbox(
+                    value: _isWorking,
+                    onChanged: (value) =>
+                        setState(() => _isWorking = value ?? true),
+                    activeColor: const Color(0xFFFF6B8B),
                   ),
-                  child: _isLoading
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            color: Colors.white,
-                            strokeWidth: 2,
-                          ),
-                        )
-                      : const Text('Update'),
-                ),
-              ],
-            ),
-          ],
+                  const SizedBox(width: 8),
+                  const Text('Working day'),
+                ],
+              ),
+
+              const SizedBox(height: 24),
+
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 12),
+                  ElevatedButton(
+                    onPressed: _isLoading ? null : _updateSchedule,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFFF6B8B),
+                    ),
+                    child: _isLoading
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : const Text('Update'),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
