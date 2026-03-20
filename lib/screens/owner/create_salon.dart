@@ -1,6 +1,6 @@
-import 'dart:io' show Platform, File; // Only for mobile
-import 'dart:typed_data'; // For web
-import 'package:flutter/foundation.dart' show kIsWeb; // Web check
+import 'dart:io' show Platform, File;
+import 'dart:typed_data';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
@@ -47,9 +47,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
 
   // Responsive layout helpers
   bool get _isWeb => MediaQuery.of(context).size.width > 800;
-  bool get _isTablet =>
-      MediaQuery.of(context).size.width > 600 &&
-      MediaQuery.of(context).size.width <= 800;
 
   final supabase = Supabase.instance.client;
   final picker = ImagePicker();
@@ -80,7 +77,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     return 'mobile';
   }
 
-  // 📸 Pick logo image (web compatible)
+  // 📸 Pick logo image
   Future<void> _pickLogoImage(ImageSource source) async {
     try {
       final XFile? pickedFile = await picker.pickImage(
@@ -92,7 +89,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
 
       if (pickedFile != null) {
         if (kIsWeb) {
-          // Web: read as bytes
           final bytes = await pickedFile.readAsBytes();
           setState(() {
             _logoWebBytes = bytes;
@@ -100,7 +96,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
             _logoUrl = null;
           });
         } else {
-          // Mobile: use File
           setState(() {
             _logoFile = File(pickedFile.path);
             _logoWebBytes = null;
@@ -116,7 +111,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     }
   }
 
-  // 📸 Pick cover image (web compatible)
+  // 📸 Pick cover image
   Future<void> _pickCoverImage(ImageSource source) async {
     try {
       final XFile? pickedFile = await picker.pickImage(
@@ -128,7 +123,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
 
       if (pickedFile != null) {
         if (kIsWeb) {
-          // Web: read as bytes
           final bytes = await pickedFile.readAsBytes();
           setState(() {
             _coverWebBytes = bytes;
@@ -136,7 +130,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
             _coverUrl = null;
           });
         } else {
-          // Mobile: use File
           setState(() {
             _coverFile = File(pickedFile.path);
             _coverWebBytes = null;
@@ -152,19 +145,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     }
   }
 
-  // Get file extension from XFile (for web)
-  String _getFileExtension(XFile file) {
-    try {
-      final name = file.name;
-      final lastDot = name.lastIndexOf('.');
-      if (lastDot != -1) return name.substring(lastDot);
-      return '.png';
-    } catch (e) {
-      return '.png';
-    }
-  }
-
-  // ☁️ Upload logo to Supabase Storage (web compatible)
+  // ☁️ Upload logo to Supabase Storage
   Future<String?> _uploadLogo() async {
     if (_logoFile == null && _logoWebBytes == null) return null;
 
@@ -179,11 +160,8 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
       String fileName;
       
       if (kIsWeb && _logoWebBytes != null) {
-        // Web upload
         fileName = 'logo_${DateTime.now().millisecondsSinceEpoch}.png';
         final filePath = 'salons/$userId/$fileName';
-        
-        debugPrint('📤 Uploading logo to: $filePath');
         
         await supabase.storage
             .from('salon-images')
@@ -193,20 +171,12 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
               fileOptions: const FileOptions(cacheControl: '3600'),
             );
         
-        final imageUrl = supabase.storage
-            .from('salon-images')
-            .getPublicUrl(filePath);
-        
-        debugPrint('✅ Logo uploaded: $imageUrl');
-        return imageUrl;
+        return supabase.storage.from('salon-images').getPublicUrl(filePath);
       } 
       else if (_logoFile != null) {
-        // Mobile upload
         final fileExt = path.extension(_logoFile!.path);
         fileName = 'logo_${DateTime.now().millisecondsSinceEpoch}$fileExt';
         final filePath = 'salons/$userId/$fileName';
-        
-        debugPrint('📤 Uploading logo to: $filePath');
         
         await supabase.storage
             .from('salon-images')
@@ -216,12 +186,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
               fileOptions: const FileOptions(cacheControl: '3600'),
             );
         
-        final imageUrl = supabase.storage
-            .from('salon-images')
-            .getPublicUrl(filePath);
-        
-        debugPrint('✅ Logo uploaded: $imageUrl');
-        return imageUrl;
+        return supabase.storage.from('salon-images').getPublicUrl(filePath);
       }
       
       return null;
@@ -240,7 +205,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     }
   }
 
-  // ☁️ Upload cover to Supabase Storage (web compatible)
+  // ☁️ Upload cover to Supabase Storage
   Future<String?> _uploadCover() async {
     if (_coverFile == null && _coverWebBytes == null) return null;
 
@@ -255,11 +220,8 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
       String fileName;
       
       if (kIsWeb && _coverWebBytes != null) {
-        // Web upload
         fileName = 'cover_${DateTime.now().millisecondsSinceEpoch}.png';
         final filePath = 'salons/$userId/$fileName';
-        
-        debugPrint('📤 Uploading cover to: $filePath');
         
         await supabase.storage
             .from('salon-images')
@@ -269,20 +231,12 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
               fileOptions: const FileOptions(cacheControl: '3600'),
             );
         
-        final imageUrl = supabase.storage
-            .from('salon-images')
-            .getPublicUrl(filePath);
-        
-        debugPrint('✅ Cover uploaded: $imageUrl');
-        return imageUrl;
+        return supabase.storage.from('salon-images').getPublicUrl(filePath);
       } 
       else if (_coverFile != null) {
-        // Mobile upload
         final fileExt = path.extension(_coverFile!.path);
         fileName = 'cover_${DateTime.now().millisecondsSinceEpoch}$fileExt';
         final filePath = 'salons/$userId/$fileName';
-        
-        debugPrint('📤 Uploading cover to: $filePath');
         
         await supabase.storage
             .from('salon-images')
@@ -292,12 +246,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
               fileOptions: const FileOptions(cacheControl: '3600'),
             );
         
-        final imageUrl = supabase.storage
-            .from('salon-images')
-            .getPublicUrl(filePath);
-        
-        debugPrint('✅ Cover uploaded: $imageUrl');
-        return imageUrl;
+        return supabase.storage.from('salon-images').getPublicUrl(filePath);
       }
       
       return null;
@@ -344,11 +293,15 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     }
   }
 
+  // Format time for database
+  String _formatTimeOfDay(TimeOfDay time) {
+    return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}:00';
+  }
+
   // 💾 Create salon in database
   Future<void> _createSalon() async {
     if (!_formKey.currentState!.validate()) return;
 
-    // Check if user is logged in
     final userId = supabase.auth.currentUser?.id;
     if (userId == null) {
       _showSnackBar('Please login first', Colors.red);
@@ -360,37 +313,34 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     });
 
     try {
-      // Upload images first if selected
-      String? logoUrl;
-      if (_logoFile != null || _logoWebBytes != null) {
-        logoUrl = await _uploadLogo();
-      }
-
-      String? coverUrl;
-      if (_coverFile != null || _coverWebBytes != null) {
-        coverUrl = await _uploadCover();
-      }
+      // Upload images
+      String? logoUrl = (_logoFile != null || _logoWebBytes != null) 
+          ? await _uploadLogo() 
+          : null;
+      String? coverUrl = (_coverFile != null || _coverWebBytes != null) 
+          ? await _uploadCover() 
+          : null;
 
       // Prepare salon data
       final salonData = {
         'name': _nameController.text.trim(),
-        'address': _addressController.text.trim().isNotEmpty
-            ? _addressController.text.trim()
+        'address': _addressController.text.trim().isNotEmpty 
+            ? _addressController.text.trim() 
             : null,
-        'phone': _phoneController.text.trim().isNotEmpty
-            ? _phoneController.text.trim()
+        'phone': _phoneController.text.trim().isNotEmpty 
+            ? _phoneController.text.trim() 
             : null,
-        'email': _emailController.text.trim().isNotEmpty
-            ? _emailController.text.trim()
+        'email': _emailController.text.trim().isNotEmpty 
+            ? _emailController.text.trim() 
             : null,
         'owner_id': userId,
-        'description': _descriptionController.text.trim().isNotEmpty
-            ? _descriptionController.text.trim()
+        'description': _descriptionController.text.trim().isNotEmpty 
+            ? _descriptionController.text.trim() 
             : null,
         'logo_url': logoUrl,
         'cover_url': coverUrl,
-        'open_time': '${_openTime!.hour.toString().padLeft(2, '0')}:${_openTime!.minute.toString().padLeft(2, '0')}:00',
-        'close_time': '${_closeTime!.hour.toString().padLeft(2, '0')}:${_closeTime!.minute.toString().padLeft(2, '0')}:00',
+        'open_time': _formatTimeOfDay(_openTime!),
+        'close_time': _formatTimeOfDay(_closeTime!),
         'extra_data': {
           'created_from': _isWeb ? 'web' : 'mobile',
           'platform': _getPlatformName(),
@@ -412,9 +362,12 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
         await showCustomAlert(
           context: context,
           title: "🎉 Salon Created!",
-          message:
+          message: 
               "${_nameController.text.trim()} has been created successfully.\n\n"
-              "You can now add genders, categories, and age categories from the salon management screen.",
+              "✅ Default genders (Male, Female, Unisex) added\n"
+              "✅ Default age categories (Child, Teen, Adult, Senior) added\n"
+              "✅ Default service categories (Hair, Skin, Grooming, Wellness, Nails, Other) added\n\n"
+              "You can now manage these from the salon management screen.",
           isError: false,
         );
 
@@ -425,7 +378,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     } catch (e) {
       debugPrint('❌ Error creating salon: $e');
       if (mounted) {
-        _showSnackBar('Error creating salon', Colors.red);
+        _showSnackBar('Error creating salon: ${e.toString()}', Colors.red);
       }
     } finally {
       if (mounted) {
@@ -456,7 +409,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     } else if (_logoUrl != null) {
       return NetworkImage(_logoUrl!);
     }
-    return const AssetImage(''); // Empty placeholder
+    return const AssetImage('');
   }
 
   // Helper to get cover image provider
@@ -468,7 +421,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     } else if (_coverUrl != null) {
       return NetworkImage(_coverUrl!);
     }
-    return const AssetImage(''); // Empty placeholder
+    return const AssetImage('');
   }
 
   @override
@@ -563,7 +516,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     );
   }
 
-  // Header (same as before)
+  // Header
   Widget _buildHeader() {
     return Center(
       child: Column(
@@ -602,7 +555,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     );
   }
 
-  // Cover Image Section (updated for web)
+  // Cover Image Section
   Widget _buildCoverImageSection() {
     bool hasCover = (kIsWeb && _coverWebBytes != null) || _coverFile != null || _coverUrl != null;
     
@@ -649,6 +602,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                                 : Image.network(
                                     _coverUrl!,
                                     fit: BoxFit.cover,
+                                    errorBuilder: (context, error, stackTrace) {
+                                      return _buildCoverPlaceholder();
+                                    },
                                   ),
                       ),
                       if (_isUploadingCover)
@@ -688,28 +644,32 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                       ),
                     ],
                   )
-                : Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.add_photo_alternate,
-                        size: 40,
-                        color: Colors.grey[400],
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Add Cover Photo',
-                        style: TextStyle(color: Colors.grey[600]),
-                      ),
-                    ],
-                  ),
+                : _buildCoverPlaceholder(),
           ),
         ),
       ],
     );
   }
 
-  // Logo Section (updated for web)
+  Widget _buildCoverPlaceholder() {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(
+          Icons.add_photo_alternate,
+          size: 40,
+          color: Colors.grey[400],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Add Cover Photo',
+          style: TextStyle(color: Colors.grey[600]),
+        ),
+      ],
+    );
+  }
+
+  // Logo Section
   Widget _buildLogoSection() {
     bool hasLogo = (kIsWeb && _logoWebBytes != null) || _logoFile != null || _logoUrl != null;
     
@@ -756,23 +716,12 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                                   : Image.network(
                                       _logoUrl!,
                                       fit: BoxFit.cover,
+                                      errorBuilder: (context, error, stackTrace) {
+                                        return _buildLogoPlaceholder();
+                                      },
                                     ),
                         )
-                      : const Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              Icons.add_a_photo,
-                              size: 30,
-                              color: Colors.grey,
-                            ),
-                            SizedBox(height: 4),
-                            Text(
-                              'Add Logo',
-                              style: TextStyle(color: Colors.grey, fontSize: 11),
-                            ),
-                          ],
-                        ),
+                      : _buildLogoPlaceholder(),
                 ),
                 if (_isUploadingLogo)
                   Positioned.fill(
@@ -796,11 +745,28 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     );
   }
 
-  // Basic Info Fields (same as before)
+  Widget _buildLogoPlaceholder() {
+    return const Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(
+          Icons.add_a_photo,
+          size: 30,
+          color: Colors.grey,
+        ),
+        SizedBox(height: 4),
+        Text(
+          'Add Logo',
+          style: TextStyle(color: Colors.grey, fontSize: 11),
+        ),
+      ],
+    );
+  }
+
+  // Basic Info Fields
   Widget _buildBasicInfoFields() {
     return Column(
       children: [
-        // Salon Name (Required)
         const Text(
           'Salon Name *',
           style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
@@ -828,10 +794,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
             return null;
           },
         ),
-
         const SizedBox(height: 16),
-
-        // Address
         const Text(
           'Address',
           style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
@@ -854,7 +817,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     );
   }
 
-  // Business Hours Section (same as before)
+  // Business Hours Section
   Widget _buildBusinessHoursSection() {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -896,7 +859,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     );
   }
 
-  // Time Picker Tile (same as before)
   Widget _buildTimePickerTile({
     required String label,
     required TimeOfDay time,
@@ -941,7 +903,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     );
   }
 
-  // Contact Section (same as before)
+  // Contact Section
   Widget _buildContactSection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -951,8 +913,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
           style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: 12),
-        
-        // Phone
         const Text(
           'Phone Number',
           style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
@@ -971,10 +931,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
             ),
           ),
         ),
-
         const SizedBox(height: 12),
-
-        // Email
         const Text(
           'Email Address',
           style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
@@ -994,9 +951,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
           ),
           validator: (value) {
             if (value != null && value.isNotEmpty) {
-              if (!RegExp(
-                r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$',
-              ).hasMatch(value)) {
+              if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value)) {
                 return 'Enter a valid email';
               }
             }
@@ -1007,7 +962,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     );
   }
 
-  // Description Field (same as before)
+  // Description Field
   Widget _buildDescriptionField() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1038,7 +993,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     );
   }
 
-  // Create Button (same as before)
+  // Create Button
   Widget _buildCreateButton() {
     return SizedBox(
       width: double.infinity,
@@ -1088,7 +1043,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     );
   }
 
-  // Logo Image Source Dialog (same as before)
+  // Logo Image Source Dialog
   void _showLogoImageSourceDialog() {
     showModalBottomSheet(
       context: context,
@@ -1145,7 +1100,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     );
   }
 
-  // Cover Image Source Dialog (same as before)
+  // Cover Image Source Dialog
   void _showCoverImageSourceDialog() {
     showModalBottomSheet(
       context: context,
