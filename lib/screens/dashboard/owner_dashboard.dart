@@ -41,12 +41,12 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
   int _totalRevenue = 0;
   int _totalCustomers = 0;
   int _activeBarbers = 0;
-  
+
   // 🔥 Multiple salons support
   List<Map<String, dynamic>> _ownerSalons = [];
   String? _selectedSalonId;
   bool _isLoadingSalons = false;
-  
+
   // User info
   String _userName = 'Salon Owner';
   String? _userEmail;
@@ -58,21 +58,55 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
   @override
   void initState() {
     super.initState();
-
-    _loadData();
-    _loadUserProfile();
-    _loadOwnerSalons();
+    _loadAllData();
     _setupNotificationListeners();
-    
     debugPrint('🔄 OwnerDashboard initState completed');
+  }
+
+  // ============================================================
+  // 🔥 Load all data (salons + profile + stats)
+  // ============================================================
+  Future<void> _loadAllData() async {
+    setState(() => _isLoading = true);
+
+    try {
+      await Future.wait([_loadUserProfile(), _loadOwnerSalons()]);
+
+      // After salons are loaded, load dashboard stats
+      await _loadDashboardStats();
+
+      // Check permissions
+      _hasPermission = await _notificationService.hasPermission();
+      if (!_hasPermission) {
+        _showPermissionCard = await _permissionManager.shouldShowPermissionCard(
+          'owner_dashboard',
+        );
+      } else {
+        _showPermissionCard = false;
+      }
+
+      if (mounted) {
+        setState(() => _isLoading = false);
+        debugPrint('✅ All data loaded successfully');
+      }
+    } catch (e) {
+      debugPrint('❌ Error loading all data: $e');
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error loading data: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   // ============================================================
   // 🔥 Load owner's salons (multiple)
   // ============================================================
   Future<void> _loadOwnerSalons() async {
-    setState(() => _isLoadingSalons = true);
-    
     try {
       final userId = supabase.auth.currentUser?.id;
       if (userId == null) return;
@@ -89,17 +123,13 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
       if (mounted) {
         setState(() {
           _ownerSalons = List<Map<String, dynamic>>.from(response);
-          if (_ownerSalons.isNotEmpty) {
+          if (_ownerSalons.isNotEmpty && _selectedSalonId == null) {
             _selectedSalonId = _ownerSalons.first['id'].toString();
           }
-          _isLoadingSalons = false;
         });
       }
     } catch (e) {
       debugPrint('❌ Error loading salons: $e');
-      if (mounted) {
-        setState(() => _isLoadingSalons = false);
-      }
     }
   }
 
@@ -122,11 +152,12 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
           .eq('id', currentUser.id)
           .maybeSingle();
 
-      if (profileResponse != null) {
+      if (profileResponse != null && mounted) {
         setState(() {
-          _userName = profileResponse['full_name'] ?? 
-                      profileResponse['extra_data']?['full_name'] ?? 
-                      'Salon Owner';
+          _userName =
+              profileResponse['full_name'] ??
+              profileResponse['extra_data']?['full_name'] ??
+              'Salon Owner';
           _userEmail = profileResponse['email'] ?? currentUser.email;
           _profileImageUrl = profileResponse['avatar_url'];
         });
@@ -148,11 +179,14 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
           roleNames.add(role['name'].toString());
         }
       }
-      
-      _userRoles = roleNames.toSet().toList();
-      
+
+      if (mounted) {
+        setState(() {
+          _userRoles = roleNames.toSet().toList();
+        });
+      }
+
       debugPrint('👤 User profile loaded: $_userName');
-      debugPrint('👤 User roles: $_userRoles');
     } catch (e) {
       debugPrint('❌ Error loading user profile: $e');
     }
@@ -166,9 +200,10 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
       debugPrint('⚠️ No salon selected');
       return;
     }
-    
+
     try {
       final today = DateTime.now().toIso8601String().split('T')[0];
+      final salonIdInt = int.parse(_selectedSalonId!);
 
       debugPrint('📊 Loading stats for salon ID: $_selectedSalonId');
 
@@ -176,50 +211,40 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
       final todayAppointments = await supabase
           .from('appointments')
           .select('id, status, price')
-          .eq('salon_id', int.parse(_selectedSalonId!))
+          .eq('salon_id', salonIdInt)
           .eq('appointment_date', today);
-
-      debugPrint('📊 Today appointments: ${todayAppointments.length}');
 
       // Get pending bookings
       final pendingBookings = await supabase
           .from('appointments')
           .select('id')
-          .eq('salon_id', int.parse(_selectedSalonId!))
+          .eq('salon_id', salonIdInt)
           .eq('appointment_date', today)
           .eq('status', 'pending');
-
-      debugPrint('📊 Pending bookings: ${pendingBookings.length}');
 
       // Get active barbers for this salon
       final activeBarbers = await supabase
           .from('salon_barbers')
           .select('id')
-          .eq('salon_id', int.parse(_selectedSalonId!))
-          .eq('is_active', true);
-
-      debugPrint('📊 Active barbers: ${activeBarbers.length}');
+          .eq('salon_id', salonIdInt)
+          .eq('status', 'active');
 
       // Get total customers (all time)
       final totalCustomers = await supabase
           .from('appointments')
           .select('customer_id')
-          .eq('salon_id', int.parse(_selectedSalonId!));
+          .eq('salon_id', salonIdInt);
 
       final uniqueCustomers = totalCustomers
           .map((a) => a['customer_id'] as String)
           .toSet()
           .length;
 
-      debugPrint('📊 Total customers: $uniqueCustomers');
-
       // Get today's revenue
       final revenue = todayAppointments.fold<int>(
         0,
         (sum, item) => sum + ((item['price'] as num?)?.toInt() ?? 0),
       );
-
-      debugPrint('📊 Today revenue: $revenue');
 
       if (mounted) {
         setState(() {
@@ -229,51 +254,17 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
           _totalCustomers = uniqueCustomers;
           _totalRevenue = revenue;
           pendingAppointments = _pendingBookings;
-          completedToday = todayAppointments.where((a) => a['status'] == 'completed').length;
+          completedToday = todayAppointments
+              .where((a) => a['status'] == 'completed')
+              .length;
         });
       }
+
+      debugPrint(
+        '📊 Stats loaded: appointments=$_todayAppointments, revenue=$_totalRevenue',
+      );
     } catch (e) {
       debugPrint('❌ Error loading dashboard stats: $e');
-    }
-  }
-
-  // ============================================================
-  // 🔥 Load initial data
-  // ============================================================
-  Future<void> _loadData() async {
-    setState(() => _isLoading = true);
-
-    try {
-      debugPrint('📊 Loading dashboard data...');
-
-      _hasPermission = await _notificationService.hasPermission();
-
-      if (!_hasPermission) {
-        _showPermissionCard = await _permissionManager.shouldShowPermissionCard(
-          'owner_dashboard',
-        );
-      } else {
-        _showPermissionCard = false;
-      }
-
-      await _loadDashboardStats();
-
-      if (mounted) {
-        setState(() => _isLoading = false);
-        debugPrint('✅ Data loaded successfully');
-      }
-    } catch (e) {
-      debugPrint('❌ Error loading data: $e');
-      if (mounted) {
-        setState(() => _isLoading = false);
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error loading data: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
     }
   }
 
@@ -282,12 +273,7 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
   // ============================================================
   Future<void> _refreshAllData() async {
     debugPrint('🔄 Refreshing all data...');
-    
-    await Future.wait([
-      _loadOwnerSalons(),
-      _loadUserProfile(),
-      _loadData(),
-    ]);
+    await _loadAllData();
   }
 
   // ============================================================
@@ -298,29 +284,54 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
     setState(() {
       _selectedSalonId = salonId;
     });
-    _loadData();
+    _loadDashboardStats();
   }
 
   // ============================================================
-  // 🔥 Navigation Methods - All Required Features
+  // 🔥 Navigation Methods
   // ============================================================
-  
-  // Salon Management
-  void _navigateToCreateSalon() {
+
+  void _navigateToCreateSalon() async {
     debugPrint('📍 Navigating to create salon screen');
-    context.push('/owner/salon/create');
+    final result = await context.push('/owner/salon/create');
+
+    // ✅ IMPORTANT: If salon was created successfully, refresh all data
+    if (result == true) {
+      debugPrint('🔄 Salon created, refreshing dashboard...');
+      await _refreshAllData();
+
+      // Show success message
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✅ Salon created successfully!'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    }
   }
 
-  void _navigateToEditSalon() {
+  void _navigateToEditSalon() async {
     if (_ownerSalons.isEmpty) {
       _showCreateSalonFirstDialog();
       return;
     }
-    debugPrint('📍 Navigating to edit salon screen');
-    context.push('/owner/salon/edit?salonId=$_selectedSalonId');
+    final result = await context.push(
+      '/owner/salon/edit?salonId=$_selectedSalonId',
+    );
+    if (result == true) {
+      await _refreshAllData();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('✅ Salon updated successfully!'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
   }
 
-  // Barber Management
   void _navigateToAddBarber() {
     if (_ownerSalons.isEmpty) {
       _showCreateSalonFirstDialog();
@@ -357,7 +368,6 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
     context.push('/owner/barbers?salonId=$_selectedSalonId');
   }
 
-  // Service Management
   void _navigateToAddService() {
     if (_ownerSalons.isEmpty) {
       _showCreateSalonFirstDialog();
@@ -385,10 +395,13 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
     context.push('/owner/services');
   }
 
-  // Category Management
-  void _navigateToAddCategory() {
+  void _navigateToAddCategory() async {
     debugPrint('📍 Navigating to add category screen');
-    context.push('/owner/categories/add');
+    final result = await context.push('/owner/categories/add');
+    if (result == true && mounted) {
+      // Category added, refresh if needed
+      debugPrint('🔄 Category added, refreshing...');
+    }
   }
 
   void _navigateToCategoryList() {
@@ -396,10 +409,12 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
     context.push('/owner/categories');
   }
 
-  // Gender Management
-  void _navigateToAddGender() {
+  void _navigateToAddGender() async {
     debugPrint('📍 Navigating to add gender screen');
-    context.push('/owner/genders/add');
+    final result = await context.push('/owner/genders/add');
+    if (result == true && mounted) {
+      debugPrint('🔄 Gender added, refreshing...');
+    }
   }
 
   void _navigateToGenderList() {
@@ -407,10 +422,12 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
     context.push('/owner/genders');
   }
 
-  // Age Category Management
-  void _navigateToAddAgeCategory() {
+  void _navigateToAddAgeCategory() async {
     debugPrint('📍 Navigating to add age category screen');
-    context.push('/owner/age-categories/add');
+    final result = await context.push('/owner/age-categories/add');
+    if (result == true && mounted) {
+      debugPrint('🔄 Age category added, refreshing...');
+    }
   }
 
   void _navigateToAgeCategoryList() {
@@ -418,7 +435,6 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
     context.push('/owner/age-categories');
   }
 
-  // Appointment Management
   void _viewBookings() {
     if (_selectedSalonId != null) {
       context.push('/owner/appointments?salonId=$_selectedSalonId');
@@ -458,15 +474,6 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
     context.push('/owner/settings');
   }
 
-  void _viewBarberList() {
-  if (_ownerSalons.isEmpty) {
-    _showCreateSalonFirstDialog();
-    return;
-  }
-  debugPrint('📍 Navigating to barber list screen');
-  context.push('/owner/barbers?salonId=$_selectedSalonId');
-}
-
   // ============================================================
   // 🔥 Helper Methods
   // ============================================================
@@ -477,7 +484,7 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Create Salon First'),
         content: const Text(
-          'You need to create a salon before adding barbers or services. Would you like to create one now?'
+          'You need to create a salon before adding barbers or services. Would you like to create one now?',
         ),
         actions: [
           TextButton(
@@ -569,9 +576,6 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
     }
   }
 
-  // ============================================================
-  // 🔥 Show new booking alert
-  // ============================================================
   void _showNewBookingAlert(RemoteMessage message) {
     if (!mounted) return;
 
@@ -626,9 +630,6 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
     );
   }
 
-  // ============================================================
-  // 🔥 Enable notifications
-  // ============================================================
   Future<void> _enableNotifications() async {
     setState(() => _showPermissionCard = false);
 
@@ -678,9 +679,6 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
     }
   }
 
-  // ============================================================
-  // 🔥 Show settings dialog
-  // ============================================================
   void _showSettingsDialog() {
     showDialog(
       context: context,
@@ -709,17 +707,11 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
     );
   }
 
-  // ============================================================
-  // 🔥 Handle Not Now
-  // ============================================================
   Future<void> _handleNotNow() async {
     setState(() => _showPermissionCard = false);
     await _permissionManager.markPermissionShown('owner_dashboard');
   }
 
-  // ============================================================
-  // 🔥 Open drawer method
-  // ============================================================
   void _openDrawer() {
     try {
       if (_scaffoldKey.currentState != null) {
@@ -735,9 +727,6 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
     }
   }
 
-  // ============================================================
-  // 🔥 Emergency menu dialog
-  // ============================================================
   void _showMenuDialog() {
     showDialog(
       context: context,
@@ -817,9 +806,6 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
     );
   }
 
-  // ============================================================
-  // 🔥 Logout
-  // ============================================================
   Future<void> _logout(BuildContext context) async {
     showLogoutConfirmation(
       context,
@@ -839,12 +825,12 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
           await appState.refreshState();
 
           if (context.mounted) {
-            Navigator.pop(context); // Close loading
+            Navigator.pop(context);
             context.go('/');
           }
         } catch (e) {
           if (context.mounted) {
-            Navigator.pop(context); // Close loading
+            Navigator.pop(context);
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text('Logout failed: $e'),
@@ -858,8 +844,9 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
   }
 
   // ============================================================
-  // 🔥 Build quick action button
+  // 🔥 Build Widgets
   // ============================================================
+
   Widget _buildQuickAction({
     required IconData icon,
     required String label,
@@ -873,18 +860,14 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 12),
           decoration: BoxDecoration(
-            color: enabled 
+            color: enabled
                 ? color.withValues(alpha: 0.1)
                 : Colors.grey.withValues(alpha: 0.05),
             borderRadius: BorderRadius.circular(12),
           ),
           child: Column(
             children: [
-              Icon(
-                icon, 
-                color: enabled ? color : Colors.grey[400], 
-                size: 28
-              ),
+              Icon(icon, color: enabled ? color : Colors.grey[400], size: 28),
               const SizedBox(height: 4),
               Text(
                 label,
@@ -902,12 +885,9 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
     );
   }
 
-  // ============================================================
-  // 🔥 Build salon selector
-  // ============================================================
   Widget _buildSalonSelector() {
     if (_ownerSalons.isEmpty) return const SizedBox.shrink();
-    
+
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       padding: const EdgeInsets.all(12),
@@ -972,11 +952,17 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
                     selected: isSelected,
                     onSelected: (_) => _switchSalon(salon['id'].toString()),
                     backgroundColor: Colors.grey[100],
-                    selectedColor: const Color(0xFFFF6B8B).withValues(alpha: 0.2),
+                    selectedColor: const Color(
+                      0xFFFF6B8B,
+                    ).withValues(alpha: 0.2),
                     checkmarkColor: const Color(0xFFFF6B8B),
                     labelStyle: TextStyle(
-                      color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[800],
-                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                      color: isSelected
+                          ? const Color(0xFFFF6B8B)
+                          : Colors.grey[800],
+                      fontWeight: isSelected
+                          ? FontWeight.bold
+                          : FontWeight.normal,
                     ),
                   ),
                 );
@@ -988,250 +974,260 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
     );
   }
 
-  // ============================================================
-  // 🔥 Build main management section
-  // ============================================================
-// ============================================================
-// 🔥 Build main management section
-// ============================================================
-Widget _buildManagementSection() {
-  return Container(
-    margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-    padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(16),
-      boxShadow: [
-        BoxShadow(
-          color: Colors.grey.withValues(alpha: 0.1),
-          blurRadius: 8,
-          offset: const Offset(0, 2),
-        ),
-      ],
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Row(
-          children: [
-            Icon(Icons.settings, size: 20, color: Color(0xFFFF6B8B)),
-            SizedBox(width: 8),
-            Text(
-              'Management',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
+  Widget _buildManagementSection() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withValues(alpha: 0.1),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.settings, size: 20, color: Color(0xFFFF6B8B)),
+              SizedBox(width: 8),
+              Text(
+                'Management',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        
-        // Row 1: Salon Management
-        const Text(
-          'Salon Management',
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-            color: Colors.grey,
+            ],
           ),
-        ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            _buildQuickAction(
-              icon: Icons.add_business,
-              label: 'Create Salon',
-              color: const Color(0xFFFF6B8B),
-              onTap: _navigateToCreateSalon,
-            ),
-            const SizedBox(width: 8),
-            _buildQuickAction(
-              icon: Icons.edit,
-              label: 'Edit Salon',
-              color: Colors.blue,
-              onTap: _navigateToEditSalon,
-              enabled: _ownerSalons.isNotEmpty,
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        
-        // Row 2: Barber Management
-        const Text(
-          'Barber Management',
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-            color: Colors.grey,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            _buildQuickAction(
-              icon: Icons.person_add,
-              label: 'Add Barber',
-              color: Colors.purple,
-              onTap: _navigateToAddBarber,
-              enabled: _ownerSalons.isNotEmpty,
-            ),
-            const SizedBox(width: 8),
-            _buildQuickAction(
-              icon: Icons.calendar_month,
-              label: 'Schedule',
-              color: Colors.teal,
-              onTap: _navigateToBarberSchedule,
-              enabled: _ownerSalons.isNotEmpty,
-            ),
-            const SizedBox(width: 8),
-            _buildQuickAction(
-              icon: Icons.beach_access,
-              label: 'Leaves',
-              color: Colors.orange,
-              onTap: _navigateToBarberLeaves,
-              enabled: _ownerSalons.isNotEmpty,
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            _buildQuickAction(
-              icon: Icons.list,
-              label: 'Barber List',
-              color: Colors.indigo,
-              onTap: _viewBarberList, // ✅ Now defined
-              enabled: _ownerSalons.isNotEmpty,
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        
-        // Row 3: Service Management
-        const Text(
-          'Service Management',
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-            color: Colors.grey,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            _buildQuickAction(
-              icon: Icons.build,
-              label: 'Add Service',
-              color: Colors.green,
-              onTap: _navigateToAddService,
-              enabled: _ownerSalons.isNotEmpty,
-            ),
-            const SizedBox(width: 8),
-            _buildQuickAction(
-              icon: Icons.tune,
-              label: 'Add Variant',
-              color: Colors.lime,
-              onTap: _navigateToAddServiceVariant,
-              enabled: _ownerSalons.isNotEmpty,
-            ),
-            const SizedBox(width: 8),
-            _buildQuickAction(
-              icon: Icons.list,
-              label: 'Service List',
-              color: Colors.cyan,
-              onTap: _navigateToServiceList,
-              enabled: _ownerSalons.isNotEmpty,
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        
-        // Row 4: Category Management
-        const Text(
-          'Category Management',
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-            color: Colors.grey,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            _buildQuickAction(
-              icon: Icons.category,
-              label: 'Add Category',
-              color: Colors.brown,
-              onTap: _navigateToAddCategory,
-            ),
-            const SizedBox(width: 8),
-            _buildQuickAction(
-              icon: Icons.list,
-              label: 'Category List',
-              color: Colors.deepPurple,
-              onTap: _navigateToCategoryList,
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            _buildQuickAction(
-              icon: Icons.wc,
-              label: 'Add Gender',
-              color: Colors.pink,
-              onTap: _navigateToAddGender,
-            ),
-            const SizedBox(width: 8),
-            _buildQuickAction(
-              icon: Icons.cake,
-              label: 'Add Age Cat',
-              color: Colors.amber,
-              onTap: _navigateToAddAgeCategory,
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        
-        // Row 5: Reports & Analytics
-        const Text(
-          'Reports & Analytics',
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-            color: Colors.grey,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            _buildQuickAction(
-              icon: Icons.bar_chart,
-              label: 'Reports',
-              color: Colors.deepOrange,
-              onTap: _viewReports,
-            ),
-            const SizedBox(width: 8),
-            _buildQuickAction(
-              icon: Icons.analytics,
-              label: 'Analytics',
-              color: Colors.indigoAccent,
-              onTap: _viewAnalytics,
-            ),
-            const SizedBox(width: 8),
-            _buildQuickAction(
-              icon: Icons.settings,
-              label: 'Settings',
+          const SizedBox(height: 16),
+
+          // Row 1: Salon Management
+          const Text(
+            'Salon Management',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
               color: Colors.grey,
-              onTap: _viewSettings,
             ),
-          ],
-        ),
-      ],
-    ),
-  );
-}
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              _buildQuickAction(
+                icon: Icons.add_business,
+                label: 'Create Salon',
+                color: const Color(0xFFFF6B8B),
+                onTap: _navigateToCreateSalon,
+              ),
+              const SizedBox(width: 8),
+              _buildQuickAction(
+                icon: Icons.edit,
+                label: 'Edit Salon',
+                color: Colors.blue,
+                onTap: _navigateToEditSalon,
+                enabled: _ownerSalons.isNotEmpty,
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // Row 2: Barber Management
+          const Text(
+            'Barber Management',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: Colors.grey,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              _buildQuickAction(
+                icon: Icons.person_add,
+                label: 'Add Barber',
+                color: Colors.purple,
+                onTap: _navigateToAddBarber,
+                enabled: _ownerSalons.isNotEmpty,
+              ),
+              const SizedBox(width: 8),
+              _buildQuickAction(
+                icon: Icons.calendar_month,
+                label: 'Schedule',
+                color: Colors.teal,
+                onTap: _navigateToBarberSchedule,
+                enabled: _ownerSalons.isNotEmpty,
+              ),
+              const SizedBox(width: 8),
+              _buildQuickAction(
+                icon: Icons.beach_access,
+                label: 'Leaves',
+                color: Colors.orange,
+                onTap: _navigateToBarberLeaves,
+                enabled: _ownerSalons.isNotEmpty,
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              _buildQuickAction(
+                icon: Icons.list,
+                label: 'Barber List',
+                color: Colors.indigo,
+                onTap: _navigateToBarberList,
+                enabled: _ownerSalons.isNotEmpty,
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // Row 3: Service Management
+          const Text(
+            'Service Management',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: Colors.grey,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              _buildQuickAction(
+                icon: Icons.build,
+                label: 'Add Service',
+                color: Colors.green,
+                onTap: _navigateToAddService,
+                enabled: _ownerSalons.isNotEmpty,
+              ),
+              const SizedBox(width: 8),
+              _buildQuickAction(
+                icon: Icons.tune,
+                label: 'Add Variant',
+                color: Colors.lime,
+                onTap: _navigateToAddServiceVariant,
+                enabled: _ownerSalons.isNotEmpty,
+              ),
+              const SizedBox(width: 8),
+              _buildQuickAction(
+                icon: Icons.list,
+                label: 'Service List',
+                color: Colors.cyan,
+                onTap: _navigateToServiceList,
+                enabled: _ownerSalons.isNotEmpty,
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // Row 4: Category Management
+          const Text(
+            'Category Management',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: Colors.grey,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              _buildQuickAction(
+                icon: Icons.category,
+                label: 'Add Category',
+                color: Colors.brown,
+                onTap: _navigateToAddCategory,
+              ),
+              const SizedBox(width: 8),
+              _buildQuickAction(
+                icon: Icons.list,
+                label: 'Category List',
+                color: Colors.deepPurple,
+                onTap: _navigateToCategoryList,
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              _buildQuickAction(
+                icon: Icons.wc,
+                label: 'Add Gender',
+                color: Colors.pink,
+                onTap: _navigateToAddGender,
+              ),
+              const SizedBox(width: 8),
+              _buildQuickAction(
+                icon: Icons.cake,
+                label: 'Add Age Cat',
+                color: Colors.amber,
+                onTap: _navigateToAddAgeCategory,
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // Row 5: Reports & Analytics
+          const Text(
+            'Reports & Analytics',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: Colors.grey,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              _buildQuickAction(
+                icon: Icons.bar_chart,
+                label: 'Reports',
+                color: Colors.deepOrange,
+                onTap: _viewReports,
+              ),
+              const SizedBox(width: 8),
+              _buildQuickAction(
+                icon: Icons.analytics,
+                label: 'Analytics',
+                color: Colors.indigoAccent,
+                onTap: _viewAnalytics,
+              ),
+              const SizedBox(width: 8),
+              _buildQuickAction(
+                icon: Icons.settings,
+                label: 'Settings',
+                color: Colors.grey,
+                onTap: _viewSettings,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _getFormattedDate() {
+    final now = DateTime.now();
+    final months = [
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
+    ];
+    return '${months[now.month - 1]} ${now.day}, ${now.year}';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1240,7 +1236,6 @@ Widget _buildManagementSection() {
 
     return Scaffold(
       key: _scaffoldKey,
-
       appBar: AppBar(
         title: Text(
           isWeb ? 'Owner Dashboard' : 'Dashboard',
@@ -1250,16 +1245,13 @@ Widget _buildManagementSection() {
         foregroundColor: Colors.white,
         elevation: 0,
         centerTitle: isWeb,
-
         leading: IconButton(
           icon: const Icon(Icons.menu),
           onPressed: _openDrawer,
           tooltip: 'Menu',
           iconSize: 28,
         ),
-
         actions: [
-          // Add Menu Button (Create Salon, Add Barber, Add Service)
           PopupMenuButton<String>(
             icon: const Icon(Icons.add),
             tooltip: 'Add New',
@@ -1297,7 +1289,11 @@ Widget _buildManagementSection() {
                 value: 'salon',
                 child: Row(
                   children: [
-                    Icon(Icons.add_business, color: Color(0xFFFF6B8B), size: 18),
+                    Icon(
+                      Icons.add_business,
+                      color: Color(0xFFFF6B8B),
+                      size: 18,
+                    ),
                     SizedBox(width: 12),
                     Text('Create New Salon'),
                   ],
@@ -1365,8 +1361,6 @@ Widget _buildManagementSection() {
               ),
             ],
           ),
-
-          // Notification bell
           Stack(
             clipBehavior: Clip.none,
             children: [
@@ -1401,8 +1395,6 @@ Widget _buildManagementSection() {
                 ),
             ],
           ),
-
-          // Refresh button
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _refreshAllData,
@@ -1410,8 +1402,6 @@ Widget _buildManagementSection() {
           ),
         ],
       ),
-
-      // Drawer with SideMenu
       drawer: SideMenu(
         userRole: 'owner',
         userName: _userName,
@@ -1421,7 +1411,6 @@ Widget _buildManagementSection() {
           _refreshAllData();
         },
       ),
-
       body: _isLoading || _isLoadingSalons
           ? const Center(
               child: Column(
@@ -1440,7 +1429,6 @@ Widget _buildManagementSection() {
                 physics: const AlwaysScrollableScrollPhysics(),
                 child: Column(
                   children: [
-                    // Permission Card
                     if (_showPermissionCard && !_hasPermission)
                       PermissionCard(
                         onEnable: _enableNotifications,
@@ -1450,8 +1438,6 @@ Widget _buildManagementSection() {
                             'Get instant notifications when customers book appointments',
                         compact: false,
                       ),
-
-                    // Welcome Message
                     Padding(
                       padding: const EdgeInsets.all(16),
                       child: Row(
@@ -1506,11 +1492,7 @@ Widget _buildManagementSection() {
                         ],
                       ),
                     ),
-
-                    // 🔥 Salon Selector (if multiple salons)
                     if (_ownerSalons.length > 1) _buildSalonSelector(),
-
-                    // No salon warning (if no salons)
                     if (_ownerSalons.isEmpty)
                       Container(
                         margin: const EdgeInsets.all(16),
@@ -1522,7 +1504,11 @@ Widget _buildManagementSection() {
                         ),
                         child: Column(
                           children: [
-                            const Icon(Icons.warning, color: Colors.orange, size: 40),
+                            const Icon(
+                              Icons.warning,
+                              color: Colors.orange,
+                              size: 40,
+                            ),
                             const SizedBox(height: 8),
                             const Text(
                               'No Salons Found',
@@ -1550,10 +1536,7 @@ Widget _buildManagementSection() {
                           ],
                         ),
                       ),
-
-                    // Stats Cards - Only show if salon exists
                     if (_ownerSalons.isNotEmpty) ...[
-                      // Stats Cards Row 1
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16),
                         child: Row(
@@ -1582,43 +1565,36 @@ Widget _buildManagementSection() {
                           ],
                         ),
                       ),
-
                       const SizedBox(height: 12),
-
-                      // Stats Cards Row 2
-                     // Stats Cards Row 2 - FIXED
-Padding(
-  padding: const EdgeInsets.symmetric(horizontal: 16),
-  child: Row(
-    children: [
-      Expanded(
-        child: DashboardStatCard(
-          title: 'Total Customers',
-          value: '$_totalCustomers',
-          icon: Icons.people,
-          color: Colors.purple,
-          percentageChange: 8.2,
-          onTap: _viewAllCustomers,
-        ),
-      ),
-      const SizedBox(width: 12),
-      Expanded(
-        child: DashboardStatCard(
-          title: 'Active Barbers',
-          value: '$_activeBarbers',
-          icon: Icons.content_cut,
-          color: Colors.green,
-          subtitle: 'Working today',
-          onTap: _viewBarberList, // Now this is defined
-        ),
-      ),
-    ],
-  ),
-),
-
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: DashboardStatCard(
+                                title: 'Total Customers',
+                                value: '$_totalCustomers',
+                                icon: Icons.people,
+                                color: Colors.purple,
+                                percentageChange: 8.2,
+                                onTap: _viewAllCustomers,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: DashboardStatCard(
+                                title: 'Active Barbers',
+                                value: '$_activeBarbers',
+                                icon: Icons.content_cut,
+                                color: Colors.green,
+                                subtitle: 'Working today',
+                                onTap: _navigateToBarberList,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                       const SizedBox(height: 12),
-
-                      // Revenue Card
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16),
                         child: DashboardStatCard(
@@ -1633,15 +1609,9 @@ Padding(
                         ),
                       ),
                     ],
-
                     const SizedBox(height: 16),
-
-                    // 🔥 Management Section - All buttons
                     _buildManagementSection(),
-
                     const SizedBox(height: 16),
-
-                    // Recent Bookings Section (only if salon exists)
                     if (_ownerSalons.isNotEmpty) ...[
                       const SectionHeader(
                         title: 'Recent Bookings',
@@ -1690,10 +1660,6 @@ Padding(
                         ),
                       ),
                     ],
-
-                    const SizedBox(height: 16),
-
-                    // Notification Status
                     if (_hasPermission)
                       Container(
                         margin: const EdgeInsets.only(bottom: 16),
@@ -1731,17 +1697,5 @@ Padding(
               ),
             ),
     );
-  }
-
-  // ============================================================
-  // 🔥 Helper: Get formatted date
-  // ============================================================
-  String _getFormattedDate() {
-    final now = DateTime.now();
-    final months = [
-      'January', 'February', 'March', 'April', 'May', 'June',
-      'July', 'August', 'September', 'October', 'November', 'December'
-    ];
-    return '${months[now.month - 1]} ${now.day}, ${now.year}';
   }
 }

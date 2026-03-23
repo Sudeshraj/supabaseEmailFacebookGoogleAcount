@@ -23,6 +23,7 @@ import 'package:flutter_application_1/screens/owner/barber_list_screen.dart';
 import 'package:flutter_application_1/screens/owner/barber_schedule_screen.dart';
 import 'package:flutter_application_1/screens/owner/create_salon.dart';
 import 'package:flutter_application_1/screens/owner/edit_barber_services_screen.dart';
+import 'package:flutter_application_1/screens/owner/edit_salon.dart';
 import 'package:flutter_application_1/screens/owner/vip_booking_requests_screen.dart';
 import 'package:flutter_application_1/services/notification_service.dart';
 import 'package:go_router/go_router.dart';
@@ -692,6 +693,19 @@ GoRouter _createRouter() {
           return BarberListScreen(salonId: salonId);
         },
       ),
+      GoRoute(
+      path: '/owner/salon/edit',
+      builder: (context, state) {
+        // Get salonId from query parameters
+        final salonIdStr = state.uri.queryParameters['salonId'];
+        if (salonIdStr == null) {
+          // If no salonId, redirect to dashboard
+          return const OwnerDashboard();
+        }
+        final salonId = int.parse(salonIdStr);
+        return EditSalonScreen(salonId: salonId);
+      },
+    ),
       GoRoute(
         path: '/owner/edit-barber-services',
         builder: (context, state) {

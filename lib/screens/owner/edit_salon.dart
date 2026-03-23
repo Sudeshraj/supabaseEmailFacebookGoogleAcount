@@ -1,20 +1,22 @@
-import 'dart:io' show Platform, File;
+import 'dart:io' show File;
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as path;
+import 'package:supabase_flutter/supabase_flutter.dart';
 
-class CreateSalonScreen extends StatefulWidget {
-  const CreateSalonScreen({super.key});
+class EditSalonScreen extends StatefulWidget {
+  final int salonId;
+
+  const EditSalonScreen({super.key, required this.salonId});
 
   @override
-  State<CreateSalonScreen> createState() => _CreateSalonScreenState();
+  State<EditSalonScreen> createState() => _EditSalonScreenState();
 }
 
-class _CreateSalonScreenState extends State<CreateSalonScreen> {
+class _EditSalonScreenState extends State<EditSalonScreen> {
   // Controllers
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _addressController = TextEditingController();
@@ -22,13 +24,13 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _descriptionController = TextEditingController();
 
-  // Images - handle both mobile and web
+  // Images
   File? _logoFile;
   Uint8List? _logoWebBytes;
   File? _coverFile;
   Uint8List? _coverWebBytes;
-  String? _logoUrl;
-  String? _coverUrl;
+  String? _currentLogoUrl;
+  String? _currentCoverUrl;
   bool _isUploadingLogo = false;
   bool _isUploadingCover = false;
 
@@ -36,17 +38,19 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
   TimeOfDay? _openTime;
   TimeOfDay? _closeTime;
 
-  // Selected items from global tables
+  // Global selections (genders, age categories, categories)
   List<Map<String, dynamic>> _genders = [];
   List<Map<String, dynamic>> _ageCategories = [];
   List<Map<String, dynamic>> _categories = [];
 
-  final List<int> _selectedGenderIds = [];
-  final List<int> _selectedAgeCategoryIds = [];
-  final List<int> _selectedCategoryIds = [];
+  List<int> _selectedGenderIds = [];
+  List<int> _selectedAgeCategoryIds = [];
+  List<int> _selectedCategoryIds = [];
 
-  bool _isLoadingData = true;
-  bool _isLoading = false;
+  bool _isLoadingGlobalData = false;
+  bool _isLoadingSalonData = true;
+  bool _isSaving = false;
+  bool _isDeleting = false;
 
   // Form key
   final _formKey = GlobalKey<FormState>();
@@ -58,6 +62,13 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
   final picker = ImagePicker();
 
   @override
+  void initState() {
+    super.initState();
+    _loadSalonData();
+    _loadGlobalData();
+  }
+
+  @override
   void dispose() {
     _nameController.dispose();
     _addressController.dispose();
@@ -67,34 +78,132 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     super.dispose();
   }
 
-  @override
-  void initState() {
-    super.initState();
-    _openTime = const TimeOfDay(hour: 9, minute: 0);
-    _closeTime = const TimeOfDay(hour: 18, minute: 0);
-    _loadGlobalData();
-  }
-
-  // Load global data from tables
-  Future<void> _loadGlobalData() async {
-    setState(() => _isLoadingData = true);
+  // ============================================================
+  // 🔥 Load salon data
+  // ============================================================
+  Future<void> _loadSalonData() async {
+    setState(() => _isLoadingSalonData = true);
 
     try {
-      // Load genders
+      final response = await supabase
+          .from('salons')
+          .select()
+          .eq('id', widget.salonId)
+          .single();
+
+      _nameController.text = response['name'] ?? '';
+      _addressController.text = response['address'] ?? '';
+      _phoneController.text = response['phone'] ?? '';
+      _emailController.text = response['email'] ?? '';
+      _descriptionController.text = response['description'] ?? '';
+
+      _currentLogoUrl = response['logo_url'];
+      _currentCoverUrl = response['cover_url'];
+
+      if (response['open_time'] != null) {
+        final openTimeStr = response['open_time'] as String;
+        final openParts = openTimeStr.split(':');
+        _openTime = TimeOfDay(
+          hour: int.parse(openParts[0]),
+          minute: int.parse(openParts[1]),
+        );
+      } else {
+        _openTime = const TimeOfDay(hour: 9, minute: 0);
+      }
+
+      if (response['close_time'] != null) {
+        final closeTimeStr = response['close_time'] as String;
+        final closeParts = closeTimeStr.split(':');
+        _closeTime = TimeOfDay(
+          hour: int.parse(closeParts[0]),
+          minute: int.parse(closeParts[1]),
+        );
+      } else {
+        _closeTime = const TimeOfDay(hour: 18, minute: 0);
+      }
+
+      setState(() => _isLoadingSalonData = false);
+    } catch (e) {
+      debugPrint('❌ Error loading salon: $e');
+      if (mounted) {
+        _showSnackBar('Error loading salon data', Colors.red);
+        Navigator.pop(context);
+      }
+    }
+  }
+
+  // ============================================================
+  // 🔥 Load salon's selected items (only selected ones)
+  // ============================================================
+  Future<void> _loadSalonSelections() async {
+    try {
+      // Load selected genders
+      final genderResponse = await supabase
+          .from('salon_genders')
+          .select('gender_id')
+          .eq('salon_id', widget.salonId)
+          .eq('is_active', true);
+
+      setState(() {
+        _selectedGenderIds = genderResponse
+            .map((e) => e['gender_id'] as int)
+            .toList();
+      });
+
+      // Load selected age categories
+      final ageResponse = await supabase
+          .from('salon_age_categories')
+          .select('age_category_id')
+          .eq('salon_id', widget.salonId)
+          .eq('is_active', true);
+
+      setState(() {
+        _selectedAgeCategoryIds = ageResponse
+            .map((e) => e['age_category_id'] as int)
+            .toList();
+      });
+
+      // Load selected categories
+      final categoryResponse = await supabase
+          .from('salon_categories')
+          .select('category_id')
+          .eq('salon_id', widget.salonId)
+          .eq('is_active', true);
+
+      setState(() {
+        _selectedCategoryIds = categoryResponse
+            .map((e) => e['category_id'] as int)
+            .toList();
+      });
+
+      debugPrint('📊 Loaded selected items:');
+      debugPrint('   Genders: $_selectedGenderIds');
+      debugPrint('   Age Categories: $_selectedAgeCategoryIds');
+      debugPrint('   Categories: $_selectedCategoryIds');
+    } catch (e) {
+      debugPrint('❌ Error loading salon selections: $e');
+    }
+  }
+
+  // ============================================================
+  // 🔥 Load global data (all available options)
+  // ============================================================
+  Future<void> _loadGlobalData() async {
+    setState(() => _isLoadingGlobalData = true);
+
+    try {
       final gendersResponse = await supabase
           .from('genders')
           .select()
           .eq('is_active', true)
           .order('display_order');
 
-      // Load age categories
       final ageResponse = await supabase
           .from('age_categories')
           .select()
           .eq('is_active', true)
           .order('display_order');
 
-      // Load categories
       final categoriesResponse = await supabase
           .from('categories')
           .select()
@@ -105,24 +214,18 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
         _genders = List<Map<String, dynamic>>.from(gendersResponse);
         _ageCategories = List<Map<String, dynamic>>.from(ageResponse);
         _categories = List<Map<String, dynamic>>.from(categoriesResponse);
-        _isLoadingData = false;
+        _isLoadingGlobalData = false;
       });
+
+      await _loadSalonSelections();
     } catch (e) {
       debugPrint('❌ Error loading global data: $e');
-      setState(() => _isLoadingData = false);
-      if (mounted) {
-        _showSnackBar('Error loading data: $e', Colors.red);
-      }
+      setState(() => _isLoadingGlobalData = false);
     }
   }
 
-  String _getPlatformName() {
-    if (kIsWeb) return 'web';
-    if (Platform.isIOS) return 'ios';
-    if (Platform.isAndroid) return 'android';
-    return 'mobile';
-  }
 
+  // 📸 Pick logo image
   Future<void> _pickLogoImage(ImageSource source) async {
     try {
       final XFile? pickedFile = await picker.pickImage(
@@ -138,13 +241,11 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
           setState(() {
             _logoWebBytes = bytes;
             _logoFile = null;
-            _logoUrl = null;
           });
         } else {
           setState(() {
             _logoFile = File(pickedFile.path);
             _logoWebBytes = null;
-            _logoUrl = null;
           });
         }
       }
@@ -154,6 +255,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     }
   }
 
+  // 📸 Pick cover image
   Future<void> _pickCoverImage(ImageSource source) async {
     try {
       final XFile? pickedFile = await picker.pickImage(
@@ -169,13 +271,11 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
           setState(() {
             _coverWebBytes = bytes;
             _coverFile = null;
-            _coverUrl = null;
           });
         } else {
           setState(() {
             _coverFile = File(pickedFile.path);
             _coverWebBytes = null;
-            _coverUrl = null;
           });
         }
       }
@@ -185,6 +285,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     }
   }
 
+  // ☁️ Upload logo
   Future<String?> _uploadLogo() async {
     if (_logoFile == null && _logoWebBytes == null) return null;
 
@@ -221,6 +322,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     }
   }
 
+  // ☁️ Upload cover
   Future<String?> _uploadCover() async {
     if (_coverFile == null && _coverWebBytes == null) return null;
 
@@ -257,6 +359,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     }
   }
 
+  // 🕒 Select time
   Future<void> _selectTime(BuildContext context, bool isOpenTime) async {
     final TimeOfDay? picked = await showTimePicker(
       context: context,
@@ -286,32 +389,27 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}:00';
   }
 
-  // ============================================================
-  // 🔥 Create Salon - FIXED VERSION
-  // ============================================================
-
-  Future<void> _createSalon() async {
+  // 💾 Update salon
+  Future<void> _updateSalon() async {
     if (!_formKey.currentState!.validate()) return;
 
-    final userId = supabase.auth.currentUser?.id;
-    if (userId == null) {
-      _showSnackBar('Please login first', Colors.red);
-      return;
-    }
-
-    setState(() => _isLoading = true);
+    setState(() => _isSaving = true);
 
     try {
-      // Upload images
-      String? logoUrl = (_logoFile != null || _logoWebBytes != null)
-          ? await _uploadLogo()
-          : null;
-      String? coverUrl = (_coverFile != null || _coverWebBytes != null)
-          ? await _uploadCover()
-          : null;
+      String? logoUrl = _currentLogoUrl;
+      if (_logoFile != null || _logoWebBytes != null) {
+        final newLogoUrl = await _uploadLogo();
+        if (newLogoUrl != null) logoUrl = newLogoUrl;
+      }
 
-      // Create salon
-      final salonData = {
+      String? coverUrl = _currentCoverUrl;
+      if (_coverFile != null || _coverWebBytes != null) {
+        final newCoverUrl = await _uploadCover();
+        if (newCoverUrl != null) coverUrl = newCoverUrl;
+      }
+
+      // Update salon basic info
+      final updateData = {
         'name': _nameController.text.trim(),
         'address': _addressController.text.trim().isNotEmpty
             ? _addressController.text.trim()
@@ -322,7 +420,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
         'email': _emailController.text.trim().isNotEmpty
             ? _emailController.text.trim()
             : null,
-        'owner_id': userId,
         'description': _descriptionController.text.trim().isNotEmpty
             ? _descriptionController.text.trim()
             : null,
@@ -330,92 +427,72 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
         'cover_url': coverUrl,
         'open_time': _formatTimeOfDay(_openTime!),
         'close_time': _formatTimeOfDay(_closeTime!),
-        'extra_data': {
-          'created_from': _isWeb ? 'web' : 'mobile',
-          'platform': _getPlatformName(),
-        },
-        'is_active': true,
+        'updated_at': DateTime.now().toIso8601String(),
       };
 
-      debugPrint('📝 Creating salon: ${_nameController.text.trim()}');
-      debugPrint('📝 Selected Gender IDs: $_selectedGenderIds');
-      debugPrint('📝 Selected Age IDs: $_selectedAgeCategoryIds');
-      debugPrint('📝 Selected Category IDs: $_selectedCategoryIds');
+      await supabase.from('salons').update(updateData).eq('id', widget.salonId);
 
-      final response = await supabase
-          .from('salons')
-          .insert(salonData)
-          .select('id, name')
-          .single();
+      // Update genders (delete old, insert new)
+      await supabase
+          .from('salon_genders')
+          .delete()
+          .eq('salon_id', widget.salonId);
 
-      final salonId = response['id'] as int;
-      debugPrint('✅ Salon created with ID: $salonId');
-
-      // Delete any existing (just in case)
-      await supabase.from('salon_genders').delete().eq('salon_id', salonId);
-
-      // Insert selected genders
       if (_selectedGenderIds.isNotEmpty) {
         final genderInserts = _selectedGenderIds.map((genderId) {
           return {
-            'salon_id': salonId,
+            'salon_id': widget.salonId,
             'gender_id': genderId,
             'is_active': true,
           };
         }).toList();
         await supabase.from('salon_genders').insert(genderInserts);
-        debugPrint('✅ Inserted ${genderInserts.length} genders');
       }
 
-      // Delete existing age categories
+      // Update age categories
       await supabase
           .from('salon_age_categories')
           .delete()
-          .eq('salon_id', salonId);
+          .eq('salon_id', widget.salonId);
 
-      // Insert selected age categories
       if (_selectedAgeCategoryIds.isNotEmpty) {
         final ageInserts = _selectedAgeCategoryIds.map((ageId) {
           return {
-            'salon_id': salonId,
+            'salon_id': widget.salonId,
             'age_category_id': ageId,
             'is_active': true,
           };
         }).toList();
         await supabase.from('salon_age_categories').insert(ageInserts);
-        debugPrint('✅ Inserted ${ageInserts.length} age categories');
       }
 
-      // Delete existing categories
-      await supabase.from('salon_categories').delete().eq('salon_id', salonId);
+      // Update categories
+      await supabase
+          .from('salon_categories')
+          .delete()
+          .eq('salon_id', widget.salonId);
 
-      // Insert selected categories
       if (_selectedCategoryIds.isNotEmpty) {
         final categoryInserts = _selectedCategoryIds.map((catId) {
-          return {'salon_id': salonId, 'category_id': catId, 'is_active': true};
+          return {
+            'salon_id': widget.salonId,
+            'category_id': catId,
+            'is_active': true,
+          };
         }).toList();
         await supabase.from('salon_categories').insert(categoryInserts);
-        debugPrint('✅ Inserted ${categoryInserts.length} categories');
       }
 
-      // 🔥 FIX: Store values before checking mounted
+      // 🔥 FIX: Store values before async gap
       final salonName = _nameController.text.trim();
-      final genderCount = _selectedGenderIds.length;
-      final ageCount = _selectedAgeCategoryIds.length;
-      final categoryCount = _selectedCategoryIds.length;
 
       // 🔥 FIX: Check mounted before using context
       if (!mounted) return;
 
       await showCustomAlert(
         context: context,
-        title: "🎉 Salon Created!",
-        message:
-            "$salonName has been created successfully.\n\n"
-            "✅ $genderCount genders selected\n"
-            "✅ $ageCount age categories selected\n"
-            "✅ $categoryCount service categories selected\n\n"
-            "You can manage these from the salon management screen.",
+        title: "✅ Salon Updated!",
+        message: "$salonName has been updated successfully.",
         isError: false,
       );
 
@@ -424,15 +501,135 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
 
       Navigator.pop(context, true);
     } catch (e) {
-      debugPrint('❌ Error creating salon: $e');
+      debugPrint('❌ Error updating salon: $e');
       // 🔥 FIX: Check mounted before showing snackbar
       if (mounted) {
-        _showSnackBar('Error creating salon: $e', Colors.red);
+        _showSnackBar('Error updating salon', Colors.red);
       }
     } finally {
       // 🔥 FIX: Check mounted before setState
       if (mounted) {
-        setState(() => _isLoading = false);
+        setState(() => _isSaving = false);
+      }
+    }
+  }
+
+  // 🗑️ Delete salon
+  // 🗑️ Delete salon
+  Future<void> _deleteSalon() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.red, size: 28),
+            SizedBox(width: 12),
+            Text(
+              'Delete Salon',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              "Are you sure you want to delete '${_nameController.text.trim()}'?",
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.red.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '⚠️ This will also delete:',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.red,
+                    ),
+                  ),
+                  SizedBox(height: 8),
+                  Text('• All appointments', style: TextStyle(fontSize: 13)),
+                  Text('• All services', style: TextStyle(fontSize: 13)),
+                  Text('• All barbers', style: TextStyle(fontSize: 13)),
+                  Text('• All reviews', style: TextStyle(fontSize: 13)),
+                  Text(
+                    '• All service variants',
+                    style: TextStyle(fontSize: 13),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'This action cannot be undone!',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+                color: Colors.red,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel', style: TextStyle(fontSize: 16)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+            ),
+            child: const Text(
+              'Delete Permanently',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      setState(() => _isDeleting = true);
+
+      try {
+        await supabase.from('salons').delete().eq('id', widget.salonId);
+
+        // 🔥 FIX: Check mounted before showing snackbar
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('✅ Salon deleted successfully'),
+              backgroundColor: Colors.green,
+            ),
+          );
+
+          // 🔥 FIX: Check mounted before pop
+          if (mounted) {
+            Navigator.pop(context, true);
+          }
+        }
+      } catch (e) {
+        debugPrint('❌ Error deleting salon: $e');
+        if (mounted) {
+          _showSnackBar('Error deleting salon', Colors.red);
+        }
+      } finally {
+        if (mounted) {
+          setState(() => _isDeleting = false);
+        }
       }
     }
   }
@@ -447,87 +644,174 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Create New Salon'),
-        backgroundColor: const Color(0xFFFF6B8B),
-        foregroundColor: Colors.white,
-        centerTitle: _isWeb,
-        elevation: 0,
-      ),
-      body: Container(
-        color: Colors.grey[50],
-        child: Center(
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxWidth: _isWeb ? 1000 : double.infinity,
-            ),
-            child: SingleChildScrollView(
-              padding: EdgeInsets.all(_isWeb ? 32 : 16),
-              child: Card(
-                elevation: _isWeb ? 4 : 2,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Padding(
-                  padding: EdgeInsets.all(_isWeb ? 32 : 20),
-                  child: _isLoadingData
-                      ? const Center(child: CircularProgressIndicator())
-                      : Form(
-                          key: _formKey,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              _buildHeader(),
-                              const SizedBox(height: 32),
-                              _buildCoverImageSection(),
-                              const SizedBox(height: 24),
-                              _isWeb
-                                  ? Row(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Expanded(
-                                          flex: 1,
-                                          child: _buildLogoSection(),
-                                        ),
-                                        const SizedBox(width: 24),
-                                        Expanded(
-                                          flex: 2,
-                                          child: _buildBasicInfoFields(),
-                                        ),
-                                      ],
-                                    )
-                                  : Column(
-                                      children: [
-                                        _buildLogoSection(),
-                                        const SizedBox(height: 24),
-                                        _buildBasicInfoFields(),
-                                      ],
-                                    ),
-                              const SizedBox(height: 24),
-                              _buildBusinessHoursSection(),
-                              const SizedBox(height: 24),
-                              _buildGlobalSelections(),
-                              const SizedBox(height: 24),
-                              _buildContactSection(),
-                              const SizedBox(height: 24),
-                              _buildDescriptionField(),
-                              const SizedBox(height: 32),
-                              _buildCreateButton(),
-                            ],
-                          ),
-                        ),
+  // ============================================================
+  // 🔥 Build Multi-Select Chip
+  // ============================================================
+  Widget _buildMultiSelectChip({
+    required String title,
+    required List<Map<String, dynamic>> items,
+    required List<int> selectedIds,
+    required Function(int id, bool selected) onChanged,
+  }) {
+    if (items.isEmpty) return const SizedBox();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: items.map((item) {
+            final id = item['id'] as int;
+            final isSelected = selectedIds.contains(id);
+            final displayName =
+                item['display_name'] as String? ??
+                item['name'] as String? ??
+                '';
+
+            return FilterChip(
+              label: Text(displayName),
+              selected: isSelected,
+              onSelected: (selected) => onChanged(id, selected),
+              backgroundColor: Colors.white,
+              selectedColor: const Color(0xFFFF6B8B).withValues(alpha: 0.2),
+              checkmarkColor: const Color(0xFFFF6B8B),
+              labelStyle: TextStyle(
+                color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[700],
+                fontWeight: isSelected ? FontWeight.w500 : FontWeight.normal,
+              ),
+              shape: StadiumBorder(
+                side: BorderSide(
+                  color: isSelected
+                      ? const Color(0xFFFF6B8B)
+                      : Colors.grey[300]!,
                 ),
               ),
-            ),
+            );
+          }).toList(),
+        ),
+      ],
+    );
+  }
+
+  // ============================================================
+  // 🔥 Build Global Selections Section
+  // ============================================================
+  Widget _buildGlobalSelections() {
+    if (_isLoadingGlobalData) {
+      return Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.grey[100],
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Center(
+          child: Column(
+            children: [
+              SizedBox(
+                height: 20,
+                width: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+              SizedBox(height: 8),
+              Text('Loading options...', style: TextStyle(fontSize: 12)),
+            ],
           ),
         ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.grey[100],
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Select Services & Settings',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'Choose what to offer at your salon (tap to select/unselect)',
+            style: TextStyle(fontSize: 12, color: Colors.grey),
+          ),
+          const SizedBox(height: 16),
+
+          // Genders Selection
+          _buildMultiSelectChip(
+            title: 'Genders',
+            items: _genders,
+            selectedIds: _selectedGenderIds,
+            onChanged: (id, selected) {
+              setState(() {
+                if (selected) {
+                  if (!_selectedGenderIds.contains(id)) {
+                    _selectedGenderIds.add(id);
+                  }
+                } else {
+                  _selectedGenderIds.remove(id);
+                }
+              });
+              debugPrint('Gender ${selected ? "selected" : "unselected"}: $id');
+            },
+          ),
+
+          const SizedBox(height: 16),
+
+          // Age Categories Selection
+          _buildMultiSelectChip(
+            title: 'Age Categories',
+            items: _ageCategories,
+            selectedIds: _selectedAgeCategoryIds,
+            onChanged: (id, selected) {
+              setState(() {
+                if (selected) {
+                  if (!_selectedAgeCategoryIds.contains(id)) {
+                    _selectedAgeCategoryIds.add(id);
+                  }
+                } else {
+                  _selectedAgeCategoryIds.remove(id);
+                }
+              });
+            },
+          ),
+
+          const SizedBox(height: 16),
+
+          // Categories Selection
+          _buildMultiSelectChip(
+            title: 'Service Categories',
+            items: _categories,
+            selectedIds: _selectedCategoryIds,
+            onChanged: (id, selected) {
+              setState(() {
+                if (selected) {
+                  if (!_selectedCategoryIds.contains(id)) {
+                    _selectedCategoryIds.add(id);
+                  }
+                } else {
+                  _selectedCategoryIds.remove(id);
+                }
+              });
+            },
+          ),
+        ],
       ),
     );
   }
+
+  // ============================================================
+  // 🔥 Build UI Components
+  // ============================================================
 
   Widget _buildHeader() {
     return Center(
@@ -539,16 +823,16 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
               color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
               shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.store, color: Color(0xFFFF6B8B), size: 48),
+            child: const Icon(Icons.edit, color: Color(0xFFFF6B8B), size: 48),
           ),
           const SizedBox(height: 16),
           const Text(
-            'Create Your Salon',
+            'Edit Salon Details',
             style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 8),
           Text(
-            'Fill in the details below to create your salon',
+            'Update your salon information',
             style: TextStyle(fontSize: 14, color: Colors.grey[600]),
           ),
         ],
@@ -560,7 +844,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     bool hasCover =
         (kIsWeb && _coverWebBytes != null) ||
         _coverFile != null ||
-        _coverUrl != null;
+        _currentCoverUrl != null;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -587,6 +871,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
             ),
             child: hasCover
                 ? Stack(
+                    fit: StackFit.expand,
                     children: [
                       ClipRRect(
                         borderRadius: BorderRadius.circular(12),
@@ -594,7 +879,12 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                             ? Image.memory(_coverWebBytes!, fit: BoxFit.cover)
                             : _coverFile != null
                             ? Image.file(_coverFile!, fit: BoxFit.cover)
-                            : Image.network(_coverUrl!, fit: BoxFit.cover),
+                            : _currentCoverUrl != null
+                            ? Image.network(
+                                _currentCoverUrl!,
+                                fit: BoxFit.cover,
+                              )
+                            : const SizedBox(),
                       ),
                       if (_isUploadingCover)
                         Positioned.fill(
@@ -649,7 +939,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     bool hasLogo =
         (kIsWeb && _logoWebBytes != null) ||
         _logoFile != null ||
-        _logoUrl != null;
+        _currentLogoUrl != null;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -684,7 +974,12 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                               ? Image.memory(_logoWebBytes!, fit: BoxFit.cover)
                               : _logoFile != null
                               ? Image.file(_logoFile!, fit: BoxFit.cover)
-                              : Image.network(_logoUrl!, fit: BoxFit.cover),
+                              : _currentLogoUrl != null
+                              ? Image.network(
+                                  _currentLogoUrl!,
+                                  fit: BoxFit.cover,
+                                )
+                              : const SizedBox(),
                         )
                       : _buildLogoPlaceholder(),
                 ),
@@ -846,156 +1141,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     );
   }
 
-  // NEW: Global Selections Section
-  Widget _buildGlobalSelections() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.grey[100],
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Select Services & Settings',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: 12),
-          const Text(
-            'Choose what to offer at your salon',
-            style: TextStyle(fontSize: 12, color: Colors.grey),
-          ),
-          const SizedBox(height: 16),
-
-          // Genders Selection
-          _buildMultiSelectChip(
-            title: 'Genders',
-            items: _genders,
-            selectedIds: _selectedGenderIds,
-            onChanged: (id, selected) {
-              setState(() {
-                if (selected) {
-                  _selectedGenderIds.add(id);
-                } else {
-                  _selectedGenderIds.remove(id);
-                }
-              });
-            },
-          ),
-
-          const SizedBox(height: 16),
-
-          // Age Categories Selection
-          _buildMultiSelectChip(
-            title: 'Age Categories',
-            items: _ageCategories,
-            selectedIds: _selectedAgeCategoryIds,
-            onChanged: (id, selected) {
-              setState(() {
-                if (selected) {
-                  _selectedAgeCategoryIds.add(id);
-                } else {
-                  _selectedAgeCategoryIds.remove(id);
-                }
-              });
-            },
-          ),
-
-          const SizedBox(height: 16),
-
-          // Categories Selection
-          _buildMultiSelectChip(
-            title: 'Service Categories',
-            items: _categories,
-            selectedIds: _selectedCategoryIds,
-            onChanged: (id, selected) {
-              setState(() {
-                if (selected) {
-                  _selectedCategoryIds.add(id);
-                } else {
-                  _selectedCategoryIds.remove(id);
-                }
-              });
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildMultiSelectChip({
-    required String title,
-    required List<Map<String, dynamic>> items,
-    required List<int> selectedIds,
-    required Function(int id, bool selected) onChanged,
-  }) {
-    if (items.isEmpty) return const SizedBox();
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          title,
-          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-        ),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: items.map((item) {
-            final id = item['id'] as int;
-            final isSelected = selectedIds.contains(id);
-            final displayName =
-                item['display_name'] as String? ??
-                item['name'] as String? ??
-                '';
-
-            debugPrint(
-              'Chip: $displayName, ID: $id, Selected: $isSelected',
-            ); // Debug print
-
-            return FilterChip(
-              label: Text(displayName),
-              selected: isSelected,
-              onSelected: (selected) {
-                debugPrint('Chip tapped: $displayName, Selected: $selected');
-                onChanged(id, selected);
-              },
-              backgroundColor: Colors.white,
-              selectedColor: const Color(0xFFFF6B8B).withValues(alpha: 0.2),
-              checkmarkColor: const Color(0xFFFF6B8B),
-              labelStyle: TextStyle(
-                color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[700],
-                fontWeight: isSelected ? FontWeight.w500 : FontWeight.normal,
-              ),
-              shape: StadiumBorder(
-                side: BorderSide(
-                  color: isSelected
-                      ? const Color(0xFFFF6B8B)
-                      : Colors.grey[300]!,
-                ),
-              ),
-            );
-          }).toList(),
-        ),
-        // Show selected count
-        if (selectedIds.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: Text(
-              '${selectedIds.length} selected',
-              style: TextStyle(
-                fontSize: 12,
-                color: const Color(0xFFFF6B8B),
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
-      ],
-    );
-  }
-
   Widget _buildContactSection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1074,53 +1219,60 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     );
   }
 
-  Widget _buildCreateButton() {
-    return SizedBox(
-      width: double.infinity,
-      height: 54,
-      child: ElevatedButton(
-        onPressed: (_isLoading || _isUploadingLogo || _isUploadingCover)
-            ? null
-            : _createSalon,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFFFF6B8B),
-          foregroundColor: Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
+  Widget _buildActionButtons() {
+    return Row(
+      children: [
+        Expanded(
+          child: OutlinedButton(
+            onPressed: _isSaving ? null : () => Navigator.pop(context),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.grey[700],
+              side: BorderSide(color: Colors.grey[300]!),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: const Text('Cancel', style: TextStyle(fontSize: 16)),
           ),
         ),
-        child: _isLoading || _isUploadingLogo || _isUploadingCover
-            ? Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const SizedBox(
-                    height: 24,
-                    width: 24,
-                    child: CircularProgressIndicator(
-                      color: Colors.white,
-                      strokeWidth: 2,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Text(
-                    _isUploadingLogo || _isUploadingCover
-                        ? 'Uploading...'
-                        : 'Creating...',
-                  ),
-                ],
-              )
-            : const Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.add_business, size: 20),
-                  SizedBox(width: 8),
-                  Text(
-                    'Create Salon',
+        const SizedBox(width: 16),
+        Expanded(
+          child: ElevatedButton(
+            onPressed: (_isSaving || _isUploadingLogo || _isUploadingCover)
+                ? null
+                : _updateSalon,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFFF6B8B),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: _isSaving || _isUploadingLogo || _isUploadingCover
+                ? const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(
+                        height: 20,
+                        width: 20,
+                        child: CircularProgressIndicator(
+                          color: Colors.white,
+                          strokeWidth: 2,
+                        ),
+                      ),
+                      SizedBox(width: 8),
+                      Text('Saving...'),
+                    ],
+                  )
+                : const Text(
+                    'Save Changes',
                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                   ),
-                ],
-              ),
-      ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -1160,7 +1312,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                 _pickLogoImage(ImageSource.camera);
               },
             ),
-            if (_logoFile != null || _logoWebBytes != null || _logoUrl != null)
+            if (_logoFile != null ||
+                _logoWebBytes != null ||
+                _currentLogoUrl != null)
               ListTile(
                 leading: const Icon(Icons.delete, color: Colors.red),
                 title: const Text(
@@ -1172,7 +1326,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                   setState(() {
                     _logoFile = null;
                     _logoWebBytes = null;
-                    _logoUrl = null;
+                    _currentLogoUrl = null;
                   });
                 },
               ),
@@ -1220,7 +1374,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
             ),
             if (_coverFile != null ||
                 _coverWebBytes != null ||
-                _coverUrl != null)
+                _currentCoverUrl != null)
               ListTile(
                 leading: const Icon(Icons.delete, color: Colors.red),
                 title: const Text(
@@ -1232,13 +1386,104 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                   setState(() {
                     _coverFile = null;
                     _coverWebBytes = null;
-                    _coverUrl = null;
+                    _currentCoverUrl = null;
                   });
                 },
               ),
           ],
         ),
       ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Edit Salon'),
+        backgroundColor: const Color(0xFFFF6B8B),
+        foregroundColor: Colors.white,
+        centerTitle: _isWeb,
+        elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.delete_outline),
+            onPressed: _isDeleting ? null : _deleteSalon,
+            tooltip: 'Delete Salon',
+          ),
+        ],
+      ),
+      body: _isLoadingSalonData
+          ? const Center(
+              child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+            )
+          : Container(
+              color: Colors.grey[50],
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: _isWeb ? 1000 : double.infinity,
+                  ),
+                  child: SingleChildScrollView(
+                    padding: EdgeInsets.all(_isWeb ? 32 : 16),
+                    child: Card(
+                      elevation: _isWeb ? 4 : 2,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Padding(
+                        padding: EdgeInsets.all(_isWeb ? 32 : 20),
+                        child: Form(
+                          key: _formKey,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _buildHeader(),
+                              const SizedBox(height: 32),
+                              _buildCoverImageSection(),
+                              const SizedBox(height: 24),
+                              _isWeb
+                                  ? Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Expanded(
+                                          flex: 1,
+                                          child: _buildLogoSection(),
+                                        ),
+                                        const SizedBox(width: 24),
+                                        Expanded(
+                                          flex: 2,
+                                          child: _buildBasicInfoFields(),
+                                        ),
+                                      ],
+                                    )
+                                  : Column(
+                                      children: [
+                                        _buildLogoSection(),
+                                        const SizedBox(height: 24),
+                                        _buildBasicInfoFields(),
+                                      ],
+                                    ),
+                              const SizedBox(height: 24),
+                              _buildBusinessHoursSection(),
+                              const SizedBox(height: 24),
+                              _buildGlobalSelections(),
+                              const SizedBox(height: 24),
+                              _buildContactSection(),
+                              const SizedBox(height: 24),
+                              _buildDescriptionField(),
+                              const SizedBox(height: 32),
+                              _buildActionButtons(),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
     );
   }
 }
