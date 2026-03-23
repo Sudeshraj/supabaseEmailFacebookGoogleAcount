@@ -368,13 +368,17 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
     context.push('/owner/barbers?salonId=$_selectedSalonId');
   }
 
-  void _navigateToAddService() {
+  void _navigateToAddService() async {
     if (_ownerSalons.isEmpty) {
       _showCreateSalonFirstDialog();
       return;
     }
-    debugPrint('📍 Navigating to add service screen');
-    context.push('/owner/services/add');
+    final result = await context.push(
+      '/owner/services/add?salonId=$_selectedSalonId',
+    );
+    if (result == true && mounted) {
+      _refreshAllData();
+    }
   }
 
   void _navigateToAddServiceVariant() {

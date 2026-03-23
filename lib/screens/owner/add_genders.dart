@@ -5,22 +5,18 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
 
-class AddCategoryScreen extends StatefulWidget {
-  const AddCategoryScreen({super.key});
+class AddGenderScreen extends StatefulWidget {
+  const AddGenderScreen({super.key});
 
   @override
-  State<AddCategoryScreen> createState() => _AddCategoryScreenState();
+  State<AddGenderScreen> createState() => _AddGenderScreenState();
 }
 
-class _AddCategoryScreenState extends State<AddCategoryScreen> {
+class _AddGenderScreenState extends State<AddGenderScreen> {
   // Controllers
   final TextEditingController _nameController = TextEditingController();
-  final TextEditingController _descriptionController = TextEditingController();
+  final TextEditingController _displayNameController = TextEditingController();
   final TextEditingController _iconNameController = TextEditingController();
-  final TextEditingController _colorController = TextEditingController();
-  
-  // Focus nodes
-  final FocusNode _nameFocusNode = FocusNode();
 
   // Variables
   bool _isActive = true;
@@ -31,21 +27,20 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
   String? _nameError;
   List<String> _suggestions = [];
   
-  // All existing categories (for suggestion)
-  List<String> _existingCategories = [];
+  // All existing genders (for duplicate check)
+  List<String> _existingGenders = [];
 
   // Available icons for suggestions
   final List<String> _suggestedIcons = [
-    'content_cut',
-    'face',
-    'face_retouching_natural',
-    'spa',
-    'handshake',
-    'build_circle_outlined',
-    'hair_cut',
-    'shower',
-    'massage',
-    'makeup',
+    'male',
+    'female',
+    'unisex',
+    'man',
+    'woman',
+    'person',
+    'transgender',
+    'wc',
+    'people',
   ];
 
   final supabase = Supabase.instance.client;
@@ -54,7 +49,7 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
   void initState() {
     super.initState();
     _loadMaxDisplayOrder();
-    _loadExistingCategories();
+    _loadExistingGenders();
     
     // Add listener for name changes
     _nameController.addListener(_onNameChanged);
@@ -64,36 +59,34 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
   void dispose() {
     _nameController.removeListener(_onNameChanged);
     _nameController.dispose();
-    _descriptionController.dispose();
+    _displayNameController.dispose();
     _iconNameController.dispose();
-    _colorController.dispose();
-    _nameFocusNode.dispose();
     super.dispose();
   }
 
-  // Load existing categories for duplicate check and suggestions
-  Future<void> _loadExistingCategories() async {
+  // Load existing genders for duplicate check
+  Future<void> _loadExistingGenders() async {
     try {
       final response = await supabase
-          .from('categories')
+          .from('genders')
           .select('name');
       
       setState(() {
-        _existingCategories = response
+        _existingGenders = response
             .map((e) => e['name'].toString().toLowerCase())
             .toList();
       });
     } catch (e) {
-      debugPrint('❌ Error loading existing categories: $e');
+      debugPrint('❌ Error loading existing genders: $e');
     }
   }
 
-  // Check if category name exists
-  Future<bool> _isCategoryNameExists(String name) async {
+  // Check if gender name exists
+  Future<bool> _isGenderNameExists(String name) async {
     if (name.isEmpty) return false;
     
     final normalizedName = name.trim().toLowerCase();
-    return _existingCategories.contains(normalizedName);
+    return _existingGenders.contains(normalizedName);
   }
 
   // Get suggestions based on input
@@ -103,22 +96,18 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
     final normalizedInput = input.trim().toLowerCase();
     if (normalizedInput.isEmpty) return [];
     
-    // Common category names for suggestions
-    final commonCategories = [
-      'hair', 'hair cut', 'hair color', 'hair styling',
-      'skin', 'facial', 'skin care',
-      'grooming', 'beard trim', 'shave',
-      'wellness', 'massage', 'spa',
-      'nails', 'manicure', 'pedicure',
-      'makeup', 'bridal makeup',
-      'waxing', 'threading',
-      'other'
+    // Common gender names for suggestions
+    final commonGenders = [
+      'male', 'female', 'unisex',
+      'man', 'woman', 'non-binary',
+      'transgender', 'gender-neutral',
+      'prefer-not-to-say'
     ];
     
     // Filter suggestions that start with input
-    final suggestions = commonCategories.where((cat) {
-      return cat.toLowerCase().contains(normalizedInput) && 
-             !_existingCategories.contains(cat.toLowerCase());
+    final suggestions = commonGenders.where((gender) {
+      return gender.toLowerCase().contains(normalizedInput) && 
+             !_existingGenders.contains(gender.toLowerCase());
     }).toList();
     
     return suggestions.take(5).toList();
@@ -162,13 +151,13 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
       
       setState(() => _isCheckingName = true);
       
-      final exists = await _isCategoryNameExists(name);
+      final exists = await _isGenderNameExists(name);
       
       if (mounted) {
         setState(() {
           _isCheckingName = false;
           if (exists) {
-            _nameError = 'Category name already exists';
+            _nameError = 'Gender name already exists';
           } else {
             _nameError = null;
           }
@@ -181,7 +170,7 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
   Future<void> _loadMaxDisplayOrder() async {
     try {
       final response = await supabase
-          .from('categories')
+          .from('genders')
           .select('display_order')
           .order('display_order', ascending: false)
           .limit(1);
@@ -207,56 +196,56 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
     }
   }
 
-  // Create category
-  Future<void> _createCategory() async {
+  // Create gender
+  Future<void> _createGender() async {
     final name = _nameController.text.trim();
     
     if (name.isEmpty) {
-      _showSnackBar('Category name is required', Colors.red);
+      _showSnackBar('Gender name is required', Colors.red);
       return;
     }
     
     // Check duplicate again before saving
-    final exists = await _isCategoryNameExists(name);
+    final exists = await _isGenderNameExists(name);
     if (exists) {
-      _showSnackBar('Category name already exists', Colors.red);
+      _showSnackBar('Gender name already exists', Colors.red);
+      return;
+    }
+
+    if (_displayNameController.text.trim().isEmpty) {
+      _showSnackBar('Display name is required', Colors.red);
       return;
     }
 
     setState(() => _isLoading = true);
 
     try {
-      final categoryData = {
+      final genderData = {
         'name': name.toLowerCase(),
-        'description': _descriptionController.text.trim().isEmpty 
-            ? null 
-            : _descriptionController.text.trim(),
+        'display_name': _displayNameController.text.trim(),
         'icon_name': _iconNameController.text.trim().isEmpty 
-            ? 'category' 
+            ? name.toLowerCase() 
             : _iconNameController.text.trim(),
-        'color': _colorController.text.trim().isEmpty 
-            ? null 
-            : _colorController.text.trim(),
         'display_order': _displayOrder,
         'is_active': _isActive,
       };
 
-      debugPrint('📝 Creating category: ${categoryData['name']}');
+      debugPrint('📝 Creating gender: ${genderData['name']}');
 
       await supabase
-          .from('categories')
-          .insert(categoryData)
+          .from('genders')
+          .insert(genderData)
           .select()
           .single();
 
-      debugPrint('✅ Category created');
+      debugPrint('✅ Gender created');
 
       if (!mounted) return;
 
       await showCustomAlert(
         context: context,
-        title: "🎉 Category Created!",
-        message: "$name category has been added successfully.",
+        title: "🎉 Gender Added!",
+        message: "${_displayNameController.text.trim()} gender has been added successfully.",
         isError: false,
       );
 
@@ -264,9 +253,9 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
       Navigator.pop(context, true);
 
     } catch (e) {
-      debugPrint('❌ Error creating category: $e');
+      debugPrint('❌ Error creating gender: $e');
       if (mounted) {
-        _showSnackBar('Error creating category: $e', Colors.red);
+        _showSnackBar('Error creating gender: $e', Colors.red);
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -283,53 +272,38 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
     );
   }
 
-  // Helper to show color picker
-  Future<void> _selectColor() async {
-    final Color? pickedColor = await showDialog<Color>(
-      context: context,
-      builder: (context) => SimpleDialog(
-        title: const Text('Select Color'),
-        children: [
-          _buildColorOption(Colors.red, 'Red'),
-          _buildColorOption(Colors.pink, 'Pink'),
-          _buildColorOption(Colors.purple, 'Purple'),
-          _buildColorOption(Colors.deepPurple, 'Deep Purple'),
-          _buildColorOption(Colors.indigo, 'Indigo'),
-          _buildColorOption(Colors.blue, 'Blue'),
-          _buildColorOption(Colors.lightBlue, 'Light Blue'),
-          _buildColorOption(Colors.cyan, 'Cyan'),
-          _buildColorOption(Colors.teal, 'Teal'),
-          _buildColorOption(Colors.green, 'Green'),
-          _buildColorOption(Colors.lightGreen, 'Light Green'),
-          _buildColorOption(Colors.lime, 'Lime'),
-          _buildColorOption(Colors.yellow, 'Yellow'),
-          _buildColorOption(Colors.amber, 'Amber'),
-          _buildColorOption(Colors.orange, 'Orange'),
-          _buildColorOption(Colors.deepOrange, 'Deep Orange'),
-          _buildColorOption(Colors.brown, 'Brown'),
-          _buildColorOption(Colors.grey, 'Grey'),
-          _buildColorOption(Colors.blueGrey, 'Blue Grey'),
-        ],
-      ),
-    );
-
-    if (pickedColor != null) {
-      final hexValue = pickedColor.value.toRadixString(16).substring(2);
-      setState(() {
-        _colorController.text = '#$hexValue';
-      });
+  // Auto-fill display name based on name
+  void _autoFillDisplayName() {
+    final name = _nameController.text.trim().toLowerCase();
+    if (name.isEmpty) return;
+    
+    String displayName;
+    switch (name) {
+      case 'male':
+        displayName = '👨 Male';
+        break;
+      case 'female':
+        displayName = '👩 Female';
+        break;
+      case 'unisex':
+        displayName = '👤 Unisex';
+        break;
+      case 'man':
+        displayName = '👨 Man';
+        break;
+      case 'woman':
+        displayName = '👩 Woman';
+        break;
+      case 'non-binary':
+        displayName = '👤 Non-Binary';
+        break;
+      default:
+        displayName = '${name[0].toUpperCase()}${name.substring(1)}';
     }
-  }
-
-  Widget _buildColorOption(Color color, String name) {
-    return ListTile(
-      leading: CircleAvatar(
-        backgroundColor: color,
-        radius: 16,
-      ),
-      title: Text(name),
-      onTap: () => Navigator.pop(context, color),
-    );
+    
+    setState(() {
+      _displayNameController.text = displayName;
+    });
   }
 
   @override
@@ -338,7 +312,7 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Add New Category'),
+        title: const Text('Add New Gender'),
         backgroundColor: const Color(0xFFFF6B8B),
         foregroundColor: Colors.white,
         centerTitle: isWeb,
@@ -390,14 +364,14 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
               shape: BoxShape.circle,
             ),
             child: const Icon(
-              Icons.category,
+              Icons.wc,
               color: Color(0xFFFF6B8B),
               size: 48,
             ),
           ),
           const SizedBox(height: 16),
           const Text(
-            'Add New Category',
+            'Add New Gender',
             style: TextStyle(
               fontSize: 24,
               fontWeight: FontWeight.bold,
@@ -405,7 +379,7 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            'Create a new service category for your salon',
+            'Create a new gender option for your salon',
             style: TextStyle(
               fontSize: 14,
               color: Colors.grey[600],
@@ -420,18 +394,17 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Category Name with Suggestions
+        // Gender Name (Required)
         const Text(
-          'Category Name *',
+          'Gender Name *',
           style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: 8),
         TextFormField(
           controller: _nameController,
-          focusNode: _nameFocusNode,
           decoration: InputDecoration(
-            hintText: 'e.g., Hair, Skin, Grooming',
-            prefixIcon: const Icon(Icons.category, color: Colors.grey),
+            hintText: 'e.g., male, female, unisex',
+            prefixIcon: const Icon(Icons.wc, color: Colors.grey),
             suffixIcon: _isCheckingName
                 ? const SizedBox(
                     width: 20,
@@ -469,7 +442,7 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
                       _nameController.text = suggestion;
                       _suggestions = [];
                     });
-                    _nameFocusNode.requestFocus();
+                    _autoFillDisplayName();
                   },
                   backgroundColor: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
                   labelStyle: const TextStyle(color: Color(0xFFFF6B8B)),
@@ -480,23 +453,34 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
         
         const SizedBox(height: 16),
 
-        // Description
+        // Display Name (Required)
         const Text(
-          'Description',
+          'Display Name *',
           style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: 8),
         TextFormField(
-          controller: _descriptionController,
-          maxLines: 3,
+          controller: _displayNameController,
           decoration: InputDecoration(
-            hintText: 'Describe what services this category includes',
+            hintText: 'e.g., 👨 Male, 👩 Female, 👤 Unisex',
+            prefixIcon: const Icon(Icons.badge, color: Colors.grey),
+            suffixIcon: IconButton(
+              icon: const Icon(Icons.auto_awesome, size: 18),
+              onPressed: _autoFillDisplayName,
+              tooltip: 'Auto-fill from name',
+              color: const Color(0xFFFF6B8B),
+            ),
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: const BorderSide(color: Color(0xFFFF6B8B), width: 2),
             ),
           ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'How this gender will appear to customers (use emojis if desired)',
+          style: TextStyle(fontSize: 11, color: Colors.grey[500]),
         ),
         const SizedBox(height: 16),
 
@@ -509,7 +493,7 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
         TextFormField(
           controller: _iconNameController,
           decoration: InputDecoration(
-            hintText: 'e.g., content_cut, face, spa',
+            hintText: 'e.g., male, female, unisex',
             prefixIcon: const Icon(Icons.abc, color: Colors.grey),
             suffixIcon: PopupMenuButton<String>(
               icon: const Icon(Icons.arrow_drop_down, color: Colors.grey),
@@ -547,49 +531,6 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
         ),
         const SizedBox(height: 16),
 
-        // Color
-        const Text(
-          'Color',
-          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-        ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            Expanded(
-              child: TextFormField(
-                controller: _colorController,
-                decoration: InputDecoration(
-                  hintText: 'e.g., #FF6B8B or select color',
-                  prefixIcon: const Icon(Icons.color_lens, color: Colors.grey),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: Color(0xFFFF6B8B), width: 2),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Container(
-              width: 56,
-              height: 56,
-              decoration: BoxDecoration(
-                color: _colorController.text.isNotEmpty
-                    ? _getColorFromHex(_colorController.text)
-                    : Colors.grey[300],
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.grey[300]!),
-              ),
-              child: IconButton(
-                icon: const Icon(Icons.colorize),
-                onPressed: _selectColor,
-                color: Colors.white,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-
         // Display Order
         const Text(
           'Display Order',
@@ -608,7 +549,7 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
             }
           },
           decoration: InputDecoration(
-            hintText: 'Order in which category appears',
+            hintText: 'Order in which gender appears',
             prefixIcon: const Icon(Icons.sort, color: Colors.grey),
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
             focusedBorder: OutlineInputBorder(
@@ -633,7 +574,7 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Inactive categories will not be shown to customers',
+                    'Inactive genders will not be shown to customers',
                     style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                   ),
                 ],
@@ -658,13 +599,16 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
   }
 
   Widget _buildCreateButton() {
-    final isDisabled = _isLoading || _nameError != null || _nameController.text.trim().isEmpty;
+    final isDisabled = _isLoading || 
+        _nameError != null || 
+        _nameController.text.trim().isEmpty ||
+        _displayNameController.text.trim().isEmpty;
     
     return SizedBox(
       width: double.infinity,
       height: 54,
       child: ElevatedButton(
-        onPressed: isDisabled ? null : _createCategory,
+        onPressed: isDisabled ? null : _createGender,
         style: ElevatedButton.styleFrom(
           backgroundColor: const Color(0xFFFF6B8B),
           foregroundColor: Colors.white,
@@ -695,21 +639,12 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
                   Icon(Icons.add, size: 20),
                   SizedBox(width: 8),
                   Text(
-                    'Create Category',
+                    'Create Gender',
                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                   ),
                 ],
               ),
       ),
     );
-  }
-
-  // Helper function to convert hex string to Color
-  Color _getColorFromHex(String hexColor) {
-    hexColor = hexColor.toUpperCase().replaceAll('#', '');
-    if (hexColor.length == 6) {
-      hexColor = 'FF$hexColor';
-    }
-    return Color(int.parse(hexColor, radix: 16));
   }
 }

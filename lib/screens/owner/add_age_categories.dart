@@ -5,22 +5,20 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
 
-class AddCategoryScreen extends StatefulWidget {
-  const AddCategoryScreen({super.key});
+class AddAgeCategoryScreen extends StatefulWidget {
+  const AddAgeCategoryScreen({super.key});
 
   @override
-  State<AddCategoryScreen> createState() => _AddCategoryScreenState();
+  State<AddAgeCategoryScreen> createState() => _AddAgeCategoryScreenState();
 }
 
-class _AddCategoryScreenState extends State<AddCategoryScreen> {
+class _AddAgeCategoryScreenState extends State<AddAgeCategoryScreen> {
   // Controllers
   final TextEditingController _nameController = TextEditingController();
-  final TextEditingController _descriptionController = TextEditingController();
+  final TextEditingController _displayNameController = TextEditingController();
   final TextEditingController _iconNameController = TextEditingController();
-  final TextEditingController _colorController = TextEditingController();
-  
-  // Focus nodes
-  final FocusNode _nameFocusNode = FocusNode();
+  final TextEditingController _minAgeController = TextEditingController();
+  final TextEditingController _maxAgeController = TextEditingController();
 
   // Variables
   bool _isActive = true;
@@ -29,23 +27,24 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
   bool _isLoadingData = true;
   bool _isCheckingName = false;
   String? _nameError;
+  String? _ageRangeError;
   List<String> _suggestions = [];
   
-  // All existing categories (for suggestion)
-  List<String> _existingCategories = [];
+  // All existing age categories (for duplicate check)
+  List<String> _existingAgeCategories = [];
 
   // Available icons for suggestions
   final List<String> _suggestedIcons = [
-    'content_cut',
-    'face',
-    'face_retouching_natural',
-    'spa',
-    'handshake',
-    'build_circle_outlined',
-    'hair_cut',
-    'shower',
-    'massage',
-    'makeup',
+    'child',
+    'teen',
+    'adult',
+    'senior',
+    'cake',
+    'calendar_today',
+    'timeline',
+    'accessibility',
+    'person',
+    'group',
   ];
 
   final supabase = Supabase.instance.client;
@@ -54,46 +53,100 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
   void initState() {
     super.initState();
     _loadMaxDisplayOrder();
-    _loadExistingCategories();
+    _loadExistingAgeCategories();
     
     // Add listener for name changes
     _nameController.addListener(_onNameChanged);
+    
+    // Add listeners for age range validation
+    _minAgeController.addListener(_validateAgeRange);
+    _maxAgeController.addListener(_validateAgeRange);
   }
 
   @override
   void dispose() {
     _nameController.removeListener(_onNameChanged);
+    _minAgeController.removeListener(_validateAgeRange);
+    _maxAgeController.removeListener(_validateAgeRange);
     _nameController.dispose();
-    _descriptionController.dispose();
+    _displayNameController.dispose();
     _iconNameController.dispose();
-    _colorController.dispose();
-    _nameFocusNode.dispose();
+    _minAgeController.dispose();
+    _maxAgeController.dispose();
     super.dispose();
   }
 
-  // Load existing categories for duplicate check and suggestions
-  Future<void> _loadExistingCategories() async {
+  // Load existing age categories for duplicate check
+  Future<void> _loadExistingAgeCategories() async {
     try {
       final response = await supabase
-          .from('categories')
+          .from('age_categories')
           .select('name');
       
       setState(() {
-        _existingCategories = response
+        _existingAgeCategories = response
             .map((e) => e['name'].toString().toLowerCase())
             .toList();
       });
     } catch (e) {
-      debugPrint('❌ Error loading existing categories: $e');
+      debugPrint('❌ Error loading existing age categories: $e');
     }
   }
 
-  // Check if category name exists
-  Future<bool> _isCategoryNameExists(String name) async {
+  // Check if age category name exists
+  Future<bool> _isAgeCategoryNameExists(String name) async {
     if (name.isEmpty) return false;
     
     final normalizedName = name.trim().toLowerCase();
-    return _existingCategories.contains(normalizedName);
+    return _existingAgeCategories.contains(normalizedName);
+  }
+
+  // Validate age range
+  void _validateAgeRange() {
+    final minAgeStr = _minAgeController.text.trim();
+    final maxAgeStr = _maxAgeController.text.trim();
+    
+    if (minAgeStr.isEmpty || maxAgeStr.isEmpty) {
+      setState(() {
+        _ageRangeError = null;
+      });
+      return;
+    }
+    
+    final minAge = int.tryParse(minAgeStr);
+    final maxAge = int.tryParse(maxAgeStr);
+    
+    if (minAge == null || maxAge == null) {
+      setState(() {
+        _ageRangeError = 'Please enter valid numbers';
+      });
+      return;
+    }
+    
+    if (minAge < 0) {
+      setState(() {
+        _ageRangeError = 'Minimum age cannot be negative';
+      });
+      return;
+    }
+    
+    if (maxAge > 120) {
+      setState(() {
+        _ageRangeError = 'Maximum age cannot exceed 120';
+      });
+      return;
+    }
+    
+    if (minAge > maxAge) {
+      setState(() {
+        _ageRangeError = 'Minimum age cannot be greater than maximum age';
+      });
+      return;
+    }
+    
+    setState(() {
+      _ageRangeError = null;
+    });
   }
 
   // Get suggestions based on input
@@ -103,22 +156,20 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
     final normalizedInput = input.trim().toLowerCase();
     if (normalizedInput.isEmpty) return [];
     
-    // Common category names for suggestions
-    final commonCategories = [
-      'hair', 'hair cut', 'hair color', 'hair styling',
-      'skin', 'facial', 'skin care',
-      'grooming', 'beard trim', 'shave',
-      'wellness', 'massage', 'spa',
-      'nails', 'manicure', 'pedicure',
-      'makeup', 'bridal makeup',
-      'waxing', 'threading',
-      'other'
+    // Common age category names for suggestions
+    final commonAgeCategories = [
+      'child', 'children', 'kid', 'kids',
+      'teen', 'teenager', 'adolescent', 'youth',
+      'adult', 'adults', 'young adult', 'middle age',
+      'senior', 'elder', 'old', 'mature',
+      'infant', 'baby', 'toddler', 'pre-school',
+      'school age', 'pre-teen', 'young', 'all ages'
     ];
     
-    // Filter suggestions that start with input
-    final suggestions = commonCategories.where((cat) {
-      return cat.toLowerCase().contains(normalizedInput) && 
-             !_existingCategories.contains(cat.toLowerCase());
+    // Filter suggestions that contain input
+    final suggestions = commonAgeCategories.where((ageCat) {
+      return ageCat.toLowerCase().contains(normalizedInput) && 
+             !_existingAgeCategories.contains(ageCat.toLowerCase());
     }).toList();
     
     return suggestions.take(5).toList();
@@ -162,13 +213,13 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
       
       setState(() => _isCheckingName = true);
       
-      final exists = await _isCategoryNameExists(name);
+      final exists = await _isAgeCategoryNameExists(name);
       
       if (mounted) {
         setState(() {
           _isCheckingName = false;
           if (exists) {
-            _nameError = 'Category name already exists';
+            _nameError = 'Age category name already exists';
           } else {
             _nameError = null;
           }
@@ -181,7 +232,7 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
   Future<void> _loadMaxDisplayOrder() async {
     try {
       final response = await supabase
-          .from('categories')
+          .from('age_categories')
           .select('display_order')
           .order('display_order', ascending: false)
           .limit(1);
@@ -207,56 +258,190 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
     }
   }
 
-  // Create category
-  Future<void> _createCategory() async {
+  // Auto-fill display name based on name and age range
+  void _autoFillDisplayName() {
+    final name = _nameController.text.trim().toLowerCase();
+    final minAge = _minAgeController.text.trim();
+    final maxAge = _maxAgeController.text.trim();
+    
+    if (name.isEmpty) return;
+    
+    String displayName;
+    switch (name) {
+      case 'child':
+      case 'children':
+      case 'kid':
+      case 'kids':
+        displayName = '👶 Child';
+        break;
+      case 'teen':
+      case 'teenager':
+      case 'adolescent':
+      case 'youth':
+        displayName = '🧑 Teen';
+        break;
+      case 'adult':
+      case 'adults':
+      case 'young adult':
+        displayName = '👨 Adult';
+        break;
+      case 'senior':
+      case 'elder':
+      case 'old':
+        displayName = '👴 Senior';
+        break;
+      case 'infant':
+      case 'baby':
+        displayName = '🍼 Baby';
+        break;
+      case 'toddler':
+        displayName = '🚼 Toddler';
+        break;
+      case 'all ages':
+      case 'everyone':
+        displayName = '👥 All Ages';
+        break;
+      default:
+        displayName = '${name[0].toUpperCase()}${name.substring(1)}';
+    }
+    
+    // Add age range if available
+    if (minAge.isNotEmpty && maxAge.isNotEmpty) {
+      displayName = '$displayName ($minAge-$maxAge yrs)';
+    }
+    
+    setState(() {
+      _displayNameController.text = displayName;
+    });
+  }
+
+  // Auto-fill age range based on name
+  void _autoFillAgeRange() {
+    final name = _nameController.text.trim().toLowerCase();
+    
+    switch (name) {
+      case 'child':
+      case 'children':
+      case 'kid':
+      case 'kids':
+        _minAgeController.text = '0';
+        _maxAgeController.text = '12';
+        break;
+      case 'teen':
+      case 'teenager':
+      case 'adolescent':
+      case 'youth':
+        _minAgeController.text = '13';
+        _maxAgeController.text = '19';
+        break;
+      case 'adult':
+      case 'adults':
+        _minAgeController.text = '20';
+        _maxAgeController.text = '60';
+        break;
+      case 'senior':
+      case 'elder':
+      case 'old':
+        _minAgeController.text = '61';
+        _maxAgeController.text = '120';
+        break;
+      case 'infant':
+      case 'baby':
+        _minAgeController.text = '0';
+        _maxAgeController.text = '1';
+        break;
+      case 'toddler':
+        _minAgeController.text = '1';
+        _maxAgeController.text = '3';
+        break;
+      case 'all ages':
+      case 'everyone':
+        _minAgeController.text = '0';
+        _maxAgeController.text = '120';
+        break;
+      default:
+        // Don't auto-fill if not recognized
+        break;
+    }
+    
+    _validateAgeRange();
+  }
+
+  // Create age category
+  Future<void> _createAgeCategory() async {
     final name = _nameController.text.trim();
     
     if (name.isEmpty) {
-      _showSnackBar('Category name is required', Colors.red);
+      _showSnackBar('Age category name is required', Colors.red);
       return;
     }
     
     // Check duplicate again before saving
-    final exists = await _isCategoryNameExists(name);
+    final exists = await _isAgeCategoryNameExists(name);
     if (exists) {
-      _showSnackBar('Category name already exists', Colors.red);
+      _showSnackBar('Age category name already exists', Colors.red);
+      return;
+    }
+
+    if (_displayNameController.text.trim().isEmpty) {
+      _showSnackBar('Display name is required', Colors.red);
+      return;
+    }
+
+    final minAgeStr = _minAgeController.text.trim();
+    final maxAgeStr = _maxAgeController.text.trim();
+    
+    if (minAgeStr.isEmpty || maxAgeStr.isEmpty) {
+      _showSnackBar('Age range is required', Colors.red);
+      return;
+    }
+    
+    final minAge = int.tryParse(minAgeStr);
+    final maxAge = int.tryParse(maxAgeStr);
+    
+    if (minAge == null || maxAge == null) {
+      _showSnackBar('Please enter valid numbers for age range', Colors.red);
+      return;
+    }
+    
+    if (minAge > maxAge) {
+      _showSnackBar('Minimum age cannot be greater than maximum age', Colors.red);
       return;
     }
 
     setState(() => _isLoading = true);
 
     try {
-      final categoryData = {
+      final ageCategoryData = {
         'name': name.toLowerCase(),
-        'description': _descriptionController.text.trim().isEmpty 
-            ? null 
-            : _descriptionController.text.trim(),
+        'display_name': _displayNameController.text.trim(),
+        'min_age': minAge,
+        'max_age': maxAge,
         'icon_name': _iconNameController.text.trim().isEmpty 
-            ? 'category' 
+            ? name.toLowerCase() 
             : _iconNameController.text.trim(),
-        'color': _colorController.text.trim().isEmpty 
-            ? null 
-            : _colorController.text.trim(),
         'display_order': _displayOrder,
         'is_active': _isActive,
       };
 
-      debugPrint('📝 Creating category: ${categoryData['name']}');
+      debugPrint('📝 Creating age category: ${ageCategoryData['name']}');
+      debugPrint('   Age range: ${ageCategoryData['min_age']} - ${ageCategoryData['max_age']}');
 
       await supabase
-          .from('categories')
-          .insert(categoryData)
+          .from('age_categories')
+          .insert(ageCategoryData)
           .select()
           .single();
 
-      debugPrint('✅ Category created');
+      debugPrint('✅ Age category created');
 
       if (!mounted) return;
 
       await showCustomAlert(
         context: context,
-        title: "🎉 Category Created!",
-        message: "$name category has been added successfully.",
+        title: "🎉 Age Category Added!",
+        message: "${_displayNameController.text.trim()} age category has been added successfully.\n\n"
+            "Age Range: $minAge - $maxAge years",
         isError: false,
       );
 
@@ -264,9 +449,9 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
       Navigator.pop(context, true);
 
     } catch (e) {
-      debugPrint('❌ Error creating category: $e');
+      debugPrint('❌ Error creating age category: $e');
       if (mounted) {
-        _showSnackBar('Error creating category: $e', Colors.red);
+        _showSnackBar('Error creating age category: $e', Colors.red);
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -283,62 +468,13 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
     );
   }
 
-  // Helper to show color picker
-  Future<void> _selectColor() async {
-    final Color? pickedColor = await showDialog<Color>(
-      context: context,
-      builder: (context) => SimpleDialog(
-        title: const Text('Select Color'),
-        children: [
-          _buildColorOption(Colors.red, 'Red'),
-          _buildColorOption(Colors.pink, 'Pink'),
-          _buildColorOption(Colors.purple, 'Purple'),
-          _buildColorOption(Colors.deepPurple, 'Deep Purple'),
-          _buildColorOption(Colors.indigo, 'Indigo'),
-          _buildColorOption(Colors.blue, 'Blue'),
-          _buildColorOption(Colors.lightBlue, 'Light Blue'),
-          _buildColorOption(Colors.cyan, 'Cyan'),
-          _buildColorOption(Colors.teal, 'Teal'),
-          _buildColorOption(Colors.green, 'Green'),
-          _buildColorOption(Colors.lightGreen, 'Light Green'),
-          _buildColorOption(Colors.lime, 'Lime'),
-          _buildColorOption(Colors.yellow, 'Yellow'),
-          _buildColorOption(Colors.amber, 'Amber'),
-          _buildColorOption(Colors.orange, 'Orange'),
-          _buildColorOption(Colors.deepOrange, 'Deep Orange'),
-          _buildColorOption(Colors.brown, 'Brown'),
-          _buildColorOption(Colors.grey, 'Grey'),
-          _buildColorOption(Colors.blueGrey, 'Blue Grey'),
-        ],
-      ),
-    );
-
-    if (pickedColor != null) {
-      final hexValue = pickedColor.value.toRadixString(16).substring(2);
-      setState(() {
-        _colorController.text = '#$hexValue';
-      });
-    }
-  }
-
-  Widget _buildColorOption(Color color, String name) {
-    return ListTile(
-      leading: CircleAvatar(
-        backgroundColor: color,
-        radius: 16,
-      ),
-      title: Text(name),
-      onTap: () => Navigator.pop(context, color),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final isWeb = MediaQuery.of(context).size.width > 800;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Add New Category'),
+        title: const Text('Add Age Category'),
         backgroundColor: const Color(0xFFFF6B8B),
         foregroundColor: Colors.white,
         centerTitle: isWeb,
@@ -390,14 +526,14 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
               shape: BoxShape.circle,
             ),
             child: const Icon(
-              Icons.category,
+              Icons.timeline,
               color: Color(0xFFFF6B8B),
               size: 48,
             ),
           ),
           const SizedBox(height: 16),
           const Text(
-            'Add New Category',
+            'Add Age Category',
             style: TextStyle(
               fontSize: 24,
               fontWeight: FontWeight.bold,
@@ -405,7 +541,7 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            'Create a new service category for your salon',
+            'Create a new age group for your salon services',
             style: TextStyle(
               fontSize: 14,
               color: Colors.grey[600],
@@ -420,17 +556,16 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Category Name with Suggestions
+        // Age Category Name (Required)
         const Text(
-          'Category Name *',
+          'Age Category Name *',
           style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: 8),
         TextFormField(
           controller: _nameController,
-          focusNode: _nameFocusNode,
           decoration: InputDecoration(
-            hintText: 'e.g., Hair, Skin, Grooming',
+            hintText: 'e.g., child, teen, adult, senior',
             prefixIcon: const Icon(Icons.category, color: Colors.grey),
             suffixIcon: _isCheckingName
                 ? const SizedBox(
@@ -469,7 +604,8 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
                       _nameController.text = suggestion;
                       _suggestions = [];
                     });
-                    _nameFocusNode.requestFocus();
+                    _autoFillAgeRange();
+                    _autoFillDisplayName();
                   },
                   backgroundColor: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
                   labelStyle: const TextStyle(color: Color(0xFFFF6B8B)),
@@ -480,23 +616,86 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
         
         const SizedBox(height: 16),
 
-        // Description
+        // Display Name (Required)
         const Text(
-          'Description',
+          'Display Name *',
           style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: 8),
         TextFormField(
-          controller: _descriptionController,
-          maxLines: 3,
+          controller: _displayNameController,
           decoration: InputDecoration(
-            hintText: 'Describe what services this category includes',
+            hintText: 'e.g., 👶 Child, 🧑 Teen, 👨 Adult, 👴 Senior',
+            prefixIcon: const Icon(Icons.badge, color: Colors.grey),
+            suffixIcon: IconButton(
+              icon: const Icon(Icons.auto_awesome, size: 18),
+              onPressed: _autoFillDisplayName,
+              tooltip: 'Auto-fill from name',
+              color: const Color(0xFFFF6B8B),
+            ),
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: const BorderSide(color: Color(0xFFFF6B8B), width: 2),
             ),
           ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'How this age group will appear to customers (use emojis if desired)',
+          style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+        ),
+        const SizedBox(height: 16),
+
+        // Age Range (Min and Max)
+        const Text(
+          'Age Range *',
+          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: TextFormField(
+                controller: _minAgeController,
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(
+                  hintText: 'Min Age',
+                  prefixIcon: const Icon(Icons.arrow_downward, size: 18),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  errorText: _ageRangeError != null && _minAgeController.text.isNotEmpty ? null : null,
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            const Text('to', style: TextStyle(fontWeight: FontWeight.w500)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: TextFormField(
+                controller: _maxAgeController,
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(
+                  hintText: 'Max Age',
+                  prefixIcon: const Icon(Icons.arrow_upward, size: 18),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  errorText: _ageRangeError != null && _maxAgeController.text.isNotEmpty ? null : null,
+                ),
+              ),
+            ),
+          ],
+        ),
+        if (_ageRangeError != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              _ageRangeError!,
+              style: const TextStyle(fontSize: 12, color: Colors.red),
+            ),
+          ),
+        const SizedBox(height: 8),
+        Text(
+          'Age range in years (e.g., 0-12 for children, 13-19 for teens)',
+          style: TextStyle(fontSize: 11, color: Colors.grey[500]),
         ),
         const SizedBox(height: 16),
 
@@ -509,7 +708,7 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
         TextFormField(
           controller: _iconNameController,
           decoration: InputDecoration(
-            hintText: 'e.g., content_cut, face, spa',
+            hintText: 'e.g., child, teen, adult, senior',
             prefixIcon: const Icon(Icons.abc, color: Colors.grey),
             suffixIcon: PopupMenuButton<String>(
               icon: const Icon(Icons.arrow_drop_down, color: Colors.grey),
@@ -547,49 +746,6 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
         ),
         const SizedBox(height: 16),
 
-        // Color
-        const Text(
-          'Color',
-          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-        ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            Expanded(
-              child: TextFormField(
-                controller: _colorController,
-                decoration: InputDecoration(
-                  hintText: 'e.g., #FF6B8B or select color',
-                  prefixIcon: const Icon(Icons.color_lens, color: Colors.grey),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: Color(0xFFFF6B8B), width: 2),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Container(
-              width: 56,
-              height: 56,
-              decoration: BoxDecoration(
-                color: _colorController.text.isNotEmpty
-                    ? _getColorFromHex(_colorController.text)
-                    : Colors.grey[300],
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.grey[300]!),
-              ),
-              child: IconButton(
-                icon: const Icon(Icons.colorize),
-                onPressed: _selectColor,
-                color: Colors.white,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-
         // Display Order
         const Text(
           'Display Order',
@@ -608,7 +764,7 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
             }
           },
           decoration: InputDecoration(
-            hintText: 'Order in which category appears',
+            hintText: 'Order in which age category appears',
             prefixIcon: const Icon(Icons.sort, color: Colors.grey),
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
             focusedBorder: OutlineInputBorder(
@@ -633,7 +789,7 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Inactive categories will not be shown to customers',
+                    'Inactive age categories will not be shown to customers',
                     style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                   ),
                 ],
@@ -658,13 +814,19 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
   }
 
   Widget _buildCreateButton() {
-    final isDisabled = _isLoading || _nameError != null || _nameController.text.trim().isEmpty;
+    final isDisabled = _isLoading || 
+        _nameError != null || 
+        _ageRangeError != null ||
+        _nameController.text.trim().isEmpty ||
+        _displayNameController.text.trim().isEmpty ||
+        _minAgeController.text.trim().isEmpty ||
+        _maxAgeController.text.trim().isEmpty;
     
     return SizedBox(
       width: double.infinity,
       height: 54,
       child: ElevatedButton(
-        onPressed: isDisabled ? null : _createCategory,
+        onPressed: isDisabled ? null : _createAgeCategory,
         style: ElevatedButton.styleFrom(
           backgroundColor: const Color(0xFFFF6B8B),
           foregroundColor: Colors.white,
@@ -695,21 +857,12 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
                   Icon(Icons.add, size: 20),
                   SizedBox(width: 8),
                   Text(
-                    'Create Category',
+                    'Create Age Category',
                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                   ),
                 ],
               ),
       ),
     );
-  }
-
-  // Helper function to convert hex string to Color
-  Color _getColorFromHex(String hexColor) {
-    hexColor = hexColor.toUpperCase().replaceAll('#', '');
-    if (hexColor.length == 6) {
-      hexColor = 'FF$hexColor';
-    }
-    return Color(int.parse(hexColor, radix: 16));
   }
 }

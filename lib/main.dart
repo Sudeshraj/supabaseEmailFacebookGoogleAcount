@@ -15,9 +15,12 @@ import 'package:flutter_application_1/screens/authantication/command/reset_passw
 import 'package:flutter_application_1/screens/authantication/command/role_selector_screen.dart';
 import 'package:flutter_application_1/screens/customer/booking_screen.dart';
 import 'package:flutter_application_1/screens/customer/vip_booking_request_screen.dart';
+import 'package:flutter_application_1/screens/owner/add_age_categories.dart';
 import 'package:flutter_application_1/screens/owner/add_barber_screen.dart';
 import 'package:flutter_application_1/screens/owner/add_barber_service_screen.dart';
 import 'package:flutter_application_1/screens/owner/add_category_screen.dart';
+import 'package:flutter_application_1/screens/owner/add_genders.dart';
+import 'package:flutter_application_1/screens/owner/add_services.dart';
 import 'package:flutter_application_1/screens/owner/barber_leaves_screen.dart';
 import 'package:flutter_application_1/screens/owner/barber_list_screen.dart';
 import 'package:flutter_application_1/screens/owner/barber_schedule_screen.dart';
@@ -629,12 +632,22 @@ GoRouter _createRouter() {
           return ResetPasswordConfirmScreen(email: extra?['email'] ?? '');
         },
       ),
+
+      // -------------------------------------------------------------Owner-----------------------------------------------
       GoRoute(
         path: '/owner/add-barber',
         name: 'addBarber',
         builder: (context, state) {
           final refresh = state.uri.queryParameters['refresh'] == 'true';
           return AddBarberScreen(refresh: refresh);
+        },
+      ),
+      GoRoute(
+        path: '/owner/services/add',
+        builder: (context, state) {
+          final salonId = state.uri.queryParameters['salonId'];
+          if (salonId == null) return const OwnerDashboard();
+          return AddServiceScreen(salonId: int.parse(salonId));
         },
       ),
       GoRoute(
@@ -694,18 +707,18 @@ GoRouter _createRouter() {
         },
       ),
       GoRoute(
-      path: '/owner/salon/edit',
-      builder: (context, state) {
-        // Get salonId from query parameters
-        final salonIdStr = state.uri.queryParameters['salonId'];
-        if (salonIdStr == null) {
-          // If no salonId, redirect to dashboard
-          return const OwnerDashboard();
-        }
-        final salonId = int.parse(salonIdStr);
-        return EditSalonScreen(salonId: salonId);
-      },
-    ),
+        path: '/owner/salon/edit',
+        builder: (context, state) {
+          // Get salonId from query parameters
+          final salonIdStr = state.uri.queryParameters['salonId'];
+          if (salonIdStr == null) {
+            // If no salonId, redirect to dashboard
+            return const OwnerDashboard();
+          }
+          final salonId = int.parse(salonIdStr);
+          return EditSalonScreen(salonId: salonId);
+        },
+      ),
       GoRoute(
         path: '/owner/edit-barber-services',
         builder: (context, state) {
@@ -721,6 +734,14 @@ GoRouter _createRouter() {
           final salonId = state.uri.queryParameters['salonId']!;
           return VIPBookingRequestsScreen(salonId: salonId);
         },
+      ),
+      GoRoute(
+        path: '/owner/genders/add',
+        builder: (context, state) => const AddGenderScreen(),
+      ),
+      GoRoute(
+        path: '/owner/age-categories/add',
+        builder: (context, state) => const AddAgeCategoryScreen(),
       ),
 
       //........................................CUstomer............................................................
