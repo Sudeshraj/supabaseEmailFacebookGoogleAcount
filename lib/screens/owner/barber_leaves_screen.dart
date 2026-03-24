@@ -27,6 +27,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
   // Salon working hours
   String? _salonOpenTime;
   String? _salonCloseTime;
+  List<Map<String, dynamic>> _holidays = [];
 
   // Filters
   DateTime? _selectedDate;
@@ -56,12 +57,21 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
         _salonCloseTime = salonResponse['close_time'];
       }
 
-      // Get barber IDs
+      // Load holidays for this salon
+      final holidaysResponse = await supabase
+          .from('salon_holidays')
+          .select('holiday_date, name, description')
+          .eq('salon_id', int.parse(widget.salonId!))
+          .order('holiday_date', ascending: false);
+
+      _holidays = List<Map<String, dynamic>>.from(holidaysResponse);
+
+      // Get barber IDs with status = 'active'
       final salonBarbersResponse = await supabase
           .from('salon_barbers')
           .select('barber_id')
           .eq('salon_id', int.parse(widget.salonId!))
-          .eq('is_active', true);
+          .eq('status', 'active');
 
       final barberIds = salonBarbersResponse
           .map((sb) => sb['barber_id'] as String)
@@ -166,7 +176,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
         .from('salon_barbers')
         .select('barber_id')
         .eq('salon_id', int.parse(widget.salonId!))
-        .eq('is_active', true);
+        .eq('status', 'active');
 
     final barberIds = salonBarbersResponse
         .map((sb) => sb['barber_id'] as String)
@@ -175,6 +185,19 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     await _loadLeavesWithFilters(barberIds);
 
     setState(() => _isLoading = false);
+  }
+
+  // Check if a date is a holiday
+  bool _isHoliday(String dateStr) {
+    return _holidays.any((h) => h['holiday_date'] == dateStr);
+  }
+
+  String? _getHolidayName(String dateStr) {
+    final holiday = _holidays.firstWhere(
+      (h) => h['holiday_date'] == dateStr,
+      orElse: () => {},
+    );
+    return holiday['name'];
   }
 
   // ==================== CUSTOMER CHOICE HANDLING ====================
@@ -300,7 +323,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
 
         return vipType['priority_level'] ?? 4;
       }
-      return 4; // Normal booking
+      return 4;
     } catch (e) {
       return 4;
     }
@@ -319,7 +342,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
           .from('salon_barbers')
           .select('barber_id')
           .eq('salon_id', int.parse(salonId))
-          .eq('is_active', true);
+          .eq('status', 'active');
 
       final barberIds = salonBarbers
           .map((sb) => sb['barber_id'] as String)
@@ -330,34 +353,6 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
 
       if (availableBarberIds.isEmpty) return null;
 
-      // First, check barbers with NO appointments
-      for (String barberId in availableBarberIds) {
-        if (await _isBarberAvailable(
-          barberId,
-          appointmentDate,
-          startTime,
-          endTime,
-        )) {
-          final hasVip = await _hasVipAppointment(barberId, appointmentDate);
-
-          if (appointmentPriority <= 2 && hasVip) {
-            continue;
-          }
-
-          final profile = await supabase
-              .from('profiles')
-              .select('full_name')
-              .eq('id', barberId)
-              .maybeSingle();
-
-          return {
-            'barber_id': barberId,
-            'name': profile?['full_name'] ?? 'Another barber',
-          };
-        }
-      }
-
-      // Second, check any available barber
       for (String barberId in availableBarberIds) {
         if (await _isBarberAvailable(
           barberId,
@@ -428,23 +423,6 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     }
   }
 
-  Future<bool> _hasVipAppointment(String barberId, String date) async {
-    try {
-      final response = await supabase
-          .from('appointments')
-          .select('id')
-          .eq('barber_id', barberId)
-          .eq('appointment_date', date)
-          .eq('is_vip', true)
-          .eq('status', 'confirmed')
-          .maybeSingle();
-
-      return response != null;
-    } catch (e) {
-      return false;
-    }
-  }
-
   Future<void> _reassignToBarber(
     Map<String, dynamic> appointment,
     Map<String, dynamic> newBarber,
@@ -472,9 +450,8 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     }
   }
 
-  // Add this helper function to get variant duration
   Future<int> _getVariantDuration(int? variantId) async {
-    if (variantId == null) return 30; // Default duration
+    if (variantId == null) return 30;
 
     try {
       final response = await supabase
@@ -490,17 +467,16 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     }
   }
 
-  // Update _moveToNextDay to use the duration
   Future<String> _moveToNextDay(Map<String, dynamic> appointment) async {
     try {
-      // Get duration for this appointment
       final duration = await _getVariantDuration(appointment['variant_id']);
 
       DateTime nextDate = DateTime.parse(
         appointment['appointment_date'],
       ).add(const Duration(days: 1));
 
-      while (!await _isWorkingDay(nextDate)) {
+      // Skip holidays and Sundays
+      while (await _isHolidayDate(nextDate) || nextDate.weekday == DateTime.sunday) {
         nextDate = nextDate.add(const Duration(days: 1));
       }
 
@@ -508,7 +484,6 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
           '${nextDate.year.toString().padLeft(4, '0')}-${nextDate.month.toString().padLeft(2, '0')}-${nextDate.day.toString().padLeft(2, '0')}';
       final queueNumber = 1;
 
-      // Get all appointments that need to be shifted
       final appointmentsToShift = await supabase
           .from('appointments')
           .select('id, queue_number')
@@ -518,7 +493,6 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
           .gte('queue_number', queueNumber)
           .order('queue_number', ascending: false);
 
-      // Shift each appointment
       for (var appt in appointmentsToShift) {
         await supabase
             .from('appointments')
@@ -526,10 +500,8 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
             .eq('id', appt['id']);
       }
 
-      // Calculate end time based on duration
       final endTime = _calculateEndTimeWithDuration('09:00:00', duration);
 
-      // Update the moved appointment
       await supabase
           .from('appointments')
           .update({
@@ -553,6 +525,20 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     }
   }
 
+  Future<bool> _isHolidayDate(DateTime date) async {
+    final dateStr =
+        '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+    
+    final holiday = await supabase
+        .from('salon_holidays')
+        .select()
+        .eq('salon_id', int.parse(widget.salonId!))
+        .eq('holiday_date', dateStr)
+        .maybeSingle();
+    
+    return holiday != null;
+  }
+
   String _calculateEndTimeWithDuration(String startTime, int durationMinutes) {
     try {
       final parts = startTime.split(':');
@@ -566,26 +552,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       return '${newHour.toString().padLeft(2, '0')}:${newMinute.toString().padLeft(2, '0')}:00';
     } catch (e) {
       debugPrint('❌ Error calculating end time: $e');
-      return '09:30:00'; // Default 30 min later
-    }
-  }
-
-  Future<bool> _isWorkingDay(DateTime date) async {
-    try {
-      final holiday = await supabase
-          .from('salon_holidays')
-          .select()
-          .eq(
-            'holiday_date',
-            '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}',
-          )
-          .maybeSingle();
-
-      if (holiday != null) return false;
-      if (date.weekday == DateTime.sunday) return false;
-      return true;
-    } catch (e) {
-      return true;
+      return '09:30:00';
     }
   }
 
@@ -595,7 +562,6 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     required Map<String, dynamic> newAppointment,
   }) async {
     try {
-      // Get current queue for this barber
       final currentQueue = await supabase
           .from('appointments')
           .select('id, queue_number, start_time, is_vip')
@@ -605,7 +571,6 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
           .order('queue_number');
 
       if (currentQueue.isEmpty) {
-        // First appointment of the day
         await supabase
             .from('appointments')
             .update({'queue_number': 1})
@@ -613,19 +578,16 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
         return;
       }
 
-      // Find where to insert based on time and priority
       int newQueueNumber = currentQueue.length + 1;
 
       for (int i = 0; i < currentQueue.length; i++) {
         final existing = currentQueue[i];
 
-        // VIP appointments go before normal ones
         if (newAppointment['is_vip'] == true && existing['is_vip'] != true) {
           newQueueNumber = existing['queue_number'];
           break;
         }
 
-        // If same priority, order by time
         if (existing['is_vip'] == newAppointment['is_vip']) {
           if (newAppointment['start_time'].compareTo(existing['start_time']) <
               0) {
@@ -635,8 +597,6 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
         }
       }
 
-      // 🔥 FIXED: Manual queue number shifting without .raw()
-      // Get all appointments that need to be shifted
       final appointmentsToShift = await supabase
           .from('appointments')
           .select('id, queue_number')
@@ -644,12 +604,8 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
           .eq('appointment_date', date)
           .eq('status', 'confirmed')
           .gte('queue_number', newQueueNumber)
-          .order(
-            'queue_number',
-            ascending: false,
-          ); // Order descending to avoid conflicts
+          .order('queue_number', ascending: false);
 
-      // Update each appointment one by one
       for (var appt in appointmentsToShift) {
         await supabase
             .from('appointments')
@@ -657,7 +613,6 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
             .eq('id', appt['id']);
       }
 
-      // Insert new appointment
       await supabase
           .from('appointments')
           .update({'queue_number': newQueueNumber})
@@ -704,9 +659,15 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
         );
       }
 
+      final currentUser = supabase.auth.currentUser;
+      if (currentUser == null) throw Exception('No authenticated user');
+
       await supabase
           .from('barber_leaves')
-          .update({'status': 'approved'})
+          .update({
+            'status': 'approved',
+            'approved_by': currentUser.id,
+          })
           .eq('id', leaveId);
 
       final dateStr =
@@ -755,7 +716,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       );
 
       if (context.mounted) {
-        Navigator.pop(context); // Close loading
+        Navigator.pop(context);
       }
 
       if (affectedAppointments.isEmpty) {
@@ -931,10 +892,6 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       if (mounted) setState(() => _isLoading = false);
     }
   }
-
-  // ==================== UI BUILDERS (Keep your existing UI code) ====================
-
-  // ... (Keep all your existing UI building methods: _buildStatusCell, _buildWebView, _buildMobileView, etc.)
 
   // ==================== HELPER METHODS ====================
 
@@ -1354,6 +1311,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
         salonId: widget.salonId!,
         salonOpenTime: _salonOpenTime,
         salonCloseTime: _salonCloseTime,
+        holidays: _holidays,
       ),
     );
 
@@ -1377,6 +1335,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
         salonOpenTime: _salonOpenTime,
         salonCloseTime: _salonCloseTime,
         leaveToEdit: leave,
+        holidays: _holidays,
       ),
     );
 
@@ -1467,6 +1426,13 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
             icon: const Icon(Icons.refresh),
             onPressed: _loadData,
             tooltip: 'Refresh',
+          ),
+          IconButton(
+            icon: const Icon(Icons.calendar_today),
+            onPressed: () {
+              context.push('/owner/salon/holidays?salonId=${widget.salonId}');
+            },
+            tooltip: 'Manage Holidays',
           ),
         ],
       ),
@@ -1744,6 +1710,8 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
             final status = leave['status'] ?? 'pending';
             final reason = leave['reason'] ?? 'No reason provided';
             final rejectionReason = leave['rejection_reason'];
+            final isHoliday = _isHoliday(leave['leave_date']);
+            final holidayName = _getHolidayName(leave['leave_date']);
 
             String timeDisplay = '';
             if (leaveType == 'full_day' || leaveType == 'emergency') {
@@ -1760,9 +1728,9 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
               margin: const EdgeInsets.only(bottom: 4),
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: isHoliday ? Colors.orange.withValues(alpha: 0.05) : Colors.white,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.grey[200]!),
+                border: Border.all(color: isHoliday ? Colors.orange : Colors.grey[200]!),
               ),
               child: Row(
                 children: [
@@ -1801,7 +1769,24 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
                       ],
                     ),
                   ),
-                  Expanded(flex: 2, child: Text(leaveDate)),
+                  Expanded(
+                    flex: 2,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(leaveDate),
+                        if (isHoliday && holidayName != null)
+                          Text(
+                            '⚠️ $holidayName',
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: Colors.orange[700],
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
                   Expanded(
                     flex: 2,
                     child: Row(
@@ -1911,6 +1896,8 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
         final status = leave['status'] ?? 'pending';
         final reason = leave['reason'] ?? 'No reason provided';
         final rejectionReason = leave['rejection_reason'];
+        final isHoliday = _isHoliday(leave['leave_date']);
+        final holidayName = _getHolidayName(leave['leave_date']);
 
         String timeDisplay = '';
         if (leaveType == 'full_day' || leaveType == 'emergency') {
@@ -1986,6 +1973,17 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
                         ),
                       ],
                     ),
+                    if (isHoliday && holidayName != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        '⚠️ $holidayName',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.orange[700],
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 4),
                     Row(
                       children: [
@@ -2111,7 +2109,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
   }
 }
 
-// ==================== ADD/EDIT LEAVE DIALOG ====================
+// ==================== ADD/EDIT LEAVE DIALOG (UPDATED) ====================
 
 class _AddEditLeaveDialog extends StatefulWidget {
   final List<Map<String, dynamic>> barbers;
@@ -2119,6 +2117,7 @@ class _AddEditLeaveDialog extends StatefulWidget {
   final String? salonOpenTime;
   final String? salonCloseTime;
   final Map<String, dynamic>? leaveToEdit;
+  final List<Map<String, dynamic>> holidays;
 
   const _AddEditLeaveDialog({
     required this.barbers,
@@ -2126,6 +2125,7 @@ class _AddEditLeaveDialog extends StatefulWidget {
     this.salonOpenTime,
     this.salonCloseTime,
     this.leaveToEdit,
+    required this.holidays,
   });
 
   @override
@@ -2146,10 +2146,13 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
   bool _isLoading = false;
   String? _errorMessage;
   bool _isEditMode = false;
-  int? _editLeaveId;
+  int _editLeaveId = 0;
 
   TimeOfDay? _minTime;
   TimeOfDay? _maxTime;
+  
+  bool _isHoliday = false;
+  String? _holidayName;
 
   @override
   void initState() {
@@ -2188,11 +2191,12 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
     _selectedBarberId = leave['barber_id'];
     _leaveType = leave['leave_type'] ?? 'full_day';
     _reasonController.text = leave['reason'] ?? '';
-    _editLeaveId = leave['id'];
+    _editLeaveId = leave['id'] as int;
 
     if (leave['leave_date'] != null) {
       try {
         _selectedDate = DateTime.parse(leave['leave_date']);
+        _checkHoliday(_selectedDate!);
       } catch (e) {}
     }
 
@@ -2211,6 +2215,31 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
           minute: int.parse(endParts[1]),
         );
       } catch (e) {}
+    }
+  }
+
+  void _checkHoliday(DateTime date) {
+    final dateStr =
+        '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+    
+    final holiday = widget.holidays.firstWhere(
+      (h) => h['holiday_date'] == dateStr,
+      orElse: () => {},
+    );
+    
+    setState(() {
+      _isHoliday = holiday.isNotEmpty;
+      _holidayName = holiday['name'];
+    });
+    
+    if (_isHoliday && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('⚠️ $_holidayName - Salon is closed on this day!'),
+          backgroundColor: Colors.orange,
+          duration: const Duration(seconds: 3),
+        ),
+      );
     }
   }
 
@@ -2294,6 +2323,7 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
                       const SizedBox(height: 16),
                     ],
 
+                    // Barber Selection
                     const Text(
                       'Select Barber',
                       style: TextStyle(fontWeight: FontWeight.bold),
@@ -2329,6 +2359,7 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
 
                     const SizedBox(height: 16),
 
+                    // Date Selection with Holiday Check
                     const Text(
                       'Date',
                       style: TextStyle(fontWeight: FontWeight.bold),
@@ -2351,6 +2382,7 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
                             _selectedDate = date;
                             _errorMessage = null;
                           });
+                          _checkHoliday(date);
                         }
                       },
                       child: Container(
@@ -2359,23 +2391,57 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
                           vertical: 12,
                         ),
                         decoration: BoxDecoration(
-                          border: Border.all(color: Colors.grey[300]!),
+                          border: Border.all(
+                            color: _isHoliday && !_isEditMode
+                                ? Colors.orange
+                                : Colors.grey[300]!,
+                            width: _isHoliday && !_isEditMode ? 2 : 1,
+                          ),
                           borderRadius: BorderRadius.circular(8),
+                          color: _isHoliday && !_isEditMode
+                              ? Colors.orange.withValues(alpha: 0.05)
+                              : null,
                         ),
                         child: Row(
                           children: [
-                            const Icon(Icons.calendar_today, size: 16),
+                            Icon(
+                              Icons.calendar_today,
+                              size: 16,
+                              color: _isHoliday && !_isEditMode
+                                  ? Colors.orange
+                                  : Colors.grey[600],
+                            ),
                             const SizedBox(width: 8),
                             Expanded(
-                              child: Text(
-                                _selectedDate != null
-                                    ? '${_selectedDate!.year}-${_selectedDate!.month.toString().padLeft(2, '0')}-${_selectedDate!.day.toString().padLeft(2, '0')}'
-                                    : 'Select date',
-                                style: TextStyle(
-                                  color: _selectedDate != null
-                                      ? Colors.black
-                                      : Colors.grey[500],
-                                ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    _selectedDate != null
+                                        ? DateFormat('EEEE, MMM d, yyyy').format(_selectedDate!)
+                                        : 'Select date',
+                                    style: TextStyle(
+                                      color: _selectedDate != null
+                                          ? Colors.black
+                                          : Colors.grey[500],
+                                      fontWeight: _isHoliday && !_isEditMode
+                                          ? FontWeight.w500
+                                          : FontWeight.normal,
+                                    ),
+                                  ),
+                                  if (_isHoliday && !_isEditMode && _holidayName != null)
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 4),
+                                      child: Text(
+                                        '⚠️ $_holidayName - Salon closed',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: Colors.orange[700],
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ),
+                                ],
                               ),
                             ),
                           ],
@@ -2383,8 +2449,43 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
                       ),
                     ),
 
+                    // Holiday Warning
+                    if (_isHoliday && !_isEditMode)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.orange.shade50,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.orange.shade200),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.info_outline,
+                                size: 16,
+                                color: Colors.orange.shade700,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'The salon is closed on this day due to holiday. '
+                                  'Leave requests on holidays are not allowed.',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.orange.shade700,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+
                     const SizedBox(height: 16),
 
+                    // Leave Type
                     const Text(
                       'Leave Type',
                       style: TextStyle(fontWeight: FontWeight.bold),
@@ -2544,6 +2645,7 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
 
                     const SizedBox(height: 16),
 
+                    // Reason
                     const Text(
                       'Reason',
                       style: TextStyle(fontWeight: FontWeight.bold),
@@ -2588,7 +2690,8 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
                     onPressed:
                         _selectedBarberId != null &&
                             _selectedDate != null &&
-                            !_isLoading
+                            !_isLoading &&
+                            (!_isHoliday || _isEditMode)
                         ? _saveLeave
                         : null,
                     style: ElevatedButton.styleFrom(
@@ -2667,9 +2770,7 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
           initialTime: time,
           builder: (context, child) {
             return MediaQuery(
-              data: MediaQuery.of(
-                context,
-              ).copyWith(alwaysUse24HourFormat: false),
+              data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: false),
               child: child!,
             );
           },
@@ -2715,6 +2816,15 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
     });
 
     try {
+      // Check if date is holiday
+      if (_isHoliday && !_isEditMode) {
+        setState(() {
+          _errorMessage = 'Cannot add leave on a holiday. The salon is closed.';
+          _isLoading = false;
+        });
+        return;
+      }
+
       if (_leaveType == 'half_day' || _leaveType == 'short_leave') {
         final startMinutes = _startTime.hour * 60 + _startTime.minute;
         final endMinutes = _endTime.hour * 60 + _endTime.minute;
@@ -2754,8 +2864,7 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
         if (_leaveType == 'half_day') {
           if (durationMinutes < 180 || durationMinutes > 300) {
             setState(() {
-              _errorMessage =
-                  'Half day should be approximately 4 hours (3-5 hours range)';
+              _errorMessage = 'Half day should be approximately 4 hours (3-5 hours range)';
               _isLoading = false;
             });
             return;
@@ -2798,6 +2907,9 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
         }
       }
 
+      final currentUser = supabase.auth.currentUser;
+      if (currentUser == null) throw Exception('No authenticated user');
+
       Map<String, dynamic> leaveData = {
         'barber_id': _selectedBarberId!,
         'salon_id': int.parse(widget.salonId),
@@ -2821,7 +2933,7 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
         await supabase
             .from('barber_leaves')
             .update(leaveData)
-            .eq('id', _editLeaveId!);
+            .eq('id', _editLeaveId);
       } else {
         await supabase.from('barber_leaves').insert(leaveData);
       }

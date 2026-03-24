@@ -27,6 +27,7 @@ import 'package:flutter_application_1/screens/owner/barber_schedule_screen.dart'
 import 'package:flutter_application_1/screens/owner/create_salon.dart';
 import 'package:flutter_application_1/screens/owner/edit_barber_services_screen.dart';
 import 'package:flutter_application_1/screens/owner/edit_salon.dart';
+import 'package:flutter_application_1/screens/owner/salon_holidays_screen.dart';
 import 'package:flutter_application_1/screens/owner/vip_booking_requests_screen.dart';
 import 'package:flutter_application_1/services/notification_service.dart';
 import 'package:go_router/go_router.dart';
@@ -742,6 +743,18 @@ GoRouter _createRouter() {
       GoRoute(
         path: '/owner/age-categories/add',
         builder: (context, state) => const AddAgeCategoryScreen(),
+      ),
+      GoRoute(
+        path: '/owner/salon/holidays',
+        builder: (context, state) {
+          final salonId = state.uri.queryParameters['salonId'];
+          final salonName = state.uri.queryParameters['salonName'] ?? 'Salon';
+          if (salonId == null) return const OwnerDashboard();
+          return SalonHolidaysScreen(
+            salonId: int.parse(salonId),
+            salonName: salonName,
+          );
+        },
       ),
 
       //........................................CUstomer............................................................
