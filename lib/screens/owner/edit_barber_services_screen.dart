@@ -34,9 +34,12 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
   // Store variant details
   Map<int, Map<String, dynamic>> _variantDetailsMap = {};
 
- 
   // Salon barber ID
   int? _salonBarberId;
+
+  // Gender and Age Category maps for lookups
+  Map<int, String> _genderMap = {};
+  Map<int, Map<String, dynamic>> _ageCategoryMap = {};
 
   @override
   void initState() {
@@ -44,16 +47,22 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
     _loadData();
   }
 
+  // ============================================================
+  // UPDATED: Load data with new schema (direct fields, no foreign keys)
+  // ============================================================
+  
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
 
     try {
-      // Get salon_barber_id
+      final salonIdInt = int.parse(widget.salonId);
+      
+      // Step 1: Get salon_barber_id
       final salonBarberResponse = await supabase
           .from('salon_barbers')
           .select('id')
           .eq('barber_id', widget.barberId)
-          .eq('salon_id', int.parse(widget.salonId))
+          .eq('salon_id', salonIdInt)
           .maybeSingle();
 
       if (salonBarberResponse == null) {
@@ -63,7 +72,7 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
       final int salonBarberId = salonBarberResponse['id'] as int;
       _salonBarberId = salonBarberId;
 
-      // Load barber profile
+      // Step 2: Load barber profile
       final profile = await supabase
           .from('profiles')
           .select('id, full_name, email, avatar_url')
@@ -74,27 +83,58 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
         _barber = profile;
       }
 
-      // Load categories
-      // await supabase
-      //     .from('categories')
-      //     .select('id, name, icon_name')
-      //     .eq('is_active', true)
-      //     .order('display_order');
+      // Step 3: Load genders for this salon (new schema - direct fields)
+      final gendersResponse = await supabase
+          .from('salon_genders')
+          .select('id, display_name')
+          .eq('salon_id', salonIdInt)
+          .eq('is_active', true);
+      
+      _genderMap = {};
+      for (var g in gendersResponse) {
+        _genderMap[g['id']] = g['display_name'];
+      }
 
+      // Step 4: Load age categories for this salon (new schema - direct fields)
+      final ageCategoriesResponse = await supabase
+          .from('salon_age_categories')
+          .select('id, display_name, min_age, max_age')
+          .eq('salon_id', salonIdInt)
+          .eq('is_active', true);
+      
+      _ageCategoryMap = {};
+      for (var a in ageCategoriesResponse) {
+        _ageCategoryMap[a['id']] = {
+          'display_name': a['display_name'],
+          'min_age': a['min_age'],
+          'max_age': a['max_age'],
+        };
+      }
 
-      // Get barber's current active services
+      // Step 5: Load salon categories for this salon (new schema - direct fields)
+      final categoriesResponse = await supabase
+          .from('salon_categories')
+          .select('id, display_name, icon_name, color')
+          .eq('salon_id', salonIdInt)
+          .eq('is_active', true);
+      
+      final Map<int, Map<String, dynamic>> categoryMap = {};
+      for (var cat in categoriesResponse) {
+        categoryMap[cat['id']] = {
+          'display_name': cat['display_name'],
+          'icon_name': cat['icon_name'] ?? 'build',
+          'color': cat['color'] ?? '#FF6B8B',
+        };
+      }
+
+      // Step 6: Get barber's current active services
       final currentServices = await supabase
           .from('barber_services')
-          .select('''
-            id,
-            variant_id,
-            service_id,
-            is_active
-          ''')
+          .select('id, variant_id, service_id, status')
           .eq('salon_barber_id', salonBarberId)
-          .eq('is_active', true);
+          .eq('status', 'active');
 
-      debugPrint('📋 Current services from DB: $currentServices');
+      debugPrint('📋 Current services from DB: ${currentServices.length}');
 
       if (currentServices.isEmpty) {
         setState(() {
@@ -104,7 +144,7 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
         return;
       }
 
-      // Separate services with and without variants
+      // Step 7: Separate services with and without variants
       final servicesWithVariants = currentServices
           .where((s) => s['variant_id'] != null)
           .toList();
@@ -113,41 +153,41 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
           .where((s) => s['variant_id'] == null)
           .toList();
 
-      // Get unique service IDs
+      // Step 8: Get unique service IDs
       final allServiceIds = currentServices
           .map((s) => s['service_id'] as int)
           .toSet()
           .toList();
 
-      // Load service details
+      // Step 9: Load service details (new schema - direct category_id)
       Map<int, Map<String, dynamic>> serviceInfoMap = {};
       for (int serviceId in allServiceIds) {
         final service = await supabase
             .from('services')
-            .select('''
-              id,
-              name,
-              category_id,
-              categories (
-                id,
-                name
-              )
-            ''')
+            .select('id, name, description, category_id, icon_name')
             .eq('id', serviceId)
             .eq('is_active', true)
             .maybeSingle();
 
         if (service != null) {
-          final categoryName = service['categories']?['name'] ?? 'other';
+          final category = categoryMap[service['category_id']] ?? {
+            'display_name': 'Other',
+            'icon_name': 'build',
+            'color': '#FF6B8B',
+          };
           serviceInfoMap[serviceId] = {
             'id': serviceId,
-            'name': service['name'],
-            'category_name': categoryName,
+            'name': service['name'] ?? 'Unknown Service',
+            'description': service['description'] ?? '',
+            'category_id': service['category_id'],
+            'category_name': category['display_name'],
+            'icon_name': service['icon_name'] ?? category['icon_name'],
+            'color': category['color'],
           };
         }
       }
 
-      // Process services with variants
+      // Step 10: Process services with variants
       final variantIds = servicesWithVariants
           .map((s) => s['variant_id'] as int?)
           .whereType<int>()
@@ -158,24 +198,7 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
       for (int variantId in variantIds) {
         final variant = await supabase
             .from('service_variants')
-            .select('''
-              id,
-              service_id,
-              price,
-              duration,
-              genders (
-                id,
-                name,
-                display_name
-              ),
-              age_categories (
-                id,
-                name,
-                display_name,
-                min_age,
-                max_age
-              )
-            ''')
+            .select('id, service_id, price, duration, salon_gender_id, salon_age_category_id')
             .eq('id', variantId)
             .eq('is_active', true)
             .maybeSingle();
@@ -183,25 +206,32 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
         if (variant != null) {
           final serviceId = variant['service_id'] as int;
           final serviceInfo = serviceInfoMap[serviceId] ?? {};
-          final gender = variant['genders'] as Map<String, dynamic>;
-          final age = variant['age_categories'] as Map<String, dynamic>;
-
+          
+          final genderId = variant['salon_gender_id'];
+          final genderName = _genderMap[genderId] ?? 'Unknown';
+          
+          final ageId = variant['salon_age_category_id'];
+          final ageData = _ageCategoryMap[ageId] ?? {'display_name': 'Unknown', 'min_age': 0, 'max_age': 0};
+          final ageName = '${ageData['display_name']} (${ageData['min_age']}-${ageData['max_age']} yrs)';
+          
           variantDetailsMap[variantId] = {
             'id': variantId,
             'service_id': serviceId,
             'service_name': serviceInfo['name'] ?? 'Unknown',
-            'category_name': serviceInfo['category_name'] ?? 'other',
+            'category_name': serviceInfo['category_name'] ?? 'Other',
             'price': variant['price'],
             'duration': variant['duration'],
-            'gender_name': gender['display_name'],
-            'age_name': age['display_name'],
-            'display_text': '${gender['display_name']} • ${age['display_name']}',
+            'gender_id': genderId,
+            'gender_name': genderName,
+            'age_category_id': ageId,
+            'age_name': ageName,
+            'display_text': '$genderName • $ageName',
             'has_variant': true,
           };
         }
       }
 
-      // Process services without variants
+      // Step 11: Process services without variants
       for (var service in servicesWithoutVariants) {
         final serviceId = service['service_id'] as int;
         final serviceInfo = serviceInfoMap[serviceId] ?? {};
@@ -212,7 +242,7 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
           'id': fakeId,
           'service_id': serviceId,
           'service_name': serviceInfo['name'] ?? 'Unknown',
-          'category_name': serviceInfo['category_name'] ?? 'other',
+          'category_name': serviceInfo['category_name'] ?? 'Other',
           'price': 0,
           'duration': 0,
           'has_variant': false,
@@ -222,7 +252,7 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
 
       _variantDetailsMap = variantDetailsMap;
 
-      // Group by service for display
+      // Step 12: Group by service for display
       final Map<int, List<Map<String, dynamic>>> variantsByService = {};
       for (var variant in variantDetailsMap.values) {
         final serviceId = variant['service_id'] as int;
@@ -232,15 +262,19 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
         variantsByService[serviceId]!.add(variant);
       }
 
-      // Build services list
+      // Step 13: Build services list
       final List<Map<String, dynamic>> processedServices = [];
       for (int serviceId in allServiceIds) {
         final variants = variantsByService[serviceId] ?? [];
         if (variants.isNotEmpty) {
+          final serviceInfo = serviceInfoMap[serviceId] ?? {};
           processedServices.add({
             'id': serviceId,
-            'name': serviceInfoMap[serviceId]?['name'] ?? 'Unknown',
-            'category_name': serviceInfoMap[serviceId]?['category_name'] ?? 'other',
+            'name': serviceInfo['name'] ?? 'Unknown',
+            'category_name': serviceInfo['category_name'] ?? 'Other',
+            'category_id': serviceInfo['category_id'],
+            'icon_name': serviceInfo['icon_name'] ?? 'build',
+            'color': serviceInfo['color'] ?? '#FF6B8B',
             'variants': variants,
             'variantCount': variants.length,
             'hasVariants': variants.any((v) => v['has_variant'] == true),
@@ -248,10 +282,14 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
         }
       }
 
-      // Sort services by name within each category (will be done in UI)
+      // Sort services by name
+      processedServices.sort((a, b) => (a['name'] as String).compareTo(b['name'] as String));
+
       setState(() {
         _services = processedServices;
       });
+
+      debugPrint('✅ Loaded ${processedServices.length} services');
 
     } catch (e) {
       debugPrint('❌ Error loading data: $e');
@@ -321,7 +359,7 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
         for (int variantId in realVariantIds) {
           await supabase
               .from('barber_services')
-              .update({'is_active': false})
+              .update({'status': 'inactive'})
               .eq('salon_barber_id', salonBarberId)
               .eq('variant_id', variantId);
         }
@@ -333,7 +371,7 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
           final serviceId = -fakeId; // Convert back to positive
           await supabase
               .from('barber_services')
-              .update({'is_active': false})
+              .update({'status': 'inactive'})
               .eq('salon_barber_id', salonBarberId)
               .eq('service_id', serviceId)
               .filter('variant_id', 'is', null);
@@ -392,7 +430,6 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
     }
   }
 
-  // Add service method
   Future<void> _addService() async {
     final result = await showDialog<bool>(
       context: context,
@@ -424,7 +461,6 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
     }
   }
 
-  // Navigate to add service with variants
   void _navigateToAddServiceWithVariants() {
     context.push(
       '/owner/salon/${widget.salonId}/barber/${widget.barberId}/add-service',
@@ -476,7 +512,7 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
   }
 
   IconData _getCategoryIcon(String categoryName) {
-    switch (categoryName) {
+    switch (categoryName.toLowerCase()) {
       case 'hair': return Icons.content_cut;
       case 'skin': return Icons.face;
       case 'grooming': return Icons.face_retouching_natural;
@@ -487,13 +523,13 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
   }
 
   Color _getCategoryColor(String categoryName) {
-    switch (categoryName) {
+    switch (categoryName.toLowerCase()) {
       case 'hair': return Colors.blue;
       case 'skin': return Colors.pink;
       case 'grooming': return Colors.orange;
       case 'wellness': return Colors.green;
       case 'nails': return Colors.purple;
-      default: return Colors.grey;
+      default: return const Color(0xFFFF6B8B);
     }
   }
 
@@ -682,11 +718,7 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
     // Group services by category and sort
     final Map<String, List<Map<String, dynamic>>> groupedServices = {};
     
-    // Sort services by name first
-    final sortedServices = List<Map<String, dynamic>>.from(_services);
-    sortedServices.sort((a, b) => (a['name'] as String).compareTo(b['name'] as String));
-    
-    for (var service in sortedServices) {
+    for (var service in _services) {
       final category = service['category_name'] as String;
       if (!groupedServices.containsKey(category)) {
         groupedServices[category] = [];
@@ -986,8 +1018,8 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
                                 shape: BoxShape.circle,
                               ),
                               child: Icon(
-                                variant['gender_name'] == 'Male' ? Icons.male :
-                                variant['gender_name'] == 'Female' ? Icons.female : Icons.people,
+                                variant['gender_name'].toLowerCase().contains('male') ? Icons.male :
+                                variant['gender_name'].toLowerCase().contains('female') ? Icons.female : Icons.people,
                                 color: Colors.grey[600],
                                 size: 16,
                               ),

@@ -36,6 +36,11 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
   
   // For expansion state
   final Set<String> _expandedServices = {};
+  
+  // Maps for lookups
+  Map<int, String> _genderMap = {};
+  Map<int, Map<String, dynamic>> _ageCategoryMap = {};
+  Map<int, Map<String, dynamic>> _categoryMap = {};
 
   @override
   void initState() {
@@ -54,17 +59,23 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
     super.dispose();
   }
 
+  // ============================================================
+  // LOAD DATA WITH NEW SCHEMA (Direct fields, no foreign keys)
+  // ============================================================
+  
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
 
     try {
-      // Get salon_barber_id if not provided
+      final salonIdInt = int.parse(widget.salonId);
+      
+      // Step 1: Get salon_barber_id if not provided
       if (widget.salonBarberId == null) {
         final salonBarberResponse = await supabase
             .from('salon_barbers')
             .select('id')
             .eq('barber_id', widget.barberId)
-            .eq('salon_id', int.parse(widget.salonId))
+            .eq('salon_id', salonIdInt)
             .maybeSingle();
 
         if (salonBarberResponse != null) {
@@ -76,12 +87,56 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
         _salonBarberId = widget.salonBarberId;
       }
 
-      // Get already assigned services
+      // Step 2: Load genders for this salon (new schema - direct fields)
+      final gendersResponse = await supabase
+          .from('salon_genders')
+          .select('id, display_name')
+          .eq('salon_id', salonIdInt)
+          .eq('is_active', true);
+      
+      _genderMap = {};
+      for (var g in gendersResponse) {
+        _genderMap[g['id']] = g['display_name'];
+      }
+
+      // Step 3: Load age categories for this salon (new schema - direct fields)
+      final ageCategoriesResponse = await supabase
+          .from('salon_age_categories')
+          .select('id, display_name, min_age, max_age')
+          .eq('salon_id', salonIdInt)
+          .eq('is_active', true);
+      
+      _ageCategoryMap = {};
+      for (var a in ageCategoriesResponse) {
+        _ageCategoryMap[a['id']] = {
+          'display_name': a['display_name'],
+          'min_age': a['min_age'],
+          'max_age': a['max_age'],
+        };
+      }
+
+      // Step 4: Load categories for this salon (new schema - direct fields)
+      final categoriesResponse = await supabase
+          .from('salon_categories')
+          .select('id, display_name, icon_name, color')
+          .eq('salon_id', salonIdInt)
+          .eq('is_active', true);
+      
+      _categoryMap = {};
+      for (var c in categoriesResponse) {
+        _categoryMap[c['id']] = {
+          'display_name': c['display_name'],
+          'icon_name': c['icon_name'] ?? 'build',
+          'color': c['color'] ?? '#FF6B8B',
+        };
+      }
+
+      // Step 5: Get already assigned services for this barber
       final existingServices = await supabase
           .from('barber_services')
           .select('service_id, variant_id')
           .eq('salon_barber_id', _salonBarberId!)
-          .eq('is_active', true);
+          .eq('status', 'active');  // Using 'status' column
 
       final Set<String> assignedServiceKeys = {};
       for (var item in existingServices) {
@@ -92,42 +147,18 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
         }
       }
 
-      // Load services with variants
+      // Step 6: Load services (new schema - direct category_id)
       final servicesResponse = await supabase
           .from('services')
-          .select('''
-            id,
-            name,
-            description,
-            category_id,
-            categories!inner (
-              id,
-              name
-            )
-          ''')
+          .select('id, name, description, category_id, icon_name')
+          .eq('salon_id', salonIdInt)
           .eq('is_active', true)
           .order('name');
 
+      // Step 7: Load variants (new schema - direct foreign keys)
       final variantsResponse = await supabase
           .from('service_variants')
-          .select('''
-            id,
-            service_id,
-            price,
-            duration,
-            genders!inner (
-              id,
-              name,
-              display_name
-            ),
-            age_categories!inner (
-              id,
-              name,
-              display_name,
-              min_age,
-              max_age
-            )
-          ''')
+          .select('id, service_id, price, duration, salon_gender_id, salon_age_category_id')
           .eq('is_active', true);
 
       // Group variants by service
@@ -138,34 +169,45 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
           variantsByService[serviceId] = [];
         }
 
-        final gender = variant['genders'] as Map<String, dynamic>;
-        final age = variant['age_categories'] as Map<String, dynamic>;
+        final genderId = variant['salon_gender_id'];
+        final genderName = _genderMap[genderId] ?? 'Unknown';
+        
+        final ageId = variant['salon_age_category_id'];
+        final ageData = _ageCategoryMap[ageId] ?? {'display_name': 'Unknown', 'min_age': 0, 'max_age': 0};
+        final ageName = '${ageData['display_name']} (${ageData['min_age']}-${ageData['max_age']} yrs)';
+        
         final variantId = variant['id'] as int;
 
         variantsByService[serviceId]!.add({
           'id': variantId,
           'price': variant['price'],
           'duration': variant['duration'],
-          'gender_name': gender['display_name'],
-          'gender_original': gender['name'],
-          'age_name': age['display_name'],
-          'display_text': '${gender['display_name']} • ${age['display_name']}',
+          'gender_id': genderId,
+          'gender_name': genderName,
+          'age_category_id': ageId,
+          'age_name': ageName,
+          'display_text': '$genderName • $ageName',
           'isAssigned': assignedServiceKeys.contains('variant_$variantId'),
         });
       }
 
-      // Build services list
+      // Step 8: Build services list
       final List<Map<String, dynamic>> processedServices = [];
       for (var service in servicesResponse) {
         final serviceId = service['id'] as int;
         final variants = variantsByService[serviceId] ?? [];
-        final category = service['categories'] as Map<String, dynamic>?;
-        final categoryName = category?['name'] ?? 'other';
+        final categoryId = service['category_id'];
+        final category = _categoryMap[categoryId] ?? {
+          'display_name': 'Other',
+          'icon_name': 'build',
+          'color': '#FF6B8B',
+        };
+        final categoryName = category['display_name'];
 
         // Sort variants
         variants.sort((a, b) {
-          if (a['gender_original'] != b['gender_original']) {
-            return a['gender_original'].compareTo(b['gender_original']);
+          if (a['gender_name'] != b['gender_name']) {
+            return a['gender_name'].compareTo(b['gender_name']);
           }
           return a['age_name'].compareTo(b['age_name']);
         });
@@ -176,8 +218,12 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
         processedServices.add({
           'id': serviceId,
           'name': service['name'] ?? 'Unknown',
+          'category_id': categoryId,
           'category_name': categoryName,
+          'category_icon': category['icon_name'],
+          'category_color': category['color'],
           'description': service['description'] ?? '',
+          'icon_name': service['icon_name'] ?? category['icon_name'],
           'variants': variants,
           'hasVariants': variants.isNotEmpty,
           'variantCount': variants.length,
@@ -195,6 +241,8 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
       setState(() {
         _services = processedServices;
       });
+
+      debugPrint('✅ Loaded ${processedServices.length} services');
 
     } catch (e) {
       debugPrint('❌ Error loading services: $e');
@@ -299,20 +347,22 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
         final variantIds = entry.value;
 
         if (variantIds.isEmpty) {
+          // Add full service (no variant)
           await supabase.from('barber_services').insert({
             'salon_barber_id': _salonBarberId!,
             'service_id': serviceId,
             'variant_id': null,
-            'is_active': true,
+            'status': 'active',
           });
           addedCount++;
         } else {
+          // Add specific variants
           for (int variantId in variantIds) {
             await supabase.from('barber_services').insert({
               'salon_barber_id': _salonBarberId!,
               'service_id': serviceId,
               'variant_id': variantId,
-              'is_active': true,
+              'status': 'active',
             });
             addedCount++;
           }
@@ -366,13 +416,13 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
   }
 
   Color _getCategoryColor(String categoryName) {
-    switch (categoryName) {
+    switch (categoryName.toLowerCase()) {
       case 'hair': return Colors.blue;
       case 'skin': return Colors.pink;
       case 'grooming': return Colors.orange;
       case 'wellness': return Colors.green;
       case 'nails': return Colors.purple;
-      default: return Colors.grey;
+      default: return const Color(0xFFFF6B8B);
     }
   }
 
@@ -380,7 +430,7 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
     final bool isWeb = screenWidth > 800;
-    final int selectedCount = _getSelectedCount(); // FIXED: Changed from _selectedCount to selectedCount
+    final int selectedCount = _getSelectedCount();
     final double padding = isWeb ? 24.0 : 16.0;
 
     return Scaffold(
@@ -456,8 +506,8 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                   child: _filteredServices.isEmpty
                       ? _buildEmptyState(isWeb)
                       : isWeb
-                          ? _buildWebView(padding, selectedCount) // FIXED: Pass selectedCount
-                          : _buildMobileView(padding, selectedCount), // FIXED: Pass selectedCount
+                          ? _buildWebView(padding, selectedCount)
+                          : _buildMobileView(padding, selectedCount),
                 ),
               ],
             ),
@@ -593,7 +643,7 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
     );
   }
 
-  Widget _buildWebView(double padding, int selectedCount) { // FIXED: Added selectedCount parameter
+  Widget _buildWebView(double padding, int selectedCount) {
     return SingleChildScrollView(
       padding: EdgeInsets.all(padding),
       child: Column(
@@ -927,7 +977,7 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
     );
   }
 
-  Widget _buildMobileView(double padding, int selectedCount) { // FIXED: Added selectedCount parameter
+  Widget _buildMobileView(double padding, int selectedCount) {
     return ListView.builder(
       padding: EdgeInsets.all(padding),
       itemCount: _filteredServices.length,

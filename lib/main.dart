@@ -28,6 +28,7 @@ import 'package:flutter_application_1/screens/owner/create_salon.dart';
 import 'package:flutter_application_1/screens/owner/edit_barber_services_screen.dart';
 import 'package:flutter_application_1/screens/owner/edit_salon.dart';
 import 'package:flutter_application_1/screens/owner/salon_holidays_screen.dart';
+import 'package:flutter_application_1/screens/owner/service_management.dart';
 import 'package:flutter_application_1/screens/owner/vip_booking_requests_screen.dart';
 import 'package:flutter_application_1/services/notification_service.dart';
 import 'package:go_router/go_router.dart';
@@ -527,12 +528,10 @@ GoRouter _createRouter() {
         name: 'roleSelector',
         builder: (context, state) {
           final extra = state.extra as Map?;
-
-          // Safely convert roles to List<String>
-          final dynamic rolesFromExtra = extra?['roles'];
           List<String> roles = [];
 
-          if (rolesFromExtra != null) {
+          if (extra?['roles'] != null) {
+            final dynamic rolesFromExtra = extra!['roles'];
             if (rolesFromExtra is List<String>) {
               roles = rolesFromExtra;
             } else if (rolesFromExtra is List) {
@@ -540,7 +539,6 @@ GoRouter _createRouter() {
             }
           }
 
-          // If no roles in extra, use appState.roles
           if (roles.isEmpty) {
             roles = appState.roles;
           }
@@ -553,7 +551,6 @@ GoRouter _createRouter() {
           return RoleSelectorScreen(roles: roles, email: email, userId: userId);
         },
       ),
-
       GoRoute(
         path: '/barber',
         builder: (_, __) {
@@ -634,7 +631,11 @@ GoRouter _createRouter() {
         },
       ),
 
-      // -------------------------------------------------------------Owner-----------------------------------------------
+      // ============================================
+      // OWNER ROUTES
+      // ============================================
+
+      // Add Barber
       GoRoute(
         path: '/owner/add-barber',
         name: 'addBarber',
@@ -643,14 +644,106 @@ GoRouter _createRouter() {
           return AddBarberScreen(refresh: refresh);
         },
       ),
+
+      // Add Service - FIXED ROUTE
       GoRoute(
         path: '/owner/services/add',
+        name: 'addService',
         builder: (context, state) {
           final salonId = state.uri.queryParameters['salonId'];
-          if (salonId == null) return const OwnerDashboard();
-          return AddServiceScreen(salonId: int.parse(salonId));
+          final salonBarberId = state.uri.queryParameters['salonBarberId'];
+          final barberName = state.uri.queryParameters['barberName'];
+          final isEditing = state.uri.queryParameters['isEditing'] == 'true';
+          final serviceId = state.uri.queryParameters['serviceId'];
+
+          // Validate required parameter
+          if (salonId == null || salonId.isEmpty) {
+            debugPrint('❌ Error: salonId is required for adding service');
+            return const OwnerDashboard();
+          }
+
+          // Parse salonId safely
+          int? parsedSalonId;
+          try {
+            parsedSalonId = int.parse(salonId);
+          } catch (e) {
+            debugPrint('❌ Error parsing salonId: $e');
+            return const OwnerDashboard();
+          }
+
+          // Parse optional parameters
+          int? parsedSalonBarberId;
+          if (salonBarberId != null && salonBarberId.isNotEmpty) {
+            try {
+              parsedSalonBarberId = int.parse(salonBarberId);
+            } catch (e) {
+              debugPrint('❌ Error parsing salonBarberId: $e');
+            }
+          }
+
+          int? parsedServiceId;
+          if (serviceId != null && serviceId.isNotEmpty && isEditing) {
+            try {
+              parsedServiceId = int.parse(serviceId);
+            } catch (e) {
+              debugPrint('❌ Error parsing serviceId: $e');
+            }
+          }
+
+          final decodedBarberName = barberName != null
+              ? Uri.decodeComponent(barberName)
+              : null;
+
+          debugPrint(
+            '📍 Navigating to Add Service - Salon ID: $parsedSalonId, Barber: $decodedBarberName, Edit: $isEditing',
+          );
+
+          return AddServiceScreen(
+            salonId: parsedSalonId,
+            salonBarberId: parsedSalonBarberId,
+            barberName: decodedBarberName,
+            isEditing: isEditing,
+            serviceId: parsedServiceId,
+          );
         },
       ),
+
+      // Service Management
+      GoRoute(
+        path: '/owner/services',
+        builder: (context, state) {
+          final salonId = state.uri.queryParameters['salonId'];
+          final salonName = state.uri.queryParameters['salonName'];
+
+          if (salonId == null || salonId.isEmpty) {
+            debugPrint('❌ Error: salonId is required for service management');
+            return const OwnerDashboard();
+          }
+
+          int? parsedSalonId;
+          try {
+            parsedSalonId = int.parse(salonId);
+          } catch (e) {
+            debugPrint('❌ Error parsing salonId: $e');
+            return const OwnerDashboard();
+          }
+
+          final decodedSalonName = salonName != null
+              ? Uri.decodeComponent(salonName)
+              : 'Salon';
+
+          debugPrint(
+            '📍 Navigating to Service Management - Salon ID: $parsedSalonId, Name: $decodedSalonName',
+          );
+
+          return ServiceManagementScreen(
+            salonId: parsedSalonId,
+            salonName: decodedSalonName,
+          );
+        },
+      ),
+
+      // Add Barber Service (for specific barber)
       GoRoute(
         path: '/owner/salon/:salonId/barber/:barberId/add-service',
         name: 'addBarberService',
@@ -670,17 +763,35 @@ GoRouter _createRouter() {
           );
         },
       ),
+
+      // Add Category
       GoRoute(
         path: '/owner/categories/add',
         name: 'addCategory',
         pageBuilder: (context, state) =>
             MaterialPage(child: const AddCategoryScreen()),
       ),
+
+      // Create Salon
       GoRoute(
         path: '/owner/salon/create',
         name: 'createSalon',
         builder: (context, state) => const CreateSalonScreen(),
       ),
+
+      // Edit Salon
+      GoRoute(
+        path: '/owner/salon/edit',
+        builder: (context, state) {
+          final salonIdStr = state.uri.queryParameters['salonId'];
+          if (salonIdStr == null) {
+            return const OwnerDashboard();
+          }
+          final salonId = int.parse(salonIdStr);
+          return EditSalonScreen(salonId: salonId);
+        },
+      ),
+
       // Barber Schedule
       GoRoute(
         path: '/owner/barber-schedule',
@@ -707,19 +818,8 @@ GoRouter _createRouter() {
           return BarberListScreen(salonId: salonId);
         },
       ),
-      GoRoute(
-        path: '/owner/salon/edit',
-        builder: (context, state) {
-          // Get salonId from query parameters
-          final salonIdStr = state.uri.queryParameters['salonId'];
-          if (salonIdStr == null) {
-            // If no salonId, redirect to dashboard
-            return const OwnerDashboard();
-          }
-          final salonId = int.parse(salonIdStr);
-          return EditSalonScreen(salonId: salonId);
-        },
-      ),
+
+      // Edit Barber Services
       GoRoute(
         path: '/owner/edit-barber-services',
         builder: (context, state) {
@@ -728,7 +828,8 @@ GoRouter _createRouter() {
           return EditBarberServicesScreen(barberId: barberId, salonId: salonId);
         },
       ),
-      // Owner side
+
+      // VIP Booking Requests
       GoRoute(
         path: '/owner/vip-requests',
         builder: (context, state) {
@@ -736,14 +837,20 @@ GoRouter _createRouter() {
           return VIPBookingRequestsScreen(salonId: salonId);
         },
       ),
+
+      // Add Gender
       GoRoute(
         path: '/owner/genders/add',
         builder: (context, state) => const AddGenderScreen(),
       ),
+
+      // Add Age Category
       GoRoute(
         path: '/owner/age-categories/add',
         builder: (context, state) => const AddAgeCategoryScreen(),
       ),
+
+      // Salon Holidays
       GoRoute(
         path: '/owner/salon/holidays',
         builder: (context, state) {
@@ -757,7 +864,9 @@ GoRouter _createRouter() {
         },
       ),
 
-      //........................................CUstomer............................................................
+      // ============================================
+      // CUSTOMER ROUTES
+      // ============================================
       GoRoute(
         path: '/customer',
         builder: (_, __) {

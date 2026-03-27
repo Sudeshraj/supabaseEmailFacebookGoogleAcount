@@ -48,10 +48,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   bool _isLoadingAgeCategories = false;
 
   // ============================================
-  // SERVICE CATEGORY SECTION - ADD WITH SUGGESTIONS
+  // SERVICE CATEGORY SECTION - ADD WITH SUGGESTIONS (UPDATED with display_name)
   // ============================================
   final List<Map<String, dynamic>> _addedServiceCategories = [];
-  final TextEditingController _serviceCategoryNameController = TextEditingController();
+  final TextEditingController _serviceCategoryDisplayNameController = TextEditingController();
   final TextEditingController _serviceCategoryDescriptionController = TextEditingController();
   
   String _selectedIcon = 'content_cut';
@@ -117,7 +117,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     _ageCategoryMinAgeController.dispose();
     _ageCategoryMaxAgeController.dispose();
     
-    _serviceCategoryNameController.dispose();
+    _serviceCategoryDisplayNameController.dispose();
     _serviceCategoryDescriptionController.dispose();
     
     super.dispose();
@@ -184,7 +184,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         _closeTime = const TimeOfDay(hour: 18, minute: 0);
       }
       
-      debugPrint('✅ Salon data loaded: ${_nameController.text}');
+      debugPrint('✅ Salon data loaded');
     } catch (e) {
       debugPrint('Error loading salon: $e');
       rethrow;
@@ -207,10 +207,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
           .eq('is_active', true)
           .order('display_order');
           
-      // Load service categories
+      // Load service categories - USING display_name
       final categories = await supabase
           .from('categories')
-          .select('id, name, description, icon_name, color, display_order')
+          .select('id, display_name, description, icon_name, color, display_order')
           .eq('is_active', true)
           .order('display_order');
           
@@ -233,7 +233,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   Future<void> _loadSalonSelections() async {
     try {
       // ============================================
-      // LOAD SELECTED GENDERS (from salon_genders)
+      // LOAD SELECTED GENDERS
       // ============================================
       final genderResponse = await supabase
           .from('salon_genders')
@@ -248,25 +248,15 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         _selectedGenderIds.clear();
         for (var gender in genderResponse) {
           final displayName = gender['display_name'] as String;
-          debugPrint('   Looking for gender: $displayName');
-          
-          // Find matching gender in global list by display_name
           final matchedGender = _globalGenders.firstWhere(
             (g) => g['display_name'] == displayName,
             orElse: () => {},
           );
-          
           if (matchedGender.isNotEmpty) {
-            final genderId = matchedGender['id'] as int;
-            _selectedGenderIds.add(genderId);
-            debugPrint('   ✅ Found gender ID: $genderId for $displayName');
-          } else {
-            debugPrint('   ❌ No matching gender found for: $displayName');
+            _selectedGenderIds.add(matchedGender['id'] as int);
           }
         }
       });
-      
-      debugPrint('✅ Selected gender IDs: $_selectedGenderIds');
 
       // ============================================
       // LOAD ADDED AGE CATEGORIES
@@ -278,8 +268,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
           .eq('is_active', true)
           .order('display_order');
 
-      debugPrint('📊 Loaded age categories from DB: ${ageResponse.length}');
-      
       setState(() {
         _addedAgeCategories.clear();
         for (var age in ageResponse) {
@@ -290,12 +278,11 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             'display_order': _addedAgeCategories.length,
             'is_active': true,
           });
-          debugPrint('   Added age category: ${age['display_name']}');
         }
       });
 
       // ============================================
-      // LOAD ADDED SERVICE CATEGORIES
+      // LOAD ADDED SERVICE CATEGORIES - USING display_name
       // ============================================
       final categoryResponse = await supabase
           .from('salon_categories')
@@ -304,22 +291,19 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
           .eq('is_active', true)
           .order('display_order');
 
-      debugPrint('📊 Loaded service categories from DB: ${categoryResponse.length}');
-      
       setState(() {
         _addedServiceCategories.clear();
         for (var cat in categoryResponse) {
           _addedServiceCategories.add({
-            'name': cat['display_name'],
+            'display_name': cat['display_name'],
             'description': cat['description'] ?? '',
             'icon_name': cat['icon_name'] ?? 'content_cut',
             'color': cat['color'] ?? '#FF6B8B',
             'display_order': _addedServiceCategories.length,
             'is_active': true,
           });
-          debugPrint('   Added service category: ${cat['name']}');
           
-          // Set selected icon if this is the first category (optional)
+          // Set selected icon and color from first category (optional)
           if (_addedServiceCategories.length == 1) {
             _selectedIcon = cat['icon_name'] ?? 'content_cut';
             String colorStr = cat['color'] ?? '#FF6B8B';
@@ -426,12 +410,12 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   }
 
   // ============================================
-  // SERVICE CATEGORY FUNCTIONS
+  // SERVICE CATEGORY FUNCTIONS - UPDATED for display_name
   // ============================================
   
   void _autoFillServiceCategory(Map<String, dynamic> selected) {
     setState(() {
-      _serviceCategoryNameController.text = selected['name']?.toString() ?? '';
+      _serviceCategoryDisplayNameController.text = selected['display_name']?.toString() ?? '';
       _serviceCategoryDescriptionController.text = selected['description']?.toString() ?? '';
       _selectedIcon = selected['icon_name']?.toString() ?? 'content_cut';
       
@@ -445,26 +429,26 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   }
 
   void _addServiceCategory() {
-    final name = _serviceCategoryNameController.text.trim();
-    if (name.isEmpty) {
-      _showSnackBar('Service category name is required', Colors.orange);
+    final displayName = _serviceCategoryDisplayNameController.text.trim();
+    if (displayName.isEmpty) {
+      _showSnackBar('Service category display name is required', Colors.orange);
       return;
     }
-    if (_addedServiceCategories.any((c) => c['name'] == name)) {
+    if (_addedServiceCategories.any((c) => c['display_name'] == displayName)) {
       _showSnackBar('This service category is already added', Colors.orange);
       return;
     }
 
     setState(() {
       _addedServiceCategories.add({
-        'name': name,
+        'display_name': displayName,
         'description': _serviceCategoryDescriptionController.text.trim(),
         'icon_name': _selectedIcon,
         'color': '#${_selectedColor.toARGB32().toRadixString(16).substring(2)}',
         'display_order': _addedServiceCategories.length,
         'is_active': true,
       });
-      _serviceCategoryNameController.clear();
+      _serviceCategoryDisplayNameController.clear();
       _serviceCategoryDescriptionController.clear();
     });
     _showSnackBar('Service category added', Colors.green);
@@ -861,14 +845,14 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       }
 
       // ============================================
-      // UPDATE SERVICE CATEGORIES (ADDED ONLY)
+      // UPDATE SERVICE CATEGORIES (ADDED ONLY) - USING display_name
       // ============================================
       await supabase.from('salon_categories').delete().eq('salon_id', widget.salonId);
       
       for (var serviceCat in _addedServiceCategories) {
         await supabase.from('salon_categories').insert({
           'salon_id': widget.salonId,
-          'name': serviceCat['name'],
+          'display_name': serviceCat['display_name'],
           'description': serviceCat['description'],
           'icon_name': serviceCat['icon_name'],
           'color': serviceCat['color'],
@@ -930,10 +914,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               child: const Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    '⚠️ This will also delete:',
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.red),
-                  ),
+                  Text('⚠️ This will also delete:', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.red)),
                   SizedBox(height: 8),
                   Text('• All appointments', style: TextStyle(fontSize: 13)),
                   Text('• All services', style: TextStyle(fontSize: 13)),
@@ -944,10 +925,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               ),
             ),
             const SizedBox(height: 16),
-            const Text(
-              'This action cannot be undone!',
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: Colors.red),
-            ),
+            const Text('This action cannot be undone!', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: Colors.red)),
           ],
         ),
         actions: [
@@ -990,9 +968,790 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   }
 
   // ============================================
-  // UI WIDGETS
+  // SPLIT VIEW SECTION
   // ============================================
   
+  Widget _buildSplitViewSection({
+    required String title,
+    required IconData icon,
+    required Color color,
+    required List<Map<String, dynamic>> addedItems,
+    required Function(int) onRemove,
+    required String Function(Map<String, dynamic>) itemDisplayName,
+    required Widget formFields,
+    required VoidCallback onAdd,
+  }) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isDesktop = screenWidth > 800;
+    
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(icon, color: color),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  title,
+                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    '${addedItems.length} items',
+                    style: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.w500),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            
+            if (isDesktop)
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Left Side - Add Form
+                  Expanded(
+                    flex: 1,
+                    child: Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.grey[50],
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.grey[200]!),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(Icons.add_circle_outline, size: 20, color: Colors.green),
+                              const SizedBox(width: 8),
+                              Text(
+                                'Add New $title',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: color,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          formFields,
+                          const SizedBox(height: 12),
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton.icon(
+                              onPressed: onAdd,
+                              icon: const Icon(Icons.add, size: 18),
+                              label: Text('Add $title'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: color,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 10),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  
+                  // Right Side - Items List
+                  Expanded(
+                    flex: 1,
+                    child: Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.grey[50],
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.grey[200]!),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(Icons.list, size: 20, color: Colors.blue),
+                              const SizedBox(width: 8),
+                              Text(
+                                'Added $title',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: color,
+                                ),
+                              ),
+                              const Spacer(),
+                              if (addedItems.isNotEmpty)
+                                TextButton(
+                                  onPressed: () {
+                                    setState(() {
+                                      addedItems.clear();
+                                    });
+                                  },
+                                  style: TextButton.styleFrom(
+                                    padding: EdgeInsets.zero,
+                                    minimumSize: Size.zero,
+                                  ),
+                                  child: const Text(
+                                    'Clear All',
+                                    style: TextStyle(fontSize: 12, color: Colors.red),
+                                  ),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          if (addedItems.isEmpty)
+                            Container(
+                              padding: const EdgeInsets.all(24),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Center(
+                                child: Column(
+                                  children: [
+                                    Icon(Icons.inbox, size: 40, color: Colors.grey[400]),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      'No $title added yet',
+                                      style: TextStyle(color: Colors.grey[500], fontSize: 12),
+                                    ),
+                                    Text(
+                                      'Use the form on the left to add',
+                                      style: TextStyle(color: Colors.grey[400], fontSize: 10),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            )
+                          else
+                            ListView.separated(
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
+                              itemCount: addedItems.length,
+                              separatorBuilder: (context, index) => const Divider(height: 1),
+                              itemBuilder: (context, index) {
+                                final item = addedItems[index];
+                                return ListTile(
+                                  leading: CircleAvatar(
+                                    backgroundColor: color.withValues(alpha: 0.1),
+                                    child: Text(
+                                      '${index + 1}',
+                                      style: TextStyle(fontSize: 12, color: color),
+                                    ),
+                                  ),
+                                  title: Text(
+                                    itemDisplayName(item),
+                                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+                                  ),
+                                  trailing: IconButton(
+                                    icon: const Icon(Icons.delete_outline, size: 20, color: Colors.red),
+                                    onPressed: () => onRemove(index),
+                                  ),
+                                  dense: true,
+                                  contentPadding: EdgeInsets.zero,
+                                );
+                              },
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              )
+            else
+              // Mobile View - Column Layout
+              Column(
+                children: [
+                  // Add Form
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[50],
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.grey[200]!),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(Icons.add_circle_outline, size: 20, color: Colors.green),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Add New $title',
+                              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: color),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        formFields,
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton.icon(
+                            onPressed: onAdd,
+                            icon: const Icon(Icons.add, size: 18),
+                            label: Text('Add $title'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: color,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  
+                  // Items List
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[50],
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.grey[200]!),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(Icons.list, size: 20, color: Colors.blue),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Added $title',
+                              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: color),
+                            ),
+                            const Spacer(),
+                            if (addedItems.isNotEmpty)
+                              TextButton(
+                                onPressed: () {
+                                  setState(() {
+                                    addedItems.clear();
+                                  });
+                                },
+                                style: TextButton.styleFrom(
+                                  padding: EdgeInsets.zero,
+                                  minimumSize: Size.zero,
+                                ),
+                                child: const Text(
+                                  'Clear All',
+                                  style: TextStyle(fontSize: 12, color: Colors.red),
+                                ),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        if (addedItems.isEmpty)
+                          Container(
+                            padding: const EdgeInsets.all(24),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Center(
+                              child: Column(
+                                children: [
+                                  Icon(Icons.inbox, size: 40, color: Colors.grey[400]),
+                                  const SizedBox(height: 8),
+                                  Text('No $title added yet', style: TextStyle(color: Colors.grey[500], fontSize: 12)),
+                                  Text('Tap + button to add', style: TextStyle(color: Colors.grey[400], fontSize: 10)),
+                                ],
+                              ),
+                            ),
+                          )
+                        else
+                          ListView.separated(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            itemCount: addedItems.length,
+                            separatorBuilder: (context, index) => const Divider(height: 1),
+                            itemBuilder: (context, index) {
+                              final item = addedItems[index];
+                              return ListTile(
+                                leading: CircleAvatar(
+                                  backgroundColor: color.withValues(alpha: 0.1),
+                                  child: Text('${index + 1}', style: TextStyle(fontSize: 12, color: color)),
+                                ),
+                                title: Text(itemDisplayName(item), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+                                trailing: IconButton(
+                                  icon: const Icon(Icons.delete_outline, size: 20, color: Colors.red),
+                                  onPressed: () => onRemove(index),
+                                ),
+                                dense: true,
+                                contentPadding: EdgeInsets.zero,
+                              );
+                            },
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ============================================
+  // GENDER SECTION - MULTI-SELECT CHIPS
+  // ============================================
+  
+  Widget _buildGenderSelection() {
+    if (_globalGenders.isEmpty) {
+      return _buildLoadingCard('Genders', Icons.people, Colors.blue);
+    }
+    
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.people, color: Colors.blue),
+                ),
+                const SizedBox(width: 12),
+                const Text(
+                  'Select Genders',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                const Spacer(),
+                if (_selectedGenderIds.isNotEmpty)
+                  TextButton(
+                    onPressed: () => setState(() => _selectedGenderIds.clear()),
+                    child: const Text('Clear All', style: TextStyle(color: Colors.red)),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Select the genders your salon serves',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: _globalGenders.map((gender) {
+                final id = gender['id'] as int;
+                final isSelected = _selectedGenderIds.contains(id);
+                final displayName = gender['display_name'] as String;
+                
+                return FilterChip(
+                  label: Text(displayName),
+                  selected: isSelected,
+                  onSelected: (selected) {
+                    setState(() {
+                      if (selected) {
+                        if (!_selectedGenderIds.contains(id)) {
+                          _selectedGenderIds.add(id);
+                        }
+                      } else {
+                        _selectedGenderIds.remove(id);
+                      }
+                    });
+                  },
+                  backgroundColor: Colors.white,
+                  selectedColor: Colors.blue.withValues(alpha: 0.2),
+                  checkmarkColor: Colors.blue,
+                  labelStyle: TextStyle(
+                    color: isSelected ? Colors.blue : Colors.grey[700],
+                    fontWeight: isSelected ? FontWeight.w500 : FontWeight.normal,
+                  ),
+                  shape: StadiumBorder(
+                    side: BorderSide(color: isSelected ? Colors.blue : Colors.grey[300]!),
+                  ),
+                );
+              }).toList(),
+            ),
+            if (_selectedGenderIds.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    '${_selectedGenderIds.length} gender${_selectedGenderIds.length > 1 ? 's' : ''} selected',
+                    style: const TextStyle(fontSize: 12, color: Colors.blue, fontWeight: FontWeight.w500),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ============================================
+  // AGE CATEGORY SECTION - SPLIT VIEW
+  // ============================================
+  
+  Widget _buildAgeCategorySection() {
+    return _buildSplitViewSection(
+      title: 'Age Categories',
+      icon: Icons.calendar_today,
+      color: Colors.green,
+      addedItems: _addedAgeCategories,
+      onRemove: _removeAgeCategory,
+      itemDisplayName: (item) => '${item['display_name']} (${item['min_age']}-${item['max_age']})',
+      formFields: Column(
+        children: [
+          _buildSuggestionField(
+            controller: _ageCategoryDisplayNameController,
+            label: 'Display Name *',
+            hint: 'e.g., Child, Teen, Adult, Senior',
+            icon: Icons.visibility,
+            suggestions: _globalAgeCategories.map((a) => a['display_name'] as String).toList(),
+            onSelected: (String value) {
+              final selected = _globalAgeCategories.firstWhere(
+                (a) => a['display_name'] == value,
+                orElse: () => {},
+              );
+              if (selected.isNotEmpty) _autoFillAgeCategory(selected);
+            },
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: _buildTextField(
+                  controller: _ageCategoryMinAgeController,
+                  label: 'Min Age',
+                  hint: '0',
+                  icon: Icons.numbers,
+                  keyboardType: TextInputType.number,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _buildTextField(
+                  controller: _ageCategoryMaxAgeController,
+                  label: 'Max Age',
+                  hint: '100',
+                  icon: Icons.numbers,
+                  keyboardType: TextInputType.number,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+      onAdd: _addAgeCategory,
+    );
+  }
+
+  // ============================================
+  // SERVICE CATEGORY SECTION - SPLIT VIEW (UPDATED with display_name)
+  // ============================================
+  
+  Widget _buildServiceCategorySection() {
+    return _buildSplitViewSection(
+      title: 'Service Categories',
+      icon: Icons.category,
+      color: Colors.orange,
+      addedItems: _addedServiceCategories,
+      onRemove: _removeServiceCategory,
+      itemDisplayName: (item) => item['display_name'],
+      formFields: Column(
+        children: [
+          _buildSuggestionField(
+            controller: _serviceCategoryDisplayNameController,
+            label: 'Display Name *',
+            hint: 'e.g., Hair, Skin, Nails, Grooming',
+            icon: Icons.category,
+            suggestions: _globalCategories.map((c) => c['display_name'] as String).toList(),
+            onSelected: (String value) {
+              final selected = _globalCategories.firstWhere(
+                (c) => c['display_name'] == value,
+                orElse: () => {},
+              );
+              if (selected.isNotEmpty) _autoFillServiceCategory(selected);
+            },
+          ),
+          const SizedBox(height: 8),
+          _buildTextField(
+            controller: _serviceCategoryDescriptionController,
+            label: 'Description',
+            hint: 'e.g., Hair cutting and styling services',
+            icon: Icons.description,
+            maxLines: 2,
+          ),
+          const SizedBox(height: 8),
+          _buildIconSelector(),
+          const SizedBox(height: 8),
+          _buildColorPicker(),
+        ],
+      ),
+      onAdd: _addServiceCategory,
+    );
+  }
+
+  Widget _buildLoadingCard(String title, IconData icon, Color color) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: color),
+            ),
+            const SizedBox(width: 12),
+            Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            const Spacer(),
+            const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildIconSelector() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Icon', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+        const SizedBox(height: 8),
+        SizedBox(
+          height: 70,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            itemCount: _iconList.length,
+            itemBuilder: (context, index) {
+              final iconItem = _iconList[index];
+              final isSelected = _selectedIcon == iconItem['name'];
+              
+              return GestureDetector(
+                onTap: () => setState(() => _selectedIcon = iconItem['name'] as String),
+                child: Container(
+                  width: 60,
+                  margin: const EdgeInsets.only(right: 8),
+                  decoration: BoxDecoration(
+                    color: isSelected ? const Color(0xFFFF6B8B).withValues(alpha: 0.1) : Colors.grey[100],
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[300]!,
+                      width: isSelected ? 1.5 : 1,
+                    ),
+                  ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        iconItem['icon'] as IconData,
+                        size: 24,
+                        color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[600],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        iconItem['label'] as String,
+                        style: TextStyle(
+                          fontSize: 9,
+                          color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[600],
+                        ),
+                        textAlign: TextAlign.center,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildColorPicker() {
+    final List<Color> colorOptions = [
+      const Color(0xFFFF6B8B), const Color(0xFF4CAF50), const Color(0xFF2196F3),
+      const Color(0xFFFF9800), const Color(0xFF9C27B0), const Color(0xFFF44336),
+      const Color(0xFF00BCD4), const Color(0xFF795548), const Color(0xFF607D8B),
+    ];
+    
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Color', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: colorOptions.map((color) {
+            final isSelected = _selectedColor == color;
+            return GestureDetector(
+              onTap: () => setState(() => _selectedColor = color),
+              child: Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: color,
+                  shape: BoxShape.circle,
+                  border: isSelected ? Border.all(color: Colors.white, width: 2) : null,
+                  boxShadow: isSelected ? [BoxShadow(color: color.withValues(alpha: 0.5), blurRadius: 4)] : null,
+                ),
+                child: isSelected ? const Center(child: Icon(Icons.check, color: Colors.white, size: 14)) : null,
+              ),
+            );
+          }).toList(),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSuggestionField({
+    required TextEditingController controller,
+    required String label,
+    required String hint,
+    required IconData icon,
+    required List<String> suggestions,
+    required Function(String) onSelected,
+    TextInputType keyboardType = TextInputType.text,
+    int maxLines = 1,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Autocomplete<String>(
+        optionsBuilder: (TextEditingValue textEditingValue) {
+          if (textEditingValue.text.isEmpty) return const Iterable<String>.empty();
+          return suggestions.where((option) =>
+              option.toLowerCase().contains(textEditingValue.text.toLowerCase()));
+        },
+        onSelected: (String selection) {
+          onSelected(selection);
+          controller.text = selection;
+        },
+        fieldViewBuilder: (context, textController, focusNode, onFieldSubmitted) {
+          if (textController.text != controller.text) textController.text = controller.text;
+          controller.addListener(() {
+            if (textController.text != controller.text) textController.text = controller.text;
+          });
+          
+          return TextFormField(
+            controller: textController,
+            focusNode: focusNode,
+            keyboardType: keyboardType,
+            maxLines: maxLines,
+            decoration: InputDecoration(
+              labelText: label,
+              hintText: hint,
+              prefixIcon: Icon(icon, color: Colors.grey),
+              suffixIcon: const Icon(Icons.arrow_drop_down, color: Colors.grey),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: const BorderSide(color: Color(0xFFFF6B8B), width: 2),
+              ),
+            ),
+            onChanged: (value) => controller.text = value,
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildTextField({
+    required TextEditingController controller,
+    required String label,
+    required String hint,
+    required IconData icon,
+    TextInputType keyboardType = TextInputType.text,
+    int maxLines = 1,
+    bool isPhone = false,
+    bool isEmail = false,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: TextFormField(
+        controller: controller,
+        keyboardType: keyboardType,
+        maxLines: maxLines,
+        onChanged: (value) {
+          if (isPhone) _validatePhone(value);
+          if (isEmail) _validateEmail(value);
+        },
+        decoration: InputDecoration(
+          labelText: label,
+          hintText: hint,
+          prefixIcon: Icon(icon, color: Colors.grey),
+          errorText: isPhone && !_isPhoneValid && controller.text.isNotEmpty
+              ? 'Enter valid phone number (e.g., 0771234567)'
+              : isEmail && !_isEmailValid && controller.text.isNotEmpty
+                  ? 'Enter valid email address'
+                  : null,
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: Color(0xFFFF6B8B), width: 2),
+          ),
+          errorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: Colors.red, width: 1),
+          ),
+          focusedErrorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: Colors.red, width: 2),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Image section widgets
   Widget _buildCoverSection() {
     final screenWidth = MediaQuery.of(context).size.width;
     final isDesktop = screenWidth > 800;
@@ -1022,7 +1781,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                         children: [
                           Icon(Icons.add_photo_alternate, size: isDesktop ? 48 : 36, color: Colors.grey[400]),
                           const SizedBox(height: 8),
-                          Text('Tap to add cover photo', style: TextStyle(color: Colors.grey[600], fontSize: isDesktop ? 14 : 12)),
+                          Text('Tap to add cover photo', style: TextStyle(color: Colors.grey[600])),
                         ],
                       ),
                     )
@@ -1197,549 +1956,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     );
   }
 
-  // ============================================
-  // GENDER SECTION - MULTI-SELECT CHIPS
-  // ============================================
-  
-  Widget _buildGenderSelection() {
-    if (_globalGenders.isEmpty) {
-      return _buildLoadingCard('Genders', Icons.people, Colors.blue);
-    }
-    
-    return Card(
-      margin: const EdgeInsets.only(bottom: 16),
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(color: Colors.blue.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)),
-                  child: const Icon(Icons.people, color: Colors.blue),
-                ),
-                const SizedBox(width: 12),
-                const Text('Select Genders', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                const Spacer(),
-                if (_selectedGenderIds.isNotEmpty)
-                  TextButton(
-                    onPressed: () => setState(() => _selectedGenderIds.clear()),
-                    child: const Text('Clear All', style: TextStyle(color: Colors.red)),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            const Text('Select the genders your salon serves', style: TextStyle(fontSize: 12, color: Colors.grey)),
-            const SizedBox(height: 16),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: _globalGenders.map((gender) {
-                final id = gender['id'] as int;
-                final isSelected = _selectedGenderIds.contains(id);
-                final displayName = gender['display_name'] as String;
-                
-                return FilterChip(
-                  label: Text(displayName),
-                  selected: isSelected,
-                  onSelected: (selected) {
-                    setState(() {
-                      if (selected) {
-                        if (!_selectedGenderIds.contains(id)) {
-                          _selectedGenderIds.add(id);
-                        }
-                      } else {
-                        _selectedGenderIds.remove(id);
-                      }
-                      debugPrint('Gender ${selected ? "selected" : "unselected"}: $displayName (ID: $id)');
-                    });
-                  },
-                  backgroundColor: Colors.white,
-                  selectedColor: Colors.blue.withValues(alpha: 0.2),
-                  checkmarkColor: Colors.blue,
-                  labelStyle: TextStyle(
-                    color: isSelected ? Colors.blue : Colors.grey[700],
-                    fontWeight: isSelected ? FontWeight.w500 : FontWeight.normal,
-                  ),
-                  shape: StadiumBorder(
-                    side: BorderSide(color: isSelected ? Colors.blue : Colors.grey[300]!),
-                  ),
-                );
-              }).toList(),
-            ),
-            if (_selectedGenderIds.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(color: Colors.blue.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(20)),
-                  child: Text(
-                    '${_selectedGenderIds.length} gender${_selectedGenderIds.length > 1 ? 's' : ''} selected',
-                    style: const TextStyle(fontSize: 12, color: Colors.blue, fontWeight: FontWeight.w500),
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ============================================
-  // AGE CATEGORY SECTION - ADD WITH SUGGESTIONS
-  // ============================================
-  
-  Widget _buildAgeCategorySection() {
-    return _buildAddableSection(
-      title: 'Age Categories',
-      icon: Icons.calendar_today,
-      color: Colors.green,
-      isLoading: _isLoadingAgeCategories,
-      addedItems: _addedAgeCategories,
-      onRemove: _removeAgeCategory,
-      itemDisplayName: (item) => '${item['display_name']} (${item['min_age']}-${item['max_age']})',
-      formFields: [
-        _buildSuggestionField(
-          controller: _ageCategoryDisplayNameController,
-          label: 'Display Name *',
-          hint: 'e.g., Child, Teen, Adult, Senior',
-          icon: Icons.visibility,
-          suggestions: _globalAgeCategories.map((a) => a['display_name'] as String).toList(),
-          onSelected: (String value) {
-            final selected = _globalAgeCategories.firstWhere(
-              (a) => a['display_name'] == value,
-              orElse: () => {},
-            );
-            if (selected.isNotEmpty) _autoFillAgeCategory(selected);
-          },
-        ),
-        Row(
-          children: [
-            Expanded(
-              child: _buildTextField(
-                controller: _ageCategoryMinAgeController,
-                label: 'Min Age',
-                hint: '0',
-                icon: Icons.numbers,
-                keyboardType: TextInputType.number,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _buildTextField(
-                controller: _ageCategoryMaxAgeController,
-                label: 'Max Age',
-                hint: '100',
-                icon: Icons.numbers,
-                keyboardType: TextInputType.number,
-              ),
-            ),
-          ],
-        ),
-      ],
-      onAdd: _addAgeCategory,
-    );
-  }
-
-  // ============================================
-  // SERVICE CATEGORY SECTION - ADD WITH SUGGESTIONS
-  // ============================================
-  
-  Widget _buildServiceCategorySection() {
-    return _buildAddableSection(
-      title: 'Service Categories',
-      icon: Icons.category,
-      color: Colors.orange,
-      isLoading: _isLoadingCategories,
-      addedItems: _addedServiceCategories,
-      onRemove: _removeServiceCategory,
-      itemDisplayName: (item) => item['name'],
-      formFields: [
-        _buildSuggestionField(
-          controller: _serviceCategoryNameController,
-          label: 'Name *',
-          hint: 'e.g., hair, skin, nails',
-          icon: Icons.category,
-          suggestions: _globalCategories.map((c) => c['name'] as String).toList(),
-          onSelected: (String value) {
-            final selected = _globalCategories.firstWhere(
-              (c) => c['name'] == value,
-              orElse: () => {},
-            );
-            if (selected.isNotEmpty) _autoFillServiceCategory(selected);
-          },
-        ),
-        _buildTextField(
-          controller: _serviceCategoryDescriptionController,
-          label: 'Description',
-          hint: 'e.g., Hair cutting and styling services',
-          icon: Icons.description,
-          maxLines: 2,
-        ),
-        _buildIconSelector(),
-        const SizedBox(height: 12),
-        _buildColorPicker(),
-      ],
-      onAdd: _addServiceCategory,
-    );
-  }
-
-  Widget _buildLoadingCard(String title, IconData icon, Color color) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 16),
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)),
-              child: Icon(icon, color: color),
-            ),
-            const SizedBox(width: 12),
-            Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            const Spacer(),
-            const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildAddableSection({
-    required String title,
-    required IconData icon,
-    required Color color,
-    required bool isLoading,
-    required List<Map<String, dynamic>> addedItems,
-    required Function(int) onRemove,
-    required String Function(Map<String, dynamic>) itemDisplayName,
-    required List<Widget> formFields,
-    required VoidCallback onAdd,
-  }) {
-    if (isLoading) {
-      return _buildLoadingCard(title, icon, color);
-    }
-    
-    return Card(
-      margin: const EdgeInsets.only(bottom: 16),
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: ExpansionTile(
-        initiallyExpanded: true,
-        leading: Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)),
-          child: Icon(icon, color: color),
-        ),
-        title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-        subtitle: Text('${addedItems.length} items added'),
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                ...formFields,
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: onAdd,
-                    icon: const Icon(Icons.add),
-                    label: Text('Add $title'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: color,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    ),
-                  ),
-                ),
-                if (addedItems.isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  const Divider(),
-                  const SizedBox(height: 8),
-                  const Text('Added Items:', style: TextStyle(fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 8),
-                  ListView.builder(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    itemCount: addedItems.length,
-                    itemBuilder: (context, index) {
-                      final item = addedItems[index];
-                      return ListTile(
-                        leading: const Icon(Icons.check_circle, color: Colors.green),
-                        title: Text(itemDisplayName(item)),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.delete, color: Colors.red),
-                          onPressed: () => onRemove(index),
-                        ),
-                        dense: true,
-                      );
-                    },
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildIconSelector() {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isDesktop = screenWidth > 800;
-    
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            const Text('Icon', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-            const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(color: const Color(0xFFFF6B8B).withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)),
-              child: Text(_iconList.length.toString(),
-                style: const TextStyle(fontSize: 11, color: Color(0xFFFF6B8B), fontWeight: FontWeight.w500),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        
-        if (isDesktop)
-          LayoutBuilder(
-            builder: (context, constraints) {
-              int crossAxisCount = 8;
-              
-              return GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: crossAxisCount,
-                  crossAxisSpacing: 6,
-                  mainAxisSpacing: 6,
-                  childAspectRatio: 0.9,
-                ),
-                itemCount: _iconList.length,
-                itemBuilder: (context, index) {
-                  final iconItem = _iconList[index];
-                  final isSelected = _selectedIcon == iconItem['name'];
-                  
-                  return GestureDetector(
-                    onTap: () => setState(() => _selectedIcon = iconItem['name'] as String),
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: isSelected ? const Color(0xFFFF6B8B).withValues(alpha: 0.1) : Colors.grey[100],
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[300]!, width: isSelected ? 1.5 : 1),
-                      ),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(iconItem['icon'] as IconData, size: 18, color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[600]),
-                          const SizedBox(height: 4),
-                          Text(iconItem['label'] as String,
-                            style: TextStyle(fontSize: 9, color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[600],
-                              fontWeight: isSelected ? FontWeight.w500 : FontWeight.normal),
-                            textAlign: TextAlign.center,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                },
-              );
-            },
-          )
-        else
-          SizedBox(
-            height: 70,
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              itemCount: _iconList.length,
-              itemBuilder: (context, index) {
-                final iconItem = _iconList[index];
-                final isSelected = _selectedIcon == iconItem['name'];
-                
-                return GestureDetector(
-                  onTap: () => setState(() => _selectedIcon = iconItem['name'] as String),
-                  child: Container(
-                    width: 65,
-                    margin: const EdgeInsets.only(right: 8),
-                    decoration: BoxDecoration(
-                      color: isSelected ? const Color(0xFFFF6B8B).withValues(alpha: 0.1) : Colors.grey[100],
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[300]!, width: isSelected ? 2 : 1),
-                    ),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(iconItem['icon'] as IconData, size: 24, color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[600]),
-                        const SizedBox(height: 4),
-                        Text(iconItem['label'] as String,
-                          style: TextStyle(fontSize: 9, color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[600],
-                            fontWeight: isSelected ? FontWeight.w500 : FontWeight.normal),
-                          textAlign: TextAlign.center,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-      ],
-    );
-  }
-
-  Widget _buildColorPicker() {
-    final List<Color> colorOptions = [
-      const Color(0xFFFF6B8B), const Color(0xFF4CAF50), const Color(0xFF2196F3),
-      const Color(0xFFFF9800), const Color(0xFF9C27B0), const Color(0xFFF44336),
-      const Color(0xFF00BCD4), const Color(0xFF795548), const Color(0xFF607D8B),
-    ];
-    
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text('Color', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 12,
-          runSpacing: 8,
-          children: colorOptions.map((color) {
-            final isSelected = _selectedColor == color;
-            return GestureDetector(
-              onTap: () => setState(() => _selectedColor = color),
-              child: Container(
-                width: 40, height: 40,
-                decoration: BoxDecoration(
-                  color: color,
-                  shape: BoxShape.circle,
-                  border: isSelected ? Border.all(color: Colors.white, width: 3) : null,
-                  boxShadow: isSelected ? [BoxShadow(color: color.withValues(alpha: 0.5), blurRadius: 8, spreadRadius: 2)] : null,
-                ),
-                child: isSelected ? const Center(child: Icon(Icons.check, color: Colors.white, size: 20)) : null,
-              ),
-            );
-          }).toList(),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildSuggestionField({
-    required TextEditingController controller,
-    required String label,
-    required String hint,
-    required IconData icon,
-    required List<String> suggestions,
-    required Function(String) onSelected,
-    TextInputType keyboardType = TextInputType.text,
-    int maxLines = 1,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Autocomplete<String>(
-        optionsBuilder: (TextEditingValue textEditingValue) {
-          if (textEditingValue.text.isEmpty) return const Iterable<String>.empty();
-          return suggestions.where((option) =>
-              option.toLowerCase().contains(textEditingValue.text.toLowerCase()));
-        },
-        onSelected: (String selection) {
-          onSelected(selection);
-          controller.text = selection;
-        },
-        fieldViewBuilder: (context, textController, focusNode, onFieldSubmitted) {
-          if (textController.text != controller.text) textController.text = controller.text;
-          controller.addListener(() {
-            if (textController.text != controller.text) textController.text = controller.text;
-          });
-          
-          return TextFormField(
-            controller: textController,
-            focusNode: focusNode,
-            keyboardType: keyboardType,
-            maxLines: maxLines,
-            decoration: InputDecoration(
-              labelText: label,
-              hintText: hint,
-              prefixIcon: Icon(icon, color: Colors.grey),
-              suffixIcon: const Icon(Icons.arrow_drop_down, color: Colors.grey),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: Color(0xFFFF6B8B), width: 2),
-              ),
-            ),
-            onChanged: (value) => controller.text = value,
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildTextField({
-    required TextEditingController controller,
-    required String label,
-    required String hint,
-    required IconData icon,
-    TextInputType keyboardType = TextInputType.text,
-    int maxLines = 1,
-    bool isPhone = false,
-    bool isEmail = false,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: TextFormField(
-        controller: controller,
-        keyboardType: keyboardType,
-        maxLines: maxLines,
-        onChanged: (value) {
-          if (isPhone) _validatePhone(value);
-          if (isEmail) _validateEmail(value);
-        },
-        decoration: InputDecoration(
-          labelText: label,
-          hintText: hint,
-          prefixIcon: Icon(icon, color: Colors.grey),
-          errorText: isPhone && !_isPhoneValid && controller.text.isNotEmpty
-              ? 'Enter valid phone number (e.g., 0771234567)'
-              : isEmail && !_isEmailValid && controller.text.isNotEmpty
-                  ? 'Enter valid email address'
-                  : null,
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: Color(0xFFFF6B8B), width: 2),
-          ),
-          errorBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: Colors.red, width: 1),
-          ),
-          focusedErrorBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: Colors.red, width: 2),
-          ),
-        ),
-      ),
-    );
-  }
-
   String _formatTimeOfDay(TimeOfDay time) => '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}:00';
   
   void _showSnackBar(String msg, Color color) {
@@ -1779,7 +1995,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               color: Colors.grey[50],
               child: Center(
                 child: Container(
-                  constraints: BoxConstraints(maxWidth: isDesktop ? 1000 : double.infinity),
+                  constraints: BoxConstraints(maxWidth: isDesktop ? 1200 : double.infinity),
                   child: SingleChildScrollView(
                     padding: EdgeInsets.all(isDesktop ? 32 : 16),
                     child: Form(
@@ -1858,13 +2074,13 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                           ),
                           const SizedBox(height: 16),
                           
-                          // Service Categories Section
+                          // Service Categories Section (Split View)
                           _buildServiceCategorySection(),
                           
-                          // Age Categories Section
+                          // Age Categories Section (Split View)
                           _buildAgeCategorySection(),
                           
-                          // Genders Section
+                          // Genders Section (Chips)
                           _buildGenderSelection(),
                           
                           const SizedBox(height: 24),
@@ -1920,15 +2136,22 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-        decoration: BoxDecoration(border: Border.all(color: Colors.grey[400]!), borderRadius: BorderRadius.circular(12), color: Colors.white),
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.grey[400]!),
+          borderRadius: BorderRadius.circular(12),
+          color: Colors.white,
+        ),
         child: Row(
           children: [
             Icon(icon, size: 20, color: Colors.grey[600]),
             const SizedBox(width: 12),
-            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(label, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
-              Text(time.format(context), style: const TextStyle(fontWeight: FontWeight.w600)),
-            ]),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                Text(time.format(context), style: const TextStyle(fontWeight: FontWeight.w600)),
+              ],
+            ),
           ],
         ),
       ),

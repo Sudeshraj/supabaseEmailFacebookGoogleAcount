@@ -23,8 +23,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   List<Map<String, dynamic>> _searchResults = [];
   List<Map<String, dynamic>> _ownerSalons = [];
   
-    
-  // Services with their variants (salon-specific)
+  // Services with their variants (salon-specific - updated for new schema)
   List<Map<String, dynamic>> _services = [];
 
   // Selected items: serviceId -> list of selected variantIds
@@ -172,7 +171,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     try {
       await Future.wait([
         _loadOwnerSalons(),
-        _loadServicesWithVariants(),
       ]);
     } catch (e) {
       debugPrint('❌ Error loading initial data: $e');
@@ -191,7 +189,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     try {
       await Future.wait([
         _loadOwnerSalons(),
-        _loadServicesWithVariants(),
         _loadIpAddress(),
       ]);
     } catch (e) {
@@ -240,6 +237,10 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     }
   }
 
+  // ============================================================
+  // UPDATED: Load salon-specific data with new schema
+  // ============================================================
+  
   Future<void> _loadSalonSpecificData() async {
     if (_selectedSalonId == null) return;
     
@@ -248,66 +249,31 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     try {
       final salonIdInt = int.parse(_selectedSalonId!);
       
-      // Load salon categories
-      await supabase
+      // Load salon categories (new schema - direct fields)
+      final categoriesResponse = await supabase
           .from('salon_categories')
-          .select('''
-            id,
-            display_order,
-            is_active,
-            custom_name,
-            category_id,
-            categories!salon_categories_category_id_fkey (
-              id,
-              name,
-              description,
-              icon_name,
-              color
-            )
-          ''')
+          .select('id, display_name, description, icon_name, color, display_order, is_active')
           .eq('salon_id', salonIdInt)
           .eq('is_active', true)
           .order('display_order');
       
-      // Load salon genders
-      await supabase
+      // Load salon genders (new schema - direct fields)
+      final gendersResponse = await supabase
           .from('salon_genders')
-          .select('''
-            id,
-            display_order,
-            is_active,
-            gender_id,
-            genders!salon_genders_gender_id_fkey (
-              id,
-              name,
-              display_name,
-              icon_name
-            )
-          ''')
+          .select('id, display_name, display_order, is_active')
           .eq('salon_id', salonIdInt)
           .eq('is_active', true)
           .order('display_order');
       
-      // Load salon age categories
-      await supabase
+      // Load salon age categories (new schema - direct fields)
+      final ageResponse = await supabase
           .from('salon_age_categories')
-          .select('''
-            id,
-            display_order,
-            is_active,
-            min_age,
-            max_age,
-            age_category_id,
-            age_categories!salon_age_categories_age_category_id_fkey (
-              id,
-              name,
-              display_name,
-              icon_name
-            )
-          ''')
+          .select('id, display_name, min_age, max_age, display_order, is_active')
           .eq('salon_id', salonIdInt)
           .eq('is_active', true)
           .order('display_order');
+      
+      debugPrint('✅ Salon data loaded - Categories: ${categoriesResponse.length}, Genders: ${gendersResponse.length}, Age Cats: ${ageResponse.length}');
       
       setState(() {
         _isLoadingSalonData = false;
@@ -322,6 +288,10 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     }
   }
 
+  // ============================================================
+  // UPDATED: Load services and variants with new schema
+  // ============================================================
+  
   Future<void> _loadServicesWithVariants() async {
     if (_selectedSalonId == null) {
       setState(() => _isLoadingServices = false);
@@ -333,7 +303,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     try {
       final salonIdInt = int.parse(_selectedSalonId!);
       
-      // Load services with their salon categories
+      // Load services (new schema - direct category_id from salon_categories)
       final servicesResponse = await supabase
           .from('services')
           .select('''
@@ -342,27 +312,25 @@ class _AddBarberScreenState extends State<AddBarberScreen>
             description,
             category_id,
             icon_name,
-            is_active,
-            salon_categories!services_category_id_fkey (
-              id,
-              display_order,
-              custom_name,
-              custom_icon,
-              custom_color,
-              category_id,
-              categories!salon_categories_category_id_fkey (
-                id,
-                name,
-                icon_name,
-                color
-              )
-            )
+            is_active
           ''')
           .eq('salon_id', salonIdInt)
           .eq('is_active', true)
           .order('name');
 
       debugPrint('📊 Services loaded: ${servicesResponse.length}');
+
+      // Load categories to map category_id to display_name
+      final categoriesResponse = await supabase
+          .from('salon_categories')
+          .select('id, display_name, icon_name, color')
+          .eq('salon_id', salonIdInt)
+          .eq('is_active', true);
+      
+      final Map<int, Map<String, dynamic>> categoryMap = {};
+      for (var cat in categoriesResponse) {
+        categoryMap[cat['id']] = cat;
+      }
 
       // Load variants for these services
       final serviceIds = servicesResponse.map((s) => s['id'] as int).toList();
@@ -379,35 +347,40 @@ class _AddBarberScreenState extends State<AddBarberScreen>
               duration,
               is_active,
               salon_gender_id,
-              salon_age_category_id,
-              salon_genders!service_variants_salon_gender_id_fkey (
-                id,
-                gender_id,
-                is_active,
-                genders!salon_genders_gender_id_fkey (
-                  id,
-                  name,
-                  display_name
-                )
-              ),
-              salon_age_categories!service_variants_salon_age_category_id_fkey (
-                id,
-                age_category_id,
-                min_age,
-                max_age,
-                is_active,
-                age_categories!salon_age_categories_age_category_id_fkey (
-                  id,
-                  name,
-                  display_name
-                )
-              )
+              salon_age_category_id
             ''')
             .inFilter('service_id', serviceIds)
             .eq('is_active', true);
       }
 
       debugPrint('📊 Variants loaded: ${variantsResponse.length}');
+
+      // Load genders and age categories for variant names
+      final gendersResponse = await supabase
+          .from('salon_genders')
+          .select('id, display_name')
+          .eq('salon_id', salonIdInt)
+          .eq('is_active', true);
+      
+      final ageCategoriesResponse = await supabase
+          .from('salon_age_categories')
+          .select('id, display_name, min_age, max_age')
+          .eq('salon_id', salonIdInt)
+          .eq('is_active', true);
+      
+      final Map<int, String> genderMap = {};
+      for (var g in gendersResponse) {
+        genderMap[g['id']] = g['display_name'];
+      }
+      
+      final Map<int, Map<String, dynamic>> ageMap = {};
+      for (var a in ageCategoriesResponse) {
+        ageMap[a['id']] = {
+          'display_name': a['display_name'],
+          'min_age': a['min_age'],
+          'max_age': a['max_age'],
+        };
+      }
 
       // Group variants by service
       final Map<int, List<Map<String, dynamic>>> variantsByService = {};
@@ -416,51 +389,23 @@ class _AddBarberScreenState extends State<AddBarberScreen>
         if (!variantsByService.containsKey(serviceId)) {
           variantsByService[serviceId] = [];
         }
-
-        // Safely extract gender and age data
-        String genderName = '';
-        String genderDisplayName = '';
-        String ageCategoryName = '';
-        String ageDisplayName = '';
-        int minAge = 0;
-        int maxAge = 0;
         
-        try {
-          final salonGender = variant['salon_genders'] as Map<String, dynamic>?;
-          if (salonGender != null) {
-            final gender = salonGender['genders'] as Map<String, dynamic>?;
-            if (gender != null) {
-              genderName = gender['name']?.toString() ?? '';
-              genderDisplayName = gender['display_name']?.toString() ?? '';
-            }
-          }
-          
-          final salonAge = variant['salon_age_categories'] as Map<String, dynamic>?;
-          if (salonAge != null) {
-            final age = salonAge['age_categories'] as Map<String, dynamic>?;
-            if (age != null) {
-              ageCategoryName = age['name']?.toString() ?? '';
-              ageDisplayName = age['display_name']?.toString() ?? '';
-            }
-            minAge = salonAge['min_age'] ?? 0;
-            maxAge = salonAge['max_age'] ?? 0;
-          }
-        } catch (e) {
-          debugPrint('⚠️ Error extracting variant data: $e');
-        }
-
+        final genderId = variant['salon_gender_id'];
+        final ageId = variant['salon_age_category_id'];
+        
+        final genderName = genderMap[genderId] ?? 'Unknown';
+        final ageData = ageMap[ageId] ?? {'display_name': 'Unknown', 'min_age': 0, 'max_age': 0};
+        final ageName = '${ageData['display_name']} (${ageData['min_age']}-${ageData['max_age']} yrs)';
+        
         variantsByService[serviceId]!.add({
           'id': variant['id'],
           'price': (variant['price'] as num?)?.toDouble() ?? 0.0,
           'duration': variant['duration'] ?? 0,
-          'gender_id': variant['salon_gender_id'],
-          'gender_name': genderDisplayName.isNotEmpty ? genderDisplayName : genderName,
-          'gender_original': genderName,
-          'age_category_id': variant['salon_age_category_id'],
-          'age_category_name': ageDisplayName.isNotEmpty ? ageDisplayName : ageCategoryName,
-          'age_category_original': ageCategoryName,
-          'age_range': '$minAge-$maxAge',
-          'display_text': '${genderDisplayName.isNotEmpty ? genderDisplayName : genderName} • ${ageDisplayName.isNotEmpty ? ageDisplayName : ageCategoryName}',
+          'gender_id': genderId,
+          'gender_name': genderName,
+          'age_category_id': ageId,
+          'age_category_name': ageName,
+          'display_text': '$genderName • $ageName',
         });
       }
 
@@ -468,44 +413,21 @@ class _AddBarberScreenState extends State<AddBarberScreen>
       final List<Map<String, dynamic>> processedServices = [];
       
       for (var service in servicesResponse) {
-        // Safely extract category data
-        String categoryName = 'Other';
-        String iconName = 'build';
-        String color = '#FF6B8B';
-        
-        try {
-          final salonCategory = service['salon_categories'] as Map<String, dynamic>?;
-          if (salonCategory != null) {
-            final customName = salonCategory['custom_name'] as String?;
-            if (customName != null && customName.isNotEmpty) {
-              categoryName = customName;
-            }
-            
-            final innerCategory = salonCategory['categories'] as Map<String, dynamic>?;
-            if (innerCategory != null) {
-              if (categoryName == 'Other') {
-                categoryName = innerCategory['name']?.toString() ?? 'Other';
-              }
-              iconName = salonCategory['custom_icon']?.toString() ?? 
-                         service['icon_name']?.toString() ?? 
-                         innerCategory['icon_name']?.toString() ?? 
-                         'build';
-              color = salonCategory['custom_color']?.toString() ?? 
-                      innerCategory['color']?.toString() ?? 
-                      '#FF6B8B';
-            }
-          }
-        } catch (e) {
-          debugPrint('⚠️ Error extracting category data: $e');
-        }
-
         final serviceId = service['id'] as int;
+        final categoryId = service['category_id'];
+        
+        final category = categoryMap[categoryId] ?? {
+          'display_name': 'Other',
+          'icon_name': 'build',
+          'color': '#FF6B8B'
+        };
+        
         final variants = variantsByService[serviceId] ?? [];
-
+        
         variants.sort((a, b) {
-          final genderCompare = a['gender_original'].compareTo(b['gender_original']);
+          final genderCompare = a['gender_name'].compareTo(b['gender_name']);
           if (genderCompare != 0) return genderCompare;
-          return a['age_category_original'].compareTo(b['age_category_original']);
+          return a['age_category_name'].compareTo(b['age_category_name']);
         });
 
         double minPrice = 0;
@@ -521,10 +443,11 @@ class _AddBarberScreenState extends State<AddBarberScreen>
           'id': serviceId.toString(),
           'name': service['name']?.toString() ?? 'Unknown Service',
           'description': service['description']?.toString() ?? '',
-          'category_name': categoryName,
-          'icon': _getIconFromName(iconName),
-          'icon_name': iconName,
-          'color': color,
+          'category_id': categoryId,
+          'category_name': category['display_name'],
+          'icon': _getIconFromName(service['icon_name']?.toString() ?? category['icon_name'] ?? 'build'),
+          'icon_name': service['icon_name']?.toString() ?? category['icon_name'] ?? 'build',
+          'color': category['color'] ?? '#FF6B8B',
           'variants': variants,
           'hasVariants': variants.isNotEmpty,
           'variant_count': variants.length,
@@ -561,6 +484,11 @@ class _AddBarberScreenState extends State<AddBarberScreen>
       case 'cleaning_services': return Icons.cleaning_services;
       case 'massage': return Icons.message;
       case 'health_and_safety': return Icons.health_and_safety;
+      case 'cut': return Icons.cut;
+      case 'shower': return Icons.shower;
+      case 'masks': return Icons.masks;
+      case 'palette': return Icons.palette;
+      case 'spa_outlined': return Icons.spa_outlined;
       default: return Icons.category;
     }
   }
@@ -688,7 +616,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
 
   Map<String, dynamic>? _findVariantById(String serviceId, int variantId) {
     try {
-      // Find the service first
       Map<String, dynamic>? service;
       for (var s in _services) {
         final id = s['id'];
@@ -698,24 +625,11 @@ class _AddBarberScreenState extends State<AddBarberScreen>
         }
       }
       
-      if (service == null) {
-        debugPrint('⚠️ Service not found for id: $serviceId');
-        return null;
-      }
+      if (service == null) return null;
       
-      // Get variants safely
       final variants = service['variants'];
-      if (variants == null) {
-        debugPrint('⚠️ No variants field in service: $serviceId');
-        return null;
-      }
+      if (variants == null || variants is! List) return null;
       
-      if (variants is! List) {
-        debugPrint('⚠️ Variants is not a List, type: ${variants.runtimeType}');
-        return null;
-      }
-      
-      // Find the variant
       for (var v in variants) {
         if (v is Map<String, dynamic>) {
           final id = v['id'];
@@ -724,10 +638,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
           }
         }
       }
-      
-      debugPrint('⚠️ Variant not found for id: $variantId');
       return null;
-      
     } catch (e) {
       debugPrint('❌ Error finding variant: $e');
       return null;
@@ -742,7 +653,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     return barber['full_name'] ?? barber['email'] ?? 'Barber';
   }
 
-  // Helper method to build selected services list for dialog
   List<Widget> _buildSelectedServicesList() {
     final List<Widget> widgets = [];
     
@@ -750,7 +660,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
       final serviceId = entry.key;
       final variantIds = entry.value;
       
-      // Find service safely
       Map<String, dynamic>? service;
       for (var s in _services) {
         final id = s['id'];
@@ -760,10 +669,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
         }
       }
       
-      if (service == null) {
-        debugPrint('⚠️ Service not found for id: $serviceId');
-        continue;
-      }
+      if (service == null) continue;
       
       if (variantIds.isEmpty) {
         widgets.add(
@@ -850,9 +756,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
       context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Row(
           children: [
             Container(
@@ -861,20 +765,10 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                 color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(
-                Icons.person_add,
-                color: Color(0xFFFF6B8B),
-                size: 24,
-              ),
+              child: const Icon(Icons.person_add, color: Color(0xFFFF6B8B), size: 24),
             ),
             const SizedBox(width: 12),
-            const Text(
-              'Confirm Add Barber',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
+            const Text('Confirm Add Barber', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
           ],
         ),
         content: SizedBox(
@@ -896,23 +790,14 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                     Expanded(
                       child: Text(
                         'Add ${_getBarberName()} to ${_selectedSalonDetails?['name'] ?? 'salon'}?',
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                        ),
+                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
                       ),
                     ),
                   ],
                 ),
               ),
               const SizedBox(height: 20),
-              const Text(
-                'Selected Services:',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16,
-                ),
-              ),
+              const Text('Selected Services:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
               const SizedBox(height: 12),
               Container(
                 constraints: const BoxConstraints(maxHeight: 300),
@@ -932,17 +817,9 @@ class _AddBarberScreenState extends State<AddBarberScreen>
             onPressed: () => Navigator.pop(context, false),
             style: TextButton.styleFrom(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             ),
-            child: const Text(
-              'Cancel',
-              style: TextStyle(
-                fontSize: 16,
-                color: Colors.grey,
-              ),
-            ),
+            child: const Text('Cancel', style: TextStyle(fontSize: 16, color: Colors.grey)),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
@@ -950,18 +827,10 @@ class _AddBarberScreenState extends State<AddBarberScreen>
               backgroundColor: const Color(0xFFFF6B8B),
               foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               elevation: 2,
             ),
-            child: const Text(
-              'Confirm Add',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
+            child: const Text('Confirm Add', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -998,7 +867,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
       } else {
         salonBarberId = salonBarberResponse['id'];
         
-        // Reactivate if inactive
         await supabase
             .from('salon_barbers')
             .update({'status': 'active'})
@@ -1032,7 +900,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
         final serviceId = int.parse(entry.key);
         final variantIds = entry.value;
         
-        // Find service safely
         Map<String, dynamic>? service;
         for (var s in _services) {
           if (s['id'] == entry.key) {
@@ -1041,10 +908,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
           }
         }
         
-        if (service == null) {
-          debugPrint('⚠️ Service with id ${entry.key} not found');
-          continue;
-        }
+        if (service == null) continue;
 
         if (variantIds.isEmpty) {
           selectedServicesList.add({
@@ -1152,7 +1016,936 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     );
   }
 
-  // ==================== UI BUILDERS (Rest of the UI code remains the same) ====================
+  // ==================== UI BUILDERS ====================
+  
+  Widget _buildSalonSection() {
+    return Card(
+      elevation: _isWeb ? 4 : 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: EdgeInsets.all(_isWeb ? 20 : 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.store, color: Color(0xFFFF6B8B), size: 24),
+                ),
+                const SizedBox(width: 12),
+                Text('Select Salon', style: TextStyle(fontSize: _isWeb ? 20 : 18, fontWeight: FontWeight.bold)),
+              ],
+            ),
+            const SizedBox(height: 16),
+            if (_ownerSalons.isEmpty)
+              _buildNoSalonWarning()
+            else
+              ListView.separated(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: _ownerSalons.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 8),
+                itemBuilder: (context, index) {
+                  final salon = _ownerSalons[index];
+                  final isSelected = _selectedSalonId == salon['id'].toString();
+                  return _buildSalonTile(salon, isSelected);
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNoSalonWarning() {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: Colors.grey[100],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.orange[200]!),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.warning_amber_rounded, size: 48, color: Colors.orange[700]),
+          const SizedBox(height: 12),
+          Text('No Salons Found', style: TextStyle(fontSize: _isWeb ? 18 : 16, color: Colors.grey[800], fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          Text('You need to create a salon first before adding barbers.', style: TextStyle(fontSize: _isWeb ? 14 : 12, color: Colors.grey[600]), textAlign: TextAlign.center),
+          const SizedBox(height: 16),
+          ElevatedButton.icon(
+            onPressed: () => context.push('/owner/salon/create'),
+            icon: const Icon(Icons.add_business),
+            label: const Text('Create Salon'),
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF6B8B), foregroundColor: Colors.white),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSalonTile(Map<String, dynamic> salon, bool isSelected) {
+    return InkWell(
+      onTap: () {
+        setState(() {
+          _selectedSalonId = salon['id'].toString();
+          _selectedSalonDetails = salon;
+        });
+        _loadSalonSpecificData();
+      },
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: isSelected ? const Color(0xFFFF6B8B).withValues(alpha: 0.05) : Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[300]!,
+            width: isSelected ? 2 : 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            CircleAvatar(
+              radius: 20,
+              backgroundColor: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[100],
+              backgroundImage: salon['logo_url'] != null ? NetworkImage(salon['logo_url']) : null,
+              child: salon['logo_url'] == null
+                  ? Icon(Icons.store, color: isSelected ? Colors.white : Colors.grey[600], size: 20)
+                  : null,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(salon['name'] ?? 'Unnamed Salon', style: TextStyle(fontWeight: isSelected ? FontWeight.bold : FontWeight.w500, fontSize: 15)),
+                  if (salon['address'] != null)
+                    Text(salon['address'], style: TextStyle(fontSize: 12, color: Colors.grey[600]), maxLines: 1, overflow: TextOverflow.ellipsis),
+                ],
+              ),
+            ),
+            if (isSelected) const Icon(Icons.check_circle, color: Color(0xFFFF6B8B), size: 24),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSearchSection() {
+    return Card(
+      elevation: _isWeb ? 4 : 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: EdgeInsets.all(_isWeb ? 20 : 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.search, color: Color(0xFFFF6B8B), size: 24),
+                ),
+                const SizedBox(width: 12),
+                Text('Search Barbers', style: TextStyle(fontSize: _isWeb ? 20 : 18, fontWeight: FontWeight.bold)),
+              ],
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                hintText: 'Type name or email...',
+                prefixIcon: const Icon(Icons.search, color: Colors.grey),
+                suffixIcon: _searchController.text.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear, color: Colors.grey),
+                        onPressed: () {
+                          _searchController.clear();
+                          setState(() {
+                            _searchResults = [];
+                            _isSearching = false;
+                            _selectedBarberId = null;
+                          });
+                        },
+                      )
+                    : null,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: Color(0xFFFF6B8B), width: 2),
+                ),
+                contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: _isWeb ? 16 : 12),
+                filled: true,
+                fillColor: Colors.grey[50],
+              ),
+            ),
+            if (_searchController.text.isNotEmpty && _searchController.text.length < 2)
+              Padding(
+                padding: const EdgeInsets.only(left: 12, top: 8),
+                child: Text(
+                  '🔍 Type at least 2 characters to search',
+                  style: TextStyle(fontSize: _isWeb ? 13 : 12, color: Colors.grey[600], fontStyle: FontStyle.italic),
+                ),
+              ),
+            if (_isSearching) ...[
+              const SizedBox(height: 16),
+              if (_searchResults.isEmpty)
+                Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(32),
+                    child: Column(
+                      children: [
+                        Icon(Icons.person_search, size: 48, color: Colors.grey[400]),
+                        const SizedBox(height: 8),
+                        Text('No barbers found', style: TextStyle(fontSize: _isWeb ? 16 : 14, color: Colors.grey[600])),
+                      ],
+                    ),
+                  ),
+                )
+              else
+                ListView.separated(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: _searchResults.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (context, index) {
+                    final barber = _searchResults[index];
+                    final isSelected = _selectedBarberId == barber['id'];
+                    return _buildBarberTile(barber, isSelected);
+                  },
+                ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBarberTile(Map<String, dynamic> barber, bool isSelected) {
+    return ListTile(
+      leading: CircleAvatar(
+        radius: 24,
+        backgroundColor: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[200],
+        backgroundImage: barber['avatar_url'] != null ? NetworkImage(barber['avatar_url']) : null,
+        child: barber['avatar_url'] == null
+            ? Text(
+                barber['full_name']?[0]?.toUpperCase() ?? '?',
+                style: TextStyle(
+                  color: isSelected ? Colors.white : Colors.grey[700],
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                ),
+              )
+            : null,
+      ),
+      title: Text(
+        barber['full_name'] ?? 'Unknown',
+        style: TextStyle(
+          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+          fontSize: _isWeb ? 16 : 14,
+        ),
+      ),
+      subtitle: Text(
+        barber['email'] ?? '',
+        style: TextStyle(fontSize: _isWeb ? 14 : 12),
+      ),
+      trailing: isSelected
+          ? Container(
+              padding: const EdgeInsets.all(4),
+              decoration: const BoxDecoration(color: Color(0xFFFF6B8B), shape: BoxShape.circle),
+              child: const Icon(Icons.check, color: Colors.white, size: 16),
+            )
+          : const Icon(Icons.radio_button_unchecked, color: Colors.grey),
+      onTap: () => setState(() => _selectedBarberId = barber['id']),
+    );
+  }
+
+  Widget _buildSelectedBarber() {
+    final barber = _searchResults.firstWhere((b) => b['id'] == _selectedBarberId);
+    return Container(
+      padding: EdgeInsets.all(_isWeb ? 20 : 16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFFF6B8B), width: 1.5),
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: _isWeb ? 32 : 28,
+            backgroundColor: const Color(0xFFFF6B8B),
+            backgroundImage: barber['avatar_url'] != null ? NetworkImage(barber['avatar_url']) : null,
+            child: barber['avatar_url'] == null
+                ? Text(
+                    barber['full_name']?[0]?.toUpperCase() ?? '?',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: _isWeb ? 20 : 16,
+                    ),
+                  )
+                : null,
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Selected Barber', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                Text(
+                  barber['full_name'] ?? 'Unknown',
+                  style: TextStyle(fontSize: _isWeb ? 20 : 18, fontWeight: FontWeight.bold),
+                ),
+                Text(
+                  barber['email'] ?? '',
+                  style: TextStyle(fontSize: _isWeb ? 14 : 12, color: Colors.grey[600]),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildServicesSection() {
+    if (_services.isEmpty) {
+      return Card(
+        elevation: _isWeb ? 4 : 2,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Center(
+            child: Column(
+              children: [
+                Icon(Icons.build_circle_outlined, size: 64, color: Colors.grey[400]),
+                const SizedBox(height: 16),
+                Text(
+                  'No services available',
+                  style: TextStyle(fontSize: _isWeb ? 18 : 16, color: Colors.grey[600], fontWeight: FontWeight.w500),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    // Group services by category
+    final Map<String, List<Map<String, dynamic>>> groupedServices = {};
+    for (var service in _services) {
+      final category = service['category_name'] as String;
+      if (!groupedServices.containsKey(category)) groupedServices[category] = [];
+      groupedServices[category]!.add(service);
+    }
+
+    return Card(
+      elevation: _isWeb ? 4 : 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: EdgeInsets.all(_isWeb ? 24 : 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.build_circle_outlined, color: Color(0xFFFF6B8B), size: 24),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Select Services',
+                    style: TextStyle(fontSize: _isWeb ? 22 : 18, fontWeight: FontWeight.bold),
+                  ),
+                ),
+                if (_totalSelectedServices > 0)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      '$_totalSelectedServices service${_totalSelectedServices > 1 ? 's' : ''} selected',
+                      style: TextStyle(
+                        fontSize: _isWeb ? 14 : 12,
+                        fontWeight: FontWeight.w600,
+                        color: const Color(0xFFFF6B8B),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Click on a service to select it, or expand to choose specific variants',
+              style: TextStyle(fontSize: 13, color: Colors.grey),
+            ),
+            const SizedBox(height: 24),
+            ...groupedServices.entries.map((entry) => _buildCategorySection(entry.key, entry.value)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCategorySection(String categoryName, List<Map<String, dynamic>> services) {
+    final categorySelectedCount = services.fold<int>(
+      0,
+      (sum, service) => sum + _getSelectedCount(service['id'] as String),
+    );
+    final categoryColor = _getCategoryColor(categoryName);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          margin: const EdgeInsets.only(bottom: 12, top: 8),
+          child: Row(
+            children: [
+              Icon(_getCategoryIcon(categoryName), size: _isWeb ? 24 : 20, color: categoryColor),
+              const SizedBox(width: 8),
+              Text(
+                categoryName[0].toUpperCase() + categoryName.substring(1),
+                style: TextStyle(fontSize: _isWeb ? 20 : 16, fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(color: Colors.grey[200], borderRadius: BorderRadius.circular(12)),
+                child: Text('${services.length}', style: TextStyle(fontSize: _isWeb ? 14 : 12, color: Colors.grey[700])),
+              ),
+              if (categorySelectedCount > 0) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    '$categorySelectedCount selected',
+                    style: TextStyle(fontSize: _isWeb ? 13 : 11, color: const Color(0xFFFF6B8B), fontWeight: FontWeight.w500),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        if (_isWeb)
+          SizedBox(
+            height: 350,
+            child: GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: MediaQuery.of(context).size.width > 1200 ? 3 : 2,
+                childAspectRatio: 1.2,
+                crossAxisSpacing: 16,
+                mainAxisSpacing: 16,
+              ),
+              itemCount: services.length,
+              itemBuilder: (context, index) => _buildServiceCard(services[index]),
+            ),
+          )
+        else
+          Column(children: services.map((service) => _buildServiceTile(service)).toList()),
+        const SizedBox(height: 24),
+      ],
+    );
+  }
+
+  Widget _buildServiceTile(Map<String, dynamic> service) {
+    final serviceId = service['id'] as String;
+    final hasVariants = service['hasVariants'] as bool;
+    final variants = service['variants'] as List;
+    final selectedCount = _getSelectedCount(serviceId);
+    final isExpanded = _expandedServices.contains(serviceId);
+
+    if (!hasVariants) {
+      final isSelected = _isSelected(serviceId);
+      return Card(
+        margin: const EdgeInsets.only(bottom: 12),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(
+            color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[200]!,
+            width: isSelected ? 2 : 1,
+          ),
+        ),
+        elevation: isSelected ? 4 : 1,
+        child: InkWell(
+          onTap: () => _toggleSelection(serviceId),
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: isSelected ? const Color(0xFFFF6B8B).withValues(alpha: 0.2) : Colors.grey[100],
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    service['icon'] ?? Icons.build,
+                    color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[600],
+                    size: 24,
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        service['name'] ?? 'Service',
+                        style: TextStyle(
+                          fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                          fontSize: 16,
+                          color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[800],
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text('No variants', style: TextStyle(fontSize: 12, color: Colors.grey[500])),
+                    ],
+                  ),
+                ),
+                if (isSelected)
+                  Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: const BoxDecoration(color: Color(0xFFFF6B8B), shape: BoxShape.circle),
+                    child: const Icon(Icons.check, color: Colors.white, size: 14),
+                  )
+                else
+                  Container(
+                    width: 24,
+                    height: 24,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.grey[400]!, width: 1.5),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      );
+    } else {
+      return Card(
+        margin: const EdgeInsets.only(bottom: 12),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(
+            color: selectedCount > 0 ? const Color(0xFFFF6B8B) : Colors.grey[200]!,
+            width: selectedCount > 0 ? 2 : 1,
+          ),
+        ),
+        elevation: selectedCount > 0 ? 4 : 1,
+        child: Theme(
+          data: Theme.of(context).copyWith(
+            dividerColor: Colors.transparent,
+            splashColor: Colors.transparent,
+            highlightColor: Colors.transparent,
+          ),
+          child: Column(
+            children: [
+              InkWell(
+                onTap: () => _toggleExpand(serviceId),
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: selectedCount > 0 ? const Color(0xFFFF6B8B).withValues(alpha: 0.2) : Colors.grey[100],
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(
+                          service['icon'] ?? Icons.build,
+                          color: selectedCount > 0 ? const Color(0xFFFF6B8B) : Colors.grey[600],
+                          size: 24,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              service['name'] ?? 'Service',
+                              style: TextStyle(
+                                fontWeight: selectedCount > 0 ? FontWeight.bold : FontWeight.w600,
+                                fontSize: 16,
+                                color: selectedCount > 0 ? const Color(0xFFFF6B8B) : Colors.grey[800],
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              '${variants.length} variants • Rs. ${service['min_price']} - ${service['max_price']}',
+                              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (selectedCount > 0)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFF6B8B),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            '$selectedCount',
+                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                          ),
+                        ),
+                      Icon(
+                        isExpanded ? Icons.expand_less : Icons.expand_more,
+                        color: selectedCount > 0 ? const Color(0xFFFF6B8B) : Colors.grey[600],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              if (isExpanded)
+                Container(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Divider(),
+                      const SizedBox(height: 8),
+                      const Text('Select variants:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                      const SizedBox(height: 12),
+                      ...variants.map((variant) => _buildVariantTile(serviceId, variant)),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+      );
+    }
+  }
+
+  Widget _buildServiceCard(Map<String, dynamic> service) {
+    final serviceId = service['id'] as String;
+    final hasVariants = service['hasVariants'] as bool;
+    final variants = service['variants'] as List;
+    final selectedCount = _getSelectedCount(serviceId);
+
+    if (!hasVariants) {
+      final isSelected = _isSelected(serviceId);
+      return Card(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(
+            color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[200]!,
+            width: isSelected ? 2 : 1,
+          ),
+        ),
+        elevation: isSelected ? 4 : 1,
+        child: InkWell(
+          onTap: () => _toggleSelection(serviceId),
+          borderRadius: BorderRadius.circular(16),
+          child: Container(
+            constraints: const BoxConstraints(minHeight: 140),
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: isSelected ? const Color(0xFFFF6B8B).withValues(alpha: 0.2) : Colors.grey[100],
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    service['icon'] ?? Icons.build,
+                    color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[600],
+                    size: 32,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  service['name'] ?? 'Service',
+                  style: TextStyle(
+                    fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                    fontSize: 14,
+                    color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[800],
+                  ),
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 4),
+                Text('No variants', style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+                if (isSelected)
+                  Container(
+                    margin: const EdgeInsets.only(top: 8),
+                    padding: const EdgeInsets.all(4),
+                    decoration: const BoxDecoration(color: Color(0xFFFF6B8B), shape: BoxShape.circle),
+                    child: const Icon(Icons.check, color: Colors.white, size: 14),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      );
+    } else {
+      return Card(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(
+            color: selectedCount > 0 ? const Color(0xFFFF6B8B) : Colors.grey[200]!,
+            width: selectedCount > 0 ? 2 : 1,
+          ),
+        ),
+        elevation: selectedCount > 0 ? 4 : 1,
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 220),
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: selectedCount > 0 ? const Color(0xFFFF6B8B).withValues(alpha: 0.2) : Colors.grey[100],
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(
+                      service['icon'] ?? Icons.build,
+                      color: selectedCount > 0 ? const Color(0xFFFF6B8B) : Colors.grey[600],
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      service['name'] ?? 'Service',
+                      style: TextStyle(
+                        fontWeight: selectedCount > 0 ? FontWeight.bold : FontWeight.w600,
+                        fontSize: 14,
+                        color: selectedCount > 0 ? const Color(0xFFFF6B8B) : Colors.grey[800],
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (selectedCount > 0)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFF6B8B),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        '$selectedCount',
+                        style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Rs. ${service['min_price']} - ${service['max_price']}',
+                style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+              ),
+              const Divider(height: 16),
+              const Text('Variants:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+              const SizedBox(height: 8),
+              Expanded(
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: variants.map((variant) => Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: GestureDetector(
+                        onTap: () => _toggleSelection(serviceId, variant['id']),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: _isSelected(serviceId, variant['id']) ? const Color(0xFFFF6B8B).withValues(alpha: 0.1) : Colors.transparent,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: _isSelected(serviceId, variant['id']) ? const Color(0xFFFF6B8B) : Colors.transparent,
+                              width: 1,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                _isSelected(serviceId, variant['id']) ? Icons.check_circle : Icons.circle_outlined,
+                                size: 14,
+                                color: _isSelected(serviceId, variant['id']) ? const Color(0xFFFF6B8B) : Colors.grey[400],
+                              ),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  variant['display_text'] ?? 'Variant',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: _isSelected(serviceId, variant['id']) ? const Color(0xFFFF6B8B) : Colors.grey[700],
+                                    fontWeight: _isSelected(serviceId, variant['id']) ? FontWeight.w500 : FontWeight.normal,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    )).toList(),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+  }
+
+  Widget _buildVariantTile(String serviceId, Map<String, dynamic> variant) {
+    final isSelected = _isSelected(serviceId, variant['id']);
+    return GestureDetector(
+      onTap: () => _toggleSelection(serviceId, variant['id']),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected ? const Color(0xFFFF6B8B).withValues(alpha: 0.1) : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[300]!,
+            width: isSelected ? 1.5 : 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: isSelected ? const Color(0xFFFF6B8B).withValues(alpha: 0.2) : Colors.grey[100],
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                variant['gender_name'].toLowerCase().contains('male') ? Icons.male :
+                variant['gender_name'].toLowerCase().contains('female') ? Icons.female : Icons.people,
+                color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[600],
+                size: 14,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    variant['display_text'] ?? '${variant['gender_name']} - ${variant['age_category_name']}',
+                    style: TextStyle(
+                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                      fontSize: 13,
+                      color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[800],
+                    ),
+                  ),
+                  Text(
+                    'Rs. ${variant['price']} • ${variant['duration']} min',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: isSelected ? const Color(0xFFFF6B8B).withValues(alpha: 0.8) : Colors.grey[600],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (isSelected)
+              const Icon(Icons.check_circle, color: Color(0xFFFF6B8B), size: 18)
+            else
+              Icon(Icons.circle_outlined, color: Colors.grey[400], size: 18),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAddButton() {
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.symmetric(horizontal: _isWeb ? 0 : 16, vertical: 8),
+      child: ElevatedButton(
+        onPressed: _isLoading ? null : _addBarber,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: const Color(0xFFFF6B8B),
+          foregroundColor: Colors.white,
+          minimumSize: Size(_isWeb ? 400 : double.infinity, _isWeb ? 60 : 54),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          elevation: 4,
+        ),
+        child: _isLoading
+            ? const SizedBox(height: 24, width: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+            : Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.person_add, size: 20),
+                  const SizedBox(width: 8),
+                  Text(
+                    _isWeb ? 'Add Barber to Selected Salon' : 'Add Barber',
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+      ),
+    );
+  }
+
+  IconData _getCategoryIcon(String categoryName) {
+    switch (categoryName.toLowerCase()) {
+      case 'hair': return Icons.content_cut;
+      case 'skin': return Icons.face;
+      case 'grooming': return Icons.face_retouching_natural;
+      case 'wellness': return Icons.spa;
+      case 'nails': return Icons.handshake;
+      default: return Icons.category;
+    }
+  }
+
+  Color _getCategoryColor(String categoryName) {
+    switch (categoryName.toLowerCase()) {
+      case 'hair': return Colors.blue;
+      case 'skin': return Colors.pink;
+      case 'grooming': return Colors.orange;
+      case 'wellness': return Colors.green;
+      case 'nails': return Colors.purple;
+      default: return const Color(0xFFFF6B8B);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
@@ -1176,13 +1969,19 @@ class _AddBarberScreenState extends State<AddBarberScreen>
             Container(
               margin: const EdgeInsets.only(right: 8),
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(20)),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(20),
+              ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   const Icon(Icons.check_circle, size: 16, color: Colors.white),
                   const SizedBox(width: 4),
-                  Text('$_totalSelectedItems', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                  Text(
+                    '$_totalSelectedItems',
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                  ),
                 ],
               ),
             ),
@@ -1274,673 +2073,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
         ],
       ),
     );
-  }
-
-  Widget _buildSalonSection() {
-    return Card(
-      elevation: _isWeb ? 4 : 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Padding(
-        padding: EdgeInsets.all(_isWeb ? 20 : 16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(color: const Color(0xFFFF6B8B).withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)),
-                  child: const Icon(Icons.store, color: Color(0xFFFF6B8B), size: 24),
-                ),
-                const SizedBox(width: 12),
-                Text('Select Salon', style: TextStyle(fontSize: _isWeb ? 20 : 18, fontWeight: FontWeight.bold)),
-              ],
-            ),
-            const SizedBox(height: 16),
-            if (_ownerSalons.isEmpty)
-              _buildNoSalonWarning()
-            else
-              ListView.separated(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: _ownerSalons.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 8),
-                itemBuilder: (context, index) {
-                  final salon = _ownerSalons[index];
-                  final isSelected = _selectedSalonId == salon['id'].toString();
-                  return _buildSalonTile(salon, isSelected);
-                },
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildNoSalonWarning() {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(color: Colors.grey[100], borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.orange[200]!)),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.warning_amber_rounded, size: 48, color: Colors.orange[700]),
-          const SizedBox(height: 12),
-          Text('No Salons Found', style: TextStyle(fontSize: _isWeb ? 18 : 16, color: Colors.grey[800], fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          Text('You need to create a salon first before adding barbers.', style: TextStyle(fontSize: _isWeb ? 14 : 12, color: Colors.grey[600]), textAlign: TextAlign.center),
-          const SizedBox(height: 16),
-          ElevatedButton.icon(
-            onPressed: () => context.push('/owner/salon/create'),
-            icon: const Icon(Icons.add_business),
-            label: const Text('Create Salon'),
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF6B8B), foregroundColor: Colors.white),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSalonTile(Map<String, dynamic> salon, bool isSelected) {
-    return InkWell(
-      onTap: () {
-        setState(() {
-          _selectedSalonId = salon['id'].toString();
-          _selectedSalonDetails = salon;
-        });
-        _loadSalonSpecificData();
-      },
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFFFF6B8B).withValues(alpha: 0.05) : Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[300]!, width: isSelected ? 2 : 1),
-        ),
-        child: Row(
-          children: [
-            CircleAvatar(
-              radius: 20,
-              backgroundColor: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[100],
-              backgroundImage: salon['logo_url'] != null ? NetworkImage(salon['logo_url']) : null,
-              child: salon['logo_url'] == null ? Icon(Icons.store, color: isSelected ? Colors.white : Colors.grey[600], size: 20) : null,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(salon['name'] ?? 'Unnamed Salon', style: TextStyle(fontWeight: isSelected ? FontWeight.bold : FontWeight.w500, fontSize: 15)),
-                  if (salon['address'] != null) Text(salon['address'], style: TextStyle(fontSize: 12, color: Colors.grey[600]), maxLines: 1, overflow: TextOverflow.ellipsis),
-                ],
-              ),
-            ),
-            if (isSelected) const Icon(Icons.check_circle, color: Color(0xFFFF6B8B), size: 24),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSearchSection() {
-    return Card(
-      elevation: _isWeb ? 4 : 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Padding(
-        padding: EdgeInsets.all(_isWeb ? 20 : 16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(color: const Color(0xFFFF6B8B).withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)),
-                  child: const Icon(Icons.search, color: Color(0xFFFF6B8B), size: 24),
-                ),
-                const SizedBox(width: 12),
-                Text('Search Barbers', style: TextStyle(fontSize: _isWeb ? 20 : 18, fontWeight: FontWeight.bold)),
-              ],
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _searchController,
-              decoration: InputDecoration(
-                hintText: 'Type name or email...',
-                prefixIcon: const Icon(Icons.search, color: Colors.grey),
-                suffixIcon: _searchController.text.isNotEmpty
-                    ? IconButton(icon: const Icon(Icons.clear, color: Colors.grey), onPressed: () { _searchController.clear(); setState(() { _searchResults = []; _isSearching = false; _selectedBarberId = null; }); })
-                    : null,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFFF6B8B), width: 2)),
-                contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: _isWeb ? 16 : 12),
-                filled: true,
-                fillColor: Colors.grey[50],
-              ),
-            ),
-            if (_searchController.text.isNotEmpty && _searchController.text.length < 2)
-              Padding(
-                padding: const EdgeInsets.only(left: 12, top: 8),
-                child: Text('🔍 Type at least 2 characters to search', style: TextStyle(fontSize: _isWeb ? 13 : 12, color: Colors.grey[600], fontStyle: FontStyle.italic)),
-              ),
-            if (_isSearching) ...[
-              const SizedBox(height: 16),
-              if (_searchResults.isEmpty)
-                Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(32),
-                    child: Column(
-                      children: [
-                        Icon(Icons.person_search, size: 48, color: Colors.grey[400]),
-                        const SizedBox(height: 8),
-                        Text('No barbers found', style: TextStyle(fontSize: _isWeb ? 16 : 14, color: Colors.grey[600])),
-                      ],
-                    ),
-                  ),
-                )
-              else
-                ListView.separated(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: _searchResults.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1),
-                  itemBuilder: (context, index) {
-                    final barber = _searchResults[index];
-                    final isSelected = _selectedBarberId == barber['id'];
-                    return _buildBarberTile(barber, isSelected);
-                  },
-                ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildBarberTile(Map<String, dynamic> barber, bool isSelected) {
-    return ListTile(
-      leading: CircleAvatar(
-        radius: 24,
-        backgroundColor: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[200],
-        backgroundImage: barber['avatar_url'] != null ? NetworkImage(barber['avatar_url']) : null,
-        child: barber['avatar_url'] == null
-            ? Text(barber['full_name']?[0]?.toUpperCase() ?? '?', style: TextStyle(color: isSelected ? Colors.white : Colors.grey[700], fontWeight: FontWeight.bold, fontSize: 16))
-            : null,
-      ),
-      title: Text(barber['full_name'] ?? 'Unknown', style: TextStyle(fontWeight: isSelected ? FontWeight.bold : FontWeight.normal, fontSize: _isWeb ? 16 : 14)),
-      subtitle: Text(barber['email'] ?? '', style: TextStyle(fontSize: _isWeb ? 14 : 12)),
-      trailing: isSelected
-          ? Container(padding: const EdgeInsets.all(4), decoration: const BoxDecoration(color: Color(0xFFFF6B8B), shape: BoxShape.circle), child: const Icon(Icons.check, color: Colors.white, size: 16))
-          : const Icon(Icons.radio_button_unchecked, color: Colors.grey),
-      onTap: () => setState(() => _selectedBarberId = barber['id']),
-    );
-  }
-
-  Widget _buildSelectedBarber() {
-    final barber = _searchResults.firstWhere((b) => b['id'] == _selectedBarberId);
-    return Container(
-      padding: EdgeInsets.all(_isWeb ? 20 : 16),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFFF6B8B), width: 1.5),
-      ),
-      child: Row(
-        children: [
-          CircleAvatar(
-            radius: _isWeb ? 32 : 28,
-            backgroundColor: const Color(0xFFFF6B8B),
-            backgroundImage: barber['avatar_url'] != null ? NetworkImage(barber['avatar_url']) : null,
-            child: barber['avatar_url'] == null
-                ? Text(barber['full_name']?[0]?.toUpperCase() ?? '?', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: _isWeb ? 20 : 16))
-                : null,
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Selected Barber', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                Text(barber['full_name'] ?? 'Unknown', style: TextStyle(fontSize: _isWeb ? 20 : 18, fontWeight: FontWeight.bold)),
-                Text(barber['email'] ?? '', style: TextStyle(fontSize: _isWeb ? 14 : 12, color: Colors.grey[600])),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildServicesSection() {
-    if (_services.isEmpty) {
-      return Card(
-        elevation: _isWeb ? 4 : 2,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Center(
-            child: Column(
-              children: [
-                Icon(Icons.build_circle_outlined, size: 64, color: Colors.grey[400]),
-                const SizedBox(height: 16),
-                Text('No services available', style: TextStyle(fontSize: _isWeb ? 18 : 16, color: Colors.grey[600], fontWeight: FontWeight.w500)),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
-
-    // Group services by category
-    final Map<String, List<Map<String, dynamic>>> groupedServices = {};
-    for (var service in _services) {
-      final category = service['category_name'] as String;
-      if (!groupedServices.containsKey(category)) groupedServices[category] = [];
-      groupedServices[category]!.add(service);
-    }
-
-    return Card(
-      elevation: _isWeb ? 4 : 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Padding(
-        padding: EdgeInsets.all(_isWeb ? 24 : 16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(color: const Color(0xFFFF6B8B).withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)),
-                  child: const Icon(Icons.build_circle_outlined, color: Color(0xFFFF6B8B), size: 24),
-                ),
-                const SizedBox(width: 12),
-                Expanded(child: Text('Select Services', style: TextStyle(fontSize: _isWeb ? 22 : 18, fontWeight: FontWeight.bold))),
-                if (_totalSelectedServices > 0)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(color: const Color(0xFFFF6B8B).withValues(alpha: 0.1), borderRadius: BorderRadius.circular(20)),
-                    child: Text('$_totalSelectedServices service${_totalSelectedServices > 1 ? 's' : ''} selected', style: TextStyle(fontSize: _isWeb ? 14 : 12, fontWeight: FontWeight.w600, color: const Color(0xFFFF6B8B))),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            const Text('Click on a service to select it, or expand to choose specific variants', style: TextStyle(fontSize: 13, color: Colors.grey)),
-            const SizedBox(height: 24),
-            ...groupedServices.entries.map((entry) => _buildCategorySection(entry.key, entry.value)),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCategorySection(String categoryName, List<Map<String, dynamic>> services) {
-    final categorySelectedCount = services.fold<int>(0, (sum, service) => sum + _getSelectedCount(service['id'] as String));
-    final categoryColor = _getCategoryColor(categoryName);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          margin: const EdgeInsets.only(bottom: 12, top: 8),
-          child: Row(
-            children: [
-              Icon(_getCategoryIcon(categoryName), size: _isWeb ? 24 : 20, color: categoryColor),
-              const SizedBox(width: 8),
-              Text(categoryName[0].toUpperCase() + categoryName.substring(1), style: TextStyle(fontSize: _isWeb ? 20 : 16, fontWeight: FontWeight.w600)),
-              const SizedBox(width: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(color: Colors.grey[200], borderRadius: BorderRadius.circular(12)),
-                child: Text('${services.length}', style: TextStyle(fontSize: _isWeb ? 14 : 12, color: Colors.grey[700])),
-              ),
-              if (categorySelectedCount > 0) ...[
-                const SizedBox(width: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  decoration: BoxDecoration(color: const Color(0xFFFF6B8B).withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)),
-                  child: Text('$categorySelectedCount selected', style: TextStyle(fontSize: _isWeb ? 13 : 11, color: const Color(0xFFFF6B8B), fontWeight: FontWeight.w500)),
-                ),
-              ],
-            ],
-          ),
-        ),
-        if (_isWeb)
-          SizedBox(
-            height: 350,
-            child: GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: MediaQuery.of(context).size.width > 1200 ? 3 : 2,
-                childAspectRatio: 1.2,
-                crossAxisSpacing: 16,
-                mainAxisSpacing: 16,
-              ),
-              itemCount: services.length,
-              itemBuilder: (context, index) => _buildServiceCard(services[index]),
-            ),
-          )
-        else
-          Column(children: services.map((service) => _buildServiceTile(service)).toList()),
-        const SizedBox(height: 24),
-      ],
-    );
-  }
-
-  Widget _buildServiceTile(Map<String, dynamic> service) {
-    final serviceId = service['id'] as String;
-    final hasVariants = service['hasVariants'] as bool;
-    final variants = service['variants'] as List;
-    final selectedCount = _getSelectedCount(serviceId);
-    final isExpanded = _expandedServices.contains(serviceId);
-
-    if (!hasVariants) {
-      final isSelected = _isSelected(serviceId);
-      return Card(
-        margin: const EdgeInsets.only(bottom: 12),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[200]!, width: isSelected ? 2 : 1)),
-        elevation: isSelected ? 4 : 1,
-        child: InkWell(
-          onTap: () => _toggleSelection(serviceId),
-          borderRadius: BorderRadius.circular(12),
-          child: Container(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(color: isSelected ? const Color(0xFFFF6B8B).withValues(alpha: 0.2) : Colors.grey[100], borderRadius: BorderRadius.circular(12)),
-                  child: Icon(service['icon'] ?? Icons.build, color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[600], size: 24),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(service['name'] ?? 'Service', style: TextStyle(fontWeight: isSelected ? FontWeight.bold : FontWeight.w600, fontSize: 16, color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[800])),
-                      const SizedBox(height: 4),
-                      Text('No variants', style: TextStyle(fontSize: 12, color: Colors.grey[500])),
-                    ],
-                  ),
-                ),
-                if (isSelected)
-                  Container(padding: const EdgeInsets.all(6), decoration: const BoxDecoration(color: Color(0xFFFF6B8B), shape: BoxShape.circle), child: const Icon(Icons.check, color: Colors.white, size: 14))
-                else
-                  Container(width: 24, height: 24, decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: Colors.grey[400]!, width: 1.5))),
-              ],
-            ),
-          ),
-        ),
-      );
-    } else {
-      return Card(
-        margin: const EdgeInsets.only(bottom: 12),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: selectedCount > 0 ? const Color(0xFFFF6B8B) : Colors.grey[200]!, width: selectedCount > 0 ? 2 : 1)),
-        elevation: selectedCount > 0 ? 4 : 1,
-        child: Theme(
-          data: Theme.of(context).copyWith(dividerColor: Colors.transparent, splashColor: Colors.transparent, highlightColor: Colors.transparent),
-          child: Column(
-            children: [
-              InkWell(
-                onTap: () => _toggleExpand(serviceId),
-                child: Container(
-                  padding: const EdgeInsets.all(16),
-                  child: Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(color: selectedCount > 0 ? const Color(0xFFFF6B8B).withValues(alpha: 0.2) : Colors.grey[100], borderRadius: BorderRadius.circular(12)),
-                        child: Icon(service['icon'] ?? Icons.build, color: selectedCount > 0 ? const Color(0xFFFF6B8B) : Colors.grey[600], size: 24),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(service['name'] ?? 'Service', style: TextStyle(fontWeight: selectedCount > 0 ? FontWeight.bold : FontWeight.w600, fontSize: 16, color: selectedCount > 0 ? const Color(0xFFFF6B8B) : Colors.grey[800])),
-                            const SizedBox(height: 4),
-                            Text('${variants.length} variants • Rs. ${service['min_price']} - ${service['max_price']}', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
-                          ],
-                        ),
-                      ),
-                      if (selectedCount > 0)
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(color: const Color(0xFFFF6B8B), borderRadius: BorderRadius.circular(20)),
-                          child: Text('$selectedCount', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
-                        ),
-                      Icon(isExpanded ? Icons.expand_less : Icons.expand_more, color: selectedCount > 0 ? const Color(0xFFFF6B8B) : Colors.grey[600]),
-                    ],
-                  ),
-                ),
-              ),
-              if (isExpanded)
-                Container(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Divider(),
-                      const SizedBox(height: 8),
-                      const Text('Select variants:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                      const SizedBox(height: 12),
-                      ...variants.map((variant) => _buildVariantTile(serviceId, variant)),
-                    ],
-                  ),
-                ),
-            ],
-          ),
-        ),
-      );
-    }
-  }
-
-  Widget _buildServiceCard(Map<String, dynamic> service) {
-    final serviceId = service['id'] as String;
-    final hasVariants = service['hasVariants'] as bool;
-    final variants = service['variants'] as List;
-    final selectedCount = _getSelectedCount(serviceId);
-
-    if (!hasVariants) {
-      final isSelected = _isSelected(serviceId);
-      return Card(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[200]!, width: isSelected ? 2 : 1)),
-        elevation: isSelected ? 4 : 1,
-        child: InkWell(
-          onTap: () => _toggleSelection(serviceId),
-          borderRadius: BorderRadius.circular(16),
-          child: Container(
-            constraints: const BoxConstraints(minHeight: 140),
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(color: isSelected ? const Color(0xFFFF6B8B).withValues(alpha: 0.2) : Colors.grey[100], shape: BoxShape.circle),
-                  child: Icon(service['icon'] ?? Icons.build, color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[600], size: 32),
-                ),
-                const SizedBox(height: 12),
-                Text(service['name'] ?? 'Service', style: TextStyle(fontWeight: isSelected ? FontWeight.bold : FontWeight.w600, fontSize: 14, color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[800]), textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis),
-                const SizedBox(height: 4),
-                Text('No variants', style: TextStyle(fontSize: 11, color: Colors.grey[500])),
-                if (isSelected)
-                  Container(margin: const EdgeInsets.only(top: 8), padding: const EdgeInsets.all(4), decoration: const BoxDecoration(color: Color(0xFFFF6B8B), shape: BoxShape.circle), child: const Icon(Icons.check, color: Colors.white, size: 14)),
-              ],
-            ),
-          ),
-        ),
-      );
-    } else {
-      return Card(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: selectedCount > 0 ? const Color(0xFFFF6B8B) : Colors.grey[200]!, width: selectedCount > 0 ? 2 : 1)),
-        elevation: selectedCount > 0 ? 4 : 1,
-        child: Container(
-          constraints: const BoxConstraints(minHeight: 220),
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(color: selectedCount > 0 ? const Color(0xFFFF6B8B).withValues(alpha: 0.2) : Colors.grey[100], borderRadius: BorderRadius.circular(10)),
-                    child: Icon(service['icon'] ?? Icons.build, color: selectedCount > 0 ? const Color(0xFFFF6B8B) : Colors.grey[600], size: 20),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(service['name'] ?? 'Service', style: TextStyle(fontWeight: selectedCount > 0 ? FontWeight.bold : FontWeight.w600, fontSize: 14, color: selectedCount > 0 ? const Color(0xFFFF6B8B) : Colors.grey[800]), maxLines: 1, overflow: TextOverflow.ellipsis),
-                  ),
-                  if (selectedCount > 0)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(color: const Color(0xFFFF6B8B), borderRadius: BorderRadius.circular(12)),
-                      child: Text('$selectedCount', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text('Rs. ${service['min_price']} - ${service['max_price']}', style: TextStyle(fontSize: 11, color: Colors.grey[600])),
-              const Divider(height: 16),
-              const Text('Variants:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
-              const SizedBox(height: 8),
-              Expanded(
-                child: SingleChildScrollView(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: variants.map((variant) => Padding(
-                      padding: const EdgeInsets.only(bottom: 6),
-                      child: GestureDetector(
-                        onTap: () => _toggleSelection(serviceId, variant['id']),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: _isSelected(serviceId, variant['id']) ? const Color(0xFFFF6B8B).withValues(alpha: 0.1) : Colors.transparent,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: _isSelected(serviceId, variant['id']) ? const Color(0xFFFF6B8B) : Colors.transparent, width: 1),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(_isSelected(serviceId, variant['id']) ? Icons.check_circle : Icons.circle_outlined, size: 14, color: _isSelected(serviceId, variant['id']) ? const Color(0xFFFF6B8B) : Colors.grey[400]),
-                              const SizedBox(width: 6),
-                              Expanded(
-                                child: Text(
-                                  variant['display_text'] ?? 'Variant',
-                                  style: TextStyle(fontSize: 10, color: _isSelected(serviceId, variant['id']) ? const Color(0xFFFF6B8B) : Colors.grey[700], fontWeight: _isSelected(serviceId, variant['id']) ? FontWeight.w500 : FontWeight.normal),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    )).toList(),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-  }
-
-  Widget _buildVariantTile(String serviceId, Map<String, dynamic> variant) {
-    final isSelected = _isSelected(serviceId, variant['id']);
-    return GestureDetector(
-      onTap: () => _toggleSelection(serviceId, variant['id']),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 6),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFFFF6B8B).withValues(alpha: 0.1) : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[300]!, width: isSelected ? 1.5 : 1),
-        ),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(4),
-              decoration: BoxDecoration(color: isSelected ? const Color(0xFFFF6B8B).withValues(alpha: 0.2) : Colors.grey[100], shape: BoxShape.circle),
-              child: Icon(
-                variant['gender_original'] == 'male' ? Icons.male : variant['gender_original'] == 'female' ? Icons.female : Icons.people,
-                color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[600],
-                size: 14,
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(variant['display_text'] ?? '${variant['gender_name']} - ${variant['age_category_name']}', style: TextStyle(fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal, fontSize: 13, color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[800])),
-                  Text('Rs. ${variant['price']} • ${variant['duration']} min', style: TextStyle(fontSize: 11, color: isSelected ? const Color(0xFFFF6B8B).withValues(alpha: 0.8) : Colors.grey[600])),
-                ],
-              ),
-            ),
-            if (isSelected)
-              const Icon(Icons.check_circle, color: Color(0xFFFF6B8B), size: 18)
-            else
-              Icon(Icons.circle_outlined, color: Colors.grey[400], size: 18),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildAddButton() {
-    return Container(
-      width: double.infinity,
-      padding: EdgeInsets.symmetric(horizontal: _isWeb ? 0 : 16, vertical: 8),
-      child: ElevatedButton(
-        onPressed: _isLoading ? null : _addBarber,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFFFF6B8B),
-          foregroundColor: Colors.white,
-          minimumSize: Size(_isWeb ? 400 : double.infinity, _isWeb ? 60 : 54),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          elevation: 4,
-        ),
-        child: _isLoading
-            ? const SizedBox(height: 24, width: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-            : Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.person_add, size: 20),
-                  const SizedBox(width: 8),
-                  Text(_isWeb ? 'Add Barber to Selected Salon' : 'Add Barber', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                ],
-              ),
-      ),
-    );
-  }
-
-  IconData _getCategoryIcon(String categoryName) {
-    switch (categoryName) {
-      case 'hair': return Icons.content_cut;
-      case 'skin': return Icons.face;
-      case 'grooming': return Icons.face_retouching_natural;
-      case 'wellness': return Icons.spa;
-      case 'nails': return Icons.handshake;
-      default: return Icons.category;
-    }
-  }
-
-  Color _getCategoryColor(String categoryName) {
-    switch (categoryName) {
-      case 'hair': return Colors.blue;
-      case 'skin': return Colors.pink;
-      case 'grooming': return Colors.orange;
-      case 'wellness': return Colors.green;
-      case 'nails': return Colors.purple;
-      default: return const Color(0xFFFF6B8B);
-    }
   }
 }
 
