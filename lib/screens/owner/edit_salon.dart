@@ -8,6 +8,374 @@ import 'package:path/path.dart' as path;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:image_cropper/image_cropper.dart';
 
+// ==================== ENHANCED TIME PICKER (Same as CreateSalonScreen) ====================
+class EnhancedTimePicker extends StatefulWidget {
+  final TimeOfDay? initialTime;
+  final ValueChanged<TimeOfDay> onTimeSelected;
+
+  const EnhancedTimePicker({
+    super.key,
+    required this.initialTime,
+    required this.onTimeSelected,
+  });
+
+  @override
+  State<EnhancedTimePicker> createState() => _EnhancedTimePickerState();
+}
+
+class _EnhancedTimePickerState extends State<EnhancedTimePicker> {
+  late int _selectedHour;
+  late int _selectedMinute;
+  late String _selectedPeriod;
+
+  final List<int> hours12 = [12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+  final List<int> minutes = List.generate(60, (i) => i);
+  final List<String> periods = ['AM', 'PM'];
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeTime();
+  }
+
+  void _initializeTime() {
+    if (widget.initialTime != null) {
+      final hour24 = widget.initialTime!.hour;
+      final minute = widget.initialTime!.minute;
+      
+      if (hour24 == 0) {
+        _selectedHour = 12;
+        _selectedPeriod = 'AM';
+      } else if (hour24 == 12) {
+        _selectedHour = 12;
+        _selectedPeriod = 'PM';
+      } else if (hour24 > 12) {
+        _selectedHour = hour24 - 12;
+        _selectedPeriod = 'PM';
+      } else {
+        _selectedHour = hour24;
+        _selectedPeriod = 'AM';
+      }
+      _selectedMinute = minute;
+    } else {
+      final now = TimeOfDay.now();
+      final hour24 = now.hour;
+      if (hour24 == 0) {
+        _selectedHour = 12;
+        _selectedPeriod = 'AM';
+      } else if (hour24 == 12) {
+        _selectedHour = 12;
+        _selectedPeriod = 'PM';
+      } else if (hour24 > 12) {
+        _selectedHour = hour24 - 12;
+        _selectedPeriod = 'PM';
+      } else {
+        _selectedHour = hour24;
+        _selectedPeriod = 'AM';
+      }
+      _selectedMinute = now.minute;
+    }
+  }
+
+  void _confirmTime() {
+    int hour24;
+    if (_selectedPeriod == 'AM') {
+      hour24 = _selectedHour == 12 ? 0 : _selectedHour;
+    } else {
+      hour24 = _selectedHour == 12 ? 12 : _selectedHour + 12;
+    }
+    
+    final selectedTime = TimeOfDay(hour: hour24, minute: _selectedMinute);
+    widget.onTimeSelected(selectedTime);
+    Navigator.of(context).pop(selectedTime);
+  }
+
+  void _cancelTime() {
+    Navigator.of(context).pop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isMobile = MediaQuery.of(context).size.width < 600;
+    
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      child: Container(
+        width: isMobile ? double.infinity : 320,
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Select Time', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 20),
+            
+            // Time Display
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    _selectedHour.toString().padLeft(2, '0'),
+                    style: const TextStyle(fontSize: 48, fontWeight: FontWeight.bold, color: Color(0xFFFF6B8B)),
+                  ),
+                  const Text(
+                    ':',
+                    style: TextStyle(fontSize: 48, fontWeight: FontWeight.bold, color: Color(0xFFFF6B8B)),
+                  ),
+                  Text(
+                    _selectedMinute.toString().padLeft(2, '0'),
+                    style: const TextStyle(fontSize: 48, fontWeight: FontWeight.bold, color: Color(0xFFFF6B8B)),
+                  ),
+                  const SizedBox(width: 12),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[200],
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      _selectedPeriod,
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+            
+            // Pickers Row
+            Row(
+              children: [
+                _buildScrollPicker(
+                  title: 'HOUR',
+                  items: hours12,
+                  selectedValue: _selectedHour,
+                  onChanged: (value) => setState(() => _selectedHour = value),
+                ),
+                const SizedBox(width: 12),
+                _buildScrollPicker(
+                  title: 'MINUTE',
+                  items: minutes,
+                  selectedValue: _selectedMinute,
+                  onChanged: (value) => setState(() => _selectedMinute = value),
+                ),
+                const SizedBox(width: 12),
+                _buildScrollPicker(
+                  title: 'PERIOD',
+                  items: periods,
+                  selectedValue: _selectedPeriod,
+                  onChanged: (value) => setState(() => _selectedPeriod = value),
+                ),
+              ],
+            ),
+            
+            const SizedBox(height: 24),
+            
+            // Buttons
+            Row(
+              children: [
+                Expanded(
+                  child: TextButton(
+                    onPressed: _cancelTime,
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text('Cancel', style: TextStyle(fontSize: 16)),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: _confirmTime,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFFF6B8B),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text('OK', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildScrollPicker<T>({
+    required String title,
+    required List<T> items,
+    required T selectedValue,
+    required ValueChanged<T> onChanged,
+  }) {
+    return Expanded(
+      child: Column(
+        children: [
+          Text(
+            title,
+            style: const TextStyle(
+              fontSize: 12,
+              color: Colors.grey,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Container(
+            height: 150,
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.grey[300]!),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: ListWheelScrollView.useDelegate(
+              itemExtent: 40,
+              onSelectedItemChanged: (newIndex) {
+                if (newIndex >= 0 && newIndex < items.length) {
+                  onChanged(items[newIndex]);
+                }
+              },
+              childDelegate: ListWheelChildBuilderDelegate(
+                builder: (context, i) {
+                  final item = items[i];
+                  final isSelected = item == selectedValue;
+                  return Container(
+                    alignment: Alignment.center,
+                    child: Text(
+                      item.toString(),
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                        color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[800],
+                      ),
+                    ),
+                  );
+                },
+                childCount: items.length,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ==================== TIME PICKER FIELD (Same as CreateSalonScreen) ====================
+class TimePickerField extends StatefulWidget {
+  final String label;
+  final TimeOfDay? initialTime;
+  final ValueChanged<TimeOfDay> onTimeSelected;
+  final bool isRequired;
+
+  const TimePickerField({
+    super.key,
+    required this.label,
+    this.initialTime,
+    required this.onTimeSelected,
+    this.isRequired = true,
+  });
+
+  @override
+  State<TimePickerField> createState() => _TimePickerFieldState();
+}
+
+class _TimePickerFieldState extends State<TimePickerField> {
+  TimeOfDay? _selectedTime;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedTime = widget.initialTime;
+  }
+
+  String _formatTimeForDisplay(TimeOfDay time) {
+    final hour = time.hour == 0 ? 12 : (time.hour > 12 ? time.hour - 12 : time.hour);
+    final minute = time.minute.toString().padLeft(2, '0');
+    final period = time.hour >= 12 ? 'PM' : 'AM';
+    return '$hour:$minute $period';
+  }
+
+  Future<void> _showTimePicker() async {
+    final result = await showDialog<TimeOfDay>(
+      context: context,
+      builder: (context) => EnhancedTimePicker(
+        initialTime: _selectedTime,
+        onTimeSelected: (time) {},
+      ),
+    );
+    
+    if (result != null) {
+      setState(() {
+        _selectedTime = result;
+      });
+      widget.onTimeSelected(result);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          widget.label,
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: Colors.grey[700],
+          ),
+        ),
+        const SizedBox(height: 8),
+        GestureDetector(
+          onTap: _showTimePicker,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.grey[300]!, width: 1),
+              borderRadius: BorderRadius.circular(12),
+              color: Colors.white,
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.access_time,
+                  size: 20,
+                  color: _selectedTime != null ? const Color(0xFFFF6B8B) : Colors.grey[400],
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    _selectedTime != null
+                        ? _formatTimeForDisplay(_selectedTime!)
+                        : 'Select time',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w500,
+                      color: _selectedTime != null ? Colors.black : Colors.grey[500],
+                    ),
+                  ),
+                ),
+                const Icon(Icons.arrow_drop_down, color: Colors.grey, size: 24),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class EditSalonScreen extends StatefulWidget {
   final int salonId;
 
@@ -34,7 +402,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   // ============================================
   List<Map<String, dynamic>> _globalGenders = [];
   final List<int> _selectedGenderIds = [];
-  bool _isLoadingGenders = false;
 
   // ============================================
   // AGE CATEGORY SECTION - ADD WITH SUGGESTIONS
@@ -45,10 +412,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   final TextEditingController _ageCategoryMaxAgeController = TextEditingController();
   
   List<Map<String, dynamic>> _globalAgeCategories = [];
-  bool _isLoadingAgeCategories = false;
 
   // ============================================
-  // SERVICE CATEGORY SECTION - ADD WITH SUGGESTIONS (UPDATED with display_name)
+  // SERVICE CATEGORY SECTION - ADD WITH SUGGESTIONS
   // ============================================
   final List<Map<String, dynamic>> _addedServiceCategories = [];
   final TextEditingController _serviceCategoryDisplayNameController = TextEditingController();
@@ -58,20 +424,16 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   Color _selectedColor = const Color(0xFFFF6B8B);
   
   List<Map<String, dynamic>> _globalCategories = [];
-  bool _isLoadingCategories = false;
 
   // Icon list for selection
-  final List<Map<String, dynamic>> _iconList = [
-    {'name': 'content_cut', 'icon': Icons.content_cut, 'label': 'Scissors'},
+  final List<Map<String, dynamic>> _iconList = [  
     {'name': 'face', 'icon': Icons.face, 'label': 'Face'},
     {'name': 'face_retouching_natural', 'icon': Icons.face_retouching_natural, 'label': 'Beard'},
     {'name': 'spa', 'icon': Icons.spa, 'label': 'Spa'},
     {'name': 'handshake', 'icon': Icons.handshake, 'label': 'Nails'},
-    {'name': 'build', 'icon': Icons.build, 'label': 'Tools'},
-    {'name': 'cut', 'icon': Icons.cut, 'label': 'Hair Cut'},
+    {'name': 'palette', 'icon': Icons.palette, 'label': 'Makeup'},   
     {'name': 'shower', 'icon': Icons.shower, 'label': 'Shower'},
-    {'name': 'masks', 'icon': Icons.masks, 'label': 'Masks'},
-    {'name': 'palette', 'icon': Icons.palette, 'label': 'Makeup'},
+    {'name': 'masks', 'icon': Icons.masks, 'label': 'Masks'},   
     {'name': 'spa_outlined', 'icon': Icons.spa_outlined, 'label': 'Wellness'},
   ];
 
@@ -85,7 +447,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   bool _isUploadingLogo = false;
   bool _isUploadingCover = false;
 
-  // Business hours
+  // Business hours - UPDATED to use TimePickerField
   TimeOfDay? _openTime;
   TimeOfDay? _closeTime;
 
@@ -193,21 +555,18 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
 
   Future<void> _loadGlobalData() async {
     try {
-      // Load genders
       final genders = await supabase
           .from('genders')
           .select('id, display_name, display_order')
           .eq('is_active', true)
           .order('display_order');
           
-      // Load age categories
       final ageCategories = await supabase
           .from('age_categories')
           .select('id, display_name, min_age, max_age, display_order')
           .eq('is_active', true)
           .order('display_order');
           
-      // Load service categories - USING display_name
       final categories = await supabase
           .from('categories')
           .select('id, display_name, description, icon_name, color, display_order')
@@ -220,10 +579,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         _globalCategories = List<Map<String, dynamic>>.from(categories);
       });
       
-      debugPrint('✅ Global data loaded:');
-      debugPrint('   Genders: ${_globalGenders.length}');
-      debugPrint('   Age Categories: ${_globalAgeCategories.length}');
-      debugPrint('   Service Categories: ${_globalCategories.length}');
+      debugPrint('✅ Global data loaded');
     } catch (e) {
       debugPrint('Error loading global data: $e');
       rethrow;
@@ -232,9 +588,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
 
   Future<void> _loadSalonSelections() async {
     try {
-      // ============================================
-      // LOAD SELECTED GENDERS
-      // ============================================
+      // Load genders
       final genderResponse = await supabase
           .from('salon_genders')
           .select('display_name')
@@ -242,8 +596,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
           .eq('is_active', true)
           .order('display_order');
 
-      debugPrint('📊 Loaded genders from DB: ${genderResponse.length}');
-      
       setState(() {
         _selectedGenderIds.clear();
         for (var gender in genderResponse) {
@@ -258,9 +610,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         }
       });
 
-      // ============================================
-      // LOAD ADDED AGE CATEGORIES
-      // ============================================
+      // Load age categories
       final ageResponse = await supabase
           .from('salon_age_categories')
           .select('display_name, min_age, max_age')
@@ -281,9 +631,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         }
       });
 
-      // ============================================
-      // LOAD ADDED SERVICE CATEGORIES - USING display_name
-      // ============================================
+      // Load service categories
       final categoryResponse = await supabase
           .from('salon_categories')
           .select('display_name, description, icon_name, color')
@@ -302,22 +650,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             'display_order': _addedServiceCategories.length,
             'is_active': true,
           });
-          
-          // Set selected icon and color from first category (optional)
-          if (_addedServiceCategories.length == 1) {
-            _selectedIcon = cat['icon_name'] ?? 'content_cut';
-            String colorStr = cat['color'] ?? '#FF6B8B';
-            if (colorStr.startsWith('#')) {
-              _selectedColor = Color(int.parse('0xFF${colorStr.substring(1)}'));
-            }
-          }
         }
       });
 
-      debugPrint('✅ Final selections loaded:');
-      debugPrint('   Genders: ${_selectedGenderIds.length}');
-      debugPrint('   Age Categories: ${_addedAgeCategories.length}');
-      debugPrint('   Service Categories: ${_addedServiceCategories.length}');
+      debugPrint('✅ Selections loaded');
     } catch (e) {
       debugPrint('Error loading salon selections: $e');
     }
@@ -410,7 +746,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   }
 
   // ============================================
-  // SERVICE CATEGORY FUNCTIONS - UPDATED for display_name
+  // SERVICE CATEGORY FUNCTIONS
   // ============================================
   
   void _autoFillServiceCategory(Map<String, dynamic> selected) {
@@ -686,7 +1022,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   }
 
   Future<String?> _uploadLogo() async {
-    if (_logoFile == null && _logoWebBytes == null) return null;
+    if (_logoFile == null && _logoWebBytes == null) return _currentLogoUrl;
     setState(() => _isUploadingLogo = true);
     try {
       final userId = supabase.auth.currentUser?.id;
@@ -704,16 +1040,16 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         await supabase.storage.from('salon-images').upload(filePath, _logoFile!);
         return supabase.storage.from('salon-images').getPublicUrl(filePath);
       }
-      return null;
+      return _currentLogoUrl;
     } catch (e) {
-      return null;
+      return _currentLogoUrl;
     } finally {
       if (mounted) setState(() => _isUploadingLogo = false);
     }
   }
 
   Future<String?> _uploadCover() async {
-    if (_coverFile == null && _coverWebBytes == null) return null;
+    if (_coverFile == null && _coverWebBytes == null) return _currentCoverUrl;
     setState(() => _isUploadingCover = true);
     try {
       final userId = supabase.auth.currentUser?.id;
@@ -731,9 +1067,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         await supabase.storage.from('salon-images').upload(filePath, _coverFile!);
         return supabase.storage.from('salon-images').getPublicUrl(filePath);
       }
-      return null;
+      return _currentCoverUrl;
     } catch (e) {
-      return null;
+      return _currentCoverUrl;
     } finally {
       if (mounted) setState(() => _isUploadingCover = false);
     }
@@ -779,21 +1115,17 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       return;
     }
 
+    if (_openTime == null || _closeTime == null) {
+      _showSnackBar('Please set business hours', Colors.orange);
+      return;
+    }
+
     setState(() => _isSaving = true);
 
     try {
       // Upload images
-      String? logoUrl = _currentLogoUrl;
-      if (_logoFile != null || _logoWebBytes != null) {
-        final newLogoUrl = await _uploadLogo();
-        if (newLogoUrl != null) logoUrl = newLogoUrl;
-      }
-
-      String? coverUrl = _currentCoverUrl;
-      if (_coverFile != null || _coverWebBytes != null) {
-        final newCoverUrl = await _uploadCover();
-        if (newCoverUrl != null) coverUrl = newCoverUrl;
-      }
+      final logoUrl = await _uploadLogo();
+      final coverUrl = await _uploadCover();
 
       // Update salon basic info
       final updateData = {
@@ -811,9 +1143,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
 
       await supabase.from('salons').update(updateData).eq('id', widget.salonId);
 
-      // ============================================
-      // UPDATE GENDERS (SELECTED ONLY)
-      // ============================================
+      // Update genders
       await supabase.from('salon_genders').delete().eq('salon_id', widget.salonId);
       
       for (int i = 0; i < _selectedGenderIds.length; i++) {
@@ -828,9 +1158,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         });
       }
 
-      // ============================================
-      // UPDATE AGE CATEGORIES (ADDED ONLY)
-      // ============================================
+      // Update age categories
       await supabase.from('salon_age_categories').delete().eq('salon_id', widget.salonId);
       
       for (var ageCat in _addedAgeCategories) {
@@ -844,9 +1172,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         });
       }
 
-      // ============================================
-      // UPDATE SERVICE CATEGORIES (ADDED ONLY) - USING display_name
-      // ============================================
+      // Update service categories
       await supabase.from('salon_categories').delete().eq('salon_id', widget.salonId);
       
       for (var serviceCat in _addedServiceCategories) {
@@ -1028,7 +1354,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Left Side - Add Form
                   Expanded(
                     flex: 1,
                     child: Container(
@@ -1080,7 +1405,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                   ),
                   const SizedBox(width: 16),
                   
-                  // Right Side - Items List
                   Expanded(
                     flex: 1,
                     child: Container(
@@ -1185,10 +1509,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 ],
               )
             else
-              // Mobile View - Column Layout
               Column(
                 children: [
-                  // Add Form
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
@@ -1231,7 +1553,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                   ),
                   const SizedBox(height: 16),
                   
-                  // Items List
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
@@ -1352,7 +1673,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 ),
                 const SizedBox(width: 12),
                 const Text(
-                  'Select Genders',
+                  'Gender Categories',
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
                 const Spacer(),
@@ -1484,12 +1805,12 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   }
 
   // ============================================
-  // SERVICE CATEGORY SECTION - SPLIT VIEW (UPDATED with display_name)
+  // SERVICE CATEGORY SECTION - SPLIT VIEW
   // ============================================
   
   Widget _buildServiceCategorySection() {
     return _buildSplitViewSection(
-      title: 'Service Categories',
+      title: 'Main Services',
       icon: Icons.category,
       color: Colors.orange,
       addedItems: _addedServiceCategories,
@@ -1499,7 +1820,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         children: [
           _buildSuggestionField(
             controller: _serviceCategoryDisplayNameController,
-            label: 'Display Name *',
+            label: 'Service Name *',
             hint: 'e.g., Hair, Skin, Nails, Grooming',
             icon: Icons.category,
             suggestions: _globalCategories.map((c) => c['display_name'] as String).toList(),
@@ -1956,17 +2277,60 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     );
   }
 
+  // ============================================
+  // BUSINESS HOURS CARD WITH ENHANCED TIME PICKER
+  // ============================================
+  
+  Widget _buildBusinessHoursCard() {
+    return Card(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Business Hours',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: TimePickerField(
+                    label: 'Open Time',
+                    initialTime: _openTime,
+                    isRequired: true,
+                    onTimeSelected: (time) {
+                      setState(() => _openTime = time);
+                    },
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: TimePickerField(
+                    label: 'Close Time',
+                    initialTime: _closeTime,
+                    isRequired: true,
+                    onTimeSelected: (time) {
+                      setState(() => _closeTime = time);
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   String _formatTimeOfDay(TimeOfDay time) => '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}:00';
   
   void _showSnackBar(String msg, Color color) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(msg), backgroundColor: color, behavior: SnackBarBehavior.floating, duration: const Duration(seconds: 2)),
     );
-  }
-
-  Future<void> _selectTime(BuildContext context, bool isOpen) async {
-    final picked = await showTimePicker(context: context, initialTime: isOpen ? _openTime! : _closeTime!);
-    if (picked != null) setState(() => isOpen ? _openTime = picked : _closeTime = picked);
   }
 
   @override
@@ -2051,27 +2415,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                           ),
                           const SizedBox(height: 16),
                           
-                          // Business Hours Card
-                          Card(
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                            child: Padding(
-                              padding: const EdgeInsets.all(16),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text('Business Hours', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                                  const SizedBox(height: 16),
-                                  Row(
-                                    children: [
-                                      Expanded(child: _buildTimeTile('Open Time', _openTime!, Icons.access_time, () => _selectTime(context, true))),
-                                      const SizedBox(width: 16),
-                                      Expanded(child: _buildTimeTile('Close Time', _closeTime!, Icons.access_time, () => _selectTime(context, false))),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
+                          // Business Hours Card with Enhanced Time Picker
+                          _buildBusinessHoursCard(),
                           const SizedBox(height: 16),
                           
                           // Service Categories Section (Split View)
@@ -2128,33 +2473,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 ),
               ),
             ),
-    );
-  }
-
-  Widget _buildTimeTile(String label, TimeOfDay time, IconData icon, VoidCallback onTap) {
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-        decoration: BoxDecoration(
-          border: Border.all(color: Colors.grey[400]!),
-          borderRadius: BorderRadius.circular(12),
-          color: Colors.white,
-        ),
-        child: Row(
-          children: [
-            Icon(icon, size: 20, color: Colors.grey[600]),
-            const SizedBox(width: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(label, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
-                Text(time.format(context), style: const TextStyle(fontWeight: FontWeight.w600)),
-              ],
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

@@ -8,6 +8,372 @@ import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
 import 'package:path/path.dart' as path;
 import 'package:image_cropper/image_cropper.dart';
 
+// ==================== ENHANCED TIME PICKER (Moved outside) ====================
+class _EnhancedTimePicker extends StatefulWidget {
+  final TimeOfDay? initialTime;
+  final ValueChanged<TimeOfDay> onTimeSelected;
+
+  const _EnhancedTimePicker({
+    required this.initialTime,
+    required this.onTimeSelected,
+  });
+
+  @override
+  State<_EnhancedTimePicker> createState() => _EnhancedTimePickerState();
+}
+
+class _EnhancedTimePickerState extends State<_EnhancedTimePicker> {
+  late int _selectedHour;
+  late int _selectedMinute;
+  late String _selectedPeriod;
+
+  final List<int> hours12 = [12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+  final List<int> minutes = List.generate(60, (i) => i);
+  final List<String> periods = ['AM', 'PM'];
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeTime();
+  }
+
+  void _initializeTime() {
+    if (widget.initialTime != null) {
+      final hour24 = widget.initialTime!.hour;
+      final minute = widget.initialTime!.minute;
+      
+      if (hour24 == 0) {
+        _selectedHour = 12;
+        _selectedPeriod = 'AM';
+      } else if (hour24 == 12) {
+        _selectedHour = 12;
+        _selectedPeriod = 'PM';
+      } else if (hour24 > 12) {
+        _selectedHour = hour24 - 12;
+        _selectedPeriod = 'PM';
+      } else {
+        _selectedHour = hour24;
+        _selectedPeriod = 'AM';
+      }
+      _selectedMinute = minute;
+    } else {
+      final now = TimeOfDay.now();
+      final hour24 = now.hour;
+      if (hour24 == 0) {
+        _selectedHour = 12;
+        _selectedPeriod = 'AM';
+      } else if (hour24 == 12) {
+        _selectedHour = 12;
+        _selectedPeriod = 'PM';
+      } else if (hour24 > 12) {
+        _selectedHour = hour24 - 12;
+        _selectedPeriod = 'PM';
+      } else {
+        _selectedHour = hour24;
+        _selectedPeriod = 'AM';
+      }
+      _selectedMinute = now.minute;
+    }
+  }
+
+  void _confirmTime() {
+    int hour24;
+    if (_selectedPeriod == 'AM') {
+      hour24 = _selectedHour == 12 ? 0 : _selectedHour;
+    } else {
+      hour24 = _selectedHour == 12 ? 12 : _selectedHour + 12;
+    }
+    
+    final selectedTime = TimeOfDay(hour: hour24, minute: _selectedMinute);
+    widget.onTimeSelected(selectedTime);
+    Navigator.of(context).pop(selectedTime);
+  }
+
+  void _cancelTime() {
+    Navigator.of(context).pop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isMobile = MediaQuery.of(context).size.width < 600;
+    
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      child: Container(
+        width: isMobile ? double.infinity : 320,
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Select Time', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 20),
+            
+            // Time Display
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    _selectedHour.toString().padLeft(2, '0'),
+                    style: const TextStyle(fontSize: 48, fontWeight: FontWeight.bold, color: Color(0xFFFF6B8B)),
+                  ),
+                  const Text(
+                    ':',
+                    style: TextStyle(fontSize: 48, fontWeight: FontWeight.bold, color: Color(0xFFFF6B8B)),
+                  ),
+                  Text(
+                    _selectedMinute.toString().padLeft(2, '0'),
+                    style: const TextStyle(fontSize: 48, fontWeight: FontWeight.bold, color: Color(0xFFFF6B8B)),
+                  ),
+                  const SizedBox(width: 12),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[200],
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      _selectedPeriod,
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+            
+            // Pickers Row
+            Row(
+              children: [
+                _buildScrollPicker(
+                  title: 'HOUR',
+                  items: hours12,
+                  selectedValue: _selectedHour,
+                  onChanged: (value) => setState(() => _selectedHour = value),
+                ),
+                const SizedBox(width: 12),
+                _buildScrollPicker(
+                  title: 'MINUTE',
+                  items: minutes,
+                  selectedValue: _selectedMinute,
+                  onChanged: (value) => setState(() => _selectedMinute = value),
+                ),
+                const SizedBox(width: 12),
+                _buildScrollPicker(
+                  title: 'PERIOD',
+                  items: periods,
+                  selectedValue: _selectedPeriod,
+                  onChanged: (value) => setState(() => _selectedPeriod = value),
+                ),
+              ],
+            ),
+            
+            const SizedBox(height: 24),
+            
+            // Buttons
+            Row(
+              children: [
+                Expanded(
+                  child: TextButton(
+                    onPressed: _cancelTime,
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text('Cancel', style: TextStyle(fontSize: 16)),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: _confirmTime,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFFF6B8B),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text('OK', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildScrollPicker<T>({
+    required String title,
+    required List<T> items,
+    required T selectedValue,
+    required ValueChanged<T> onChanged,
+  }) {
+    return Expanded(
+      child: Column(
+        children: [
+          Text(
+            title,
+            style: const TextStyle(
+              fontSize: 12,
+              color: Colors.grey,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Container(
+            height: 150,
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.grey[300]!),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: ListWheelScrollView.useDelegate(
+              itemExtent: 40,
+              onSelectedItemChanged: (newIndex) {
+                if (newIndex >= 0 && newIndex < items.length) {
+                  onChanged(items[newIndex]);
+                }
+              },
+              childDelegate: ListWheelChildBuilderDelegate(
+                builder: (context, i) {
+                  final item = items[i];
+                  final isSelected = item == selectedValue;
+                  return Container(
+                    alignment: Alignment.center,
+                    child: Text(
+                      item.toString(),
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                        color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[800],
+                      ),
+                    ),
+                  );
+                },
+                childCount: items.length,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ==================== TIME PICKER FIELD (Moved outside) ====================
+class _TimePickerField extends StatefulWidget {
+  final String label;
+  final TimeOfDay? initialTime;
+  final ValueChanged<TimeOfDay> onTimeSelected;
+  final bool isRequired;
+
+  const _TimePickerField({
+    required this.label,
+    this.initialTime,
+    required this.onTimeSelected,
+    this.isRequired = true,
+  });
+
+  @override
+  State<_TimePickerField> createState() => _TimePickerFieldState();
+}
+
+class _TimePickerFieldState extends State<_TimePickerField> {
+  TimeOfDay? _selectedTime;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedTime = widget.initialTime;
+  }
+
+  String _formatTimeForDisplay(TimeOfDay time) {
+    final hour = time.hour == 0 ? 12 : (time.hour > 12 ? time.hour - 12 : time.hour);
+    final minute = time.minute.toString().padLeft(2, '0');
+    final period = time.hour >= 12 ? 'PM' : 'AM';
+    return '$hour:$minute $period';
+  }
+
+  Future<void> _showTimePicker() async {
+    final result = await showDialog<TimeOfDay>(
+      context: context,
+      builder: (context) => _EnhancedTimePicker(
+        initialTime: _selectedTime,
+        onTimeSelected: (time) {},
+      ),
+    );
+    
+    if (result != null) {
+      setState(() {
+        _selectedTime = result;
+      });
+      widget.onTimeSelected(result);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          widget.label,
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: Colors.grey[700],
+          ),
+        ),
+        const SizedBox(height: 8),
+        GestureDetector(
+          onTap: _showTimePicker,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.grey[300]!, width: 1),
+              borderRadius: BorderRadius.circular(12),
+              color: Colors.white,
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.access_time,
+                  size: 20,
+                  color: _selectedTime != null ? const Color(0xFFFF6B8B) : Colors.grey[400],
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    _selectedTime != null
+                        ? _formatTimeForDisplay(_selectedTime!)
+                        : 'Select time',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w500,
+                      color: _selectedTime != null ? Colors.black : Colors.grey[500],
+                    ),
+                  ),
+                ),
+                const Icon(Icons.arrow_drop_down, color: Colors.grey, size: 24),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class CreateSalonScreen extends StatefulWidget {
   const CreateSalonScreen({super.key});
 
@@ -118,25 +484,19 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
   }
 
   Future<void> _loadGlobalData() async {
-    setState(() {
-    });
-    
     try {
-      // Load genders
       final genders = await supabase
           .from('genders')
           .select('id, display_name, display_order')
           .eq('is_active', true)
           .order('display_order');
           
-      // Load age categories
       final ageCategories = await supabase
           .from('age_categories')
           .select('id, display_name, min_age, max_age, display_order')
           .eq('is_active', true)
           .order('display_order');
           
-      // Load service categories
       final categories = await supabase
           .from('categories')
           .select('id, display_name, description, icon_name, color, display_order')
@@ -150,8 +510,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
       });
     } catch (e) {
       debugPrint('Error loading data: $e');
-      setState(() {
-      });
     }
   }
 
@@ -323,7 +681,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                 ),
                 const SizedBox(width: 12),
                 const Text(
-                  'Select Genders',
+                  'Gender Categories',
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
                 const Spacer(),
@@ -397,7 +755,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
   }
 
   // ============================================
-  // SPLIT VIEW SECTION (Same as Edit Screen)
+  // SPLIT VIEW SECTION
   // ============================================
   
   Widget _buildSplitViewSection({
@@ -457,7 +815,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Left Side - Add Form
                   Expanded(
                     flex: 1,
                     child: Container(
@@ -815,7 +1172,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
   
   Widget _buildServiceCategorySection() {
     return _buildSplitViewSection(
-      title: 'Service Categories',
+      title: 'Main Services',
       icon: Icons.category,
       color: Colors.orange,
       addedItems: _addedServiceCategories,
@@ -825,7 +1182,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
         children: [
           _buildSuggestionField(
             controller: _serviceCategoryDisplayNameController,
-            label: 'Display Name *',
+            label: 'Service Name *',
             hint: 'e.g., Hair, Skin, Nails, Grooming',
             icon: Icons.category,
             suggestions: _globalCategories.map((c) => c['display_name'] as String).toList(),
@@ -1596,6 +1953,54 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
   }
 
   // ============================================
+  // BUSINESS HOURS SECTION WITH ENHANCED TIME PICKER
+  // ============================================
+  
+  Widget _buildBusinessHoursCard() {
+    return Card(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Business Hours',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: _TimePickerField(
+                    label: 'Open Time',
+                    initialTime: _openTime,
+                    isRequired: true,
+                    onTimeSelected: (time) {
+                      setState(() => _openTime = time);
+                    },
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: _TimePickerField(
+                    label: 'Close Time',
+                    initialTime: _closeTime,
+                    isRequired: true,
+                    onTimeSelected: (time) {
+                      setState(() => _closeTime = time);
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ============================================
   // CREATE SALON
   // ============================================
   
@@ -1735,11 +2140,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     );
   }
 
-  Future<void> _selectTime(BuildContext context, bool isOpen) async {
-    final picked = await showTimePicker(context: context, initialTime: isOpen ? _openTime! : _closeTime!);
-    if (picked != null) setState(() => isOpen ? _openTime = picked : _closeTime = picked);
-  }
-
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
@@ -1813,27 +2213,8 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                     ),
                     const SizedBox(height: 16),
                     
-                    // Business Hours Card
-                    Card(
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text('Business Hours', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                            const SizedBox(height: 16),
-                            Row(
-                              children: [
-                                Expanded(child: _buildTimeTile('Open Time', _openTime!, Icons.access_time, () => _selectTime(context, true))),
-                                const SizedBox(width: 16),
-                                Expanded(child: _buildTimeTile('Close Time', _closeTime!, Icons.access_time, () => _selectTime(context, false))),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
+                    // Business Hours Card with Enhanced Time Picker
+                    _buildBusinessHoursCard(),
                     const SizedBox(height: 16),
                     
                     // Service Categories Section (Split View)
@@ -1877,33 +2258,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
               ),
             ),
           ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTimeTile(String label, TimeOfDay time, IconData icon, VoidCallback onTap) {
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-        decoration: BoxDecoration(
-          border: Border.all(color: Colors.grey[400]!),
-          borderRadius: BorderRadius.circular(12),
-          color: Colors.white,
-        ),
-        child: Row(
-          children: [
-            Icon(icon, size: 20, color: Colors.grey[600]),
-            const SizedBox(width: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(label, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
-                Text(time.format(context), style: const TextStyle(fontWeight: FontWeight.w600)),
-              ],
-            ),
-          ],
         ),
       ),
     );
