@@ -8,9 +8,10 @@ class EnvironmentManager {
   EnvironmentManager._internal();
 
   // Initialize environment based on flavor
-  Future<void> init({String flavor = 'development'}) async {// 1 .flavor කියන්නේ optional named parameter එකක්value එකක් pass කළොත්, default value එක override වෙලා අලුත් value එක ගන්නවා,default value එක 'development' වෙයි
+  Future<void> init({String flavor = 'development'}) async {
+    // 1 .flavor කියන්නේ optional named parameter එකක්value එකක් pass කළොත්, default value එක override වෙලා අලුත් value එක ගන්නවා,default value එක 'development' වෙයි
     String envFile;
-    
+
     switch (flavor) {
       case 'production':
         envFile = '.env.production';
@@ -24,9 +25,11 @@ class EnvironmentManager {
       default:
         envFile = '.env';
     }
-    
+
     try {
-      await dotenv.load(fileName: envFile); // 2 .name ekata adala file eka load karanava pasuva eke thiyena varible access krnva
+      await dotenv.load(
+        fileName: envFile,
+      ); // 2 .name ekata adala file eka load karanava pasuva eke thiyena varible access krnva
       if (debugMode) debugPrint('✅ Loaded environment: $flavor from $envFile');
     } catch (e) {
       // Fallback to default .env
@@ -40,7 +43,7 @@ class EnvironmentManager {
   }
 
   // ========== REQUIRED CONFIGURATION ==========
-  
+
   String get supabaseUrl {
     return _getRequired('SUPABASE_URL');
   }
@@ -62,7 +65,7 @@ class EnvironmentManager {
   }
 
   // ========== GOOGLE OAUTH CONFIGURATION ==========
-  
+
   String get googleWebClientId {
     return dotenv.env['GOOGLE_WEB_CLIENT_ID'] ?? '';
   }
@@ -80,13 +83,13 @@ class EnvironmentManager {
   }
 
   bool get enableGoogleOAuth {
-    return dotenv.env['ENABLE_GOOGLE_OAUTH'] != 'false' && 
-           googleWebClientId.isNotEmpty && 
-           googleWebClientSecret.isNotEmpty;
+    return dotenv.env['ENABLE_GOOGLE_OAUTH'] != 'false' &&
+        googleWebClientId.isNotEmpty &&
+        googleWebClientSecret.isNotEmpty;
   }
 
   // ========== FACEBOOK OAUTH CONFIGURATION ==========
-  
+
   String get facebookAppId {
     return dotenv.env['FACEBOOK_APP_ID'] ?? '';
   }
@@ -96,13 +99,13 @@ class EnvironmentManager {
   }
 
   bool get enableFacebookOAuth {
-    return dotenv.env['ENABLE_FACEBOOK_OAUTH'] != 'false' && 
-           facebookAppId.isNotEmpty && 
-           facebookClientToken.isNotEmpty;
+    return dotenv.env['ENABLE_FACEBOOK_OAUTH'] != 'false' &&
+        facebookAppId.isNotEmpty &&
+        facebookClientToken.isNotEmpty;
   }
 
   // ========== APPLE OAUTH CONFIGURATION ==========
-  
+
   /// 🔥 NEW: Apple Service ID (from Apple Developer Console)
   String get appleServiceId {
     return dotenv.env['APPLE_SERVICE_ID'] ?? '';
@@ -119,20 +122,20 @@ class EnvironmentManager {
   }
 
   // ========== REDIRECT URL CONFIGURATION ==========
-  
+
   String get webRedirectUrl {
-    final customUrl = dotenv.env['WEB_REDIRECT_URL'];
-    if (customUrl != null && customUrl.isNotEmpty) {
-      return customUrl;
-    }
-    
+    // final customUrl = dotenv.env['WEB_REDIRECT_URL'];
+    // if (customUrl != null && customUrl.isNotEmpty) {
+    //   return customUrl;
+    // }
+
     // Default URLs based on environment
     if (isProduction) {
       return 'https://yourdomain.com/auth/callback';
     } else if (isStaging) {
       return 'https://staging.yourdomain.com/auth/callback';
     } else {
-       return '${Uri.base.origin}/auth/callback';     
+      return '${Uri.base.origin}/auth/callback';
     }
   }
 
@@ -158,33 +161,33 @@ class EnvironmentManager {
     final urls = <String>{
       // Supabase OAuth callback
       supabaseOAuthCallbackUrl,
-      
+
       // Web development URLs
       'http://localhost:3000/auth/callback',
       'http://localhost:5000/auth/callback',
       'http://127.0.0.1:3000/auth/callback',
       'http://127.0.0.1:5000/auth/callback',
-      
+
       // Mobile URLs
       mobileRedirectUrl,
       'com.example.mysalon://auth/callback',
     };
-    
+
     // Add Apple specific URLs
     if (enableAppleOAuth) {
       urls.add(appleRedirectUrl);
     }
-    
+
     // Add production URL if configured
     if (isProduction && dotenv.env['PRODUCTION_REDIRECT_URL'] != null) {
       urls.add(dotenv.env['PRODUCTION_REDIRECT_URL']!);
     }
-    
+
     return urls.toList();
   }
 
   // ========== OPTIONAL CONFIGURATION ==========
-  
+
   bool get debugMode {
     return dotenv.env['DEBUG'] == 'true' || isDevelopment;
   }
@@ -210,15 +213,15 @@ class EnvironmentManager {
   }
 
   // ========== OAUTH PROVIDER MANAGEMENT ==========
-  
+
   /// 🔥 UPDATED: List of enabled OAuth providers
   List<String> get enabledOAuthProviders {
     final providers = <String>[];
-    
+
     if (enableGoogleOAuth) providers.add('google');
     if (enableFacebookOAuth) providers.add('facebook');
     if (enableAppleOAuth) providers.add('apple'); // 👈 Apple එක add කරන්න
-    
+
     return providers;
   }
 
@@ -229,7 +232,7 @@ class EnvironmentManager {
         return enableGoogleOAuth;
       case 'facebook':
         return enableFacebookOAuth;
-      case 'apple':  // 👈 Apple support එක
+      case 'apple': // 👈 Apple support එක
         return enableAppleOAuth;
       default:
         return false;
@@ -240,15 +243,15 @@ class EnvironmentManager {
   bool hasValidOAuthConfiguration(String provider) {
     switch (provider.toLowerCase()) {
       case 'google':
-        return enableGoogleOAuth && 
-               googleWebClientId.isNotEmpty && 
-               googleWebClientSecret.isNotEmpty &&
-               googleWebClientId.endsWith('.apps.googleusercontent.com');
+        return enableGoogleOAuth &&
+            googleWebClientId.isNotEmpty &&
+            googleWebClientSecret.isNotEmpty &&
+            googleWebClientId.endsWith('.apps.googleusercontent.com');
       case 'facebook':
-        return enableFacebookOAuth && 
-               facebookAppId.isNotEmpty && 
-               facebookClientToken.isNotEmpty;
-      case 'apple':  // 👈 Apple validation
+        return enableFacebookOAuth &&
+            facebookAppId.isNotEmpty &&
+            facebookClientToken.isNotEmpty;
+      case 'apple': // 👈 Apple validation
         return enableAppleOAuth;
       default:
         return false;
@@ -256,7 +259,7 @@ class EnvironmentManager {
   }
 
   // ========== FEATURE FLAGS ==========
-  
+
   bool get enableBiometrics {
     return dotenv.env['ENABLE_BIOMETRICS'] != 'false';
   }
@@ -270,58 +273,65 @@ class EnvironmentManager {
   }
 
   // ========== ENVIRONMENT CHECKS ==========
-  
-  bool get isProduction => environment == 'production'; //meken karanne 'environment' kiyana metode ekata call karla den tiyena envirement eka .ev eken gannava ekai mekai samananam true venva.
+
+  bool get isProduction =>
+      environment ==
+      'production'; //meken karanne 'environment' kiyana metode ekata call karla den tiyena envirement eka .ev eken gannava ekai mekai samananam true venva.
   bool get isStaging => environment == 'staging';
   bool get isDevelopment => environment == 'development';
   bool get isTest => environment == 'test';
 
   // ========== VALIDATION ==========
-  
+
   /// 🔥 UPDATED: Validate with Apple support
   void validate() {
     final errors = <String>[];
-    
+
     // Check required variables
     if (supabaseUrl.isEmpty || supabaseUrl.contains('your-project')) {
       errors.add('SUPABASE_URL is invalid');
     }
-    
+
     if (supabaseAnonKey.isEmpty || supabaseAnonKey.contains('your-anon-key')) {
       errors.add('SUPABASE_ANON_KEY is invalid');
     }
-    
+
     // Check URL format
     if (!supabaseUrl.startsWith('https://')) {
       errors.add('SUPABASE_URL must use HTTPS');
     }
-    
+
     if (!supabaseUrl.contains('supabase.co')) {
       errors.add('SUPABASE_URL must be a valid Supabase URL');
     }
-    
+
     // Validate OAuth configurations if enabled
     if (enableGoogleOAuth) {
-      if (googleWebClientId.isEmpty || googleWebClientId.contains('your-client-id')) {
+      if (googleWebClientId.isEmpty ||
+          googleWebClientId.contains('your-client-id')) {
         errors.add('GOOGLE_WEB_CLIENT_ID is invalid');
       }
-      if (googleWebClientSecret.isEmpty || googleWebClientSecret.contains('your-client-secret')) {
+      if (googleWebClientSecret.isEmpty ||
+          googleWebClientSecret.contains('your-client-secret')) {
         errors.add('GOOGLE_WEB_CLIENT_SECRET is invalid');
       }
       if (!googleWebClientId.endsWith('.apps.googleusercontent.com')) {
-        errors.add('GOOGLE_WEB_CLIENT_ID must end with .apps.googleusercontent.com');
+        errors.add(
+          'GOOGLE_WEB_CLIENT_ID must end with .apps.googleusercontent.com',
+        );
       }
     }
-    
+
     if (enableFacebookOAuth) {
       if (facebookAppId.isEmpty || facebookAppId.contains('your-app-id')) {
         errors.add('FACEBOOK_APP_ID is invalid');
       }
-      if (facebookClientToken.isEmpty || facebookClientToken.contains('your-client-token')) {
+      if (facebookClientToken.isEmpty ||
+          facebookClientToken.contains('your-client-token')) {
         errors.add('FACEBOOK_CLIENT_TOKEN is invalid');
       }
     }
-    
+
     // 👈 Apple validation (optional)
     if (enableAppleOAuth) {
       // Apple doesn't require client ID validation for basic OAuth
@@ -329,14 +339,14 @@ class EnvironmentManager {
         debugPrint('🍎 Apple Service ID configured: $appleServiceId');
       }
     }
-    
+
     if (errors.isNotEmpty) {
       throw Exception('Environment validation failed:\n${errors.join('\n')}');
     }
   }
 
   // ========== HELPER METHODS ==========
-  
+
   String _getRequired(String key) {
     final value = dotenv.env[key];
     if (value == null || value.isEmpty) {
@@ -366,50 +376,56 @@ class EnvironmentManager {
   }
 
   // ========== DEBUG INFO ==========
-  
+
   /// 🔥 UPDATED: Print info with Apple support
   void printInfo() {
     if (!debugMode) return;
-    
+
     debugPrint('\n${'=' * 60}');
     debugPrint('🌍 ENVIRONMENT CONFIGURATION');
     debugPrint('=' * 60);
-    
+
     // App Info
     debugPrint('📱 App: $appName v$appVersion');
     debugPrint('🌐 Environment: $environment');
     debugPrint('🔧 Debug Mode: $debugMode');
     debugPrint('📝 Log Level: $logLevel');
-    
+
     // Supabase Info (partial for security)
     final url = supabaseUrl;
     final displayUrl = url.length > 40 ? '${url.substring(0, 40)}...' : url;
     debugPrint('🔗 Supabase URL: $displayUrl');
     debugPrint('🔑 Supabase Key: ${supabaseAnonKey.length} chars');
     debugPrint('🔗 Supabase OAuth URL: $supabaseOAuthCallbackUrl');
-    
+
     // OAuth Configuration
     debugPrint('\n🔐 OAuth Configuration:');
-    
+
     if (enableGoogleOAuth) {
       debugPrint('   • Google OAuth: ✅ Enabled');
       final googleId = googleWebClientId;
-      final displayGoogleId = googleId.length > 30 ? '${googleId.substring(0, 30)}...' : googleId;
+      final displayGoogleId = googleId.length > 30
+          ? '${googleId.substring(0, 30)}...'
+          : googleId;
       debugPrint('     - Client ID: $displayGoogleId');
-      debugPrint('     - Valid: ${googleWebClientId.endsWith('.apps.googleusercontent.com') ? '✅' : '❌'}');
+      debugPrint(
+        '     - Valid: ${googleWebClientId.endsWith('.apps.googleusercontent.com') ? '✅' : '❌'}',
+      );
     } else {
       debugPrint('   • Google OAuth: ❌ Disabled');
     }
-    
+
     if (enableFacebookOAuth) {
       debugPrint('   • Facebook OAuth: ✅ Enabled');
       final fbId = facebookAppId;
-      final displayFbId = fbId.length > 15 ? '${fbId.substring(0, 15)}...' : fbId;
+      final displayFbId = fbId.length > 15
+          ? '${fbId.substring(0, 15)}...'
+          : fbId;
       debugPrint('     - App ID: $displayFbId');
     } else {
       debugPrint('   • Facebook OAuth: ❌ Disabled');
     }
-    
+
     // 🔥 Apple status
     if (enableAppleOAuth) {
       debugPrint('   • Apple OAuth: ✅ Enabled');
@@ -419,7 +435,7 @@ class EnvironmentManager {
     } else {
       debugPrint('   • Apple OAuth: ❌ Disabled');
     }
-    
+
     // Redirect URLs
     debugPrint('\n🔄 Redirect URLs:');
     debugPrint('   • Web: $webRedirectUrl');
@@ -428,14 +444,14 @@ class EnvironmentManager {
     if (enableAppleOAuth) {
       debugPrint('   • Apple: $appleRedirectUrl');
     }
-    
+
     // Feature Flags
     debugPrint('\n🚀 Feature Flags:');
     debugPrint('   • Biometrics: ${enableBiometrics ? '✅' : '❌'}');
     debugPrint('   • Dark Mode: ${enableDarkMode ? '✅' : '❌'}');
     debugPrint('   • Notifications: ${enableNotifications ? '✅' : '❌'}');
     debugPrint('   • Analytics: ${enableAnalytics ? '✅' : '❌'}');
-    
+
     // Optional Config
     if (supportEmail != null) {
       debugPrint('📧 Support: $supportEmail');
@@ -443,33 +459,34 @@ class EnvironmentManager {
     if (websiteUrl != null) {
       debugPrint('🌐 Website: $websiteUrl');
     }
-    
+
     // Show non-secret variables in debug mode
     debugPrint('\n📋 Environment Variables:');
     debugPrint('-' * 30);
     dotenv.env.forEach((key, value) {
-      final isSecret = key.contains('KEY') || 
-                      key.contains('SECRET') || 
-                      key.contains('PASSWORD') ||
-                      key.contains('TOKEN') ||
-                      key.contains('PRIVATE');
-      
+      final isSecret =
+          key.contains('KEY') ||
+          key.contains('SECRET') ||
+          key.contains('PASSWORD') ||
+          key.contains('TOKEN') ||
+          key.contains('PRIVATE');
+
       if (!isSecret) {
         debugPrint('$key: $value');
       } else if (debugMode && key == 'ENVIRONMENT') {
         debugPrint('$key: $value');
       }
     });
-    
+
     debugPrint('=' * 60 + '\n');
   }
-  
+
   // ========== OAUTH VALIDATION METHODS ==========
-  
+
   /// 🔥 UPDATED: Validate OAuth configurations with Apple
   Map<String, dynamic> validateOAuthConfigurations() {
     final results = <String, dynamic>{};
-    
+
     // Google OAuth
     results['google'] = {
       'enabled': enableGoogleOAuth,
@@ -478,7 +495,7 @@ class EnvironmentManager {
       'validFormat': googleWebClientId.endsWith('.apps.googleusercontent.com'),
       'redirectUrls': getRequiredRedirectUrls(),
     };
-    
+
     // Facebook OAuth
     results['facebook'] = {
       'enabled': enableFacebookOAuth,
@@ -486,17 +503,17 @@ class EnvironmentManager {
       'clientToken': facebookClientToken.isNotEmpty,
       'redirectUrls': getRequiredRedirectUrls(),
     };
-    
+
     // 🔥 Apple OAuth
     results['apple'] = {
       'enabled': enableAppleOAuth,
       'serviceId': appleServiceId.isNotEmpty,
       'redirectUrls': getRequiredRedirectUrls(),
     };
-    
+
     return results;
   }
-  
+
   // Get OAuth provider configuration
   /// 🔥 UPDATED: Get provider config with Apple
   Map<String, dynamic>? getOAuthProviderConfig(String provider) {
@@ -515,7 +532,7 @@ class EnvironmentManager {
           'clientToken': facebookClientToken,
           'enabled': enableFacebookOAuth,
         };
-      case 'apple':  // 👈 Apple config
+      case 'apple': // 👈 Apple config
         return {
           'serviceId': appleServiceId,
           'redirectUrl': appleRedirectUrl,
