@@ -11,6 +11,7 @@ class BookingTile extends StatelessWidget {
   final double? price;
   final String? imageUrl;
   final bool showActions;
+  final VoidCallback? onComplete;  // 👈 Add this line
 
   const BookingTile({
     super.key,
@@ -24,6 +25,7 @@ class BookingTile extends StatelessWidget {
     this.price,
     this.imageUrl,
     this.showActions = false,
+    this.onComplete,  // 👈 Add this line
   });
 
   @override
@@ -197,16 +199,62 @@ class BookingTile extends StatelessWidget {
                           ),
                       ],
                     ),
+
+                    // 👇 Add action buttons if showActions is true and onComplete exists
+                    if (showActions && onComplete != null) ...[
+                      const SizedBox(height: 12),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          // Complete button
+                          ElevatedButton(
+                            onPressed: onComplete,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.green,
+                              foregroundColor: Colors.white,
+                              minimumSize: const Size(100, 36),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                            child: const Text('Complete'),
+                          ),
+                          const SizedBox(width: 8),
+                          // Reschedule button
+                          OutlinedButton(
+                            onPressed: () {
+                              // Handle reschedule
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Reschedule feature coming soon'),
+                                  duration: Duration(seconds: 1),
+                                ),
+                              );
+                            },
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.orange,
+                              side: const BorderSide(color: Colors.orange),
+                              minimumSize: const Size(100, 36),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                            child: const Text('Reschedule'),
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),
 
-              // Arrow icon
-              const Icon(
-                Icons.arrow_forward_ios,
-                size: 14,
-                color: Colors.grey,
-              ),
+              // Arrow icon - hide when actions are shown
+              if (!showActions)
+                const Icon(
+                  Icons.arrow_forward_ios,
+                  size: 14,
+                  color: Colors.grey,
+                ),
             ],
           ),
         ),

@@ -110,6 +110,19 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+
+<!-- cropping start -->
+        <provider
+            android:name="com.yalantis.ucrop.UCropFileProvider"
+            android:authorities="${applicationId}.ucrop"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/ucrop_paths" />
+        </provider>
+<!-- cropping end -->
+
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

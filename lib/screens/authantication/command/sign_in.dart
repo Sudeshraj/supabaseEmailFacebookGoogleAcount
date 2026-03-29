@@ -27,11 +27,13 @@ class _ReturningUserCheck {
   final String? email;
   final bool hasConsent;
   final bool hasAutoLoginSetting;
+  final List<String>? existingRoles;
 
   _ReturningUserCheck({
     this.email,
     this.hasConsent = false,
     this.hasAutoLoginSetting = true,
+    this.existingRoles,
   });
 }
 
@@ -280,46 +282,47 @@ class _SignInScreenState extends State<SignInScreen>
     }
   }
 
-  //  FIXED: Check if user is returning - ALWAYS return true for new users
+  // 🔥 FIXED: Check if user is returning - using user_roles table
   Future<_ReturningUserCheck> _checkIfReturningUser(String provider) async {
     try {
       final profiles = await SessionManager.getProfiles();
-      debugPrint(' Total profiles found: ${profiles.length}');
+      debugPrint('📊 Total profiles found: ${profiles.length}');
 
       if (profiles.isEmpty) {
-        debugPrint(' No profiles found - new user');
-        // NEW USER - return with default true
+        debugPrint('📊 No profiles found - new user');
         return _ReturningUserCheck(hasAutoLoginSetting: true);
       }
 
       for (var profile in profiles) {
         final profileProvider = profile['provider']?.toString().toLowerCase();
-        debugPrint(
-          ' Checking profile - Provider: $profileProvider, RememberMe: ${profile['rememberMe']}',
-        );
+        debugPrint('📊 Checking profile - Provider: $profileProvider');
 
         if (profileProvider == provider.toLowerCase()) {
           final email = profile['email']?.toString();
           final termsAccepted = profile['termsAcceptedAt'] != null;
           final privacyAccepted = profile['privacyAcceptedAt'] != null;
           final hasRememberMe = profile['rememberMe'] == true;
+          
+          // Get existing roles from profile
+          final existingRoles = profile['roles'] as List? ?? [];
 
-          debugPrint(' Found returning user: $email for provider: $provider');
-          debugPrint(' Has rememberMe: $hasRememberMe');
+          debugPrint('✅ Found returning user: $email for provider: $provider');
+          debugPrint('📊 Has rememberMe: $hasRememberMe');
+          debugPrint('📊 Existing roles: $existingRoles');
 
           return _ReturningUserCheck(
             email: email,
             hasConsent: termsAccepted && privacyAccepted,
             hasAutoLoginSetting: hasRememberMe,
+            existingRoles: existingRoles.isNotEmpty ? List<String>.from(existingRoles) : null,
           );
         }
       }
 
-      debugPrint(' No matching profile found for provider: $provider');
-      // NEW USER FOR THIS PROVIDER - return with default true
+      debugPrint('📊 No matching profile found for provider: $provider');
       return _ReturningUserCheck(hasAutoLoginSetting: true);
     } catch (e) {
-      debugPrint(' Error checking returning user: $e');
+      debugPrint('❌ Error checking returning user: $e');
       return _ReturningUserCheck(hasAutoLoginSetting: true);
     }
   }
@@ -330,9 +333,9 @@ class _SignInScreenState extends State<SignInScreen>
       setState(() {
         _hasSavedProfile = profiles.isNotEmpty;
       });
-      debugPrint(' Has saved profile: ${profiles.isNotEmpty}');
+      debugPrint('📊 Has saved profile: ${profiles.isNotEmpty}');
     } catch (e) {
-      debugPrint(' Error checking saved profiles: $e');
+      debugPrint('❌ Error checking saved profiles: $e');
     }
   }
 
@@ -347,7 +350,7 @@ class _SignInScreenState extends State<SignInScreen>
     return 'com.yourcompany.mysalon.staging://auth-callback';
   }
 
-  // Save OAuth profile
+  // 🔥 FIXED: Save OAuth profile with proper role handling
   Future<void> _saveOAuthProfile({
     required User user,
     required String providerToSave,
@@ -355,6 +358,7 @@ class _SignInScreenState extends State<SignInScreen>
     String? accessToken,
     String? refreshToken,
     bool? marketingConsent,
+    List<String>? existingRoles, // Add existing roles parameter
   }) async {
     try {
       final email = user.email!;
@@ -371,9 +375,7 @@ class _SignInScreenState extends State<SignInScreen>
         finalMarketingConsent = marketingConsent;
         finalMarketingConsentAt = marketingConsent ? now : null;
 
-        debugPrint(
-          ' Using marketing consent from parameter: $finalMarketingConsent',
-        );
+        debugPrint('📊 Using marketing consent from parameter: $finalMarketingConsent');
 
         await supabase.auth.updateUser(
           UserAttributes(
@@ -382,15 +384,13 @@ class _SignInScreenState extends State<SignInScreen>
               'terms_accepted_at': now.toIso8601String(),
               'privacy_accepted_at': now.toIso8601String(),
               'marketing_consent': finalMarketingConsent,
-              'marketing_consent_at': finalMarketingConsentAt
-                  ?.toIso8601String(),
+              'marketing_consent_at': finalMarketingConsentAt?.toIso8601String(),
             },
           ),
         );
-        debugPrint(' Updated auth metadata with marketing consent');
+        debugPrint('✅ Updated auth metadata with marketing consent');
       } else {
-        finalMarketingConsent =
-            userMetadata['marketing_consent'] as bool? ?? false;
+        finalMarketingConsent = userMetadata['marketing_consent'] as bool? ?? false;
 
         if (userMetadata['marketing_consent_at'] != null) {
           try {
@@ -402,9 +402,7 @@ class _SignInScreenState extends State<SignInScreen>
           }
         }
 
-        debugPrint(
-          ' Using marketing consent from metadata: $finalMarketingConsent',
-        );
+        debugPrint('📊 Using marketing consent from metadata: $finalMarketingConsent');
       }
 
       String finalProvider = providerToSave;
@@ -449,11 +447,44 @@ class _SignInScreenState extends State<SignInScreen>
         name = userMetadata['display_name'].toString();
       }
 
+      // 🔥 Check if user already has roles in database
+      List<String> finalRoles = [];
+      
+      // First, try to get from database
+      try {
+        final userRolesResponse = await supabase
+            .from('user_roles')
+            .select('''
+              role_id,
+              roles!inner (
+                name
+              )
+            ''')
+            .eq('user_id', user.id);
+
+        for (var roleEntry in userRolesResponse) {
+          final role = roleEntry['roles'] as Map?;
+          if (role != null && role['name'] != null) {
+            finalRoles.add(role['name'].toString());
+          }
+        }
+      } catch (e) {
+        debugPrint('📊 Error fetching user roles: $e');
+      }
+
+      // If no roles in database, use existing roles from profile
+      if (finalRoles.isEmpty && existingRoles != null && existingRoles.isNotEmpty) {
+        finalRoles = existingRoles;
+      }
+
+      debugPrint('📊 Final roles for profile: $finalRoles');
+
       await SessionManager.saveUserProfile(
         email: email,
         userId: user.id,
         name: name,
         photo: photoUrl ?? '',
+        roles: finalRoles, // Save roles
         rememberMe: rememberMe,
         refreshToken: refreshToken,
         accessToken: accessToken,
@@ -464,9 +495,9 @@ class _SignInScreenState extends State<SignInScreen>
         marketingConsentAt: finalMarketingConsentAt,
       );
 
-      debugPrint('Saved profile for $email with rememberMe: $rememberMe');
+      debugPrint('✅ Saved profile for $email with rememberMe: $rememberMe');
     } catch (e) {
-      debugPrint(' Error in _saveOAuthProfile: $e');
+      debugPrint('❌ Error in _saveOAuthProfile: $e');
     }
   }
 
@@ -588,29 +619,26 @@ class _SignInScreenState extends State<SignInScreen>
         : error.toString();
   }
 
-  // ✅FIXED: COMBINED OAuth DIALOG with Remember Me
+  // ✅ FIXED: COMBINED OAuth DIALOG with Remember Me
   Future<Map<String, dynamic>?> _showCombinedOAuthDialog({
     required String provider,
     required List<String> scopes,
     bool defaultAutoLogin = true,
+    List<String>? existingRoles,
   }) async {
-    // පරණ remember me setting එක load කරගන්නවා
     bool rememberMe = defaultAutoLogin;
     bool marketingConsent = false;
 
-    //  Saved profile එක තියෙනවා නම්, ඒකේ remember me setting එක ගන්නවා
     if (_hasSavedProfile) {
       final savedRememberMe = await SessionManager.isRememberMeEnabled();
       rememberMe = savedRememberMe;
-      debugPrint('Loaded saved remember me: $rememberMe');
+      debugPrint('📊 Loaded saved remember me: $rememberMe');
     } else {
-      debugPrint(' New user - default remember me: $rememberMe');
+      debugPrint('📊 New user - default remember me: $rememberMe');
     }
 
-    //  Check if mounted before using context
     if (!mounted) return null;
 
-    //  Use a local variable for the dialog result
     final dialogResult = await showDialog<Map<String, dynamic>>(
       context: context,
       barrierDismissible: false,
@@ -629,6 +657,61 @@ class _SignInScreenState extends State<SignInScreen>
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // Existing roles info (if any)
+                  if (existingRoles != null && existingRoles.isNotEmpty)
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.blue.shade200),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(Icons.info, size: 16, color: Colors.blue.shade700),
+                              const SizedBox(width: 8),
+                              Text(
+                                "You have existing profiles",
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.blue.shade700,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 8,
+                            children: existingRoles.map((role) {
+                              return Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 4,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: _getRoleColor(role).withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  _getRoleDisplayName(role),
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: _getRoleColor(role),
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                        ],
+                      ),
+                    ),
+
                   // OAuth Permissions Section
                   Container(
                     padding: const EdgeInsets.all(12),
@@ -715,11 +798,7 @@ class _SignInScreenState extends State<SignInScreen>
                           children: [
                             TextButton.icon(
                               onPressed: () {
-                                // ✅ Use push with dialogContext (this is safe as it's in the builder)
-                                // If you need to navigate to terms, you might want to:
-                                // 1. Close the dialog first, then navigate
-                                Navigator.pop(context); // Close dialog
-                                // Then navigate using the original context (if still mounted)
+                                Navigator.pop(context);
                                 if (mounted) {
                                   context.push('/terms');
                                 }
@@ -733,8 +812,7 @@ class _SignInScreenState extends State<SignInScreen>
                             ),
                             TextButton.icon(
                               onPressed: () {
-                                // Same approach for privacy policy
-                                Navigator.pop(context); // Close dialog
+                                Navigator.pop(context);
                                 if (mounted) {
                                   context.push('/privacy');
                                 }
@@ -889,10 +967,6 @@ class _SignInScreenState extends State<SignInScreen>
                       "App v${packageInfo.version} (${packageInfo.buildNumber})",
                       style: const TextStyle(fontSize: 10, color: Colors.grey),
                     ),
-                    //   child: Text(
-                    //     "App v${_env.appVersion} (${_env.environment})",
-                    //     style: const TextStyle(fontSize: 10, color: Colors.grey),
-                    //   ),
                   ),
                 ],
               ),
@@ -957,6 +1031,34 @@ class _SignInScreenState extends State<SignInScreen>
     }
   }
 
+  // Get role color
+  Color _getRoleColor(String role) {
+    switch (role.toLowerCase()) {
+      case 'owner':
+        return Colors.blueAccent;
+      case 'barber':
+        return Colors.orangeAccent;
+      case 'customer':
+        return Colors.greenAccent;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  // Get role display name
+  String _getRoleDisplayName(String role) {
+    switch (role.toLowerCase()) {
+      case 'owner':
+        return 'Owner';
+      case 'barber':
+        return 'Barber';
+      case 'customer':
+        return 'Customer';
+      default:
+        return role;
+    }
+  }
+
   // HYBRID GOOGLE SIGN-IN USING SERVICE
   Future<void> _signInWithGoogle() async {
     if (_loadingGoogle) return;
@@ -972,21 +1074,21 @@ class _SignInScreenState extends State<SignInScreen>
       debugPrint('Returning User Check - Google:');
       debugPrint('   Email: ${returningUserCheck.email}');
       debugPrint('   Has Consent: ${returningUserCheck.hasConsent}');
-      debugPrint(
-        '   Auto Login Setting: ${returningUserCheck.hasAutoLoginSetting}',
-      );
+      debugPrint('   Auto Login Setting: ${returningUserCheck.hasAutoLoginSetting}');
+      debugPrint('   Existing Roles: ${returningUserCheck.existingRoles}');
 
       // Dialog එකට පරණ setting එක pass කරන්න
       final result = await _showCombinedOAuthDialog(
         provider: 'Google',
         scopes: ['email', 'profile'],
         defaultAutoLogin: returningUserCheck.hasAutoLoginSetting,
+        existingRoles: returningUserCheck.existingRoles,
       );
 
       debugPrint('Dialog result: $result');
 
       if (result == null) {
-        debugPrint(' User cancelled dialog');
+        debugPrint('User cancelled dialog');
         setState(() => _loadingGoogle = false);
         return;
       }
@@ -994,8 +1096,8 @@ class _SignInScreenState extends State<SignInScreen>
       final bool userWantsAutoLogin = result['rememberMe'] ?? true;
       final bool marketingConsent = result['marketingConsent'] ?? false;
 
-      debugPrint(' User wants auto login: $userWantsAutoLogin');
-      debugPrint(' Marketing consent: $marketingConsent');
+      debugPrint('User wants auto login: $userWantsAutoLogin');
+      debugPrint('Marketing consent: $marketingConsent');
 
       setState(() => _rememberMe = userWantsAutoLogin);
       await SessionManager.setRememberMe(userWantsAutoLogin);
@@ -1020,9 +1122,9 @@ class _SignInScreenState extends State<SignInScreen>
         }
       }
 
-      //  WEB: Supabase OAuth
+      // WEB: Supabase OAuth
       if (kIsWeb) {
-        debugPrint(' Web platform - starting Supabase OAuth');
+        debugPrint('Web platform - starting Supabase OAuth');
         _authSubscription?.cancel();
 
         _authSubscription = supabase.auth.onAuthStateChange.listen((
@@ -1038,6 +1140,7 @@ class _SignInScreenState extends State<SignInScreen>
                 session: session,
                 userWantsAutoLogin: userWantsAutoLogin,
                 marketingConsent: marketingConsent,
+                existingRoles: returningUserCheck.existingRoles,
               );
             }
           }
@@ -1045,8 +1148,7 @@ class _SignInScreenState extends State<SignInScreen>
 
         await supabase.auth.signInWithOAuth(
           OAuthProvider.google,
-          // redirectTo: _getRedirectUrl(),
-           redirectTo:_env.getRedirectUrl(),
+          redirectTo: _env.getRedirectUrl(),
           scopes: 'email profile',
           queryParams: {'prompt': 'select_account'},
         );
@@ -1056,12 +1158,12 @@ class _SignInScreenState extends State<SignInScreen>
       // MOBILE: Use GoogleSignInService (Native)
       if (defaultTargetPlatform == TargetPlatform.android ||
           defaultTargetPlatform == TargetPlatform.iOS) {
-        debugPrint(' Mobile platform - using native Google Sign-In');
+        debugPrint('Mobile platform - using native Google Sign-In');
 
         final authData = await _googleSignInService.authenticateAndGetDetails();
 
         if (authData != null && authData['idToken'] != null) {
-          debugPrint(' Got auth data from Google');
+          debugPrint('Got auth data from Google');
 
           try {
             final response = await supabase.auth.signInWithIdToken(
@@ -1079,19 +1181,20 @@ class _SignInScreenState extends State<SignInScreen>
                 session: session,
                 userWantsAutoLogin: userWantsAutoLogin,
                 marketingConsent: marketingConsent,
+                existingRoles: returningUserCheck.existingRoles,
               );
               return;
             }
           } catch (e) {
-            debugPrint(' Supabase sign-in failed: $e');
+            debugPrint('Supabase sign-in failed: $e');
           }
         } else {
-          debugPrint(' Google authentication failed');
+          debugPrint('Google authentication failed');
         }
       }
 
       // FALLBACK: Supabase OAuth
-      debugPrint(' Falling back to Supabase OAuth');
+      debugPrint('Falling back to Supabase OAuth');
       _authSubscription?.cancel();
 
       _authSubscription = supabase.auth.onAuthStateChange.listen((data) async {
@@ -1104,6 +1207,7 @@ class _SignInScreenState extends State<SignInScreen>
               session: session,
               userWantsAutoLogin: userWantsAutoLogin,
               marketingConsent: marketingConsent,
+              existingRoles: returningUserCheck.existingRoles,
             );
           }
         }
@@ -1111,13 +1215,12 @@ class _SignInScreenState extends State<SignInScreen>
 
       await supabase.auth.signInWithOAuth(
         OAuthProvider.google,
-        // redirectTo: _getRedirectUrl(),
-         redirectTo:_env.getRedirectUrl(),
+        redirectTo: _env.getRedirectUrl(),
         scopes: 'email profile',
         queryParams: {'prompt': 'select_account'},
       );
     } on AuthException catch (e) {
-      debugPrint(' AuthException: ${e.message}');
+      debugPrint('AuthException: ${e.message}');
       if (!mounted) return;
       await showCustomAlert(
         context: context,
@@ -1126,7 +1229,7 @@ class _SignInScreenState extends State<SignInScreen>
         isError: true,
       );
     } catch (e) {
-      debugPrint(' Error: $e');
+      debugPrint('Error: $e');
       if (!mounted) return;
       await showCustomAlert(
         context: context,
@@ -1144,8 +1247,10 @@ class _SignInScreenState extends State<SignInScreen>
     required Session? session,
     required bool userWantsAutoLogin,
     required bool marketingConsent,
+    List<String>? existingRoles,
   }) async {
     if (!mounted) return;
+    
     await _saveOAuthProfile(
       user: user,
       providerToSave: 'google',
@@ -1153,7 +1258,9 @@ class _SignInScreenState extends State<SignInScreen>
       accessToken: session?.accessToken,
       refreshToken: session?.refreshToken,
       marketingConsent: marketingConsent,
+      existingRoles: existingRoles,
     );
+
     if (marketingConsent) {
       await SessionManager.updateMarketingConsent(
         email: user.email!,
@@ -1161,6 +1268,21 @@ class _SignInScreenState extends State<SignInScreen>
         consentedAt: DateTime.now(),
       );
     }
+
+    // Check if user already has roles in database
+    final userRolesResponse = await supabase
+        .from('user_roles')
+        .select('role_id')
+        .eq('user_id', user.id);
+
+    if (userRolesResponse.isEmpty) {
+      // New user - needs registration
+      if (mounted) {
+        context.go('/reg');
+        return;
+      }
+    }
+
     await _handlePostLogin(user.id);
   }
 
@@ -1184,6 +1306,7 @@ class _SignInScreenState extends State<SignInScreen>
         provider: 'Facebook',
         scopes: ['email', 'public_profile'],
         defaultAutoLogin: returningUserCheck.hasAutoLoginSetting,
+        existingRoles: returningUserCheck.existingRoles,
       );
 
       if (result == null) {
@@ -1243,6 +1366,7 @@ class _SignInScreenState extends State<SignInScreen>
                 session: session,
                 userWantsAutoLogin: userWantsAutoLogin,
                 marketingConsent: marketingConsent,
+                existingRoles: returningUserCheck.existingRoles,
               );
               return;
             }
@@ -1267,7 +1391,7 @@ class _SignInScreenState extends State<SignInScreen>
         isError: true,
       );
     } catch (e) {
-      debugPrint(' Facebook OAuth error: $e');
+      debugPrint('Facebook OAuth error: $e');
       if (!mounted) return;
       await showCustomAlert(
         context: context,
@@ -1296,6 +1420,7 @@ class _SignInScreenState extends State<SignInScreen>
             session: session,
             userWantsAutoLogin: userWantsAutoLogin,
             marketingConsent: marketingConsent,
+            existingRoles: returningUserCheck.existingRoles,
           );
         }
       }
@@ -1303,8 +1428,7 @@ class _SignInScreenState extends State<SignInScreen>
 
     await supabase.auth.signInWithOAuth(
       OAuthProvider.facebook,
-      // redirectTo: _getRedirectUrl(),
-       redirectTo:_env.getRedirectUrl(),
+      redirectTo: _env.getRedirectUrl(),
       scopes: 'public_profile',
     );
   }
@@ -1314,8 +1438,10 @@ class _SignInScreenState extends State<SignInScreen>
     required Session? session,
     required bool userWantsAutoLogin,
     required bool marketingConsent,
+    List<String>? existingRoles,
   }) async {
     if (!mounted) return;
+    
     await _saveOAuthProfile(
       user: user,
       providerToSave: 'facebook',
@@ -1323,7 +1449,9 @@ class _SignInScreenState extends State<SignInScreen>
       accessToken: session?.accessToken,
       refreshToken: session?.refreshToken,
       marketingConsent: marketingConsent,
+      existingRoles: existingRoles,
     );
+
     if (marketingConsent) {
       await SessionManager.updateMarketingConsent(
         email: user.email!,
@@ -1331,11 +1459,25 @@ class _SignInScreenState extends State<SignInScreen>
         consentedAt: DateTime.now(),
       );
     }
+
+    // Check if user already has roles in database
+    final userRolesResponse = await supabase
+        .from('user_roles')
+        .select('role_id')
+        .eq('user_id', user.id);
+
+    if (userRolesResponse.isEmpty) {
+      // New user - needs registration
+      if (mounted) {
+        context.go('/reg');
+        return;
+      }
+    }
+
     await _handlePostLogin(user.id);
   }
 
   // Apple Sign In
-  // UPDATED: Apple Sign In with Web Support
   Future<void> _signInWithApple() async {
     if (_loadingApple) return;
 
@@ -1349,6 +1491,7 @@ class _SignInScreenState extends State<SignInScreen>
         provider: 'Apple',
         scopes: ['email', 'name'],
         defaultAutoLogin: returningUserCheck.hasAutoLoginSetting,
+        existingRoles: returningUserCheck.existingRoles,
       );
 
       if (result == null) {
@@ -1376,7 +1519,7 @@ class _SignInScreenState extends State<SignInScreen>
 
       // WEB: Supabase OAuth (Apple)
       if (kIsWeb) {
-        debugPrint(' Web platform - starting Apple OAuth');
+        debugPrint('Web platform - starting Apple OAuth');
         await _signInWithAppleWeb(
           userWantsAutoLogin,
           marketingConsent,
@@ -1387,7 +1530,7 @@ class _SignInScreenState extends State<SignInScreen>
 
       // Android: Use Supabase OAuth
       if (defaultTargetPlatform == TargetPlatform.android) {
-        debugPrint(' Android platform - starting Apple OAuth');
+        debugPrint('Android platform - starting Apple OAuth');
         await _signInWithAppleWeb(
           userWantsAutoLogin,
           marketingConsent,
@@ -1398,7 +1541,7 @@ class _SignInScreenState extends State<SignInScreen>
 
       // iOS: Try native Apple Sign-In
       if (defaultTargetPlatform == TargetPlatform.iOS) {
-        debugPrint(' iOS platform - trying native Apple Sign-In');
+        debugPrint('iOS platform - trying native Apple Sign-In');
         try {
           final credential = await SignInWithApple.getAppleIDCredential(
             scopes: [
@@ -1408,7 +1551,7 @@ class _SignInScreenState extends State<SignInScreen>
           );
 
           if (credential.identityToken != null) {
-            debugPrint(' Got native Apple credential');
+            debugPrint('Got native Apple credential');
 
             final response = await supabase.auth.signInWithIdToken(
               provider: OAuthProvider.apple,
@@ -1424,6 +1567,7 @@ class _SignInScreenState extends State<SignInScreen>
                 session: session,
                 userWantsAutoLogin: userWantsAutoLogin,
                 marketingConsent: marketingConsent,
+                existingRoles: returningUserCheck.existingRoles,
               );
               return;
             }
@@ -1434,15 +1578,15 @@ class _SignInScreenState extends State<SignInScreen>
         }
       }
 
-      //  FALLBACK: Supabase OAuth
-      debugPrint(' Falling back to Supabase OAuth for Apple');
+      // FALLBACK: Supabase OAuth
+      debugPrint('Falling back to Supabase OAuth for Apple');
       await _signInWithAppleWeb(
         userWantsAutoLogin,
         marketingConsent,
         returningUserCheck,
       );
     } on AuthException catch (e) {
-      debugPrint(' Apple AuthException: ${e.message}');
+      debugPrint('Apple AuthException: ${e.message}');
       if (!mounted) return;
       await showCustomAlert(
         context: context,
@@ -1451,7 +1595,7 @@ class _SignInScreenState extends State<SignInScreen>
         isError: true,
       );
     } catch (e) {
-      debugPrint(' Apple Sign In error: $e');
+      debugPrint('Apple Sign In error: $e');
       if (!mounted) return;
       await showCustomAlert(
         context: context,
@@ -1473,7 +1617,7 @@ class _SignInScreenState extends State<SignInScreen>
     _authSubscription?.cancel();
 
     _authSubscription = supabase.auth.onAuthStateChange.listen((data) async {
-      debugPrint('📡 Apple Auth event: ${data.event}');
+      debugPrint('Apple Auth event: ${data.event}');
       if (data.event == AuthChangeEvent.signedIn && mounted) {
         final user = supabase.auth.currentUser;
         final session = supabase.auth.currentSession;
@@ -1483,19 +1627,18 @@ class _SignInScreenState extends State<SignInScreen>
             session: session,
             userWantsAutoLogin: userWantsAutoLogin,
             marketingConsent: marketingConsent,
+            existingRoles: returningUserCheck.existingRoles,
           );
         }
       }
     });
 
-    // Use redirect URL from EnvironmentManager
     final redirectUrl = _getRedirectUrl();
     debugPrint('Starting Apple OAuth with redirect: $redirectUrl');
 
     await supabase.auth.signInWithOAuth(
       OAuthProvider.apple,
-      // redirectTo: redirectUrl,
-       redirectTo:_env.getRedirectUrl(),
+      redirectTo: _env.getRedirectUrl(),
       scopes: 'email name',
     );
   }
@@ -1505,6 +1648,7 @@ class _SignInScreenState extends State<SignInScreen>
     required Session? session,
     required bool userWantsAutoLogin,
     required bool marketingConsent,
+    List<String>? existingRoles,
   }) async {
     if (!mounted) return;
     debugPrint('Completing Apple Sign-In for: ${user.email}');
@@ -1516,6 +1660,7 @@ class _SignInScreenState extends State<SignInScreen>
       accessToken: session?.accessToken,
       refreshToken: session?.refreshToken,
       marketingConsent: marketingConsent,
+      existingRoles: existingRoles,
     );
 
     if (marketingConsent) {
@@ -1525,10 +1670,25 @@ class _SignInScreenState extends State<SignInScreen>
         consentedAt: DateTime.now(),
       );
     }
+
+    // Check if user already has roles in database
+    final userRolesResponse = await supabase
+        .from('user_roles')
+        .select('role_id')
+        .eq('user_id', user.id);
+
+    if (userRolesResponse.isEmpty) {
+      // New user - needs registration
+      if (mounted) {
+        context.go('/reg');
+        return;
+      }
+    }
+
     await _handlePostLogin(user.id);
   }
 
-  // Handle post-login
+  // 🔥 FIXED: Handle post-login with proper role fetching from user_roles
   Future<void> _handlePostLogin(String userId) async {
     try {
       if (!mounted) return;
@@ -1543,6 +1703,7 @@ class _SignInScreenState extends State<SignInScreen>
 
       final email = user.email!;
 
+      // 🔥 1. Check profile status (blocked/active)
       final profileCheck = await supabase
           .from('profiles')
           .select('is_blocked, is_active')
@@ -1581,37 +1742,45 @@ class _SignInScreenState extends State<SignInScreen>
         }
       }
 
-      final profiles = await supabase
-          .from('profiles')
+      // 🔥 2. FIXED: Get user roles from user_roles table (not profiles)
+      final userRolesResponse = await supabase
+          .from('user_roles')
           .select('''
             role_id,
-            is_active,
-            is_blocked,
             roles!inner (
               name
             )
           ''')
-          .eq('id', userId)
-          .eq('is_active', true)
-          .eq('is_blocked', false);
+          .eq('user_id', userId);
 
+      debugPrint('📋 userRolesResponse: $userRolesResponse');
+
+      // 🔥 3. Extract role names
       final List<String> roleNames = [];
-      for (var profile in profiles) {
-        final role = profile['roles'] as Map?;
+      for (var roleEntry in userRolesResponse) {
+        final role = roleEntry['roles'] as Map?;
         if (role != null && role['name'] != null) {
           roleNames.add(role['name'].toString());
         }
       }
 
+      debugPrint('📋 Extracted role names: $roleNames');
+
+      // 🔥 4. Save to SessionManager
       await SessionManager.saveUserRoles(email: email, roles: roleNames);
 
+      // 🔥 5. No roles found - go to registration
       if (roleNames.isEmpty) {
+        debugPrint('⚠️ No roles found, redirecting to /reg');
         if (mounted) context.go('/reg');
         return;
       }
 
+      // 🔥 6. Single role - direct dashboard
       if (roleNames.length == 1) {
         final singleRole = roleNames.first;
+        debugPrint('✅ Single role: $singleRole, saving and redirecting');
+
         await SessionManager.saveCurrentRole(singleRole);
         await appState.refreshState();
 
@@ -1634,27 +1803,38 @@ class _SignInScreenState extends State<SignInScreen>
         return;
       }
 
+      // 🔥 7. Multiple roles
       if (roleNames.length > 1) {
+        debugPrint('🔄 Multiple roles: $roleNames');
+
+        // Check if there's a saved role
         final savedRole = await SessionManager.getCurrentRole();
+        debugPrint('📋 Saved role from SessionManager: $savedRole');
 
         if (savedRole != null && roleNames.contains(savedRole)) {
+          // Use saved role
+          debugPrint('✅ Using saved role: $savedRole');
           await SessionManager.saveCurrentRole(savedRole);
           await appState.refreshState();
 
+          if (!mounted) return;
+
           switch (savedRole) {
             case 'owner':
-              if (mounted) context.go('/owner');
+              context.go('/owner');
               break;
             case 'barber':
-              if (mounted) context.go('/barber');
+              context.go('/barber');
               break;
             default:
-              if (mounted) context.go('/customer');
+              context.go('/customer');
               break;
           }
           return;
         }
 
+        // No saved role - go to role selector
+        debugPrint('🔄 No saved role, going to role selector');
         if (mounted) {
           context.go(
             '/role-selector',
@@ -1664,10 +1844,13 @@ class _SignInScreenState extends State<SignInScreen>
         return;
       }
 
+      // Fallback
+      debugPrint('⚠️ Fallback - refreshing app state');
       appState.refreshState();
       if (mounted) context.go('/');
+
     } catch (e) {
-      debugPrint('Post-login error: $e');
+      debugPrint('❌ Post-login error: $e');
       appState.refreshState();
       if (mounted) context.go('/');
     }
@@ -1680,6 +1863,16 @@ class _SignInScreenState extends State<SignInScreen>
     }
 
     final code = e.code ?? '';
+    final message = e.message.toLowerCase();
+
+    if (message.contains('network') || message.contains('connection')) {
+      return "Please check your internet connection and try again.";
+    }
+
+    if (message.contains('cancelled') || message.contains('canceled')) {
+      return "Sign in was cancelled.";
+    }
+
     switch (code) {
       case 'oauth_callback':
       case 'invalid_client':
@@ -1758,15 +1951,6 @@ $provider OAuth Configuration Required:
             ),
           ),
 
-        // if (enabledProviders.contains('apple'))
-        //   Padding(
-        //     padding: const EdgeInsets.only(bottom: 12),
-        //     child: _SocialLoginButton(
-        //       provider: 'apple',
-        //       onPressed: _signInWithApple,
-        //       isLoading: _loadingApple,
-        //     ),
-        //   ),
         Padding(
           padding: const EdgeInsets.only(bottom: 12),
           child: _SocialLoginButton(
@@ -2319,7 +2503,6 @@ class _SocialLoginButton extends StatelessWidget {
       case 'facebook':
         return SvgPicture.asset('icons/facebook.svg', width: 18, height: 18);
       case 'apple':
-        // return const Icon(Icons.apple, size: 18);
         return SvgPicture.asset('icons/apple.svg', width: 20, height: 20);
       case 'password':
         return Icon(

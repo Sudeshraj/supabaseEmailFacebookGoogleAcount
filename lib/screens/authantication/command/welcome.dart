@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_application_1/alertBox/show_logout_conf.dart';
-import 'package:flutter_application_1/main.dart';
+// import 'package:flutter_application_1/alertBox/show_logout_conf.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../services/session_manager.dart';
@@ -424,7 +423,7 @@ Future<void> _handleLogout() async {
                           Expanded(
                             child: _roleCard(
                               image: 'salon.png',
-                              title: 'Salon',
+                              title: 'Owner',
                               accentColor: _businessBlue,
                               onTap: () => widget.onNext('owner'),
                             ),
@@ -476,7 +475,7 @@ Future<void> _handleLogout() async {
                       const SizedBox(height: 12),
 
                       _actionButton(
-                        label: ' Create salon account',
+                        label: ' Create owner account',
                         color: _businessBlue,
                         icon: Icons.storefront,
                         onPressed: () => widget.onNext('owner'),
