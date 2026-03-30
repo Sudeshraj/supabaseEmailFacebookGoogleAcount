@@ -19,11 +19,10 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   List<Map<String, dynamic>> _barbers = [];
   List<Map<String, dynamic>> _schedules = [];
   Map<String, List<Map<String, dynamic>>> _groupedSchedules = {};
-  
+
   // Salon default times
   TimeOfDay? _salonOpenTime;
   TimeOfDay? _salonCloseTime;
-  bool _salonTimesLoaded = false;
 
   // Days of week mapping
   final Map<int, String> _dayNames = {
@@ -44,7 +43,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
 
   Future<void> _loadSalonTimes() async {
     if (widget.salonId == null) return;
-    
+
     try {
       final salonIdInt = int.parse(widget.salonId!);
       final salonResponse = await supabase
@@ -52,7 +51,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
           .select('open_time, close_time')
           .eq('id', salonIdInt)
           .maybeSingle();
-          
+
       if (salonResponse != null) {
         final openTimeStr = salonResponse['open_time'] as String?;
         if (openTimeStr != null) {
@@ -62,7 +61,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
             minute: int.parse(parts[1]),
           );
         }
-        
+
         final closeTimeStr = salonResponse['close_time'] as String?;
         if (closeTimeStr != null) {
           final parts = closeTimeStr.split(':');
@@ -72,12 +71,12 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
           );
         }
       }
-      
-      _salonTimesLoaded = true;
-      debugPrint('✅ Salon times loaded - Open: $_salonOpenTime, Close: $_salonCloseTime');
+
+      debugPrint(
+        '✅ Salon times loaded - Open: $_salonOpenTime, Close: $_salonCloseTime',
+      );
     } catch (e) {
       debugPrint('❌ Error loading salon times: $e');
-      _salonTimesLoaded = true;
     }
   }
 
@@ -95,9 +94,9 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
 
     try {
       final salonIdInt = int.parse(widget.salonId!);
-      
+
       await _loadSalonTimes();
-      
+
       final salonBarbersResponse = await supabase
           .from('salon_barbers')
           .select('id, barber_id, status')
@@ -131,7 +130,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
       for (var sb in salonBarbersResponse) {
         final barberId = sb['barber_id'] as String;
         final profile = profileMap[barberId] ?? {};
-        
+
         barbersList.add({
           'id': barberId,
           'salon_barber_id': sb['id'],
@@ -141,7 +140,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
           'status': sb['status'],
         });
       }
-      
+
       _barbers = barbersList;
 
       if (_barbers.isNotEmpty) {
@@ -162,9 +161,10 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
           _groupedSchedules[barberId]!.add(schedule);
         }
       }
-      
-      debugPrint('✅ Loaded ${_barbers.length} barbers, ${_schedules.length} schedules');
 
+      debugPrint(
+        '✅ Loaded ${_barbers.length} barbers, ${_schedules.length} schedules',
+      );
     } catch (e) {
       debugPrint('❌ Error loading schedules: $e');
       if (mounted) {
@@ -180,22 +180,26 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   Future<void> _addSchedule(String barberId) async {
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
+      barrierDismissible: false,
       builder: (context) => _AddScheduleDialog(
         barberId: barberId,
         salonId: widget.salonId!,
-        existingSchedules: _schedules.where((s) => s['barber_id'] == barberId).toList(),
+        existingSchedules: _schedules
+            .where((s) => s['barber_id'] == barberId)
+            .toList(),
         defaultOpenTime: _salonOpenTime,
         defaultCloseTime: _salonCloseTime,
       ),
     );
 
-    if (result != null) {
+    if (result != null && result['success'] == true) {
       await _loadData();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Schedule added successfully'),
             backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
           ),
         );
       }
@@ -205,6 +209,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   Future<void> _editSchedule(Map<String, dynamic> schedule) async {
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
+      barrierDismissible: false,
       builder: (context) => _EditScheduleDialog(
         schedule: schedule,
         defaultOpenTime: _salonOpenTime,
@@ -212,14 +217,80 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
       ),
     );
 
-    if (result != null) {
+    if (result != null && result['success'] == true) {
       await _loadData();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Schedule updated successfully'),
             backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
           ),
+        );
+      }
+    }
+  }
+
+  Future<void> _toggleWorkingStatus(Map<String, dynamic> schedule) async {
+    final bool newStatus = !(schedule['is_working'] ?? true);
+
+    // Optimistic update
+    setState(() {
+      final index = _schedules.indexWhere((s) => s['id'] == schedule['id']);
+      if (index != -1) {
+        _schedules[index]['is_working'] = newStatus;
+      }
+      final barberId = schedule['barber_id'] as String;
+      if (_groupedSchedules.containsKey(barberId)) {
+        final scheduleIndex = _groupedSchedules[barberId]!.indexWhere(
+          (s) => s['id'] == schedule['id'],
+        );
+        if (scheduleIndex != -1) {
+          _groupedSchedules[barberId]![scheduleIndex]['is_working'] = newStatus;
+        }
+      }
+    });
+
+    try {
+      await supabase
+          .from('barber_schedules')
+          .update({'is_working': newStatus})
+          .eq('id', schedule['id']);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              newStatus ? 'Working day enabled' : 'Working day disabled',
+            ),
+            backgroundColor: newStatus ? Colors.green : Colors.orange,
+            duration: const Duration(seconds: 1),
+          ),
+        );
+      }
+    } catch (e) {
+      // Revert on error
+      debugPrint('❌ Error updating working status: $e');
+      setState(() {
+        final index = _schedules.indexWhere((s) => s['id'] == schedule['id']);
+        if (index != -1) {
+          _schedules[index]['is_working'] = !newStatus;
+        }
+        final barberId = schedule['barber_id'] as String;
+        if (_groupedSchedules.containsKey(barberId)) {
+          final scheduleIndex = _groupedSchedules[barberId]!.indexWhere(
+            (s) => s['id'] == schedule['id'],
+          );
+          if (scheduleIndex != -1) {
+            _groupedSchedules[barberId]![scheduleIndex]['is_working'] =
+                !newStatus;
+          }
+        }
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
         );
       }
     }
@@ -247,6 +318,8 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     );
 
     if (confirm == true) {
+      setState(() => _isLoading = true);
+
       try {
         await supabase.from('barber_schedules').delete().eq('id', scheduleId);
         await _loadData();
@@ -255,11 +328,18 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
             const SnackBar(
               content: Text('Schedule deleted'),
               backgroundColor: Colors.orange,
+              duration: Duration(seconds: 2),
             ),
           );
         }
       } catch (e) {
         debugPrint('❌ Error deleting schedule: $e');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          );
+          setState(() => _isLoading = false);
+        }
       }
     }
   }
@@ -299,12 +379,14 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
         ],
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: Color(0xFFFF6B8B)))
+          ? const Center(
+              child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+            )
           : _barbers.isEmpty
-              ? _buildEmptyState(isWeb, padding)
-              : isWeb
-                  ? _buildWebView(padding, screenWidth)
-                  : _buildMobileView(padding),
+          ? _buildEmptyState(isWeb, padding)
+          : isWeb
+          ? _buildWebView(padding, screenWidth)
+          : _buildMobileView(padding),
     );
   }
 
@@ -315,11 +397,21 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.person_off, size: isWeb ? 80 : 64, color: Colors.grey[400]),
+            Icon(
+              Icons.person_off,
+              size: isWeb ? 80 : 64,
+              color: Colors.grey[400],
+            ),
             const SizedBox(height: 16),
-            const Text('No barbers found', style: TextStyle(fontSize: 18, color: Colors.grey)),
+            const Text(
+              'No barbers found',
+              style: TextStyle(fontSize: 18, color: Colors.grey),
+            ),
             const SizedBox(height: 8),
-            Text('Add barbers first to manage schedules', style: TextStyle(color: Colors.grey[600])),
+            Text(
+              'Add barbers first to manage schedules',
+              style: TextStyle(color: Colors.grey[600]),
+            ),
             const SizedBox(height: 16),
             ElevatedButton(
               onPressed: () => context.pop(),
@@ -338,20 +430,46 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Card(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
             child: Padding(
               padding: EdgeInsets.all(padding),
               child: Row(
                 children: [
                   Icon(Icons.people, color: const Color(0xFFFF6B8B)),
                   const SizedBox(width: 12),
-                  Text('Total Barbers: ${_barbers.length}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  Text(
+                    'Total Barbers: ${_barbers.length}',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                   const SizedBox(width: 24),
                   Container(width: 1, height: 30, color: Colors.grey[300]),
                   const SizedBox(width: 24),
                   Icon(Icons.schedule, color: Colors.green),
                   const SizedBox(width: 12),
-                  Text('Total Schedules: ${_schedules.length}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  Text(
+                    'Total Schedules: ${_schedules.length}',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(width: 24),
+                  Container(width: 1, height: 30, color: Colors.grey[300]),
+                  const SizedBox(width: 24),
+                  Icon(Icons.toggle_on, color: Colors.blue),
+                  const SizedBox(width: 12),
+                  Text(
+                    'Working Days: ${_schedules.where((s) => s['is_working'] == true).length}',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -391,7 +509,11 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     );
   }
 
-  Widget _buildBarberCard(Map<String, dynamic> barber, List<Map<String, dynamic>> schedules, bool isWeb) {
+  Widget _buildBarberCard(
+    Map<String, dynamic> barber,
+    List<Map<String, dynamic>> schedules,
+    bool isWeb,
+  ) {
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -401,7 +523,10 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     );
   }
 
-  Widget _buildWebBarberCard(Map<String, dynamic> barber, List<Map<String, dynamic>> schedules) {
+  Widget _buildWebBarberCard(
+    Map<String, dynamic> barber,
+    List<Map<String, dynamic>> schedules,
+  ) {
     return Padding(
       padding: const EdgeInsets.all(12),
       child: Column(
@@ -412,10 +537,18 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
               CircleAvatar(
                 radius: 24,
                 backgroundColor: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
-                backgroundImage: barber['avatar'] != null ? NetworkImage(barber['avatar']) : null,
+                backgroundImage: barber['avatar'] != null
+                    ? NetworkImage(barber['avatar'])
+                    : null,
                 child: barber['avatar'] == null
-                    ? Text(barber['name'][0].toUpperCase(),
-                        style: const TextStyle(color: Color(0xFFFF6B8B), fontWeight: FontWeight.bold, fontSize: 16))
+                    ? Text(
+                        barber['name'][0].toUpperCase(),
+                        style: const TextStyle(
+                          color: Color(0xFFFF6B8B),
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                      )
                     : null,
               ),
               const SizedBox(width: 12),
@@ -423,8 +556,17 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(barber['name'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                    Text('${schedules.length} schedules', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                    Text(
+                      barber['name'],
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                    Text(
+                      '${schedules.where((s) => s['is_working'] == true).length} Working / ${schedules.length} Total',
+                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                    ),
                   ],
                 ),
               ),
@@ -440,25 +582,103 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
           const Divider(height: 16),
           Expanded(
             child: schedules.isEmpty
-                ? Center(child: Text('No schedules', style: TextStyle(color: Colors.grey[400])))
+                ? Center(
+                    child: Text(
+                      'No schedules',
+                      style: TextStyle(color: Colors.grey[400]),
+                    ),
+                  )
                 : ListView.separated(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
                     itemCount: schedules.length,
                     separatorBuilder: (_, __) => const SizedBox(height: 4),
                     itemBuilder: (context, idx) {
                       final schedule = schedules[idx];
-                      final dayName = _dayNames[schedule['day_of_week']] ?? 'Unknown';
+                      final dayName =
+                          _dayNames[schedule['day_of_week']] ?? 'Unknown';
                       final startTime = _formatTime(schedule['start_time']);
                       final endTime = _formatTime(schedule['end_time']);
+                      final isWorking = schedule['is_working'] ?? true;
+
                       return Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
                         decoration: BoxDecoration(
-                          color: Colors.green.withValues(alpha: 0.05),
+                          color: isWorking
+                              ? Colors.green.withValues(alpha: 0.05)
+                              : Colors.red.withValues(alpha: 0.05),
                           borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: isWorking
+                                ? Colors.green.withValues(alpha: 0.3)
+                                : Colors.red.withValues(alpha: 0.3),
+                            width: 0.5,
+                          ),
                         ),
                         child: Row(
                           children: [
-                            Expanded(flex: 2, child: Text(dayName.substring(0, 3), style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12))),
-                            Expanded(flex: 3, child: Text('$startTime - $endTime', style: TextStyle(fontSize: 11, color: Colors.grey[700]))),
+                            Expanded(
+                              flex: 2,
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    isWorking
+                                        ? Icons.check_circle
+                                        : Icons.cancel,
+                                    size: 14,
+                                    color: isWorking
+                                        ? Colors.green
+                                        : Colors.red,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    dayName.substring(0, 3),
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 12,
+                                      color: isWorking
+                                          ? Colors.black87
+                                          : Colors.grey[600],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Expanded(
+                              flex: 3,
+                              child: Text(
+                                '$startTime - $endTime',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: isWorking
+                                      ? Colors.grey[700]
+                                      : Colors.grey[500],
+                                  decoration: isWorking
+                                      ? null
+                                      : TextDecoration.lineThrough,
+                                ),
+                              ),
+                            ),
+                            // Working Day Toggle Switch (FIXED)
+                            SizedBox(
+                              width: 40,
+                              height: 30,
+                              child: Transform.scale(
+                                scale: 0.7,
+                                child: Switch(
+                                  value: isWorking,
+                                  onChanged: (_) =>
+                                      _toggleWorkingStatus(schedule),
+                                  activeThumbColor: Colors.green,
+                                  inactiveThumbColor: Colors.red,
+                                  materialTapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
+                                ),
+                              ),
+                            ),
                             IconButton(
                               icon: const Icon(Icons.edit, size: 14),
                               onPressed: () => _editSchedule(schedule),
@@ -466,7 +686,11 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
                               constraints: const BoxConstraints(),
                             ),
                             IconButton(
-                              icon: const Icon(Icons.delete, size: 14, color: Colors.red),
+                              icon: const Icon(
+                                Icons.delete,
+                                size: 14,
+                                color: Colors.red,
+                              ),
                               onPressed: () => _deleteSchedule(schedule['id']),
                               padding: EdgeInsets.zero,
                               constraints: const BoxConstraints(),
@@ -482,70 +706,248 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     );
   }
 
-  Widget _buildMobileBarberCard(Map<String, dynamic> barber, List<Map<String, dynamic>> schedules) {
-    return Theme(
-      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-      child: ExpansionTile(
-        leading: CircleAvatar(
-          backgroundColor: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
-          backgroundImage: barber['avatar'] != null ? NetworkImage(barber['avatar']) : null,
-          child: barber['avatar'] == null
-              ? Text(barber['name'][0].toUpperCase(),
-                  style: const TextStyle(color: Color(0xFFFF6B8B), fontWeight: FontWeight.bold))
-              : null,
-        ),
-        title: Text(barber['name'], style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Text('${schedules.length} schedules'),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              icon: const Icon(Icons.add, color: Colors.green),
-              onPressed: () => _addSchedule(barber['id']),
-              tooltip: 'Add Schedule',
-            ),
-            const Icon(Icons.keyboard_arrow_down),
-          ],
-        ),
-        children: schedules.isEmpty
-            ? [const Padding(padding: EdgeInsets.all(16), child: Text('No schedules set', style: TextStyle(color: Colors.grey)))]
-            : schedules.map((schedule) {
-                final dayName = _dayNames[schedule['day_of_week']] ?? 'Unknown';
-                final startTime = _formatTime(schedule['start_time']);
-                final endTime = _formatTime(schedule['end_time']);
-                return ListTile(
-                  leading: Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: Colors.green.withValues(alpha: 0.1),
-                      shape: BoxShape.circle,
+  Widget _buildMobileBarberCard(
+    Map<String, dynamic> barber,
+    List<Map<String, dynamic>> schedules,
+  ) {
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          leading: CircleAvatar(
+            backgroundColor: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+            backgroundImage: barber['avatar'] != null
+                ? NetworkImage(barber['avatar'])
+                : null,
+            child: barber['avatar'] == null
+                ? Text(
+                    barber['name'][0].toUpperCase(),
+                    style: const TextStyle(
+                      color: Color(0xFFFF6B8B),
+                      fontWeight: FontWeight.bold,
                     ),
-                    child: const Icon(Icons.work, color: Colors.green, size: 20),
-                  ),
-                  title: Text(dayName, style: const TextStyle(fontWeight: FontWeight.w600)),
-                  subtitle: Text('$startTime - $endTime'),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.edit, size: 18),
-                        onPressed: () => _editSchedule(schedule),
+                  )
+                : null,
+          ),
+          title: Text(
+            barber['name'],
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+          subtitle: Text(
+            '${schedules.where((s) => s['is_working'] == true).length} Working / ${schedules.length} Total',
+            style: TextStyle(color: Colors.grey[600], fontSize: 12),
+          ),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.add, color: Colors.green),
+                onPressed: () => _addSchedule(barber['id']),
+                tooltip: 'Add Schedule',
+              ),
+              const Icon(Icons.keyboard_arrow_down),
+            ],
+          ),
+          children: schedules.isEmpty
+              ? [
+                  const Padding(
+                    padding: EdgeInsets.all(16),
+                    child: Center(
+                      child: Text(
+                        'No schedules set',
+                        style: TextStyle(color: Colors.grey),
                       ),
-                      IconButton(
-                        icon: const Icon(Icons.delete, size: 18, color: Colors.red),
-                        onPressed: () => _deleteSchedule(schedule['id']),
-                      ),
-                    ],
+                    ),
                   ),
-                );
-              }).toList(),
+                ]
+              : schedules.map((schedule) {
+                  final dayName =
+                      _dayNames[schedule['day_of_week']] ?? 'Unknown';
+                  final startTime = _formatTime(schedule['start_time']);
+                  final endTime = _formatTime(schedule['end_time']);
+                  final isWorking = schedule['is_working'] ?? true;
+
+                  return Container(
+                    margin: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: isWorking
+                          ? Colors.green.withValues(alpha: 0.05)
+                          : Colors.red.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: isWorking
+                            ? Colors.green.withValues(alpha: 0.3)
+                            : Colors.red.withValues(alpha: 0.3),
+                        width: 0.5,
+                      ),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 8,
+                        horizontal: 12,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Day and Status Row
+                          Row(
+                            children: [
+                              Container(
+                                width: 36,
+                                height: 36,
+                                decoration: BoxDecoration(
+                                  color: isWorking
+                                      ? Colors.green.withValues(alpha: 0.1)
+                                      : Colors.red.withValues(alpha: 0.1),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Icon(
+                                  isWorking ? Icons.work : Icons.work_off,
+                                  color: isWorking ? Colors.green : Colors.red,
+                                  size: 18,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Text(
+                                          dayName,
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w600,
+                                            fontSize: 14,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 8,
+                                            vertical: 2,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: isWorking
+                                                ? Colors.green
+                                                : Colors.red,
+                                            borderRadius: BorderRadius.circular(
+                                              12,
+                                            ),
+                                          ),
+                                          child: Text(
+                                            isWorking ? 'Working' : 'Off',
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      '$startTime - $endTime',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: isWorking
+                                            ? Colors.grey[700]
+                                            : Colors.grey[500],
+                                        decoration: isWorking
+                                            ? null
+                                            : TextDecoration.lineThrough,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              // Working Day Toggle Switch
+                              SizedBox(
+                                width: 50,
+                                height: 40,
+                                child: Transform.scale(
+                                  scale: 0.7,
+                                  child: Switch(
+                                    value: isWorking,
+                                    onChanged: (_) =>
+                                        _toggleWorkingStatus(schedule),
+                                    activeThumbColor: Colors.green,
+                                    inactiveThumbColor: Colors.red,
+                                    materialTapTargetSize:
+                                        MaterialTapTargetSize.shrinkWrap,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          // Action Buttons Row
+                          const SizedBox(height: 8),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
+                              TextButton.icon(
+                                onPressed: () => _editSchedule(schedule),
+                                icon: const Icon(Icons.edit, size: 16),
+                                label: const Text(
+                                  'Edit',
+                                  style: TextStyle(fontSize: 12),
+                                ),
+                                style: TextButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 4,
+                                  ),
+                                  minimumSize: Size.zero,
+                                  tapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              TextButton.icon(
+                                onPressed: () =>
+                                    _deleteSchedule(schedule['id']),
+                                icon: const Icon(
+                                  Icons.delete,
+                                  size: 16,
+                                  color: Colors.red,
+                                ),
+                                label: const Text(
+                                  'Delete',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.red,
+                                  ),
+                                ),
+                                style: TextButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 4,
+                                  ),
+                                  minimumSize: Size.zero,
+                                  tapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }).toList(),
+        ),
       ),
     );
   }
 }
 
-// ==================== ENHANCED TIME PICKER (WORKING FIXED) ====================
+// ==================== ENHANCED TIME PICKER ====================
 class _EnhancedTimePicker extends StatefulWidget {
   final TimeOfDay? initialTime;
   final ValueChanged<TimeOfDay> onTimeSelected;
@@ -578,7 +980,7 @@ class _EnhancedTimePickerState extends State<_EnhancedTimePicker> {
     if (widget.initialTime != null) {
       final hour24 = widget.initialTime!.hour;
       final minute = widget.initialTime!.minute;
-      
+
       if (hour24 == 0) {
         _selectedHour = 12;
         _selectedPeriod = 'AM';
@@ -620,10 +1022,8 @@ class _EnhancedTimePickerState extends State<_EnhancedTimePicker> {
     } else {
       hour24 = _selectedHour == 12 ? 12 : _selectedHour + 12;
     }
-    
+
     final selectedTime = TimeOfDay(hour: hour24, minute: _selectedMinute);
-    
-    // Call the callback and close dialog
     widget.onTimeSelected(selectedTime);
     Navigator.of(context).pop(selectedTime);
   }
@@ -635,7 +1035,7 @@ class _EnhancedTimePickerState extends State<_EnhancedTimePicker> {
   @override
   Widget build(BuildContext context) {
     final isMobile = MediaQuery.of(context).size.width < 600;
-    
+
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
       child: Container(
@@ -644,10 +1044,12 @@ class _EnhancedTimePickerState extends State<_EnhancedTimePicker> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('Select Time', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const Text(
+              'Select Time',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 20),
-            
-            // Time Display
+
             Container(
               padding: const EdgeInsets.symmetric(vertical: 16),
               decoration: BoxDecoration(
@@ -659,34 +1061,51 @@ class _EnhancedTimePickerState extends State<_EnhancedTimePicker> {
                 children: [
                   Text(
                     _selectedHour.toString().padLeft(2, '0'),
-                    style: const TextStyle(fontSize: 48, fontWeight: FontWeight.bold, color: Color(0xFFFF6B8B)),
+                    style: const TextStyle(
+                      fontSize: 48,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFFFF6B8B),
+                    ),
                   ),
                   const Text(
                     ':',
-                    style: TextStyle(fontSize: 48, fontWeight: FontWeight.bold, color: Color(0xFFFF6B8B)),
+                    style: TextStyle(
+                      fontSize: 48,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFFFF6B8B),
+                    ),
                   ),
                   Text(
                     _selectedMinute.toString().padLeft(2, '0'),
-                    style: const TextStyle(fontSize: 48, fontWeight: FontWeight.bold, color: Color(0xFFFF6B8B)),
+                    style: const TextStyle(
+                      fontSize: 48,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFFFF6B8B),
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.grey[200],
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Text(
                       _selectedPeriod,
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                 ],
               ),
             ),
             const SizedBox(height: 20),
-            
-            // Pickers Row
+
             Row(
               children: [
                 _buildScrollPicker(
@@ -711,10 +1130,9 @@ class _EnhancedTimePickerState extends State<_EnhancedTimePicker> {
                 ),
               ],
             ),
-            
+
             const SizedBox(height: 24),
-            
-            // Buttons
+
             Row(
               children: [
                 Expanded(
@@ -741,7 +1159,13 @@ class _EnhancedTimePickerState extends State<_EnhancedTimePicker> {
                         borderRadius: BorderRadius.circular(12),
                       ),
                     ),
-                    child: const Text('OK', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    child: const Text(
+                      'OK',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                   ),
                 ),
               ],
@@ -758,8 +1182,6 @@ class _EnhancedTimePickerState extends State<_EnhancedTimePicker> {
     required T selectedValue,
     required ValueChanged<T> onChanged,
   }) {
-    final initialIndex = items.indexWhere((item) => item == selectedValue);
-    
     return Expanded(
       child: Column(
         children: [
@@ -795,8 +1217,12 @@ class _EnhancedTimePickerState extends State<_EnhancedTimePicker> {
                       item.toString(),
                       style: TextStyle(
                         fontSize: 20,
-                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                        color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[800],
+                        fontWeight: isSelected
+                            ? FontWeight.bold
+                            : FontWeight.normal,
+                        color: isSelected
+                            ? const Color(0xFFFF6B8B)
+                            : Colors.grey[800],
                       ),
                     ),
                   );
@@ -839,7 +1265,9 @@ class _TimePickerFieldState extends State<_TimePickerField> {
   }
 
   String _formatTimeForDisplay(TimeOfDay time) {
-    final hour = time.hour == 0 ? 12 : (time.hour > 12 ? time.hour - 12 : time.hour);
+    final hour = time.hour == 0
+        ? 12
+        : (time.hour > 12 ? time.hour - 12 : time.hour);
     final minute = time.minute.toString().padLeft(2, '0');
     final period = time.hour >= 12 ? 'PM' : 'AM';
     return '$hour:$minute $period';
@@ -851,11 +1279,14 @@ class _TimePickerFieldState extends State<_TimePickerField> {
       builder: (context) => _EnhancedTimePicker(
         initialTime: _selectedTime,
         onTimeSelected: (time) {
-          // This is called from inside the dialog when OK is pressed
+          setState(() {
+            _selectedTime = time;
+          });
+          widget.onTimeSelected(time);
         },
       ),
     );
-    
+
     if (result != null) {
       setState(() {
         _selectedTime = result;
@@ -892,7 +1323,9 @@ class _TimePickerFieldState extends State<_TimePickerField> {
                 Icon(
                   Icons.access_time,
                   size: 20,
-                  color: _selectedTime != null ? const Color(0xFFFF6B8B) : Colors.grey[400],
+                  color: _selectedTime != null
+                      ? const Color(0xFFFF6B8B)
+                      : Colors.grey[400],
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -903,7 +1336,9 @@ class _TimePickerFieldState extends State<_TimePickerField> {
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w500,
-                      color: _selectedTime != null ? Colors.black : Colors.grey[500],
+                      color: _selectedTime != null
+                          ? Colors.black
+                          : Colors.grey[500],
                     ),
                   ),
                 ),
@@ -943,6 +1378,7 @@ class _AddScheduleDialogState extends State<_AddScheduleDialog> {
   int? _selectedDay;
   TimeOfDay? _startTime;
   TimeOfDay? _endTime;
+  bool _isWorking = true;
   bool _isLoading = false;
 
   final List<Map<String, dynamic>> _days = const [
@@ -957,6 +1393,7 @@ class _AddScheduleDialogState extends State<_AddScheduleDialog> {
 
   List<int> get _availableDays {
     final existingDays = widget.existingSchedules
+        .where((s) => s['day_of_week'] != null)
         .map((s) => s['day_of_week'] as int)
         .toSet();
     return _days
@@ -1011,18 +1448,28 @@ class _AddScheduleDialogState extends State<_AddScheduleDialog> {
                     label: Text(day['name']),
                     selected: isSelected,
                     onSelected: isAvailable
-                        ? (selected) {
-                            setState(() => _selectedDay = day['id']);
-                          }
+                        ? (selected) => setState(() => _selectedDay = day['id'])
                         : null,
                     backgroundColor: Colors.grey[100],
-                    selectedColor:
-                        const Color(0xFFFF6B8B).withValues(alpha: 0.2),
+                    selectedColor: const Color(
+                      0xFFFF6B8B,
+                    ).withValues(alpha: 0.2),
                     checkmarkColor: const Color(0xFFFF6B8B),
-                    avatar: isAvailable ? null : const Icon(Icons.lock, size: 16),
+                    avatar: isAvailable
+                        ? null
+                        : const Icon(Icons.lock, size: 16),
                   );
                 }).toList(),
               ),
+
+              if (_availableDays.isEmpty && _selectedDay == null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    'All days already have schedules!',
+                    style: TextStyle(color: Colors.orange[700], fontSize: 12),
+                  ),
+                ),
 
               const SizedBox(height: 16),
 
@@ -1033,9 +1480,8 @@ class _AddScheduleDialogState extends State<_AddScheduleDialog> {
                       label: 'Start Time',
                       initialTime: _startTime,
                       isRequired: true,
-                      onTimeSelected: (time) {
-                        setState(() => _startTime = time);
-                      },
+                      onTimeSelected: (time) =>
+                          setState(() => _startTime = time),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -1044,12 +1490,68 @@ class _AddScheduleDialogState extends State<_AddScheduleDialog> {
                       label: 'End Time',
                       initialTime: _endTime,
                       isRequired: true,
-                      onTimeSelected: (time) {
-                        setState(() => _endTime = time);
-                      },
+                      onTimeSelected: (time) => setState(() => _endTime = time),
                     ),
                   ),
                 ],
+              ),
+
+              const SizedBox(height: 16),
+
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: _isWorking
+                      ? Colors.green.withValues(alpha: 0.1)
+                      : Colors.red.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: _isWorking
+                        ? Colors.green.withValues(alpha: 0.3)
+                        : Colors.red.withValues(alpha: 0.3),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      _isWorking ? Icons.check_circle : Icons.cancel,
+                      color: _isWorking ? Colors.green : Colors.red,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Working Day',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: _isWorking ? Colors.green : Colors.red,
+                            ),
+                          ),
+                          Text(
+                            _isWorking
+                                ? 'This day will be available for bookings'
+                                : 'This day will be marked as day off',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[600],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Switch(
+                      value: _isWorking,
+                      onChanged: (value) => setState(() => _isWorking = value),
+                      activeThumbColor: Colors.green,
+                      inactiveThumbColor: Colors.red,
+                    ),
+                  ],
+                ),
               ),
 
               const SizedBox(height: 24),
@@ -1063,7 +1565,8 @@ class _AddScheduleDialogState extends State<_AddScheduleDialog> {
                   ),
                   const SizedBox(width: 12),
                   ElevatedButton(
-                    onPressed: _selectedDay != null &&
+                    onPressed:
+                        _selectedDay != null &&
                             _startTime != null &&
                             _endTime != null &&
                             !_isLoading
@@ -1088,9 +1591,7 @@ class _AddScheduleDialogState extends State<_AddScheduleDialog> {
                           )
                         : const Text(
                             'Add Schedule',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                            ),
+                            style: TextStyle(fontWeight: FontWeight.bold),
                           ),
                   ),
                 ],
@@ -1118,7 +1619,7 @@ class _AddScheduleDialogState extends State<_AddScheduleDialog> {
         'day_of_week': _selectedDay,
         'start_time': startTimeString,
         'end_time': endTimeString,
-        'is_working': true,
+        'is_working': _isWorking,
       });
 
       if (mounted) Navigator.pop(context, {'success': true});
@@ -1153,6 +1654,7 @@ class _EditScheduleDialog extends StatefulWidget {
 class _EditScheduleDialogState extends State<_EditScheduleDialog> {
   late TimeOfDay _startTime;
   late TimeOfDay _endTime;
+  late bool _isWorking;
   bool _isLoading = false;
   final supabase = Supabase.instance.client;
 
@@ -1169,6 +1671,7 @@ class _EditScheduleDialogState extends State<_EditScheduleDialog> {
       hour: int.parse(endParts[0]),
       minute: int.parse(endParts[1]),
     );
+    _isWorking = widget.schedule['is_working'] ?? true;
   }
 
   @override
@@ -1201,7 +1704,10 @@ class _EditScheduleDialogState extends State<_EditScheduleDialog> {
             children: [
               Text(
                 'Edit Schedule - $dayName',
-                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               const SizedBox(height: 20),
 
@@ -1212,9 +1718,8 @@ class _EditScheduleDialogState extends State<_EditScheduleDialog> {
                       label: 'Start Time',
                       initialTime: _startTime,
                       isRequired: true,
-                      onTimeSelected: (time) {
-                        setState(() => _startTime = time);
-                      },
+                      onTimeSelected: (time) =>
+                          setState(() => _startTime = time),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -1223,12 +1728,68 @@ class _EditScheduleDialogState extends State<_EditScheduleDialog> {
                       label: 'End Time',
                       initialTime: _endTime,
                       isRequired: true,
-                      onTimeSelected: (time) {
-                        setState(() => _endTime = time);
-                      },
+                      onTimeSelected: (time) => setState(() => _endTime = time),
                     ),
                   ),
                 ],
+              ),
+
+              const SizedBox(height: 16),
+
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: _isWorking
+                      ? Colors.green.withValues(alpha: 0.1)
+                      : Colors.red.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: _isWorking
+                        ? Colors.green.withValues(alpha: 0.3)
+                        : Colors.red.withValues(alpha: 0.3),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      _isWorking ? Icons.check_circle : Icons.cancel,
+                      color: _isWorking ? Colors.green : Colors.red,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Working Day',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: _isWorking ? Colors.green : Colors.red,
+                            ),
+                          ),
+                          Text(
+                            _isWorking
+                                ? 'This day will be available for bookings'
+                                : 'This day will be marked as day off',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[600],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Switch(
+                      value: _isWorking,
+                      onChanged: (value) => setState(() => _isWorking = value),
+                      activeThumbColor: Colors.green,
+                      inactiveThumbColor: Colors.red,
+                    ),
+                  ],
+                ),
               ),
 
               const SizedBox(height: 24),
@@ -1262,9 +1823,7 @@ class _EditScheduleDialogState extends State<_EditScheduleDialog> {
                           )
                         : const Text(
                             'Update Schedule',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                            ),
+                            style: TextStyle(fontWeight: FontWeight.bold),
                           ),
                   ),
                 ],
@@ -1290,7 +1849,7 @@ class _EditScheduleDialogState extends State<_EditScheduleDialog> {
           .update({
             'start_time': startTimeString,
             'end_time': endTimeString,
-            'is_working': true,
+            'is_working': _isWorking,
           })
           .eq('id', widget.schedule['id']);
 
