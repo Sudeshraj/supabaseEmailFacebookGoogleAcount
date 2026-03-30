@@ -33,22 +33,25 @@ android {
 
     buildTypes {
         release {
-            signingConfig signingConfigs.debug
-            minifyEnabled true
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            signingConfig = signingConfigs.getByName("debug")
+            isMinifyEnabled = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android.txt"),
+                file("proguard-rules.pro")
+            )
         }
         debug {
-            signingConfig signingConfigs.debug
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 }
 
- dependencies {
+dependencies {
   // Import the Firebase BoM
   implementation(platform("com.google.firebase:firebase-bom:34.3.0"))
 
   //notification-firbase
-  implementation 'com.google.firebase:firebase-messaging:23.1.2'
+  implementation("com.google.firebase:firebase-messaging:23.1.2")
 
 
   // TODO: Add the dependencies for Firebase products you want to use
