@@ -90,8 +90,8 @@ class _BarberListScreenState extends State<BarberListScreen> {
           final count = await supabase
               .from('barber_services')
               .select('id')
-              .eq('salon_barber_id', salonBarber['id'])
-              .eq('status', 'active');
+              .eq('salon_barber_id', salonBarber['id']);
+              // .eq('status', 'active');
 
           serviceCountMap[barberId] = count.length;
         } else {

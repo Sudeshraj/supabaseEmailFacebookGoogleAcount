@@ -584,7 +584,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                     'service_id': serviceId,
                     'variant_id': variantId,
                     'custom_price': variant['price'],
-                    'status': 'active',
+                    // 'status': 'active',
                   });
               debugPrint('✅ Added to barber services');
             }
@@ -603,7 +603,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           final Map<String, dynamic> barberServiceData = {
             'salon_barber_id': widget.salonBarberId!,
             'service_id': serviceId,
-            'status': 'active',
+            // 'status': 'active',
           };
           
           await supabase

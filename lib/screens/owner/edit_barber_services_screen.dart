@@ -1,4 +1,4 @@
-// screens/owner/edit_barber_services_screen.dart
+// screens/owner/edit_barber_services_screen.dart - Fully Updated
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -21,10 +21,8 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
   final supabase = Supabase.instance.client;
 
   bool _isLoading = true;
-  bool _isDeleting = false;
-  bool _isSelectMode = false;
-  final Set<int> _selectedForDelete = {};
-
+  bool _isProcessing = false;
+  
   // Barber details
   Map<String, dynamic> _barber = {};
 
@@ -60,7 +58,6 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
     try {
       final salonIdInt = int.parse(widget.salonId);
       
-      // Step 1: Get salon_barber_id
       final salonBarberResponse = await supabase
           .from('salon_barbers')
           .select('id')
@@ -74,7 +71,6 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
 
       _salonBarberId = salonBarberResponse['id'] as int;
 
-      // Step 2: Load barber profile
       final profile = await supabase
           .from('profiles')
           .select('id, full_name, email, avatar_url')
@@ -85,7 +81,6 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
         _barber = profile;
       }
 
-      // Step 3: Load categories
       final categoriesResponse = await supabase
           .from('salon_categories')
           .select('id, display_name, icon_name, color')
@@ -95,7 +90,6 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
       
       _categories = List<Map<String, dynamic>>.from(categoriesResponse);
 
-      // Step 4: Load genders
       final gendersResponse = await supabase
           .from('salon_genders')
           .select('id, display_name')
@@ -106,7 +100,6 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
         _genderMap[g['id']] = g['display_name'];
       }
 
-      // Step 5: Load age categories
       final ageCategoriesResponse = await supabase
           .from('salon_age_categories')
           .select('id, display_name, min_age, max_age')
@@ -121,12 +114,10 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
         };
       }
 
-      // Step 6: Get barber's current active services
       final currentServices = await supabase
           .from('barber_services')
-          .select('id, variant_id, service_id, status')
-          .eq('salon_barber_id', _salonBarberId!)
-          .eq('status', 'active');
+          .select('id, variant_id, service_id')
+          .eq('salon_barber_id', _salonBarberId!);        
 
       if (currentServices.isEmpty) {
         setState(() {
@@ -136,13 +127,11 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
         return;
       }
 
-      // Step 7: Get unique service IDs
       final allServiceIds = currentServices
           .map((s) => s['service_id'] as int)
           .toSet()
           .toList();
 
-      // Step 8: Load service details
       final servicesResponse = await supabase
           .from('services')
           .select('id, name, description, category_id, icon_name')
@@ -159,7 +148,6 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
           'id': service['id'],
           'name': service['name'],
           'description': service['description'] ?? '',
-          'category_id': service['category_id'],
           'category_name': category['display_name'],
           'category_icon': category['icon_name'],
           'category_color': category['color'],
@@ -167,7 +155,6 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
         };
       }
 
-      // Step 9: Process services
       final Map<int, List<Map<String, dynamic>>> variantsByService = {};
       final Map<int, bool> hasFullService = {};
 
@@ -199,6 +186,8 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
               'id': variant['id'],
               'price': variant['price'],
               'duration': variant['duration'],
+              'gender_id': variant['salon_gender_id'],
+              'age_category_id': variant['salon_age_category_id'],
               'gender_name': genderName,
               'age_name': ageName,
               'display_text': '$genderName • $ageName',
@@ -207,7 +196,6 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
         }
       }
 
-      // Step 10: Build services list
       final List<Map<String, dynamic>> processedServices = [];
       for (var serviceId in allServiceIds) {
         final serviceInfo = serviceInfoMap[serviceId];
@@ -230,7 +218,6 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
         });
       }
 
-      // Sort by category then name
       processedServices.sort((a, b) {
         final categoryCompare = (a['category_name'] as String).compareTo(b['category_name'] as String);
         if (categoryCompare != 0) return categoryCompare;
@@ -252,47 +239,120 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
   }
 
   // ============================================================
-  // ADD VARIANT DIALOG (Same as ServiceManagementScreen)
+  // ASSIGN VARIANTS DIALOG (Only unassigned variants)
   // ============================================================
   
-  void _showAddVariantDialog(Map<String, dynamic> service) {
-    int? selectedGenderId;
-    int? selectedAgeCategoryId;
-    final priceController = TextEditingController();
-    final durationController = TextEditingController();
-    String? priceError;
-    String? durationError;
+  Future<void> _showAssignVariantsDialog(Map<String, dynamic> service) async {
+    // Get all variants for this service from database
+    final allVariants = await supabase
+        .from('service_variants')
+        .select('id, price, duration, salon_gender_id, salon_age_category_id')
+        .eq('service_id', service['id'])
+        .eq('is_active', true);
     
-    void validatePrice() {
-      final price = double.tryParse(priceController.text.trim());
-      if (priceController.text.trim().isEmpty) {
-        priceError = null;
-      } else if (price == null) {
-        priceError = 'Please enter a valid number';
-      } else if (price <= 0) {
-        priceError = 'Price must be greater than 0';
-      } else {
-        priceError = null;
+    // Get currently assigned variant IDs for this barber
+    final assignedVariants = await supabase
+        .from('barber_services')
+        .select('variant_id')
+        .eq('salon_barber_id', _salonBarberId!)
+        .eq('service_id', service['id']);
+       
+    
+    final Set<int> assignedVariantIds = {};
+    for (var item in assignedVariants) {
+      if (item['variant_id'] != null) {
+        assignedVariantIds.add(item['variant_id'] as int);
       }
     }
     
-    void validateDuration() {
-      final duration = int.tryParse(durationController.text.trim());
-      if (durationController.text.trim().isEmpty) {
-        durationError = null;
-      } else if (duration == null) {
-        durationError = 'Please enter a valid number';
-      } else if (duration <= 0) {
-        durationError = 'Duration must be greater than 0';
-      } else {
-        durationError = null;
+    // Prepare variant list - ONLY UNAssigned variants
+    final List<Map<String, dynamic>> variantList = [];
+    for (var variant in allVariants) {
+      if (assignedVariantIds.contains(variant['id'])) {
+        continue;
       }
+      
+      final genderName = _genderMap[variant['salon_gender_id']] ?? 'Unknown';
+      final ageData = _ageCategoryMap[variant['salon_age_category_id']] ?? 
+          {'display_name': 'Unknown', 'min_age': 0, 'max_age': 0};
+      final ageName = '${ageData['display_name']} (${ageData['min_age']}-${ageData['max_age']} yrs)';
+      
+      variantList.add({
+        'id': variant['id'],
+        'price': variant['price'],
+        'duration': variant['duration'],
+        'gender_id': variant['salon_gender_id'],
+        'age_category_id': variant['salon_age_category_id'],
+        'gender_name': genderName,
+        'age_name': ageName,
+        'display_text': '$genderName • $ageName',
+      });
     }
+    
+    // If no variants available to assign
+    if (variantList.isEmpty) {
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Row(
+            children: [
+              Icon(Icons.info_outline, color: Colors.blue, size: 28),
+              SizedBox(width: 12),
+              Text('No Options Available'),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('All options for this service are already assigned to this barber.'),
+              const SizedBox(height: 16),
+              if (service['has_full_service'] == true)
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.orange[50],
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Text(
+                    'Note: This service currently has "Full Service" assigned.',
+                    style: TextStyle(color: Colors.orange),
+                  ),
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+    
+    final Set<int> selectedVariantIds = {};
+    bool selectAll = false;
     
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) {
+          void toggleSelectAll() {
+            setDialogState(() {
+              selectAll = !selectAll;
+              if (selectAll) {
+                selectedVariantIds.clear();
+                for (var variant in variantList) {
+                  selectedVariantIds.add(variant['id']);
+                }
+              } else {
+                selectedVariantIds.clear();
+              }
+            });
+          }
+          
           return AlertDialog(
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(20),
@@ -314,7 +374,7 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    'Add New Option - ${service['name']}',
+                    'Assign Options - ${service['name']}',
                     style: const TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
@@ -324,250 +384,206 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
                 ),
               ],
             ),
-            content: SingleChildScrollView(
+            content: Container(
+              width: double.maxFinite,
+              constraints: const BoxConstraints(
+                maxWidth: 500,
+                maxHeight: 500,
+              ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Gender Dropdown
-                  const Text(
-                    'Gender *',
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-                  ),
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<int>(
-                    value: selectedGenderId,
-                    isExpanded: true,
-                    decoration: InputDecoration(
-                      prefixIcon: const Icon(Icons.wc, color: Colors.grey, size: 20),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                      filled: true,
-                      fillColor: Colors.white,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.green[50],
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                    hint: const Text('Select gender'),
-                    items: _genderMap.entries.map((entry) {
-                      return DropdownMenuItem<int>(
-                        value: entry.key,
-                        child: Text(entry.value),
-                      );
-                    }).toList(),
-                    onChanged: (value) {
-                      setDialogState(() {
-                        selectedGenderId = value;
-                      });
-                    },
+                    child: Row(
+                      children: [
+                        Icon(Icons.check_circle, size: 20, color: Colors.green[700]),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            '${variantList.length} option(s) available to assign',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Colors.green[700],
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                   const SizedBox(height: 16),
-                  
-                  // Age Category Dropdown
-                  const Text(
-                    'Age Category *',
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-                  ),
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<int>(
-                    value: selectedAgeCategoryId,
-                    isExpanded: true,
-                    decoration: InputDecoration(
-                      prefixIcon: const Icon(Icons.timeline, color: Colors.grey, size: 20),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                      filled: true,
-                      fillColor: Colors.white,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                    ),
-                    hint: const Text('Select age category'),
-                    items: _ageCategoryMap.entries.map((entry) {
-                      final ageData = entry.value;
-                      String displayName = ageData['display_name'];
-                      if (ageData['min_age'] != null && ageData['max_age'] != null) {
-                        displayName = '$displayName (${ageData['min_age']}-${ageData['max_age']} yrs)';
-                      }
-                      return DropdownMenuItem<int>(
-                        value: entry.key,
-                        child: Text(displayName),
-                      );
-                    }).toList(),
-                    onChanged: (value) {
-                      setDialogState(() {
-                        selectedAgeCategoryId = value;
-                      });
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  
-                  // Price and Duration Row
                   Row(
                     children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Price (Rs.) *',
-                              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-                            ),
-                            const SizedBox(height: 8),
-                            TextFormField(
-                              controller: priceController,
-                              keyboardType: TextInputType.number,
-                              decoration: InputDecoration(
-                                hintText: 'e.g., 1500',
-                                prefixIcon: const Icon(Icons.currency_rupee, color: Colors.grey, size: 20),
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                                filled: true,
-                                fillColor: Colors.white,
-                                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                                errorText: priceError,
-                                errorMaxLines: 2,
-                              ),
-                              onChanged: (value) {
-                                validatePrice();
-                                setDialogState(() {});
-                              },
-                            ),
-                          ],
+                      const Text(
+                        'Available Options',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Duration (mins) *',
-                              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-                            ),
-                            const SizedBox(height: 8),
-                            TextFormField(
-                              controller: durationController,
-                              keyboardType: TextInputType.number,
-                              decoration: InputDecoration(
-                                hintText: 'e.g., 30',
-                                prefixIcon: const Icon(Icons.timer, color: Colors.grey, size: 20),
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                                filled: true,
-                                fillColor: Colors.white,
-                                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                                errorText: durationError,
-                                errorMaxLines: 2,
-                              ),
-                              onChanged: (value) {
-                                validateDuration();
-                                setDialogState(() {});
-                              },
-                            ),
-                          ],
+                      const Spacer(),
+                      TextButton.icon(
+                        onPressed: toggleSelectAll,
+                        icon: Icon(
+                          selectAll ? Icons.deselect : Icons.select_all,
+                          size: 18,
+                        ),
+                        label: Text(selectAll ? 'Deselect All' : 'Select All'),
+                        style: TextButton.styleFrom(
+                          foregroundColor: const Color(0xFFFF6B8B),
                         ),
                       ),
                     ],
+                  ),
+                  const SizedBox(height: 12),
+                  Expanded(
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: variantList.length,
+                      separatorBuilder: (context, index) => const Divider(height: 1),
+                      itemBuilder: (context, index) {
+                        final variant = variantList[index];
+                        final isSelected = selectedVariantIds.contains(variant['id']);
+                        
+                        return Container(
+                          decoration: BoxDecoration(
+                            color: isSelected 
+                                ? const Color(0xFFFF6B8B).withValues(alpha: 0.1) 
+                                : null,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: CheckboxListTile(
+                            value: isSelected,
+                            onChanged: (value) {
+                              setDialogState(() {
+                                if (value == true) {
+                                  selectedVariantIds.add(variant['id']);
+                                } else {
+                                  selectedVariantIds.remove(variant['id']);
+                                }
+                              });
+                            },
+                            title: Text(
+                              variant['display_text'],
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                            subtitle: Text(
+                              'Rs. ${variant['price']} • ${variant['duration']} min',
+                              style: TextStyle(
+                                color: Colors.grey[600],
+                              ),
+                            ),
+                            controlAffinity: ListTileControlAffinity.leading,
+                            dense: true,
+                          ),
+                        );
+                      },
+                    ),
                   ),
                 ],
               ),
             ),
             actions: [
               TextButton(
-                onPressed: () {
-                  priceController.dispose();
-                  durationController.dispose();
-                  Navigator.pop(context);
-                },
+                onPressed: () => Navigator.pop(context),
                 child: const Text('Cancel'),
               ),
               ElevatedButton(
                 onPressed: () async {
-                  validatePrice();
-                  validateDuration();
-                  
-                  if (selectedGenderId == null) {
-                    _showSnackBar('Please select a gender', Colors.orange);
-                    return;
-                  }
-                  if (selectedAgeCategoryId == null) {
-                    _showSnackBar('Please select an age category', Colors.orange);
+                  if (selectedVariantIds.isEmpty) {
+                    _showSnackBar('Please select at least one option', Colors.orange);
                     return;
                   }
                   
-                  final price = double.tryParse(priceController.text.trim());
-                  final duration = int.tryParse(durationController.text.trim());
-                  
-                  if (price == null || price <= 0) {
-                    _showSnackBar('Please enter a valid price', Colors.orange);
-                    return;
-                  }
-                  if (duration == null || duration <= 0) {
-                    _showSnackBar('Please enter a valid duration', Colors.orange);
-                    return;
-                  }
-                  
-                  // Check for duplicate variant
-                  final bool isDuplicate = service['variants'].any((variant) {
-                    return variant['gender_id'] == selectedGenderId &&
-                           variant['age_category_id'] == selectedAgeCategoryId;
-                  });
-                  
-                  if (isDuplicate) {
-                    _showSnackBar('This option already exists!', Colors.orange);
-                    return;
-                  }
-                  
-                  setState(() => _isDeleting = true);
+                  setState(() => _isProcessing = true);
                   
                   try {
-                    // First, check if the variant already exists in service_variants
-                    final existingVariant = await supabase
-                        .from('service_variants')
-                        .select('id')
-                        .eq('service_id', service['id'])
-                        .eq('salon_gender_id', selectedGenderId!)
-                        .eq('salon_age_category_id', selectedAgeCategoryId!)
-                        .maybeSingle();
+                    int addedCount = 0;
                     
-                    int variantId;
-                    
-                    if (existingVariant != null) {
-                      variantId = existingVariant['id'];
-                    } else {
-                      // Create new variant
-                      final newVariant = await supabase
-                          .from('service_variants')
-                          .insert({
-                            'service_id': service['id'],
-                            'salon_gender_id': selectedGenderId,
-                            'salon_age_category_id': selectedAgeCategoryId,
-                            'price': price,
-                            'duration': duration,
-                            'is_active': true,
-                          })
-                          .select()
-                          .single();
-                      variantId = newVariant['id'];
+                    // If service has full service, remove it first
+                    if (service['has_full_service'] == true) {
+                      final fullServiceEntry = await supabase
+                          .from('barber_services')
+                          .select('id')
+                          .eq('salon_barber_id', _salonBarberId!)
+                          .eq('service_id', service['id'])
+                          .filter('variant_id', 'is', 'null')
+                          .maybeSingle();
+                      
+                      if (fullServiceEntry != null) {
+                        await supabase
+                            .from('barber_services')
+                            .delete()
+                            .eq('id', fullServiceEntry['id']);
+                      }
                     }
                     
-                    // Assign variant to barber
-                    await supabase
-                        .from('barber_services')
-                        .insert({
-                          'salon_barber_id': _salonBarberId!,
-                          'service_id': service['id'],
-                          'variant_id': variantId,
-                          'status': 'active',
-                        });
+                    // Assign selected variants
+                    for (int variantId in selectedVariantIds) {
+                      await supabase
+                          .from('barber_services')
+                          .insert({
+                            'salon_barber_id': _salonBarberId!,
+                            'service_id': service['id'],
+                            'variant_id': variantId                           
+                          });
+                      addedCount++;
+                    }
                     
-                    priceController.dispose();
-                    durationController.dispose();
+                    // Update local state
+                    setState(() {
+                      for (int i = 0; i < _services.length; i++) {
+                        if (_services[i]['id'] == service['id']) {
+                          // Remove full service flag
+                          _services[i]['has_full_service'] = false;
+                          
+                          // Add newly assigned variants to local list
+                          for (int variantId in selectedVariantIds) {
+                            final variantData = variantList.firstWhere((v) => v['id'] == variantId);
+                            final isAlreadyInList = _services[i]['variants'].any((v) => v['id'] == variantId);
+                            
+                            if (!isAlreadyInList) {
+                              _services[i]['variants'].add({
+                                'id': variantData['id'],
+                                'price': variantData['price'],
+                                'duration': variantData['duration'],
+                                'gender_id': variantData['gender_id'],
+                                'age_category_id': variantData['age_category_id'],
+                                'gender_name': variantData['gender_name'],
+                                'age_name': variantData['age_name'],
+                                'display_text': variantData['display_text'],
+                              });
+                            }
+                          }
+                          _services[i]['variant_count'] = _services[i]['variants'].length;
+                          break;
+                        }
+                      }
+                    });
+                    
                     Navigator.pop(context);
-                    await _loadData();
                     
                     if (mounted) {
-                      _showSnackBar('Option added successfully!', Colors.green);
+                      _showSnackBar('$addedCount option(s) assigned successfully!', Colors.green);
                     }
                   } catch (e) {
                     if (mounted) {
-                      _showSnackBar('Error adding option: $e', Colors.red);
+                      if (e.toString().contains('23505') || e.toString().contains('duplicate key')) {
+                        _showSnackBar('This option is already assigned!', Colors.orange);
+                      } else {
+                        _showSnackBar('Error assigning options: $e', Colors.red);
+                      }
                     }
                   } finally {
-                    if (mounted) setState(() => _isDeleting = false);
+                    if (mounted) setState(() => _isProcessing = false);
                   }
                 },
                 style: ElevatedButton.styleFrom(
@@ -577,7 +593,7 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
                     borderRadius: BorderRadius.circular(12),
                   ),
                 ),
-                child: const Text('Add Option', style: TextStyle(fontWeight: FontWeight.bold)),
+                child: const Text('Assign Selected', style: TextStyle(fontWeight: FontWeight.bold)),
               ),
             ],
           );
@@ -587,10 +603,15 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
   }
 
   // ============================================================
-  // DELETE FUNCTIONS
+  // REMOVE SERVICE - DELETE completely
   // ============================================================
 
-  Future<void> _deleteService(Map<String, dynamic> service) async {
+  Future<void> _removeService(Map<String, dynamic> service) async {
+    final hasVariants = service['variants'].isNotEmpty;
+    final message = hasVariants 
+        ? "Are you sure you want to remove '${service['name']}' and all its ${service['variants'].length} options?"
+        : "Are you sure you want to remove '${service['name']}' from this barber?";
+    
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -599,21 +620,10 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
           children: [
             Icon(Icons.warning_amber_rounded, color: Colors.red, size: 28),
             SizedBox(width: 12),
-            Text('Delete Service'),
+            Text('Remove Service'),
           ],
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text("Are you sure you want to delete '${service['name']}'?"),
-            const SizedBox(height: 12),
-            const Text(
-              'This will also remove this service from the barber.',
-              style: TextStyle(color: Colors.red, fontSize: 12),
-            ),
-          ],
-        ),
+        content: Text(message),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -625,7 +635,7 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
               backgroundColor: Colors.red,
               foregroundColor: Colors.white,
             ),
-            child: const Text('Delete'),
+            child: const Text('Remove'),
           ),
         ],
       ),
@@ -633,125 +643,118 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
 
     if (confirm != true) return;
 
-    setState(() => _isDeleting = true);
+    setState(() => _isProcessing = true);
 
     try {
-      if (_salonBarberId == null) {
-        throw Exception('Salon barber ID not found');
-      }
-      
-      final int salonBarberId = _salonBarberId!;
-
-      if (service['has_full_service'] == true) {
-        // Delete full service entry
-        await supabase
-            .from('barber_services')
-            .update({'status': 'inactive'})
-            .eq('salon_barber_id', salonBarberId)
-            .eq('service_id', service['id'])
-            .filter('variant_id', 'is', 'null');
-      }
-
-      // Delete all variants
-      for (var variant in service['variants']) {
-        await supabase
-            .from('barber_services')
-            .update({'status': 'inactive'})
-            .eq('salon_barber_id', salonBarberId)
-            .eq('variant_id', variant['id']);
-      }
-
-      await _loadData();
-      
-      if (mounted) {
-        _showSnackBar('Service deleted successfully', Colors.green);
-      }
-
-    } catch (e) {
-      _showSnackBar('Error deleting: $e', Colors.red);
-    } finally {
-      if (mounted) setState(() => _isDeleting = false);
-    }
-  }
-
-  Future<void> _deleteVariant(Map<String, dynamic> service, Map<String, dynamic> variant) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Row(
-          children: [
-            Icon(Icons.warning_amber_rounded, color: Colors.red, size: 28),
-            SizedBox(width: 12),
-            Text('Delete Option'),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text("Are you sure you want to delete this option from '${service['name']}'?"),
-            const SizedBox(height: 12),
-            Text(
-              '${variant['display_text']}',
-              style: const TextStyle(fontWeight: FontWeight.w500),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'This action cannot be undone!',
-              style: TextStyle(color: Colors.red, fontSize: 12),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm != true) return;
-
-    setState(() => _isDeleting = true);
-
-    try {
-      if (_salonBarberId == null) {
-        throw Exception('Salon barber ID not found');
-      }
-      
-      final int salonBarberId = _salonBarberId!;
-
-      await supabase
+      // Get all barber_service entries for this service
+      final barberServiceEntries = await supabase
           .from('barber_services')
-          .update({'status': 'inactive'})
-          .eq('salon_barber_id', salonBarberId)
-          .eq('variant_id', variant['id']);
-
-      await _loadData();
+          .select('id')
+          .eq('salon_barber_id', _salonBarberId!)
+          .eq('service_id', service['id']);
       
-      if (mounted) {
-        _showSnackBar('Option deleted successfully', Colors.green);
+      // Delete each entry completely
+      for (var entry in barberServiceEntries) {
+        await supabase
+            .from('barber_services')
+            .delete()
+            .eq('id', entry['id']);
       }
 
+      // Update local state
+      setState(() {
+        _services.removeWhere((s) => s['id'] == service['id']);
+      });
+      
+      if (mounted) {
+        _showSnackBar('Service removed successfully', Colors.green);
+      }
     } catch (e) {
-      _showSnackBar('Error deleting: $e', Colors.red);
+      _showSnackBar('Error removing service: $e', Colors.red);
     } finally {
-      if (mounted) setState(() => _isDeleting = false);
+      if (mounted) setState(() => _isProcessing = false);
     }
   }
 
   // ============================================================
-  // ADD SERVICE (Icon only)
+  // REMOVE VARIANT - DELETE completely
+  // ============================================================
+
+  Future<void> _removeVariant(Map<String, dynamic> service, Map<String, dynamic> variant) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.red, size: 28),
+            SizedBox(width: 12),
+            Text('Remove Option'),
+          ],
+        ),
+        content: Text("Are you sure you want to remove '${variant['display_text']}' from '${service['name']}'?"),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    setState(() => _isProcessing = true);
+
+    try {
+      // Find the barber_service entry for this variant
+      final barberServiceEntry = await supabase
+          .from('barber_services')
+          .select('id')
+          .eq('salon_barber_id', _salonBarberId!)
+          .eq('service_id', service['id'])
+          .eq('variant_id', variant['id'])
+          .maybeSingle();
+      
+      if (barberServiceEntry != null) {
+        // COMPLETELY DELETE the record
+        await supabase
+            .from('barber_services')
+            .delete()
+            .eq('id', barberServiceEntry['id']);
+      }
+
+      // Update local state
+      setState(() {
+        for (int i = 0; i < _services.length; i++) {
+          if (_services[i]['id'] == service['id']) {
+            _services[i]['variants'].removeWhere((v) => v['id'] == variant['id']);
+            _services[i]['variant_count'] = _services[i]['variants'].length;
+            break;
+          }
+        }
+      });
+      
+      if (mounted) {
+        _showSnackBar('Option removed successfully', Colors.green);
+      }
+    } catch (e) {
+      _showSnackBar('Error removing option: $e', Colors.red);
+    } finally {
+      if (mounted) setState(() => _isProcessing = false);
+    }
+  }
+
+  // ============================================================
+  // ADD SERVICE
   // ============================================================
 
   Future<void> _addService() async {
@@ -841,7 +844,6 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
         centerTitle: isWeb,
         elevation: 0,
         actions: [
-          // Add Service Button - Icon only
           IconButton(
             icon: const Icon(Icons.add, color: Colors.white),
             onPressed: _addService,
@@ -880,18 +882,12 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
           const SizedBox(height: 16),
           Text(
             'No services found',
-            style: TextStyle(
-              fontSize: isWeb ? 18 : 16,
-              color: Colors.grey[600],
-            ),
+            style: TextStyle(fontSize: isWeb ? 18 : 16, color: Colors.grey[600]),
           ),
           const SizedBox(height: 8),
           Text(
             'Add services for this barber',
-            style: TextStyle(
-              fontSize: isWeb ? 14 : 12,
-              color: Colors.grey[500],
-            ),
+            style: TextStyle(fontSize: isWeb ? 14 : 12, color: Colors.grey[500]),
           ),
           const SizedBox(height: 24),
           ElevatedButton.icon(
@@ -901,13 +897,8 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFFFF6B8B),
               foregroundColor: Colors.white,
-              padding: EdgeInsets.symmetric(
-                horizontal: isWeb ? 32 : 24,
-                vertical: isWeb ? 14 : 12,
-              ),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
+              padding: EdgeInsets.symmetric(horizontal: isWeb ? 32 : 24, vertical: isWeb ? 14 : 12),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
           ),
         ],
@@ -923,11 +914,7 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withValues(alpha: 0.1),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
+          BoxShadow(color: Colors.grey.withValues(alpha: 0.1), blurRadius: 8, offset: const Offset(0, 2)),
         ],
       ),
       child: Row(
@@ -935,18 +922,10 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
           CircleAvatar(
             radius: 30,
             backgroundColor: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
-            backgroundImage: _barber['avatar_url'] != null
-                ? NetworkImage(_barber['avatar_url'])
-                : null,
+            backgroundImage: _barber['avatar_url'] != null ? NetworkImage(_barber['avatar_url']) : null,
             child: _barber['avatar_url'] == null
-                ? Text(
-                    _barber['full_name']?[0]?.toUpperCase() ?? '?',
-                    style: const TextStyle(
-                      color: Color(0xFFFF6B8B),
-                      fontWeight: FontWeight.bold,
-                      fontSize: 24,
-                    ),
-                  )
+                ? Text(_barber['full_name']?[0]?.toUpperCase() ?? '?',
+                    style: const TextStyle(color: Color(0xFFFF6B8B), fontWeight: FontWeight.bold, fontSize: 24))
                 : null,
           ),
           const SizedBox(width: 16),
@@ -954,43 +933,24 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  _barber['full_name'] ?? 'Unknown Barber',
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                Text(
-                  _barber['email'] ?? '',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.grey[600],
-                  ),
-                ),
+                Text(_barber['full_name'] ?? 'Unknown Barber', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                Text(_barber['email'] ?? '', style: TextStyle(fontSize: 14, color: Colors.grey[600])),
               ],
             ),
           ),
-          // Add Service Button removed from here (moved to app bar)
         ],
       ),
     );
   }
 
   Widget _buildWebView() {
-    // Group services by category
     final Map<String, List<Map<String, dynamic>>> groupedServices = {};
-    
     for (var service in _services) {
       final category = service['category_name'] as String;
-      if (!groupedServices.containsKey(category)) {
-        groupedServices[category] = [];
-      }
+      if (!groupedServices.containsKey(category)) groupedServices[category] = [];
       groupedServices[category]!.add(service);
     }
-
     final sortedCategories = groupedServices.keys.toList()..sort();
-
     return ListView.builder(
       padding: const EdgeInsets.all(16),
       itemCount: sortedCategories.length,
@@ -1003,19 +963,13 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
   }
 
   Widget _buildMobileView() {
-    // Group services by category
     final Map<String, List<Map<String, dynamic>>> groupedServices = {};
-    
     for (var service in _services) {
       final category = service['category_name'] as String;
-      if (!groupedServices.containsKey(category)) {
-        groupedServices[category] = [];
-      }
+      if (!groupedServices.containsKey(category)) groupedServices[category] = [];
       groupedServices[category]!.add(service);
     }
-
     final sortedCategories = groupedServices.keys.toList()..sort();
-
     return ListView.builder(
       padding: const EdgeInsets.all(12),
       itemCount: sortedCategories.length,
@@ -1033,68 +987,37 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Category Header
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
           child: Row(
             children: [
               Container(
                 padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: categoryColor.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(
-                  _getIconForName(services.first['category_icon']),
-                  color: categoryColor,
-                  size: 20,
-                ),
+                decoration: BoxDecoration(color: categoryColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)),
+                child: Icon(_getIconForName(services.first['category_icon']), color: categoryColor, size: 20),
               ),
               const SizedBox(width: 12),
-              Text(
-                category,
-                style: const TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
+              Text(category, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
               const Spacer(),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.grey[200],
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  '${services.length} service${services.length > 1 ? 's' : ''}',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey[600],
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
+                decoration: BoxDecoration(color: Colors.grey[200], borderRadius: BorderRadius.circular(20)),
+                child: Text('${services.length} service${services.length > 1 ? 's' : ''}',
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600], fontWeight: FontWeight.w500)),
               ),
             ],
           ),
         ),
-        
-        // Services Grid/List
         isWeb
             ? GridView.builder(
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
                 gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                  maxCrossAxisExtent: 400,
-                  crossAxisSpacing: 16,
-                  mainAxisSpacing: 16,
-                  childAspectRatio: 0.85,
-                ),
+                  maxCrossAxisExtent: 400, crossAxisSpacing: 16, mainAxisSpacing: 16, childAspectRatio: 0.85),
                 itemCount: services.length,
                 itemBuilder: (context, index) => _buildServiceCard(services[index], true),
               )
-            : Column(
-                children: services.map((service) => _buildServiceCard(service, false)).toList(),
-              ),
+            : Column(children: services.map((service) => _buildServiceCard(service, false)).toList()),
         const SizedBox(height: 16),
       ],
     );
@@ -1108,10 +1031,7 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
     
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: Colors.grey[200]!, width: 1),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: Colors.grey[200]!, width: 1)),
       elevation: 2,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1121,10 +1041,7 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               color: categoryColor.withValues(alpha: 0.05),
-              borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(16),
-                topRight: Radius.circular(16),
-              ),
+              borderRadius: const BorderRadius.only(topLeft: Radius.circular(16), topRight: Radius.circular(16)),
             ),
             child: Row(
               children: [
@@ -1133,100 +1050,62 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(12),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.grey.withValues(alpha: 0.1),
-                        blurRadius: 4,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
+                    boxShadow: [BoxShadow(color: Colors.grey.withValues(alpha: 0.1), blurRadius: 4, offset: const Offset(0, 2))],
                   ),
-                  child: Icon(
-                    _getIconForName(service['icon_name']),
-                    color: const Color(0xFFFF6B8B),
-                    size: 24,
-                  ),
+                  child: Icon(_getIconForName(service['icon_name']), color: const Color(0xFFFF6B8B), size: 24),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        service['name'],
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                        ),
-                      ),
+                      Text(service['name'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                       if (service['description'].isNotEmpty)
-                        Text(
-                          service['description'],
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[600],
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
+                        Text(service['description'], style: TextStyle(fontSize: 12, color: Colors.grey[600]), maxLines: 1, overflow: TextOverflow.ellipsis),
                       if (variants.isNotEmpty && !isWeb)
-                        Text(
-                          '${variants.length} options',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: Colors.grey[500],
-                          ),
-                        ),
+                        Text('${variants.length} options', style: TextStyle(fontSize: 11, color: Colors.grey[500])),
                     ],
                   ),
                 ),
-                // Delete Service Button
+                // Remove Service Button
                 IconButton(
                   icon: const Icon(Icons.delete_outline, color: Colors.red, size: 22),
-                  onPressed: _isDeleting ? null : () => _deleteService(service),
-                  tooltip: 'Delete Service',
+                  onPressed: _isProcessing ? null : () => _removeService(service),
+                  tooltip: 'Remove Service',
                 ),
-                // Expand/Collapse for mobile
+                // Assign Variants Button
+                IconButton(
+                  icon: const Icon(Icons.playlist_add, color: Color(0xFFFF6B8B), size: 22),
+                  onPressed: _isProcessing ? null : () => _showAssignVariantsDialog(service),
+                  tooltip: 'Assign Options',
+                ),
                 if (!isWeb && variants.isNotEmpty)
                   IconButton(
-                    icon: Icon(
-                      isExpanded ? Icons.expand_less : Icons.expand_more,
-                      color: Colors.grey,
-                    ),
+                    icon: Icon(isExpanded ? Icons.expand_less : Icons.expand_more, color: Colors.grey),
                     onPressed: () => _toggleExpand(service['id']),
                   ),
               ],
             ),
           ),
           
-          // Full Service Badge (if no variants)
-          if (variants.isEmpty && hasFullService)
+          // Full Service Badge
+          if (hasFullService && variants.isEmpty)
             Padding(
               padding: const EdgeInsets.all(16),
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(
-                  color: Colors.green[50],
-                  borderRadius: BorderRadius.circular(8),
-                ),
+                decoration: BoxDecoration(color: Colors.green[50], borderRadius: BorderRadius.circular(8)),
                 child: Row(
                   children: [
                     Icon(Icons.check_circle, size: 16, color: Colors.green[700]),
                     const SizedBox(width: 8),
-                    Text(
-                      'Full Service - No variants',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: Colors.green[700],
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
+                    Text('Full Service Assigned', style: TextStyle(fontSize: 13, color: Colors.green[700], fontWeight: FontWeight.w500)),
                   ],
                 ),
               ),
             ),
           
-          // Variants Section
+          // Assigned Variants List
           if (variants.isNotEmpty && (isWeb || isExpanded)) ...[
             const Divider(height: 1),
             Padding(
@@ -1236,39 +1115,13 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
                 children: [
                   Row(
                     children: [
-                      const Text(
-                        'Service Options',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.grey,
-                        ),
-                      ),
+                      const Text('Assigned Options', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.grey)),
                       const Spacer(),
-                      // Add Variant Button - Opens Dialog
-                      TextButton.icon(
-                        onPressed: () => _showAddVariantDialog(service),
-                        icon: const Icon(Icons.add, size: 16),
-                        label: const Text('Add Option'),
-                        style: TextButton.styleFrom(
-                          foregroundColor: const Color(0xFFFF6B8B),
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        ),
-                      ),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: Colors.blue[50],
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          '${variants.length} option${variants.length > 1 ? 's' : ''}',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: Colors.blue[700],
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
+                        decoration: BoxDecoration(color: Colors.blue[50], borderRadius: BorderRadius.circular(12)),
+                        child: Text('${variants.length} option${variants.length > 1 ? 's' : ''}',
+                            style: TextStyle(fontSize: 11, color: Colors.blue[700], fontWeight: FontWeight.w500)),
                       ),
                     ],
                   ),
@@ -1298,45 +1151,26 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
             Container(
               width: 36,
               height: 36,
-              decoration: BoxDecoration(
-                color: Colors.orange.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: const Icon(
-                Icons.local_offer,
-                color: Colors.orange,
-                size: 18,
-              ),
+              decoration: BoxDecoration(color: Colors.orange.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10)),
+              child: const Icon(Icons.local_offer, color: Colors.orange, size: 18),
             ),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    variant['display_text'],
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13,
-                    ),
-                  ),
+                  Text(variant['display_text'], style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
                   const SizedBox(height: 4),
-                  Text(
-                    'Rs. ${variant['price']} • ${variant['duration']} min',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey[600],
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
+                  Text('Rs. ${variant['price']} • ${variant['duration']} min',
+                      style: TextStyle(fontSize: 12, color: Colors.grey[600], fontWeight: FontWeight.w500)),
                 ],
               ),
             ),
-            // Delete Variant Button
+            // Remove Variant Button - DELETE completely
             IconButton(
-              icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
-              onPressed: _isDeleting ? null : () => _deleteVariant(service, variant),
-              tooltip: 'Delete Option',
+              icon: const Icon(Icons.remove_circle_outline, color: Colors.red, size: 20),
+              onPressed: _isProcessing ? null : () => _removeVariant(service, variant),
+              tooltip: 'Remove Option',
             ),
           ],
         ),

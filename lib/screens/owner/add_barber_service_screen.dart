@@ -135,8 +135,8 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
       final existingServices = await supabase
           .from('barber_services')
           .select('service_id, variant_id')
-          .eq('salon_barber_id', _salonBarberId!)
-          .eq('status', 'active');  // Using 'status' column
+          .eq('salon_barber_id', _salonBarberId!);
+          // .eq('status', 'active');  // Using 'status' column
 
       final Set<String> assignedServiceKeys = {};
       for (var item in existingServices) {
@@ -351,8 +351,7 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
           await supabase.from('barber_services').insert({
             'salon_barber_id': _salonBarberId!,
             'service_id': serviceId,
-            'variant_id': null,
-            'status': 'active',
+            'variant_id': null           
           });
           addedCount++;
         } else {
@@ -361,8 +360,7 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
             await supabase.from('barber_services').insert({
               'salon_barber_id': _salonBarberId!,
               'service_id': serviceId,
-              'variant_id': variantId,
-              'status': 'active',
+              'variant_id': variantId             
             });
             addedCount++;
           }

@@ -1141,16 +1141,15 @@ class _AddBarberScreenState extends State<AddBarberScreen>
             await supabase.from('barber_services').insert({
               'salon_barber_id': salonBarberId,
               'service_id': serviceId,
-              'variant_id': null,
-              'status': 'active',
+              'variant_id': null,             
             });
             servicesAddedCount++;
             debugPrint('✅ Added full service: ${service['name']}');
           } else {
-            await supabase
-                .from('barber_services')
-                .update({'status': 'active'})
-                .eq('id', existing[0]['id']);
+            // await supabase
+            //     .from('barber_services')
+            //     .update({'status': 'active'})
+            //     .eq('id', existing[0]['id']);
             debugPrint('✅ Updated full service: ${service['name']}');
           }
         } else {
@@ -1177,18 +1176,17 @@ class _AddBarberScreenState extends State<AddBarberScreen>
               await supabase.from('barber_services').insert({
                 'salon_barber_id': salonBarberId,
                 'service_id': serviceId,
-                'variant_id': variantId,
-                'status': 'active',
+                'variant_id': variantId                
               });
               variantsAddedCount++;
               debugPrint(
                 '✅ Added variant for ${service['name']}: ${variant?['display_text']}',
               );
             } else {
-              await supabase
-                  .from('barber_services')
-                  .update({'status': 'active'})
-                  .eq('id', existing[0]['id']);
+              // await supabase
+              //     .from('barber_services')
+              //     .update({'status': 'active'})
+              //     .eq('id', existing[0]['id']);
               debugPrint(
                 '✅ Updated variant for ${service['name']}: ${variant?['display_text']}',
               );
