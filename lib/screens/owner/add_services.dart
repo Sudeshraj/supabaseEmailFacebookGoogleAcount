@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
 
@@ -54,6 +53,11 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   bool _isLoadingData = true;
   bool _isLoading = false;
 
+  // Validation errors
+  String? _priceError;
+  String? _durationError;
+  String? _serviceNameError;
+
   // Icon suggestions
   final List<Map<String, dynamic>> _iconSuggestions = [
     {'icon': Icons.content_cut, 'name': 'content_cut', 'label': 'Hair Cut', 'color': 0xFFFF6B8B},
@@ -71,7 +75,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   ];
 
   final supabase = Supabase.instance.client;
-  bool get _isWeb => MediaQuery.of(context).size.width > 800;
 
   @override
   void initState() {
@@ -82,6 +85,11 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     if (widget.isEditing && widget.serviceId != null) {
       _loadServiceDataForEdit();
     }
+    
+    // Add listeners for real-time validation
+    _variantPriceController.addListener(_validatePrice);
+    _variantDurationController.addListener(_validateDuration);
+    _serviceNameController.addListener(_validateServiceName);
   }
 
   @override
@@ -94,6 +102,103 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   }
 
   // ============================================
+  // VALIDATION METHODS
+  // ============================================
+  
+  void _validateServiceName() {
+    final String name = _serviceNameController.text.trim();
+    if (name.isEmpty) {
+      setState(() {
+        _serviceNameError = null;
+      });
+      return;
+    }
+    
+    // Check if service name already exists (only for new services, not for editing)
+    if (!widget.isEditing && _mode == 'new_service') {
+      final bool exists = _existingServices.any((service) => 
+        service['name'].toString().toLowerCase() == name.toLowerCase()
+      );
+      
+      if (exists) {
+        setState(() {
+          _serviceNameError = 'A service with this name already exists';
+        });
+      } else {
+        setState(() {
+          _serviceNameError = null;
+        });
+      }
+    } else if (widget.isEditing) {
+      // For editing, check if name exists for other services
+      final bool exists = _existingServices.any((service) => 
+        service['id'] != widget.serviceId && 
+        service['name'].toString().toLowerCase() == name.toLowerCase()
+      );
+      
+      if (exists) {
+        setState(() {
+          _serviceNameError = 'A service with this name already exists';
+        });
+      } else {
+        setState(() {
+          _serviceNameError = null;
+        });
+      }
+    }
+  }
+  
+  void _validatePrice() {
+    final String priceText = _variantPriceController.text.trim();
+    if (priceText.isEmpty) {
+      setState(() {
+        _priceError = null;
+      });
+      return;
+    }
+    
+    final double? price = double.tryParse(priceText);
+    if (price == null) {
+      setState(() {
+        _priceError = 'Please enter a valid number';
+      });
+    } else if (price <= 0) {
+      setState(() {
+        _priceError = 'Price must be greater than 0';
+      });
+    } else {
+      setState(() {
+        _priceError = null;
+      });
+    }
+  }
+  
+  void _validateDuration() {
+    final String durationText = _variantDurationController.text.trim();
+    if (durationText.isEmpty) {
+      setState(() {
+        _durationError = null;
+      });
+      return;
+    }
+    
+    final int? duration = int.tryParse(durationText);
+    if (duration == null) {
+      setState(() {
+        _durationError = 'Please enter a valid number';
+      });
+    } else if (duration <= 0) {
+      setState(() {
+        _durationError = 'Duration must be greater than 0';
+      });
+    } else {
+      setState(() {
+        _durationError = null;
+      });
+    }
+  }
+
+  // ============================================
   // DATA LOADING
   // ============================================
   
@@ -101,7 +206,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     setState(() => _isLoadingData = true);
     
     try {
-      // Load categories
       final categoriesResponse = await supabase
           .from('salon_categories')
           .select('id, display_name, description, icon_name, color, display_order, is_active')
@@ -109,7 +213,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           .eq('is_active', true)
           .order('display_order');
       
-      // Load genders
       final gendersResponse = await supabase
           .from('salon_genders')
           .select('id, display_name, display_order, is_active')
@@ -117,7 +220,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           .eq('is_active', true)
           .order('display_order');
       
-      // Load age categories
       final ageResponse = await supabase
           .from('salon_age_categories')
           .select('id, display_name, min_age, max_age, display_order, is_active')
@@ -125,7 +227,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           .eq('is_active', true)
           .order('display_order');
       
-      // Load existing services
       final servicesResponse = await supabase
           .from('services')
           .select('id, name, description, icon_name, category_id, is_active')
@@ -159,10 +260,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   
   Future<void> _loadServiceDataForEdit() async {
     try {
-      if (widget.serviceId == null) {
-        debugPrint('❌ Cannot load service data: serviceId is null');
-        return;
-      }
+      if (widget.serviceId == null) return;
       
       final serviceResponse = await supabase
           .from('services')
@@ -177,7 +275,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         _selectedCategoryId = serviceResponse['category_id'];
       });
       
-      // Load existing variants
       final variantsResponse = await supabase
           .from('service_variants')
           .select('id, price, duration, salon_gender_id, salon_age_category_id')
@@ -206,7 +303,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       }
       
       setState(() {});
-      
       debugPrint('✅ Loaded service data for edit');
       
     } catch (e) {
@@ -255,6 +351,10 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   // ============================================
   
   void _saveVariant() {
+    // Clear previous errors
+    _validatePrice();
+    _validateDuration();
+    
     if (_selectedGenderId == null) {
       _showSnackBar('Please select a gender', Colors.orange);
       return;
@@ -305,6 +405,8 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       _selectedAgeCategoryId = null;
       _variantPriceController.clear();
       _variantDurationController.clear();
+      _priceError = null;
+      _durationError = null;
     });
     
     _showSnackBar('Variant added', Colors.green);
@@ -318,6 +420,8 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       _selectedAgeCategoryId = variant['age_category_id'];
       _variantPriceController.text = variant['price'].toString();
       _variantDurationController.text = variant['duration'].toString();
+      _validatePrice();
+      _validateDuration();
     });
   }
 
@@ -330,6 +434,8 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         _selectedAgeCategoryId = null;
         _variantPriceController.clear();
         _variantDurationController.clear();
+        _priceError = null;
+        _durationError = null;
       }
     });
     _showSnackBar('Variant removed', Colors.red);
@@ -342,8 +448,15 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   Future<void> _createAndAddService() async {
     // Validation
     if (_mode == 'new_service' || widget.isEditing) {
-      if (_serviceNameController.text.trim().isEmpty) {
+      final serviceName = _serviceNameController.text.trim();
+      if (serviceName.isEmpty) {
         _showSnackBar('Service name is required', Colors.orange);
+        return;
+      }
+      
+      // Check for duplicate service name
+      if (_serviceNameError != null) {
+        _showSnackBar(_serviceNameError!, Colors.orange);
         return;
       }
     } else {
@@ -352,11 +465,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         return;
       }
     }
-    
-    if (_variants.isEmpty) {
-      _showSnackBar('Please add at least one variant', Colors.orange);
-      return;
-    }
 
     setState(() => _isLoading = true);
 
@@ -364,9 +472,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       int serviceId;
       
       if (_mode == 'new_service' || widget.isEditing) {
-        // Create new service or update existing
         if (widget.isEditing && widget.serviceId != null) {
-          // Update existing service
           serviceId = widget.serviceId!;
           
           final updateData = {
@@ -385,13 +491,28 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           
           debugPrint('✅ Updated service: $serviceId');
           
-          // Delete existing variants and re-add
-          await supabase
-              .from('service_variants')
-              .delete()
-              .eq('service_id', serviceId);
+          // Delete existing variants if any
+          if (_variants.isNotEmpty) {
+            await supabase
+                .from('service_variants')
+                .delete()
+                .eq('service_id', serviceId);
+          }
         } else {
-          // Create new service
+          // Check again for duplicate before inserting
+          final exists = _existingServices.any((service) => 
+            service['name'].toString().toLowerCase() == _serviceNameController.text.trim().toLowerCase()
+          );
+          
+          if (exists) {
+            setState(() {
+              _serviceNameError = 'A service with this name already exists';
+              _isLoading = false;
+            });
+            _showSnackBar('A service with this name already exists', Colors.orange);
+            return;
+          }
+          
           final serviceData = {
             'salon_id': widget.salonId,
             'name': _serviceNameController.text.trim(),
@@ -413,12 +534,11 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           debugPrint('✅ Created new service: $serviceId');
         }
       } else {
-        // Use existing service
         serviceId = _selectedExistingServiceId!;
         debugPrint('✅ Using existing service: $serviceId');
         
-        // Delete existing variants for this service (if editing variants for existing service)
-        if (widget.isEditing) {
+        // Delete existing variants for this service
+        if (_variants.isNotEmpty) {
           await supabase
               .from('service_variants')
               .delete()
@@ -426,61 +546,94 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         }
       }
 
-      // Create new variants
-      for (var variant in _variants) {
-        final variantData = {
-          'service_id': serviceId,
-          'salon_gender_id': variant['gender_id'],
-          'salon_age_category_id': variant['age_category_id'],
-          'price': variant['price'],
-          'duration': variant['duration'],
-          'is_active': true,
-        };
-        
-        final variantResponse = await supabase
-            .from('service_variants')
-            .insert(variantData)
-            .select()
-            .single();
-        
-        final variantId = variantResponse['id'];
-        debugPrint('✅ Created variant: $variantId');
-        
-        // If this is for a barber, add to barber_services
-        // ✅ FIX: Check if salonBarberId is not null
-        if (widget.salonBarberId != null) {
-          // Check if already exists
-          final existingBarberService = await supabase
-              .from('barber_services')
-              .select()
-              .eq('salon_barber_id', widget.salonBarberId!)
-              .eq('service_id', serviceId)
-              .eq('variant_id', variantId)
-              .maybeSingle();
+      // Create variants if any
+      if (_variants.isNotEmpty) {
+        for (var variant in _variants) {
+          final variantData = {
+            'service_id': serviceId,
+            'salon_gender_id': variant['gender_id'],
+            'salon_age_category_id': variant['age_category_id'],
+            'price': variant['price'],
+            'duration': variant['duration'],
+            'is_active': true,
+          };
           
-          if (existingBarberService == null) {
-            await supabase
+          final variantResponse = await supabase
+              .from('service_variants')
+              .insert(variantData)
+              .select()
+              .single();
+          
+          final variantId = variantResponse['id'];
+          debugPrint('✅ Created variant: $variantId');
+          
+          if (widget.salonBarberId != null) {
+            final existingBarberService = await supabase
                 .from('barber_services')
-                .insert({
-                  'salon_barber_id': widget.salonBarberId!,
-                  'service_id': serviceId,
-                  'variant_id': variantId,
-                  'custom_price': variant['price'],
-                  'status': 'active',
-                });
-            debugPrint('✅ Added to barber services');
+                .select()
+                .eq('salon_barber_id', widget.salonBarberId!)
+                .eq('service_id', serviceId)
+                .eq('variant_id', variantId)
+                .maybeSingle();
+            
+            if (existingBarberService == null) {
+              await supabase
+                  .from('barber_services')
+                  .insert({
+                    'salon_barber_id': widget.salonBarberId!,
+                    'service_id': serviceId,
+                    'variant_id': variantId,
+                    'custom_price': variant['price'],
+                    'status': 'active',
+                  });
+              debugPrint('✅ Added to barber services');
+            }
           }
+        }
+      } else if (widget.salonBarberId != null) {
+        // For services without variants, add to barber_services without variant_id
+        final existingBarberService = await supabase
+            .from('barber_services')
+            .select()
+            .eq('salon_barber_id', widget.salonBarberId!)
+            .eq('service_id', serviceId)
+            .maybeSingle();
+        
+        if (existingBarberService == null) {
+          final Map<String, dynamic> barberServiceData = {
+            'salon_barber_id': widget.salonBarberId!,
+            'service_id': serviceId,
+            'status': 'active',
+          };
+          
+          await supabase
+              .from('barber_services')
+              .insert(barberServiceData);
+          debugPrint('✅ Added to barber services (no variants)');
         }
       }
 
       if (!mounted) return;
 
+      String successMessage;
+      if (_mode == 'new_service' || widget.isEditing) {
+        if (_variants.isNotEmpty) {
+          successMessage = "${_serviceNameController.text.trim()} has been ${widget.isEditing ? 'updated' : 'added'} successfully.\n\n✅ ${_variants.length} variant${_variants.length > 1 ? 's' : ''} ${widget.isEditing ? 'updated' : 'added'}";
+        } else {
+          successMessage = "${_serviceNameController.text.trim()} has been ${widget.isEditing ? 'updated' : 'added'} successfully.";
+        }
+      } else {
+        if (_variants.isNotEmpty) {
+          successMessage = "${_getServiceName(serviceId)} variants added successfully.\n\n✅ ${_variants.length} variant${_variants.length > 1 ? 's' : ''} added";
+        } else {
+          successMessage = "${_getServiceName(serviceId)} has been added successfully.";
+        }
+      }
+
       await showCustomAlert(
         context: context,
         title: widget.isEditing ? "✅ Service Updated!" : "🎉 Service Added!",
-        message: _mode == 'new_service' || widget.isEditing
-            ? "${_serviceNameController.text.trim()} has been ${widget.isEditing ? 'updated' : 'added'} successfully.\n\n✅ ${_variants.length} variant${_variants.length > 1 ? 's' : ''} ${widget.isEditing ? 'updated' : 'added'}"
-            : "${_getServiceName(serviceId)} variants added successfully.\n\n✅ ${_variants.length} variant${_variants.length > 1 ? 's' : ''} added",
+        message: successMessage,
         isError: false,
       );
 
@@ -490,7 +643,15 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     } catch (e) {
       debugPrint('❌ Error: $e');
       if (mounted) {
-        _showSnackBar('Error: $e', Colors.red);
+        // Handle duplicate key error specifically
+        if (e.toString().contains('duplicate key value violates unique constraint')) {
+          _showSnackBar('A service with this name already exists. Please use a different name.', Colors.orange);
+          setState(() {
+            _serviceNameError = 'A service with this name already exists';
+          });
+        } else {
+          _showSnackBar('Error: $e', Colors.red);
+        }
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -503,7 +664,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         content: Text(message),
         backgroundColor: color,
         behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 2),
+        duration: const Duration(seconds: 3),
       ),
     );
   }
@@ -538,8 +699,8 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
             widget.barberName != null 
                 ? '${widget.isEditing ? 'Edit' : 'Add'} service for ${widget.barberName}' 
                 : widget.isEditing 
-                    ? 'Update service details and variants' 
-                    : 'Create a new service with multiple variants',
+                    ? 'Update service details' 
+                    : 'Create a new service',
             style: TextStyle(fontSize: 14, color: Colors.grey[600]),
           ),
         ],
@@ -577,6 +738,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                       setState(() {
                         _mode = 'new_service';
                         _selectedExistingServiceId = null;
+                        _serviceNameError = null;
                       });
                     }
                   },
@@ -609,15 +771,22 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           if (_mode == 'add_to_existing') ...[
             const SizedBox(height: 12),
             DropdownButtonFormField<int>(
-              value: _selectedExistingServiceId,
+              initialValue: _selectedExistingServiceId,
+              isExpanded: true,
               decoration: InputDecoration(
                 labelText: 'Select Service',
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                filled: true,
+                fillColor: Colors.white,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
               ),
               items: _existingServices.map((service) {
                 return DropdownMenuItem<int>(
                   value: service['id'] as int,
-                  child: Text(service['name']),
+                  child: Text(
+                    service['name'],
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 );
               }).toList(),
               onChanged: (value) {
@@ -710,12 +879,11 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Service Information',
+            'Service Details',
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 16),
           
-          // Service Name
           const Text(
             'Service Name *',
             style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
@@ -727,17 +895,19 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
               hintText: 'e.g., Hair Cut, Facial, Massage',
               prefixIcon: const Icon(Icons.build, color: Colors.grey),
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              filled: true,
+              fillColor: Colors.white,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              errorText: _serviceNameError,
+              errorMaxLines: 2,
             ),
-            validator: (value) {
-              if (value == null || value.trim().isEmpty) {
-                return 'Service name is required';
-              }
-              return null;
+            onChanged: (value) {
+              _validateServiceName();
+              setState(() {});
             },
           ),
           const SizedBox(height: 16),
 
-          // Description
           const Text(
             'Description',
             style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
@@ -745,15 +915,17 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           const SizedBox(height: 8),
           TextFormField(
             controller: _serviceDescriptionController,
-            maxLines: 3,
+            maxLines: 2,
             decoration: InputDecoration(
               hintText: 'Describe what this service includes...',
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              filled: true,
+              fillColor: Colors.white,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
             ),
           ),
           const SizedBox(height: 16),
 
-          // Icon Selection
           const Text(
             'Service Icon',
             style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
@@ -762,75 +934,60 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
+              color: Colors.white,
               border: Border.all(color: Colors.grey[300]!),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Choose an icon for your service',
-                  style: TextStyle(fontSize: 12, color: Colors.grey),
-                ),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 12,
-                  runSpacing: 12,
-                  children: _iconSuggestions.map((iconData) {
-                    final isSelected = _selectedIcon == iconData['name'];
-                    return GestureDetector(
-                      onTap: () {
-                        setState(() {
-                          _selectedIcon = iconData['name'];
-                        });
-                      },
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 200),
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              alignment: WrapAlignment.start,
+              children: _iconSuggestions.map((iconData) {
+                final isSelected = _selectedIcon == iconData['name'];
+                return GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      _selectedIcon = iconData['name'];
+                    });
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: isSelected 
+                          ? Color(iconData['color']).withValues(alpha: 0.1)
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: isSelected 
+                            ? Color(iconData['color'])
+                            : Colors.grey[300]!,
+                        width: isSelected ? 2 : 1,
+                      ),
+                    ),
+                    child: Column(
+                      children: [
+                        Icon(
+                          iconData['icon'],
+                          size: 24,
                           color: isSelected 
-                              ? Color(iconData['color']).withValues(alpha: 0.1)
-                              : Colors.transparent,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
+                              ? Color(iconData['color'])
+                              : Colors.grey[600],
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          iconData['label'],
+                          style: TextStyle(
+                            fontSize: 9,
                             color: isSelected 
                                 ? Color(iconData['color'])
-                                : Colors.grey[300]!,
-                            width: isSelected ? 2 : 1,
+                                : Colors.grey[600],
                           ),
-                          boxShadow: isSelected ? [
-                            BoxShadow(
-                              color: Color(iconData['color']).withValues(alpha: 0.3),
-                              blurRadius: 4,
-                            )
-                          ] : null,
                         ),
-                        child: Column(
-                          children: [
-                            Icon(
-                              iconData['icon'],
-                              size: 28,
-                              color: isSelected 
-                                  ? Color(iconData['color'])
-                                  : Colors.grey[600],
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              iconData['label'],
-                              style: TextStyle(
-                                fontSize: 10,
-                                color: isSelected 
-                                    ? Color(iconData['color'])
-                                    : Colors.grey[600],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ],
+                      ],
+                    ),
+                  ),
+                );
+              }).toList(),
             ),
           ),
         ],
@@ -840,17 +997,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
 
   Widget _buildVariantForm() {
     if (_genders.isEmpty || _ageCategories.isEmpty) {
-      return Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.grey[50],
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.grey[200]!),
-        ),
-        child: const Center(
-          child: Text('Please add genders and age categories first.'),
-        ),
-      );
+      return const SizedBox();
     }
     
     return Container(
@@ -866,7 +1013,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           Row(
             children: [
               const Text(
-                'Service Variants',
+                'Add Variants (Optional)',
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
               const Spacer(),
@@ -879,6 +1026,8 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                       _selectedAgeCategoryId = null;
                       _variantPriceController.clear();
                       _variantDurationController.clear();
+                      _priceError = null;
+                      _durationError = null;
                     });
                   },
                   child: const Text('Cancel Edit'),
@@ -900,21 +1049,28 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      'Gender *',
+                      'Gender',
                       style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
                     ),
                     const SizedBox(height: 8),
                     DropdownButtonFormField<int>(
-                      value: _selectedGenderId,
+                      initialValue: _selectedGenderId,
+                      isExpanded: true,
                       decoration: InputDecoration(
-                        prefixIcon: const Icon(Icons.wc, color: Colors.grey),
+                        prefixIcon: const Icon(Icons.wc, color: Colors.grey, size: 20),
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        filled: true,
+                        fillColor: Colors.white,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                       ),
                       hint: const Text('Select gender'),
                       items: _genders.map((gender) {
                         return DropdownMenuItem<int>(
                           value: gender['id'] as int,
-                          child: Text(_getGenderDisplayName(gender)),
+                          child: Text(
+                            _getGenderDisplayName(gender),
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         );
                       }).toList(),
                       onChanged: (value) {
@@ -932,21 +1088,28 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      'Age Category *',
+                      'Age Category',
                       style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
                     ),
                     const SizedBox(height: 8),
                     DropdownButtonFormField<int>(
-                      value: _selectedAgeCategoryId,
+                      initialValue: _selectedAgeCategoryId,
+                      isExpanded: true,
                       decoration: InputDecoration(
-                        prefixIcon: const Icon(Icons.timeline, color: Colors.grey),
+                        prefixIcon: const Icon(Icons.timeline, color: Colors.grey, size: 20),
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        filled: true,
+                        fillColor: Colors.white,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                       ),
                       hint: const Text('Select age'),
                       items: _ageCategories.map((ageCat) {
                         return DropdownMenuItem<int>(
                           value: ageCat['id'] as int,
-                          child: Text(_getAgeCategoryDisplayName(ageCat)),
+                          child: Text(
+                            _getAgeCategoryDisplayName(ageCat),
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         );
                       }).toList(),
                       onChanged: (value) {
@@ -962,7 +1125,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           ),
           const SizedBox(height: 12),
 
-          // Price and Duration Row
+          // Price and Duration Row with Validation
           Row(
             children: [
               Expanded(
@@ -979,9 +1142,18 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                       keyboardType: TextInputType.number,
                       decoration: InputDecoration(
                         hintText: 'e.g., 1500',
-                        prefixIcon: const Icon(Icons.currency_rupee, color: Colors.grey),
+                        prefixIcon: const Icon(Icons.currency_rupee, color: Colors.grey, size: 20),
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        filled: true,
+                        fillColor: Colors.white,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                        errorText: _priceError,
+                        errorMaxLines: 2,
                       ),
+                      onChanged: (value) {
+                        _validatePrice();
+                        setState(() {});
+                      },
                     ),
                   ],
                 ),
@@ -1001,9 +1173,18 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                       keyboardType: TextInputType.number,
                       decoration: InputDecoration(
                         hintText: 'e.g., 30',
-                        prefixIcon: const Icon(Icons.timer, color: Colors.grey),
+                        prefixIcon: const Icon(Icons.timer, color: Colors.grey, size: 20),
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        filled: true,
+                        fillColor: Colors.white,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                        errorText: _durationError,
+                        errorMaxLines: 2,
                       ),
+                      onChanged: (value) {
+                        _validateDuration();
+                        setState(() {});
+                      },
                     ),
                   ],
                 ),
@@ -1012,7 +1193,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           ),
           const SizedBox(height: 16),
           
-          // Add/Update Button
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
@@ -1038,36 +1218,13 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
 
   Widget _buildVariantsList() {
     if (_variants.isEmpty) {
-      return Container(
-        padding: const EdgeInsets.all(32),
-        decoration: BoxDecoration(
-          color: Colors.grey[50],
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.grey[200]!),
-        ),
-        child: const Center(
-          child: Column(
-            children: [
-              Icon(Icons.local_offer, size: 48, color: Colors.grey),
-              SizedBox(height: 12),
-              Text(
-                'No variants added yet',
-                style: TextStyle(color: Colors.grey),
-              ),
-              SizedBox(height: 4),
-              Text(
-                'Add variants to create different pricing options',
-                style: TextStyle(fontSize: 12, color: Colors.grey),
-              ),
-            ],
-          ),
-        ),
-      );
+      return const SizedBox();
     }
     
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        const SizedBox(height: 16),
         const Text(
           'Added Variants',
           style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
@@ -1088,11 +1245,12 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
               child: ListTile(
                 leading: CircleAvatar(
                   backgroundColor: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
-                  child: Text('${index + 1}'),
+                  child: Text('${index + 1}', style: const TextStyle(color: Color(0xFFFF6B8B))),
                 ),
                 title: Text(
                   '${variant['gender_name']} - ${variant['age_category_name']}',
                   style: const TextStyle(fontWeight: FontWeight.w500),
+                  overflow: TextOverflow.ellipsis,
                 ),
                 subtitle: Text(
                   'Rs. ${variant['price']} | ${variant['duration']} mins',
@@ -1101,14 +1259,12 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     IconButton(
-                      icon: const Icon(Icons.edit, color: Colors.blue),
+                      icon: const Icon(Icons.edit, color: Colors.blue, size: 20),
                       onPressed: () => _editVariant(index),
-                      tooltip: 'Edit Variant',
                     ),
                     IconButton(
-                      icon: const Icon(Icons.delete, color: Colors.red),
+                      icon: const Icon(Icons.delete, color: Colors.red, size: 20),
                       onPressed: () => _removeVariant(index),
-                      tooltip: 'Delete Variant',
                     ),
                   ],
                 ),
@@ -1121,16 +1277,21 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   }
 
   Widget _buildCreateButton() {
-    final isDisabled = _isLoading || 
-        ((_mode == 'new_service' || widget.isEditing) && _serviceNameController.text.trim().isEmpty) ||
-        (_mode == 'add_to_existing' && !widget.isEditing && _selectedExistingServiceId == null) ||
-        _variants.isEmpty;
+    bool isEnabled = false;
+    
+    if (_mode == 'new_service' || widget.isEditing) {
+      // For new service or edit mode - need service name and no error
+      isEnabled = _serviceNameController.text.trim().isNotEmpty && _serviceNameError == null;
+    } else {
+      // For add to existing mode - need to select a service
+      isEnabled = _selectedExistingServiceId != null;
+    }
     
     return SizedBox(
       width: double.infinity,
       height: 54,
       child: ElevatedButton(
-        onPressed: isDisabled ? null : _createAndAddService,
+        onPressed: (_isLoading || !isEnabled) ? null : _createAndAddService,
         style: ElevatedButton.styleFrom(
           backgroundColor: const Color(0xFFFF6B8B),
           foregroundColor: Colors.white,
@@ -1140,20 +1301,13 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           elevation: 2,
         ),
         child: _isLoading
-            ? const Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  SizedBox(
-                    height: 24,
-                    width: 24,
-                    child: CircularProgressIndicator(
-                      color: Colors.white,
-                      strokeWidth: 2,
-                    ),
-                  ),
-                  SizedBox(width: 12),
-                  Text('Processing...'),
-                ],
+            ? const SizedBox(
+                height: 24,
+                width: 24,
+                child: CircularProgressIndicator(
+                  color: Colors.white,
+                  strokeWidth: 2,
+                ),
               )
             : Row(
                 mainAxisSize: MainAxisSize.min,
@@ -1172,8 +1326,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isDesktop = MediaQuery.of(context).size.width > 800;
-    
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.barberName != null 
@@ -1181,48 +1333,46 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
             : widget.isEditing ? 'Edit Service' : 'Add New Service'),
         backgroundColor: const Color(0xFFFF6B8B),
         foregroundColor: Colors.white,
-        centerTitle: isDesktop,
         elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.pop(context),
-        ),
       ),
       body: _isLoadingData
           ? const Center(child: CircularProgressIndicator(color: Color(0xFFFF6B8B)))
           : Container(
               color: Colors.grey[50],
-              child: Center(
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(maxWidth: isDesktop ? 900 : double.infinity),
-                  child: SingleChildScrollView(
-                    padding: EdgeInsets.all(isDesktop ? 32 : 16),
-                    child: Card(
-                      elevation: isDesktop ? 4 : 2,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Padding(
-                        padding: EdgeInsets.all(isDesktop ? 32 : 20),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _buildHeader(),
-                            const SizedBox(height: 24),
-                            if (widget.salonBarberId != null && !widget.isEditing) _buildModeSelector(),
-                            if (widget.salonBarberId != null && !widget.isEditing) const SizedBox(height: 24),
-                            _buildCategorySection(),
-                            const SizedBox(height: 24),
-                            if (_mode == 'new_service' || widget.isEditing) ...[
-                              _buildServiceInfoForm(),
+              child: SafeArea(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(16),
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 800),
+                      child: Card(
+                        elevation: 2,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(20),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _buildHeader(),
                               const SizedBox(height: 24),
+                              if (widget.salonBarberId != null && !widget.isEditing) 
+                                _buildModeSelector(),
+                              if (widget.salonBarberId != null && !widget.isEditing) 
+                                const SizedBox(height: 24),
+                              _buildCategorySection(),
+                              const SizedBox(height: 24),
+                              if (_mode == 'new_service' || widget.isEditing) ...[
+                                _buildServiceInfoForm(),
+                                const SizedBox(height: 24),
+                              ],
+                              _buildVariantForm(),
+                              _buildVariantsList(),
+                              const SizedBox(height: 32),
+                              _buildCreateButton(),
                             ],
-                            _buildVariantForm(),
-                            const SizedBox(height: 24),
-                            _buildVariantsList(),
-                            const SizedBox(height: 32),
-                            _buildCreateButton(),
-                          ],
+                          ),
                         ),
                       ),
                     ),
