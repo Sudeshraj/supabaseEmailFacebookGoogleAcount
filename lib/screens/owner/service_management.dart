@@ -22,9 +22,6 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
   List<Map<String, dynamic>> _services = [];
   bool _isLoading = true;
   bool _isProcessing = false;
-  
-  // Track expanded service cards
-  Set<int> _expandedServices = {};
 
   // Search and filter
   String _searchQuery = '';
@@ -34,6 +31,9 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
   // Gender and age categories for variant form
   List<Map<String, dynamic>> _genders = [];
   List<Map<String, dynamic>> _ageCategories = [];
+  
+  // For expansion state - track expanded services
+  final Set<int> _expandedServices = {};
 
   final supabase = Supabase.instance.client;
 
@@ -170,8 +170,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
     }
   }
 
-  // Toggle service expansion
-  void _toggleServiceExpansion(int serviceId) {
+  void _toggleExpand(int serviceId) {
     setState(() {
       if (_expandedServices.contains(serviceId)) {
         _expandedServices.remove(serviceId);
@@ -193,7 +192,6 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
     String? priceError;
     String? durationError;
     
-    // Validation functions
     void validatePrice() {
       final price = double.tryParse(priceController.text.trim());
       if (priceController.text.trim().isEmpty) {
@@ -245,7 +243,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    'Add Variant',
+                    'Add New Option',
                     style: const TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.bold,
@@ -285,7 +283,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                   
                   // Gender Dropdown
                   const Text(
-                    'Gender *',
+                    'Gender',
                     style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
                   ),
                   const SizedBox(height: 8),
@@ -319,7 +317,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                   
                   // Age Category Dropdown
                   const Text(
-                    'Age Category *',
+                    'Age Category',
                     style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
                   ),
                   const SizedBox(height: 8),
@@ -363,7 +361,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             const Text(
-                              'Price (Rs.) *',
+                              'Price (Rs.)',
                               style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
                             ),
                             const SizedBox(height: 8),
@@ -394,7 +392,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             const Text(
-                              'Duration (mins) *',
+                              'Duration (mins)',
                               style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
                             ),
                             const SizedBox(height: 8),
@@ -431,7 +429,6 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
               ),
               ElevatedButton(
                 onPressed: () async {
-                  // Validate before saving
                   validatePrice();
                   validateDuration();
                   
@@ -463,14 +460,13 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                   });
                   
                   if (isDuplicate) {
-                    _showSnackBar('This variant combination already exists!', Colors.orange);
+                    _showSnackBar('This option already exists!', Colors.orange);
                     return;
                   }
                   
                   setState(() => _isProcessing = true);
                   
                   try {
-                    // Create new variant
                     await supabase
                         .from('service_variants')
                         .insert({
@@ -485,11 +481,11 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                     if (mounted) {
                       Navigator.pop(context);
                       await _loadServices();
-                      _showSnackBar('Variant added successfully', Colors.green);
+                      _showSnackBar('Option added successfully', Colors.green);
                     }
                   } catch (e) {
                     if (mounted) {
-                      _showSnackBar('Error adding variant: $e', Colors.red);
+                      _showSnackBar('Error adding option: $e', Colors.red);
                     }
                   } finally {
                     if (mounted) setState(() => _isProcessing = false);
@@ -502,7 +498,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                     borderRadius: BorderRadius.circular(12),
                   ),
                 ),
-                child: const Text('Add Variant', style: TextStyle(fontWeight: FontWeight.bold)),
+                child: const Text('Add Option', style: TextStyle(fontWeight: FontWeight.bold)),
               ),
             ],
           );
@@ -578,7 +574,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                 ),
                 const SizedBox(width: 12),
                 const Text(
-                  'Edit Variant',
+                  'Edit Option',
                   style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                 ),
               ],
@@ -713,13 +709,13 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                       Navigator.pop(context);
                       await _loadServices();
                       _showSnackBar(
-                        'Variant updated successfully',
+                        'Option updated successfully',
                         Colors.green,
                       );
                     }
                   } catch (e) {
                     if (mounted) {
-                      _showSnackBar('Error updating variant: $e', Colors.red);
+                      _showSnackBar('Error updating option: $e', Colors.red);
                     }
                   } finally {
                     if (mounted) setState(() => _isProcessing = false);
@@ -758,7 +754,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
             Icon(Icons.warning_amber_rounded, color: Colors.red, size: 28),
             SizedBox(width: 12),
             Text(
-              'Delete Variant',
+              'Delete Option',
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             ),
           ],
@@ -768,7 +764,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              "Are you sure you want to delete this variant?",
+              "Are you sure you want to delete this option?",
               style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
             ),
             const SizedBox(height: 12),
@@ -787,12 +783,12 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Variant: ${variant['gender_name']} - ${variant['age_name']}',
+                    '${variant['gender_name']} - ${variant['age_name']}',
                     style: const TextStyle(fontSize: 13),
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Price: Rs. ${variant['price']} | Duration: ${variant['duration']} mins',
+                    'Rs. ${variant['price']} | ${variant['duration']} mins',
                     style: const TextStyle(fontSize: 13),
                   ),
                 ],
@@ -837,11 +833,11 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
         await _loadServices();
 
         if (mounted) {
-          _showSnackBar('Variant deleted successfully', Colors.green);
+          _showSnackBar('Option deleted successfully', Colors.green);
         }
       } catch (e) {
         if (mounted) {
-          _showSnackBar('Error deleting variant: $e', Colors.red);
+          _showSnackBar('Error deleting option: $e', Colors.red);
         }
       } finally {
         if (mounted) setState(() => _isProcessing = false);
@@ -1031,7 +1027,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    '• ${service['variant_count']} variant${service['variant_count'] != 1 ? 's' : ''}',
+                    '• ${service['variant_count']} option${service['variant_count'] != 1 ? 's' : ''}',
                     style: const TextStyle(fontSize: 13),
                   ),
                   const Text(
@@ -1130,14 +1126,15 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isDesktop = MediaQuery.of(context).size.width > 800;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isWeb = screenWidth > 800;
 
     return Scaffold(
       appBar: AppBar(
         title: Text('Services - ${widget.salonName}'),
         backgroundColor: const Color(0xFFFF6B8B),
         foregroundColor: Colors.white,
-        centerTitle: isDesktop,
+        centerTitle: isWeb,
         elevation: 0,
         actions: [
           IconButton(
@@ -1168,71 +1165,69 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
               children: [
                 // Search and Filter Bar
                 Container(
-                  padding: EdgeInsets.all(isDesktop ? 16 : 12),
+                  padding: const EdgeInsets.all(16),
                   color: Colors.white,
-                  child: Row(
+                  child: Column(
                     children: [
-                      Expanded(
-                        child: TextField(
-                          onChanged: (value) {
-                            setState(() {
-                              _searchQuery = value;
-                            });
-                          },
-                          decoration: InputDecoration(
-                            hintText: 'Search services...',
-                            prefixIcon: const Icon(
-                              Icons.search,
-                              color: Colors.grey,
-                            ),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: BorderSide.none,
-                            ),
-                            filled: true,
-                            fillColor: Colors.grey[100],
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 12,
-                            ),
+                      TextField(
+                        onChanged: (value) {
+                          setState(() {
+                            _searchQuery = value;
+                          });
+                        },
+                        decoration: InputDecoration(
+                          hintText: 'Search services...',
+                          prefixIcon: const Icon(Icons.search, color: Colors.grey),
+                          suffixIcon: _searchQuery.isNotEmpty
+                              ? IconButton(
+                                  icon: const Icon(Icons.clear, color: Colors.grey),
+                                  onPressed: () => setState(() => _searchQuery = ''),
+                                )
+                              : null,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(color: Color(0xFFFF6B8B), width: 2),
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
                           ),
                         ),
                       ),
-                      const SizedBox(width: 12),
-                      Container(
-                        constraints: const BoxConstraints(maxWidth: 200),
-                        child: DropdownButtonFormField<int>(
-                          value: _selectedCategoryId,
-                          decoration: InputDecoration(
-                            hintText: 'All Categories',
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: BorderSide.none,
+                      const SizedBox(height: 12),
+                      
+                      // Category filter chips
+                      SizedBox(
+                        height: 45,
+                        child: ListView(
+                          scrollDirection: Axis.horizontal,
+                          children: [
+                            FilterChip(
+                              label: const Text('All'),
+                              selected: _selectedCategoryId == null,
+                              onSelected: (_) => setState(() => _selectedCategoryId = null),
+                              selectedColor: const Color(0xFFFF6B8B).withValues(alpha: 0.2),
+                              checkmarkColor: const Color(0xFFFF6B8B),
                             ),
-                            filled: true,
-                            fillColor: Colors.grey[100],
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 12,
-                            ),
-                          ),
-                          items: [
-                            const DropdownMenuItem<int>(
-                              value: null,
-                              child: Text('All Categories'),
-                            ),
+                            const SizedBox(width: 8),
                             ..._categories.map((category) {
-                              return DropdownMenuItem<int>(
-                                value: category['id'] as int,
-                                child: Text(category['display_name']),
+                              return Padding(
+                                padding: const EdgeInsets.only(right: 8),
+                                child: FilterChip(
+                                  label: Text(category['display_name']),
+                                  selected: _selectedCategoryId == category['id'],
+                                  onSelected: (_) => setState(() {
+                                    _selectedCategoryId = category['id'] as int;
+                                  }),
+                                  selectedColor: const Color(0xFFFF6B8B).withValues(alpha: 0.2),
+                                  checkmarkColor: const Color(0xFFFF6B8B),
+                                ),
                               );
                             }),
                           ],
-                          onChanged: (value) {
-                            setState(() {
-                              _selectedCategoryId = value;
-                            });
-                          },
                         ),
                       ),
                     ],
@@ -1253,8 +1248,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                               ),
                               const SizedBox(height: 16),
                               Text(
-                                _searchQuery.isNotEmpty ||
-                                        _selectedCategoryId != null
+                                _searchQuery.isNotEmpty || _selectedCategoryId != null
                                     ? 'No services match your filters'
                                     : 'No services added yet',
                                 style: TextStyle(
@@ -1263,8 +1257,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                                 ),
                               ),
                               const SizedBox(height: 8),
-                              if (_searchQuery.isNotEmpty ||
-                                  _selectedCategoryId != null)
+                              if (_searchQuery.isNotEmpty || _selectedCategoryId != null)
                                 TextButton(
                                   onPressed: () {
                                     setState(() {
@@ -1304,342 +1297,521 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                             ],
                           ),
                         )
-                      : ListView.builder(
-                          padding: EdgeInsets.all(isDesktop ? 16 : 12),
-                          itemCount: _filteredServices.length,
-                          itemBuilder: (context, index) {
-                            final service = _filteredServices[index];
-                            return _buildServiceCard(service, isDesktop);
-                          },
-                        ),
+                      : isWeb
+                          ? _buildWebView()
+                          : _buildMobileView(),
                 ),
               ],
             ),
     );
   }
 
-  Widget _buildServiceCard(Map<String, dynamic> service, bool isDesktop) {
+  Widget _buildWebView() {
+    return GridView.builder(
+      padding: const EdgeInsets.all(16),
+      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+        maxCrossAxisExtent: 400,
+        crossAxisSpacing: 16,
+        mainAxisSpacing: 16,
+        childAspectRatio: 0.85,
+      ),
+      itemCount: _filteredServices.length,
+      itemBuilder: (context, index) {
+        final service = _filteredServices[index];
+        return _buildServiceCardWeb(service);
+      },
+    );
+  }
+
+  Widget _buildServiceCardWeb(Map<String, dynamic> service) {
+    final variants = service['variants'] as List;
+    final hasVariants = variants.isNotEmpty;
     final isExpanded = _expandedServices.contains(service['id']);
-    final hasVariants = service['has_variants'];
     
     return Card(
-      margin: EdgeInsets.only(bottom: 16),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: Colors.grey[200]!, width: 1),
+      ),
       elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Service Header (Always visible)
-          InkWell(
-            onTap: hasVariants ? () => _toggleServiceExpansion(service['id']) : null,
-            borderRadius: BorderRadius.circular(16),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  // Icon
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Icon(
-                      _getIconForName(service['icon_name']),
-                      color: const Color(0xFFFF6B8B),
-                      size: isDesktop ? 32 : 28,
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  
-                  // Service Info
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          service['name'],
-                          style: TextStyle(
-                            fontSize: isDesktop ? 18 : 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 2,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.grey[200],
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Text(
-                                service['category_name'],
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.grey[600],
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            if (hasVariants)
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 2,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: Text(
-                                  '${service['variant_count']} variant${service['variant_count'] != 1 ? 's' : ''}',
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    color: const Color(0xFFFF6B8B),
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ),
-                        if (service['description'] != null &&
-                            service['description'].isNotEmpty)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 8),
-                            child: Text(
-                              service['description'],
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: Colors.grey[600],
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                  
-                  // Action Buttons
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.edit, color: Colors.blue, size: 20),
-                        onPressed: _isProcessing ? null : () => _editService(service),
-                        tooltip: 'Edit Service',
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.delete, color: Colors.red, size: 20),
-                        onPressed: _isProcessing ? null : () => _deleteService(service),
-                        tooltip: 'Delete Service',
-                      ),
-                      if (hasVariants)
-                        IconButton(
-                          icon: AnimatedRotation(
-                            duration: const Duration(milliseconds: 300),
-                            turns: isExpanded ? 0.5 : 0.0,
-                            child: Icon(
-                              Icons.keyboard_arrow_down,
-                              color: Colors.grey[600],
-                              size: 24,
-                            ),
-                          ),
-                          onPressed: () => _toggleServiceExpansion(service['id']),
-                          tooltip: isExpanded ? 'Show less' : 'Show variants',
-                        ),
-                    ],
-                  ),
-                ],
+          // Service Header
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFF6B8B).withValues(alpha: 0.05),
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(16),
+                topRight: Radius.circular(16),
               ),
             ),
-          ),
-          
-          // Variants Section (Expandable)
-          AnimatedCrossFade(
-            duration: const Duration(milliseconds: 300),
-            crossFadeState: isExpanded ? CrossFadeState.showFirst : CrossFadeState.showSecond,
-            firstChild: Container(
-              decoration: BoxDecoration(
-                color: Colors.grey[50],
-                borderRadius: const BorderRadius.only(
-                  bottomLeft: Radius.circular(16),
-                  bottomRight: Radius.circular(16),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.grey.withValues(alpha: 0.1),
+                        blurRadius: 4,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Icon(
+                    _getIconForName(service['icon_name']),
+                    color: const Color(0xFFFF6B8B),
+                    size: 28,
+                  ),
                 ),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Variants Header
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.list_alt,
-                          size: 20,
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        service['name'],
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 18,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        service['category_name'],
+                        style: TextStyle(
+                          fontSize: 12,
                           color: Colors.grey[600],
                         ),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Sub Services',
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.grey[700],
-                          ),
-                        ),
-                        const Spacer(),
-                        TextButton.icon(
-                          onPressed: _isProcessing
-                              ? null
-                              : () => _showAddVariantDialog(service),
-                          icon: const Icon(Icons.add, size: 18),
-                          label: const Text('Add Sub Service'),
-                          style: TextButton.styleFrom(
-                            foregroundColor: const Color(0xFFFF6B8B),
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                          ),
-                        ),
-                      ],
+                      ),
+                    ],
+                  ),
+                ),
+                // Service Action Buttons
+                Row(
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.edit, color: Colors.blue, size: 20),
+                      onPressed: _isProcessing ? null : () => _editService(service),
+                      tooltip: 'Edit Service',
                     ),
-                    const SizedBox(height: 12),
-                    
-                    // Variants List
-                    if (service['variants'].isEmpty)
-                      Container(
-                        padding: const EdgeInsets.all(32),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: Colors.grey[200]!),
+                    IconButton(
+                      icon: const Icon(Icons.delete, color: Colors.red, size: 20),
+                      onPressed: _isProcessing ? null : () => _deleteService(service),
+                      tooltip: 'Delete Service',
+                    ),
+                    if (hasVariants)
+                      IconButton(
+                        icon: AnimatedRotation(
+                          duration: const Duration(milliseconds: 300),
+                          turns: isExpanded ? 0.5 : 0.0,
+                          child: const Icon(Icons.keyboard_arrow_down, color: Colors.grey),
                         ),
-                        child: Column(
-                          children: [
-                            Icon(Icons.local_offer, size: 48, color: Colors.grey[400]),
-                            const SizedBox(height: 12),
-                            Text(
-                              'No sub services added yet',
-                              style: TextStyle(color: Colors.grey[500]),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              'Add sub services to create different pricing options',
-                              style: TextStyle(fontSize: 12, color: Colors.grey[400]),
-                            ),
-                          ],
-                        ),
-                      )
-                    else
-                      GridView.builder(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: isDesktop ? 3 : 1,
-                          childAspectRatio: isDesktop ? 3.5 : 5,
-                          crossAxisSpacing: 12,
-                          mainAxisSpacing: 12,
-                        ),
-                        itemCount: service['variants'].length,
-                        itemBuilder: (context, index) {
-                          final variant = service['variants'][index];
-                          return _buildVariantCard(service, variant);
-                        },
+                        onPressed: () => _toggleExpand(service['id']),
                       ),
                   ],
                 ),
+              ],
+            ),
+          ),
+          
+          // Description
+          if (service['description'] != null && service['description'].isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text(
+                service['description'],
+                style: TextStyle(
+                  fontSize: 13,
+                  color: Colors.grey[600],
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
-            secondChild: const SizedBox.shrink(),
-          ),
+          
+          // Variants Section
+          if (hasVariants) ...[
+            const Divider(height: 1),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Text(
+                        'Options',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.grey,
+                        ),
+                      ),
+                      const Spacer(),
+                      TextButton.icon(
+                        onPressed: _isProcessing ? null : () => _showAddVariantDialog(service),
+                        icon: const Icon(Icons.add, size: 16),
+                        label: const Text('Add Option'),
+                        style: TextButton.styleFrom(
+                          foregroundColor: const Color(0xFFFF6B8B),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  
+                  // Variants List
+                  ...variants.map((variant) {
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.grey[50],
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.grey[200]!),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 40,
+                            height: 40,
+                            decoration: BoxDecoration(
+                              color: Colors.orange.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Icon(
+                              Icons.local_offer,
+                              color: Colors.orange,
+                              size: 20,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '${variant['gender_name']} • ${variant['age_name']}',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Rs. ${variant['price']} | ${variant['duration']} mins',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.grey[600],
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Row(
+                            children: [
+                              IconButton(
+                                icon: const Icon(Icons.edit, size: 18, color: Colors.blue),
+                                onPressed: _isProcessing
+                                    ? null
+                                    : () => _showEditVariantDialog(service, variant),
+                                tooltip: 'Edit Option',
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.delete, size: 18, color: Colors.red),
+                                onPressed: _isProcessing
+                                    ? null
+                                    : () => _deleteVariant(service, variant),
+                                tooltip: 'Delete Option',
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+                  
+                  if (variants.isEmpty)
+                    Container(
+                      padding: const EdgeInsets.all(24),
+                      decoration: BoxDecoration(
+                        color: Colors.grey[50],
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Center(
+                        child: Text(
+                          'No options added yet',
+                          style: TextStyle(color: Colors.grey),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );
   }
 
-  Widget _buildVariantCard(
-    Map<String, dynamic> service,
-    Map<String, dynamic> variant,
-  ) {
-    return Container(
+  Widget _buildMobileView() {
+    return ListView.builder(
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[200]!),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withValues(alpha: 0.05),
-            blurRadius: 4,
-            offset: const Offset(0, 2),
+      itemCount: _filteredServices.length,
+      itemBuilder: (context, index) {
+        final service = _filteredServices[index];
+        final variants = service['variants'] as List;
+        final hasVariants = variants.isNotEmpty;
+        final isExpanded = _expandedServices.contains(service['id']);
+        
+        return Card(
+          margin: const EdgeInsets.only(bottom: 12),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: BorderSide(color: Colors.grey[200]!, width: 1),
           ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: Colors.orange.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: const Icon(
-              Icons.local_offer,
-              color: Colors.orange,
-              size: 20,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '${variant['gender_name']} • ${variant['age_name']}',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 13,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Rs. ${variant['price']} | ${variant['duration']} mins',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey[600],
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Row(
-            mainAxisSize: MainAxisSize.min,
+          child: Column(
             children: [
-              IconButton(
-                icon: const Icon(Icons.edit, size: 18, color: Colors.blue),
-                onPressed: _isProcessing
-                    ? null
-                    : () => _showEditVariantDialog(service, variant),
-                tooltip: 'Edit Sub Service',
+              // Service Header
+              InkWell(
+                onTap: hasVariants ? () => _toggleExpand(service['id']) : null,
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(
+                          _getIconForName(service['icon_name']),
+                          color: const Color(0xFFFF6B8B),
+                          size: 24,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              service['name'],
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 16,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                Text(
+                                  service['category_name'],
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: Colors.grey[600],
+                                  ),
+                                ),
+                                if (hasVariants) ...[
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 6,
+                                      vertical: 2,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: Colors.grey[200],
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text(
+                                      '${variants.length} options',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        color: Colors.grey[600],
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      Row(
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.edit, color: Colors.blue, size: 20),
+                            onPressed: _isProcessing ? null : () => _editService(service),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.delete, color: Colors.red, size: 20),
+                            onPressed: _isProcessing ? null : () => _deleteService(service),
+                          ),
+                          if (hasVariants)
+                            Icon(
+                              isExpanded ? Icons.expand_less : Icons.expand_more,
+                              color: Colors.grey,
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
               ),
-              IconButton(
-                icon: const Icon(Icons.delete, size: 18, color: Colors.red),
-                onPressed: _isProcessing
-                    ? null
-                    : () => _deleteVariant(service, variant),
-                tooltip: 'Delete Sub Service',
-              ),
+              
+              // Description
+              if (service['description'] != null && service['description'].isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                  child: Text(
+                    service['description'],
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Colors.grey[600],
+                    ),
+                  ),
+                ),
+              
+              // Variants Section
+              if (isExpanded && hasVariants)
+                Container(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  child: Column(
+                    children: [
+                      const Divider(),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          const Text(
+                            'Options',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const Spacer(),
+                          TextButton.icon(
+                            onPressed: _isProcessing ? null : () => _showAddVariantDialog(service),
+                            icon: const Icon(Icons.add, size: 16),
+                            label: const Text('Add'),
+                            style: TextButton.styleFrom(
+                              foregroundColor: const Color(0xFFFF6B8B),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      
+                      ...variants.map((variant) {
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.grey[50],
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.grey[200]!),
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 32,
+                                height: 32,
+                                decoration: BoxDecoration(
+                                  color: Colors.orange.withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: const Icon(
+                                  Icons.local_offer,
+                                  color: Colors.orange,
+                                  size: 16,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      '${variant['gender_name']} • ${variant['age_name']}',
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w500,
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                    Text(
+                                      'Rs. ${variant['price']} | ${variant['duration']} mins',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: Colors.grey[600],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Row(
+                                children: [
+                                  IconButton(
+                                    icon: const Icon(Icons.edit, size: 18, color: Colors.blue),
+                                    onPressed: _isProcessing
+                                        ? null
+                                        : () => _showEditVariantDialog(service, variant),
+                                  ),
+                                  IconButton(
+                                    icon: const Icon(Icons.delete, size: 18, color: Colors.red),
+                                    onPressed: _isProcessing
+                                        ? null
+                                        : () => _deleteVariant(service, variant),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
+                      
+                      if (variants.isEmpty)
+                        Container(
+                          padding: const EdgeInsets.all(24),
+                          decoration: BoxDecoration(
+                            color: Colors.grey[50],
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Center(
+                            child: Text(
+                              'No options added yet',
+                              style: TextStyle(color: Colors.grey),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
             ],
           ),
-        ],
-      ),
+        );
+      },
     );
+  }
+
+  Color _getCategoryColor(String categoryName) {
+    switch (categoryName.toLowerCase()) {
+      case 'hair': return Colors.blue;
+      case 'skin': return Colors.pink;
+      case 'grooming': return Colors.orange;
+      case 'wellness': return Colors.green;
+      case 'nails': return Colors.purple;
+      default: return const Color(0xFFFF6B8B);
+    }
   }
 
   IconData _getIconForName(String? iconName) {
