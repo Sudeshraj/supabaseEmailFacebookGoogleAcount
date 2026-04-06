@@ -1,4 +1,4 @@
-// screens/owner/edit_barber_services_screen.dart - Fully Updated
+// screens/owner/edit_barber_services_screen.dart - Fixed with proper mounted checks
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -33,13 +33,17 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
   int? _salonBarberId;
 
   // Gender and Age Category maps
-  Map<int, String> _genderMap = {};
-  Map<int, Map<String, dynamic>> _ageCategoryMap = {};
+  final Map<int, String> _genderMap = {};
+  final Map<int, Map<String, dynamic>> _ageCategoryMap = {};
   
   // Categories list
   List<Map<String, dynamic>> _categories = [];
 
-  // Expanded services for mobile view
+  // Search and filter
+  String _searchQuery = '';
+  int? _selectedCategoryId;
+  
+  // For expansion state - track expanded services
   final Set<int> _expandedServices = {};
 
   @override
@@ -53,6 +57,7 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
   // ============================================================
   
   Future<void> _loadData() async {
+    if (!mounted) return;
     setState(() => _isLoading = true);
 
     try {
@@ -77,8 +82,10 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
           .eq('id', widget.barberId)
           .maybeSingle();
 
-      if (profile != null) {
-        _barber = profile;
+      if (profile != null && mounted) {
+        setState(() {
+          _barber = profile;
+        });
       }
 
       final categoriesResponse = await supabase
@@ -88,7 +95,11 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
           .eq('is_active', true)
           .order('display_order');
       
-      _categories = List<Map<String, dynamic>>.from(categoriesResponse);
+      if (mounted) {
+        setState(() {
+          _categories = List<Map<String, dynamic>>.from(categoriesResponse);
+        });
+      }
 
       final gendersResponse = await supabase
           .from('salon_genders')
@@ -120,10 +131,12 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
           .eq('salon_barber_id', _salonBarberId!);        
 
       if (currentServices.isEmpty) {
-        setState(() {
-          _services = [];
-          _isLoading = false;
-        });
+        if (mounted) {
+          setState(() {
+            _services = [];
+            _isLoading = false;
+          });
+        }
         return;
       }
 
@@ -148,6 +161,7 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
           'id': service['id'],
           'name': service['name'],
           'description': service['description'] ?? '',
+          'category_id': service['category_id'],
           'category_name': category['display_name'],
           'category_icon': category['icon_name'],
           'category_color': category['color'],
@@ -208,6 +222,7 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
           'id': serviceId,
           'name': serviceInfo['name'],
           'description': serviceInfo['description'],
+          'category_id': serviceInfo['category_id'],
           'category_name': serviceInfo['category_name'],
           'category_icon': serviceInfo['category_icon'],
           'category_color': serviceInfo['category_color'],
@@ -215,6 +230,7 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
           'has_full_service': hasFullServiceValue,
           'variants': variants,
           'variant_count': variants.length,
+          'has_variants': variants.isNotEmpty,
         });
       }
 
@@ -224,9 +240,11 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
         return (a['name'] as String).compareTo(b['name'] as String);
       });
 
-      setState(() {
-        _services = processedServices;
-      });
+      if (mounted) {
+        setState(() {
+          _services = processedServices;
+        });
+      }
 
     } catch (e) {
       debugPrint('Error loading data: $e');
@@ -243,6 +261,8 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
   // ============================================================
   
   Future<void> _showAssignVariantsDialog(Map<String, dynamic> service) async {
+    if (!mounted) return;
+    
     // Get all variants for this service from database
     final allVariants = await supabase
         .from('service_variants')
@@ -256,7 +276,6 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
         .select('variant_id')
         .eq('salon_barber_id', _salonBarberId!)
         .eq('service_id', service['id']);
-       
     
     final Set<int> assignedVariantIds = {};
     for (var item in assignedVariants) {
@@ -265,7 +284,7 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
       }
     }
     
-    // Prepare variant list - ONLY UNAssigned variants
+    // Prepare variant list - ONLY UNASSIGNED variants
     final List<Map<String, dynamic>> variantList = [];
     for (var variant in allVariants) {
       if (assignedVariantIds.contains(variant['id'])) {
@@ -291,6 +310,7 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
     
     // If no variants available to assign
     if (variantList.isEmpty) {
+      if (!mounted) return;
       showDialog(
         context: context,
         builder: (context) => AlertDialog(
@@ -323,7 +343,9 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context),
+              onPressed: () {
+                if (mounted) Navigator.pop(context);
+              },
               child: const Text('OK'),
             ),
           ],
@@ -335,6 +357,7 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
     final Set<int> selectedVariantIds = {};
     bool selectAll = false;
     
+    if (!mounted) return;
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
@@ -493,20 +516,25 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
             ),
             actions: [
               TextButton(
-                onPressed: () => Navigator.pop(context),
+                onPressed: () {
+                  if (mounted) Navigator.pop(context);
+                },
                 child: const Text('Cancel'),
               ),
               ElevatedButton(
                 onPressed: () async {
                   if (selectedVariantIds.isEmpty) {
-                    _showSnackBar('Please select at least one option', Colors.orange);
+                    if (mounted) {
+                      _showSnackBar('Please select at least one option', Colors.orange);
+                    }
                     return;
                   }
                   
+                  if (!mounted) return;
                   setState(() => _isProcessing = true);
                   
                   try {
-                    int addedCount = 0;
+                    // int addedCount = 0;
                     
                     // If service has full service, remove it first
                     if (service['has_full_service'] == true) {
@@ -535,45 +563,47 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
                             'service_id': service['id'],
                             'variant_id': variantId                           
                           });
-                      addedCount++;
+                      // addedCount++;
                     }
                     
                     // Update local state
-                    setState(() {
-                      for (int i = 0; i < _services.length; i++) {
-                        if (_services[i]['id'] == service['id']) {
-                          // Remove full service flag
-                          _services[i]['has_full_service'] = false;
-                          
-                          // Add newly assigned variants to local list
-                          for (int variantId in selectedVariantIds) {
-                            final variantData = variantList.firstWhere((v) => v['id'] == variantId);
-                            final isAlreadyInList = _services[i]['variants'].any((v) => v['id'] == variantId);
-                            
-                            if (!isAlreadyInList) {
-                              _services[i]['variants'].add({
-                                'id': variantData['id'],
-                                'price': variantData['price'],
-                                'duration': variantData['duration'],
-                                'gender_id': variantData['gender_id'],
-                                'age_category_id': variantData['age_category_id'],
-                                'gender_name': variantData['gender_name'],
-                                'age_name': variantData['age_name'],
-                                'display_text': variantData['display_text'],
-                              });
-                            }
-                          }
-                          _services[i]['variant_count'] = _services[i]['variants'].length;
-                          break;
-                        }
-                      }
-                    });
-                    
-                    Navigator.pop(context);
-                    
                     if (mounted) {
-                      _showSnackBar('$addedCount option(s) assigned successfully!', Colors.green);
+                      setState(() {
+                        for (int i = 0; i < _services.length; i++) {
+                          if (_services[i]['id'] == service['id']) {
+                            // Remove full service flag
+                            _services[i]['has_full_service'] = false;
+                            
+                            // Add newly assigned variants to local list
+                            for (int variantId in selectedVariantIds) {
+                              final variantData = variantList.firstWhere((v) => v['id'] == variantId);
+                              final isAlreadyInList = _services[i]['variants'].any((v) => v['id'] == variantId);
+                              
+                              if (!isAlreadyInList) {
+                                _services[i]['variants'].add({
+                                  'id': variantData['id'],
+                                  'price': variantData['price'],
+                                  'duration': variantData['duration'],
+                                  'gender_id': variantData['gender_id'],
+                                  'age_category_id': variantData['age_category_id'],
+                                  'gender_name': variantData['gender_name'],
+                                  'age_name': variantData['age_name'],
+                                  'display_text': variantData['display_text'],
+                                });
+                              }
+                            }
+                            _services[i]['variant_count'] = _services[i]['variants'].length;
+                            _services[i]['has_variants'] = _services[i]['variants'].isNotEmpty;
+                            break;
+                          }
+                        }
+                      });
                     }
+                    
+                    // if (mounted) {
+                    //   Navigator.pop(context);
+                    //   _showSnackBar('$addedCount option(s) assigned successfully!', Colors.green);
+                    // }
                   } catch (e) {
                     if (mounted) {
                       if (e.toString().contains('23505') || e.toString().contains('duplicate key')) {
@@ -612,6 +642,7 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
         ? "Are you sure you want to remove '${service['name']}' and all its ${service['variants'].length} options?"
         : "Are you sure you want to remove '${service['name']}' from this barber?";
     
+    if (!mounted) return;
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -623,17 +654,42 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
             Text('Remove Service'),
           ],
         ),
-        content: Text(message),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(message),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.red.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Text(
+                '⚠️ This action cannot be undone!',
+                style: TextStyle(fontSize: 12, color: Colors.red),
+              ),
+            ),
+          ],
+        ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () {
+              if (mounted) Navigator.pop(context, false);
+            },
             child: const Text('Cancel'),
           ),
           ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
+            onPressed: () {
+              if (mounted) Navigator.pop(context, true);
+            },
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.red,
               foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
             ),
             child: const Text('Remove'),
           ),
@@ -643,6 +699,7 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
 
     if (confirm != true) return;
 
+    if (!mounted) return;
     setState(() => _isProcessing = true);
 
     try {
@@ -662,15 +719,16 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
       }
 
       // Update local state
-      setState(() {
-        _services.removeWhere((s) => s['id'] == service['id']);
-      });
-      
       if (mounted) {
+        setState(() {
+          _services.removeWhere((s) => s['id'] == service['id']);
+        });
         _showSnackBar('Service removed successfully', Colors.green);
       }
     } catch (e) {
-      _showSnackBar('Error removing service: $e', Colors.red);
+      if (mounted) {
+        _showSnackBar('Error removing service: $e', Colors.red);
+      }
     } finally {
       if (mounted) setState(() => _isProcessing = false);
     }
@@ -681,6 +739,7 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
   // ============================================================
 
   Future<void> _removeVariant(Map<String, dynamic> service, Map<String, dynamic> variant) async {
+    if (!mounted) return;
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -692,17 +751,42 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
             Text('Remove Option'),
           ],
         ),
-        content: Text("Are you sure you want to remove '${variant['display_text']}' from '${service['name']}'?"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text("Are you sure you want to remove '${variant['display_text']}' from '${service['name']}'?"),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.red.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Text(
+                '⚠️ This action cannot be undone!',
+                style: TextStyle(fontSize: 12, color: Colors.red),
+              ),
+            ),
+          ],
+        ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () {
+              if (mounted) Navigator.pop(context, false);
+            },
             child: const Text('Cancel'),
           ),
           ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
+            onPressed: () {
+              if (mounted) Navigator.pop(context, true);
+            },
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.red,
               foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
             ),
             child: const Text('Remove'),
           ),
@@ -712,6 +796,7 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
 
     if (confirm != true) return;
 
+    if (!mounted) return;
     setState(() => _isProcessing = true);
 
     try {
@@ -733,21 +818,23 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
       }
 
       // Update local state
-      setState(() {
-        for (int i = 0; i < _services.length; i++) {
-          if (_services[i]['id'] == service['id']) {
-            _services[i]['variants'].removeWhere((v) => v['id'] == variant['id']);
-            _services[i]['variant_count'] = _services[i]['variants'].length;
-            break;
-          }
-        }
-      });
-      
       if (mounted) {
+        setState(() {
+          for (int i = 0; i < _services.length; i++) {
+            if (_services[i]['id'] == service['id']) {
+              _services[i]['variants'].removeWhere((v) => v['id'] == variant['id']);
+              _services[i]['variant_count'] = _services[i]['variants'].length;
+              _services[i]['has_variants'] = _services[i]['variants'].isNotEmpty;
+              break;
+            }
+          }
+        });
         _showSnackBar('Option removed successfully', Colors.green);
       }
     } catch (e) {
-      _showSnackBar('Error removing option: $e', Colors.red);
+      if (mounted) {
+        _showSnackBar('Error removing option: $e', Colors.red);
+      }
     } finally {
       if (mounted) setState(() => _isProcessing = false);
     }
@@ -759,10 +846,13 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
 
   Future<void> _addService() async {
     if (_salonBarberId == null) {
-      _showSnackBar('Salon barber ID not found', Colors.red);
+      if (mounted) {
+        _showSnackBar('Salon barber ID not found', Colors.red);
+      }
       return;
     }
     
+    if (!mounted) return;
     final result = await context.push(
       '/owner/salon/${widget.salonId}/barber/${widget.barberId}/add-service',
       extra: {
@@ -771,7 +861,7 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
       },
     );
     
-    if (result == true) {
+    if (result == true && mounted) {
       await _loadData();
       if (mounted) {
         _showSnackBar('Services added successfully!', Colors.green);
@@ -783,7 +873,19 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
   // HELPERS
   // ============================================================
 
+  void _toggleExpand(int serviceId) {
+    if (!mounted) return;
+    setState(() {
+      if (_expandedServices.contains(serviceId)) {
+        _expandedServices.remove(serviceId);
+      } else {
+        _expandedServices.add(serviceId);
+      }
+    });
+  }
+
   void _showSnackBar(String message, Color color) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
@@ -794,14 +896,23 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
     );
   }
 
-  void _toggleExpand(int serviceId) {
-    setState(() {
-      if (_expandedServices.contains(serviceId)) {
-        _expandedServices.remove(serviceId);
-      } else {
-        _expandedServices.add(serviceId);
-      }
-    });
+  // Filter services based on search and category
+  List<Map<String, dynamic>> get _filteredServices {
+    return _services.where((service) {
+      final matchesSearch =
+          _searchQuery.isEmpty ||
+          service['name'].toLowerCase().contains(_searchQuery.toLowerCase()) ||
+          (service['description']?.toLowerCase().contains(
+                _searchQuery.toLowerCase(),
+              ) ??
+              false);
+
+      final matchesCategory =
+          _selectedCategoryId == null ||
+          service['category_id'] == _selectedCategoryId;
+
+      return matchesSearch && matchesCategory;
+    }).toList();
   }
 
   IconData _getIconForName(String? iconName) {
@@ -818,15 +929,6 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
     }
   }
 
-  Color _getColorFromHex(String? hexColor) {
-    if (hexColor == null) return const Color(0xFFFF6B8B);
-    try {
-      return Color(int.parse('0xFF${hexColor.replaceFirst('#', '')}'));
-    } catch (e) {
-      return const Color(0xFFFF6B8B);
-    }
-  }
-
   // ============================================================
   // UI BUILDERS
   // ============================================================
@@ -838,14 +940,14 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Barber Services'),
+        title: Text('${_barber['full_name'] ?? 'Barber'} - Services'),
         backgroundColor: const Color(0xFFFF6B8B),
         foregroundColor: Colors.white,
         centerTitle: isWeb,
         elevation: 0,
         actions: [
           IconButton(
-            icon: const Icon(Icons.add, color: Colors.white),
+            icon: const Icon(Icons.add),
             onPressed: _addService,
             tooltip: 'Add Service',
           ),
@@ -855,183 +957,164 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
           ? const Center(
               child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
             )
-          : _services.isEmpty
-              ? _buildEmptyState()
-              : Column(
-                  children: [
-                    _buildBarberInfoCard(),
-                    Expanded(
-                      child: isWeb
+          : Column(
+              children: [
+                // Search and Filter Bar
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  color: Colors.white,
+                  child: Column(
+                    children: [
+                      TextField(
+                        onChanged: (value) {
+                          setState(() {
+                            _searchQuery = value;
+                          });
+                        },
+                        decoration: InputDecoration(
+                          hintText: 'Search services...',
+                          prefixIcon: const Icon(Icons.search, color: Colors.grey),
+                          suffixIcon: _searchQuery.isNotEmpty
+                              ? IconButton(
+                                  icon: const Icon(Icons.clear, color: Colors.grey),
+                                  onPressed: () => setState(() => _searchQuery = ''),
+                                )
+                              : null,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(color: Color(0xFFFF6B8B), width: 2),
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      
+                      // Category filter chips
+                      SizedBox(
+                        height: 45,
+                        child: ListView(
+                          scrollDirection: Axis.horizontal,
+                          children: [
+                            FilterChip(
+                              label: const Text('All'),
+                              selected: _selectedCategoryId == null,
+                              onSelected: (_) => setState(() => _selectedCategoryId = null),
+                              selectedColor: const Color(0xFFFF6B8B).withValues(alpha: 0.2),
+                              checkmarkColor: const Color(0xFFFF6B8B),
+                            ),
+                            const SizedBox(width: 8),
+                            ..._categories.map((category) {
+                              return Padding(
+                                padding: const EdgeInsets.only(right: 8),
+                                child: FilterChip(
+                                  label: Text(category['display_name']),
+                                  selected: _selectedCategoryId == category['id'],
+                                  onSelected: (_) => setState(() {
+                                    _selectedCategoryId = category['id'] as int;
+                                  }),
+                                  selectedColor: const Color(0xFFFF6B8B).withValues(alpha: 0.2),
+                                  checkmarkColor: const Color(0xFFFF6B8B),
+                                ),
+                              );
+                            }),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Services List
+                Expanded(
+                  child: _filteredServices.isEmpty
+                      ? Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.inbox,
+                                size: 64,
+                                color: Colors.grey[400],
+                              ),
+                              const SizedBox(height: 16),
+                              Text(
+                                _searchQuery.isNotEmpty || _selectedCategoryId != null
+                                    ? 'No services match your filters'
+                                    : 'No services assigned yet',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  color: Colors.grey[600],
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              if (_searchQuery.isNotEmpty || _selectedCategoryId != null)
+                                TextButton(
+                                  onPressed: () {
+                                    setState(() {
+                                      _searchQuery = '';
+                                      _selectedCategoryId = null;
+                                    });
+                                  },
+                                  child: const Text('Clear Filters'),
+                                )
+                              else
+                                ElevatedButton(
+                                  onPressed: _addService,
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFFFF6B8B),
+                                    foregroundColor: Colors.white,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                  ),
+                                  child: const Text('Add Services for Barber'),
+                                ),
+                            ],
+                          ),
+                        )
+                      : isWeb
                           ? _buildWebView()
                           : _buildMobileView(),
-                    ),
-                  ],
                 ),
-    );
-  }
-
-  Widget _buildEmptyState() {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final bool isWeb = screenWidth > 800;
-    
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.inbox, size: isWeb ? 80 : 64, color: Colors.grey[400]),
-          const SizedBox(height: 16),
-          Text(
-            'No services found',
-            style: TextStyle(fontSize: isWeb ? 18 : 16, color: Colors.grey[600]),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Add services for this barber',
-            style: TextStyle(fontSize: isWeb ? 14 : 12, color: Colors.grey[500]),
-          ),
-          const SizedBox(height: 24),
-          ElevatedButton.icon(
-            onPressed: _addService,
-            icon: const Icon(Icons.add),
-            label: const Text('Add Services'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFFF6B8B),
-              foregroundColor: Colors.white,
-              padding: EdgeInsets.symmetric(horizontal: isWeb ? 32 : 24, vertical: isWeb ? 14 : 12),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildBarberInfoCard() {
-    return Container(
-      margin: const EdgeInsets.all(16),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(color: Colors.grey.withValues(alpha: 0.1), blurRadius: 8, offset: const Offset(0, 2)),
-        ],
-      ),
-      child: Row(
-        children: [
-          CircleAvatar(
-            radius: 30,
-            backgroundColor: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
-            backgroundImage: _barber['avatar_url'] != null ? NetworkImage(_barber['avatar_url']) : null,
-            child: _barber['avatar_url'] == null
-                ? Text(_barber['full_name']?[0]?.toUpperCase() ?? '?',
-                    style: const TextStyle(color: Color(0xFFFF6B8B), fontWeight: FontWeight.bold, fontSize: 24))
-                : null,
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(_barber['full_name'] ?? 'Unknown Barber', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                Text(_barber['email'] ?? '', style: TextStyle(fontSize: 14, color: Colors.grey[600])),
               ],
             ),
-          ),
-        ],
-      ),
     );
   }
 
   Widget _buildWebView() {
-    final Map<String, List<Map<String, dynamic>>> groupedServices = {};
-    for (var service in _services) {
-      final category = service['category_name'] as String;
-      if (!groupedServices.containsKey(category)) groupedServices[category] = [];
-      groupedServices[category]!.add(service);
-    }
-    final sortedCategories = groupedServices.keys.toList()..sort();
-    return ListView.builder(
+    return GridView.builder(
       padding: const EdgeInsets.all(16),
-      itemCount: sortedCategories.length,
+      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+        maxCrossAxisExtent: 400,
+        crossAxisSpacing: 16,
+        mainAxisSpacing: 16,
+        childAspectRatio: 0.85,
+      ),
+      itemCount: _filteredServices.length,
       itemBuilder: (context, index) {
-        final category = sortedCategories[index];
-        final services = groupedServices[category]!;
-        return _buildCategorySection(category, services, true);
+        final service = _filteredServices[index];
+        return _buildServiceCardWeb(service);
       },
     );
   }
 
-  Widget _buildMobileView() {
-    final Map<String, List<Map<String, dynamic>>> groupedServices = {};
-    for (var service in _services) {
-      final category = service['category_name'] as String;
-      if (!groupedServices.containsKey(category)) groupedServices[category] = [];
-      groupedServices[category]!.add(service);
-    }
-    final sortedCategories = groupedServices.keys.toList()..sort();
-    return ListView.builder(
-      padding: const EdgeInsets.all(12),
-      itemCount: sortedCategories.length,
-      itemBuilder: (context, index) {
-        final category = sortedCategories[index];
-        final services = groupedServices[category]!;
-        return _buildCategorySection(category, services, false);
-      },
-    );
-  }
-
-  Widget _buildCategorySection(String category, List<Map<String, dynamic>> services, bool isWeb) {
-    final categoryColor = _getColorFromHex(services.first['category_color']);
-    
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(color: categoryColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)),
-                child: Icon(_getIconForName(services.first['category_icon']), color: categoryColor, size: 20),
-              ),
-              const SizedBox(width: 12),
-              Text(category, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-              const Spacer(),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(color: Colors.grey[200], borderRadius: BorderRadius.circular(20)),
-                child: Text('${services.length} service${services.length > 1 ? 's' : ''}',
-                    style: TextStyle(fontSize: 12, color: Colors.grey[600], fontWeight: FontWeight.w500)),
-              ),
-            ],
-          ),
-        ),
-        isWeb
-            ? GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                  maxCrossAxisExtent: 400, crossAxisSpacing: 16, mainAxisSpacing: 16, childAspectRatio: 0.85),
-                itemCount: services.length,
-                itemBuilder: (context, index) => _buildServiceCard(services[index], true),
-              )
-            : Column(children: services.map((service) => _buildServiceCard(service, false)).toList()),
-        const SizedBox(height: 16),
-      ],
-    );
-  }
-
-  Widget _buildServiceCard(Map<String, dynamic> service, bool isWeb) {
-    final hasFullService = service['has_full_service'] == true;
+  Widget _buildServiceCardWeb(Map<String, dynamic> service) {
     final variants = service['variants'] as List;
-    final categoryColor = _getColorFromHex(service['category_color']);
+    final hasVariants = variants.isNotEmpty;
+    final hasFullService = service['has_full_service'] == true;
     final isExpanded = _expandedServices.contains(service['id']);
     
     return Card(
-      margin: const EdgeInsets.only(bottom: 16),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: Colors.grey[200]!, width: 1)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: Colors.grey[200]!, width: 1),
+      ),
       elevation: 2,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1040,8 +1123,11 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: categoryColor.withValues(alpha: 0.05),
-              borderRadius: const BorderRadius.only(topLeft: Radius.circular(16), topRight: Radius.circular(16)),
+              color: const Color(0xFFFF6B8B).withValues(alpha: 0.05),
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(16),
+                topRight: Radius.circular(16),
+              ),
             ),
             child: Row(
               children: [
@@ -1050,131 +1136,514 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(12),
-                    boxShadow: [BoxShadow(color: Colors.grey.withValues(alpha: 0.1), blurRadius: 4, offset: const Offset(0, 2))],
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.grey.withValues(alpha: 0.1),
+                        blurRadius: 4,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
                   ),
-                  child: Icon(_getIconForName(service['icon_name']), color: const Color(0xFFFF6B8B), size: 24),
+                  child: Icon(
+                    _getIconForName(service['icon_name']),
+                    color: const Color(0xFFFF6B8B),
+                    size: 28,
+                  ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(service['name'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                      if (service['description'].isNotEmpty)
-                        Text(service['description'], style: TextStyle(fontSize: 12, color: Colors.grey[600]), maxLines: 1, overflow: TextOverflow.ellipsis),
-                      if (variants.isNotEmpty && !isWeb)
-                        Text('${variants.length} options', style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+                      Text(
+                        service['name'],
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 18,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        service['category_name'],
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey[600],
+                        ),
+                      ),
                     ],
                   ),
                 ),
-                // Remove Service Button
-                IconButton(
-                  icon: const Icon(Icons.delete_outline, color: Colors.red, size: 22),
-                  onPressed: _isProcessing ? null : () => _removeService(service),
-                  tooltip: 'Remove Service',
+                // Service Action Buttons
+                Row(
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.delete, color: Colors.red, size: 20),
+                      onPressed: _isProcessing ? null : () => _removeService(service),
+                      tooltip: 'Remove Service',
+                    ),
+                    if (hasVariants)
+                      IconButton(
+                        icon: AnimatedRotation(
+                          duration: const Duration(milliseconds: 300),
+                          turns: isExpanded ? 0.5 : 0.0,
+                          child: const Icon(Icons.keyboard_arrow_down, color: Colors.grey),
+                        ),
+                        onPressed: () => _toggleExpand(service['id']),
+                      ),
+                  ],
                 ),
-                // Assign Variants Button
-                IconButton(
-                  icon: const Icon(Icons.playlist_add, color: Color(0xFFFF6B8B), size: 22),
-                  onPressed: _isProcessing ? null : () => _showAssignVariantsDialog(service),
-                  tooltip: 'Assign Options',
-                ),
-                if (!isWeb && variants.isNotEmpty)
-                  IconButton(
-                    icon: Icon(isExpanded ? Icons.expand_less : Icons.expand_more, color: Colors.grey),
-                    onPressed: () => _toggleExpand(service['id']),
-                  ),
               ],
             ),
           ),
           
+          // Description
+          if (service['description'] != null && service['description'].isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text(
+                service['description'],
+                style: TextStyle(
+                  fontSize: 13,
+                  color: Colors.grey[600],
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          
           // Full Service Badge
-          if (hasFullService && variants.isEmpty)
+          if (hasFullService && !hasVariants)
             Padding(
               padding: const EdgeInsets.all(16),
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(color: Colors.green[50], borderRadius: BorderRadius.circular(8)),
+                decoration: BoxDecoration(
+                  color: Colors.green[50],
+                  borderRadius: BorderRadius.circular(8),
+                ),
                 child: Row(
                   children: [
                     Icon(Icons.check_circle, size: 16, color: Colors.green[700]),
                     const SizedBox(width: 8),
-                    Text('Full Service Assigned', style: TextStyle(fontSize: 13, color: Colors.green[700], fontWeight: FontWeight.w500)),
+                    Text(
+                      'Full Service Assigned',
+                      style: TextStyle(fontSize: 13, color: Colors.green[700], fontWeight: FontWeight.w500),
+                    ),
                   ],
                 ),
               ),
             ),
           
-          // Assigned Variants List
-          if (variants.isNotEmpty && (isWeb || isExpanded)) ...[
-            const Divider(height: 1),
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      const Text('Assigned Options', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.grey)),
-                      const Spacer(),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                        decoration: BoxDecoration(color: Colors.blue[50], borderRadius: BorderRadius.circular(12)),
-                        child: Text('${variants.length} option${variants.length > 1 ? 's' : ''}',
-                            style: TextStyle(fontSize: 11, color: Colors.blue[700], fontWeight: FontWeight.w500)),
+          // Variants Section
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Text(
+                      'Assigned Options',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.grey,
                       ),
-                    ],
+                    ),
+                    const Spacer(),
+                    // Assign Options Button
+                    TextButton.icon(
+                      onPressed: _isProcessing ? null : () => _showAssignVariantsDialog(service),
+                      icon: const Icon(Icons.playlist_add, size: 16),
+                      label: const Text('Assign Options'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: const Color(0xFFFF6B8B),
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                
+                // Variants List or Empty State
+                if (hasVariants) ...[
+                  ...variants.map((variant) {
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.grey[50],
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.grey[200]!),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 40,
+                            height: 40,
+                            decoration: BoxDecoration(
+                              color: Colors.orange.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Icon(
+                              Icons.local_offer,
+                              color: Colors.orange,
+                              size: 20,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  variant['display_text'],
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Rs. ${variant['price']} | ${variant['duration']} mins',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.grey[600],
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.remove_circle_outline, color: Colors.red, size: 20),
+                            onPressed: _isProcessing
+                                ? null
+                                : () => _removeVariant(service, variant),
+                            tooltip: 'Remove Option',
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+                ] else if (!hasFullService) ...[
+                  // Empty state for services without variants
+                  Container(
+                    padding: const EdgeInsets.all(24),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[50],
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.grey[200]!),
+                    ),
+                    child: Column(
+                      children: [
+                        Icon(
+                          Icons.playlist_add,
+                          size: 48,
+                          color: Colors.grey[400],
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          'No options assigned',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.grey[600],
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Click "Assign Options" to add gender and age-based pricing',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[500],
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ),
                   ),
-                  const SizedBox(height: 12),
-                  ...variants.map((variant) => _buildVariantCard(service, variant)),
                 ],
-              ),
+              ],
             ),
-          ],
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildVariantCard(Map<String, dynamic> service, Map<String, dynamic> variant) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
-        color: Colors.grey[50],
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[200]!, width: 1),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Row(
-          children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(color: Colors.orange.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10)),
-              child: const Icon(Icons.local_offer, color: Colors.orange, size: 18),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(variant['display_text'], style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                  const SizedBox(height: 4),
-                  Text('Rs. ${variant['price']} • ${variant['duration']} min',
-                      style: TextStyle(fontSize: 12, color: Colors.grey[600], fontWeight: FontWeight.w500)),
-                ],
+  Widget _buildMobileView() {
+    return ListView.builder(
+      padding: const EdgeInsets.all(12),
+      itemCount: _filteredServices.length,
+      itemBuilder: (context, index) {
+        final service = _filteredServices[index];
+        final variants = service['variants'] as List;
+        final hasVariants = variants.isNotEmpty;
+        final hasFullService = service['has_full_service'] == true;
+        final isExpanded = _expandedServices.contains(service['id']);
+        
+        return Card(
+          margin: const EdgeInsets.only(bottom: 12),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: BorderSide(color: Colors.grey[200]!, width: 1),
+          ),
+          child: Column(
+            children: [
+              // Service Header
+              InkWell(
+                onTap: hasVariants ? () => _toggleExpand(service['id']) : null,
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(
+                          _getIconForName(service['icon_name']),
+                          color: const Color(0xFFFF6B8B),
+                          size: 24,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              service['name'],
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 16,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                Text(
+                                  service['category_name'],
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: Colors.grey[600],
+                                  ),
+                                ),
+                                if (hasVariants) ...[
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 6,
+                                      vertical: 2,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: Colors.grey[200],
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text(
+                                      '${variants.length} options',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        color: Colors.grey[600],
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      Row(
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.delete, color: Colors.red, size: 20),
+                            onPressed: _isProcessing ? null : () => _removeService(service),
+                          ),
+                          if (hasVariants)
+                            Icon(
+                              isExpanded ? Icons.expand_less : Icons.expand_more,
+                              color: Colors.grey,
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
               ),
-            ),
-            // Remove Variant Button - DELETE completely
-            IconButton(
-              icon: const Icon(Icons.remove_circle_outline, color: Colors.red, size: 20),
-              onPressed: _isProcessing ? null : () => _removeVariant(service, variant),
-              tooltip: 'Remove Option',
-            ),
-          ],
-        ),
-      ),
+              
+              // Description
+              if (service['description'] != null && service['description'].isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                  child: Text(
+                    service['description'],
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Colors.grey[600],
+                    ),
+                  ),
+                ),
+              
+              // Full Service Badge
+              if (hasFullService && !hasVariants)
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.green[50],
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.check_circle, size: 16, color: Colors.green[700]),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Full Service Assigned',
+                          style: TextStyle(fontSize: 13, color: Colors.green[700], fontWeight: FontWeight.w500),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              
+              // Variants Section
+              Container(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                child: Column(
+                  children: [
+                    const Divider(),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        const Text(
+                          'Assigned Options',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const Spacer(),
+                        TextButton.icon(
+                          onPressed: _isProcessing ? null : () => _showAssignVariantsDialog(service),
+                          icon: const Icon(Icons.playlist_add, size: 16),
+                          label: const Text('Assign'),
+                          style: TextButton.styleFrom(
+                            foregroundColor: const Color(0xFFFF6B8B),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    
+                    if (hasVariants) ...[
+                      ...variants.map((variant) {
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.grey[50],
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.grey[200]!),
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 32,
+                                height: 32,
+                                decoration: BoxDecoration(
+                                  color: Colors.orange.withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: const Icon(
+                                  Icons.local_offer,
+                                  color: Colors.orange,
+                                  size: 16,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      variant['display_text'],
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w500,
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                    Text(
+                                      'Rs. ${variant['price']} | ${variant['duration']} mins',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: Colors.grey[600],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.remove_circle_outline, color: Colors.red, size: 18),
+                                onPressed: _isProcessing
+                                    ? null
+                                    : () => _removeVariant(service, variant),
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
+                    ] else if (!hasFullService) ...[
+                      // Empty state for services without variants
+                      Container(
+                        padding: const EdgeInsets.all(24),
+                        decoration: BoxDecoration(
+                          color: Colors.grey[50],
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.grey[200]!),
+                        ),
+                        child: Column(
+                          children: [
+                            Icon(
+                              Icons.playlist_add,
+                              size: 48,
+                              color: Colors.grey[400],
+                            ),
+                            const SizedBox(height: 12),
+                            Text(
+                              'No options assigned',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey[600],
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'Tap "Assign" to add gender and age-based pricing',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[500],
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/screens/owner/add_services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
 
 class ServiceManagementScreen extends StatefulWidget {
   final int salonId;
@@ -288,7 +287,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                   ),
                   const SizedBox(height: 8),
                   DropdownButtonFormField<int>(
-                    value: selectedGenderId,
+                    initialValue: selectedGenderId,
                     isExpanded: true,
                     decoration: InputDecoration(
                       prefixIcon: const Icon(Icons.wc, color: Colors.grey, size: 20),
@@ -322,7 +321,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                   ),
                   const SizedBox(height: 8),
                   DropdownButtonFormField<int>(
-                    value: selectedAgeCategoryId,
+                    initialValue: selectedAgeCategoryId,
                     isExpanded: true,
                     decoration: InputDecoration(
                       prefixIcon: const Icon(Icons.timeline, color: Colors.grey, size: 20),
@@ -478,11 +477,11 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                           'is_active': true,
                         });
                     
-                    if (mounted) {
-                      Navigator.pop(context);
-                      await _loadServices();
-                      _showSnackBar('Option added successfully', Colors.green);
-                    }
+                    // if (mounted) {
+                    //   Navigator.pop(context);
+                    //   await _loadServices();
+                    //   _showSnackBar('Option added successfully', Colors.green);
+                    // }
                   } catch (e) {
                     if (mounted) {
                       _showSnackBar('Error adding option: $e', Colors.red);
@@ -705,14 +704,14 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                         })
                         .eq('id', variant['id']);
 
-                    if (mounted) {
-                      Navigator.pop(context);
-                      await _loadServices();
-                      _showSnackBar(
-                        'Option updated successfully',
-                        Colors.green,
-                      );
-                    }
+                    // if (mounted) {
+                    //   Navigator.pop(context);
+                    //   await _loadServices();
+                    //   _showSnackBar(
+                    //     'Option updated successfully',
+                    //     Colors.green,
+                    //   );
+                    // }
                   } catch (e) {
                     if (mounted) {
                       _showSnackBar('Error updating option: $e', Colors.red);
@@ -908,7 +907,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                   ),
                   const SizedBox(height: 16),
                   DropdownButtonFormField<int>(
-                    value: selectedCategoryId,
+                    initialValue: selectedCategoryId,
                     decoration: InputDecoration(
                       labelText: 'Category',
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
@@ -951,14 +950,14 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                         })
                         .eq('id', service['id']);
 
-                    if (mounted) {
-                      Navigator.pop(context);
-                      await _loadServices();
-                      _showSnackBar(
-                        'Service updated successfully',
-                        Colors.green,
-                      );
-                    }
+                    // if (mounted) {
+                    //   Navigator.pop(context);
+                    //   await _loadServices();
+                    //   _showSnackBar(
+                    //     'Service updated successfully',
+                    //     Colors.green,
+                    //   );
+                    // }
                   } catch (e) {
                     if (mounted) {
                       _showSnackBar('Error updating service: $e', Colors.red);
@@ -1437,38 +1436,38 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
             ),
           
           // Variants Section
-          if (hasVariants) ...[
-            const Divider(height: 1),
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      const Text(
-                        'Options',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.grey,
-                        ),
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Text(
+                      'Options',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.grey,
                       ),
-                      const Spacer(),
-                      TextButton.icon(
-                        onPressed: _isProcessing ? null : () => _showAddVariantDialog(service),
-                        icon: const Icon(Icons.add, size: 16),
-                        label: const Text('Add Option'),
-                        style: TextButton.styleFrom(
-                          foregroundColor: const Color(0xFFFF6B8B),
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        ),
+                    ),
+                    const Spacer(),
+                    // Add Option button - Always visible
+                    TextButton.icon(
+                      onPressed: _isProcessing ? null : () => _showAddVariantDialog(service),
+                      icon: const Icon(Icons.add, size: 16),
+                      label: const Text('Add Option'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: const Color(0xFFFF6B8B),
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  
-                  // Variants List
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                
+                // Variants List or Empty State
+                if (hasVariants) ...[
                   ...variants.map((variant) {
                     return Container(
                       margin: const EdgeInsets.only(bottom: 8),
@@ -1539,25 +1538,47 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                       ),
                     );
                   }),
-                  
-                  if (variants.isEmpty)
-                    Container(
-                      padding: const EdgeInsets.all(24),
-                      decoration: BoxDecoration(
-                        color: Colors.grey[50],
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: const Center(
-                        child: Text(
-                          'No options added yet',
-                          style: TextStyle(color: Colors.grey),
-                        ),
-                      ),
+                ] else ...[
+                  // Empty state for services without variants
+                  Container(
+                    padding: const EdgeInsets.all(24),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[50],
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.grey[200]!),
                     ),
+                    child: Column(
+                      children: [
+                        Icon(
+                          Icons.add_circle_outline,
+                          size: 48,
+                          color: Colors.grey[400],
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          'No options added yet',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.grey[600],
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Click "Add Option" to add gender and age-based pricing',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[500],
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ),
+                  ),
                 ],
-              ),
+              ],
             ),
-          ],
+          ),
         ],
       ),
     );
@@ -1682,36 +1703,36 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                   ),
                 ),
               
-              // Variants Section
-              if (isExpanded && hasVariants)
-                Container(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                  child: Column(
-                    children: [
-                      const Divider(),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          const Text(
-                            'Options',
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                            ),
+              // Variants Section - Always visible (not just expanded)
+              Container(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                child: Column(
+                  children: [
+                    const Divider(),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        const Text(
+                          'Options',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
                           ),
-                          const Spacer(),
-                          TextButton.icon(
-                            onPressed: _isProcessing ? null : () => _showAddVariantDialog(service),
-                            icon: const Icon(Icons.add, size: 16),
-                            label: const Text('Add'),
-                            style: TextButton.styleFrom(
-                              foregroundColor: const Color(0xFFFF6B8B),
-                            ),
+                        ),
+                        const Spacer(),
+                        TextButton.icon(
+                          onPressed: _isProcessing ? null : () => _showAddVariantDialog(service),
+                          icon: const Icon(Icons.add, size: 16),
+                          label: const Text('Add Option'),
+                          style: TextButton.styleFrom(
+                            foregroundColor: const Color(0xFFFF6B8B),
                           ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    
+                    if (hasVariants) ...[
                       ...variants.map((variant) {
                         return Container(
                           margin: const EdgeInsets.only(bottom: 8),
@@ -1778,24 +1799,47 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                           ),
                         );
                       }),
-                      
-                      if (variants.isEmpty)
-                        Container(
-                          padding: const EdgeInsets.all(24),
-                          decoration: BoxDecoration(
-                            color: Colors.grey[50],
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: const Center(
-                            child: Text(
-                              'No options added yet',
-                              style: TextStyle(color: Colors.grey),
-                            ),
-                          ),
+                    ] else ...[
+                      // Empty state for services without variants
+                      Container(
+                        padding: const EdgeInsets.all(24),
+                        decoration: BoxDecoration(
+                          color: Colors.grey[50],
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.grey[200]!),
                         ),
+                        child: Column(
+                          children: [
+                            Icon(
+                              Icons.add_circle_outline,
+                              size: 48,
+                              color: Colors.grey[400],
+                            ),
+                            const SizedBox(height: 12),
+                            Text(
+                              'No options added yet',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey[600],
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'Tap "Add Option" to add gender and age-based pricing',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[500],
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                          ],
+                        ),
+                      ),
                     ],
-                  ),
+                  ],
                 ),
+              ),
             ],
           ),
         );
@@ -1803,16 +1847,6 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
     );
   }
 
-  Color _getCategoryColor(String categoryName) {
-    switch (categoryName.toLowerCase()) {
-      case 'hair': return Colors.blue;
-      case 'skin': return Colors.pink;
-      case 'grooming': return Colors.orange;
-      case 'wellness': return Colors.green;
-      case 'nails': return Colors.purple;
-      default: return const Color(0xFFFF6B8B);
-    }
-  }
 
   IconData _getIconForName(String? iconName) {
     switch (iconName) {
