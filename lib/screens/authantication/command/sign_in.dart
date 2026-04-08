@@ -22,6 +22,9 @@ import 'package:flutter_application_1/services/google_sign_in_service.dart';
 import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 
+// Global flag to prevent multiple Google SDK initializations
+bool _googleSdkInitialized = false;
+
 // Class for returning user check
 class _ReturningUserCheck {
   final String? email;
@@ -63,7 +66,7 @@ class _SignInScreenState extends State<SignInScreen>
   bool _obscurePassword = true;
   bool _loading = false;
   bool _coolDown = false;
-  bool _rememberMe = true; // AUTO-CHECKED by default
+  bool _rememberMe = true;
   bool _loadingGoogle = false;
   bool _loadingFacebook = false;
   bool _loadingApple = false;
@@ -98,9 +101,17 @@ class _SignInScreenState extends State<SignInScreen>
   void initState() {
     super.initState();
 
-    // Initialize GoogleSignInService
+    // Initialize GoogleSignInService with check to prevent multiple initializations
     _googleSignInService = GoogleSignInService();
-    _googleSignInService.initialize();
+    
+    // Only initialize if not already initialized globally
+    if (!_googleSdkInitialized) {
+      _googleSignInService.initialize();
+      _googleSdkInitialized = true;
+      if (kDebugMode) print('✅ Google Sign-In SDK initialized once');
+    } else {
+      if (kDebugMode) print('ℹ️ Google Sign-In SDK already initialized, skipping');
+    }
 
     // Initialize controllers
     _emailController = TextEditingController(text: widget.prefilledEmail ?? '');
@@ -282,7 +293,6 @@ class _SignInScreenState extends State<SignInScreen>
     }
   }
 
-  // 🔥 FIXED: Check if user is returning - using user_roles table
   Future<_ReturningUserCheck> _checkIfReturningUser(String provider) async {
     try {
       final profiles = await SessionManager.getProfiles();
@@ -303,7 +313,6 @@ class _SignInScreenState extends State<SignInScreen>
           final privacyAccepted = profile['privacyAcceptedAt'] != null;
           final hasRememberMe = profile['rememberMe'] == true;
           
-          // Get existing roles from profile
           final existingRoles = profile['roles'] as List? ?? [];
 
           debugPrint('✅ Found returning user: $email for provider: $provider');
@@ -350,7 +359,6 @@ class _SignInScreenState extends State<SignInScreen>
     return 'com.yourcompany.mysalon.staging://auth-callback';
   }
 
-  // 🔥 FIXED: Save OAuth profile with proper role handling
   Future<void> _saveOAuthProfile({
     required User user,
     required String providerToSave,
@@ -358,7 +366,7 @@ class _SignInScreenState extends State<SignInScreen>
     String? accessToken,
     String? refreshToken,
     bool? marketingConsent,
-    List<String>? existingRoles, // Add existing roles parameter
+    List<String>? existingRoles,
   }) async {
     try {
       final email = user.email!;
@@ -367,7 +375,6 @@ class _SignInScreenState extends State<SignInScreen>
       final userMetadata = user.userMetadata ?? {};
       final appMetadata = user.appMetadata;
 
-      // FINAL marketing consent
       bool finalMarketingConsent;
       DateTime? finalMarketingConsentAt;
 
@@ -447,10 +454,8 @@ class _SignInScreenState extends State<SignInScreen>
         name = userMetadata['display_name'].toString();
       }
 
-      // 🔥 Check if user already has roles in database
       List<String> finalRoles = [];
       
-      // First, try to get from database
       try {
         final userRolesResponse = await supabase
             .from('user_roles')
@@ -472,7 +477,6 @@ class _SignInScreenState extends State<SignInScreen>
         debugPrint('📊 Error fetching user roles: $e');
       }
 
-      // If no roles in database, use existing roles from profile
       if (finalRoles.isEmpty && existingRoles != null && existingRoles.isNotEmpty) {
         finalRoles = existingRoles;
       }
@@ -484,7 +488,7 @@ class _SignInScreenState extends State<SignInScreen>
         userId: user.id,
         name: name,
         photo: photoUrl ?? '',
-        roles: finalRoles, // Save roles
+        roles: finalRoles,
         rememberMe: rememberMe,
         refreshToken: refreshToken,
         accessToken: accessToken,
@@ -501,7 +505,6 @@ class _SignInScreenState extends State<SignInScreen>
     }
   }
 
-  // LOGIN WITHOUT PRIVACY DIALOG
   Future<void> loginUser() async {
     if (_loading) return;
 
@@ -619,7 +622,7 @@ class _SignInScreenState extends State<SignInScreen>
         : error.toString();
   }
 
-  // ✅ FIXED: COMBINED OAuth DIALOG with Remember Me
+  // FIXED: COMBINED OAuth DIALOG with proper overflow handling
   Future<Map<String, dynamic>?> _showCombinedOAuthDialog({
     required String provider,
     required List<String> scopes,
@@ -645,11 +648,25 @@ class _SignInScreenState extends State<SignInScreen>
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, setState) {
           return AlertDialog(
+            titlePadding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+            contentPadding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
             title: Row(
               children: [
                 _getProviderIcon(provider, size: 24),
-                const SizedBox(width: 8),
-                Text("Sign in with $provider"),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    "Sign in with $provider",
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
               ],
             ),
             content: SingleChildScrollView(
@@ -674,12 +691,14 @@ class _SignInScreenState extends State<SignInScreen>
                             children: [
                               Icon(Icons.info, size: 16, color: Colors.blue.shade700),
                               const SizedBox(width: 8),
-                              Text(
-                                "You have existing profiles",
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.blue.shade700,
-                                  fontSize: 13,
+                              Expanded(
+                                child: Text(
+                                  "You have existing profiles",
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.blue.shade700,
+                                    fontSize: 13,
+                                  ),
                                 ),
                               ),
                             ],
@@ -687,6 +706,7 @@ class _SignInScreenState extends State<SignInScreen>
                           const SizedBox(height: 8),
                           Wrap(
                             spacing: 8,
+                            runSpacing: 4,
                             children: existingRoles.map((role) {
                               return Container(
                                 padding: const EdgeInsets.symmetric(
@@ -730,11 +750,13 @@ class _SignInScreenState extends State<SignInScreen>
                               color: Colors.grey.shade700,
                             ),
                             const SizedBox(width: 8),
-                            Text(
-                              "$provider will share:",
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w600,
-                                fontSize: 13,
+                            Expanded(
+                              child: Text(
+                                "$provider will share:",
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 13,
+                                ),
                               ),
                             ),
                           ],
@@ -751,9 +773,12 @@ class _SignInScreenState extends State<SignInScreen>
                                   color: Colors.green.shade600,
                                 ),
                                 const SizedBox(width: 8),
-                                Text(
-                                  "• $scope",
-                                  style: const TextStyle(fontSize: 13),
+                                Expanded(
+                                  child: Text(
+                                    "• $scope",
+                                    style: const TextStyle(fontSize: 13),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
                                 ),
                               ],
                             ),
@@ -782,19 +807,23 @@ class _SignInScreenState extends State<SignInScreen>
                               color: Colors.blue.shade700,
                             ),
                             const SizedBox(width: 8),
-                            Text(
-                              "Terms & Privacy",
-                              style: TextStyle(
-                                fontWeight: FontWeight.w600,
-                                fontSize: 13,
-                                color: Colors.blue.shade700,
+                            Expanded(
+                              child: Text(
+                                "Terms & Privacy",
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 13,
+                                  color: Colors.blue.shade700,
+                                ),
                               ),
                             ),
                           ],
                         ),
                         const SizedBox(height: 12),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        Wrap(
+                          alignment: WrapAlignment.center,
+                          spacing: 8,
+                          runSpacing: 8,
                           children: [
                             TextButton.icon(
                               onPressed: () {
@@ -865,20 +894,23 @@ class _SignInScreenState extends State<SignInScreen>
                                   : Colors.grey.shade700,
                             ),
                             const SizedBox(width: 8),
-                            Text(
-                              "Quick Sign-in",
-                              style: TextStyle(
-                                fontWeight: FontWeight.w600,
-                                fontSize: 13,
-                                color: rememberMe
-                                    ? Colors.green.shade700
-                                    : Colors.grey.shade700,
+                            Expanded(
+                              child: Text(
+                                "Quick Sign-in",
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 13,
+                                  color: rememberMe
+                                      ? Colors.green.shade700
+                                      : Colors.grey.shade700,
+                                ),
                               ),
                             ),
                           ],
                         ),
                         const SizedBox(height: 8),
                         Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Checkbox(
                               value: rememberMe,
@@ -886,6 +918,7 @@ class _SignInScreenState extends State<SignInScreen>
                                   setState(() => rememberMe = value ?? false),
                               activeColor: _getProviderColor(provider),
                             ),
+                            const SizedBox(width: 4),
                             Expanded(
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -918,12 +951,14 @@ class _SignInScreenState extends State<SignInScreen>
                                   color: Colors.green.shade600,
                                 ),
                                 const SizedBox(width: 4),
-                                Text(
-                                  "Saved preference applied",
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    color: Colors.green.shade700,
-                                    fontWeight: FontWeight.w500,
+                                Expanded(
+                                  child: Text(
+                                    "Saved preference applied",
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.green.shade700,
+                                      fontWeight: FontWeight.w500,
+                                    ),
                                   ),
                                 ),
                               ],
@@ -946,6 +981,7 @@ class _SignInScreenState extends State<SignInScreen>
                               setState(() => marketingConsent = value ?? false),
                           activeColor: _getProviderColor(provider),
                         ),
+                        const SizedBox(width: 4),
                         Expanded(
                           child: Text(
                             "Send me occasional offers and updates (optional)",
@@ -987,6 +1023,9 @@ class _SignInScreenState extends State<SignInScreen>
                 style: ElevatedButton.styleFrom(
                   backgroundColor: _getProviderColor(provider),
                   foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 ),
                 child: const Text("Continue"),
               ),
@@ -999,7 +1038,6 @@ class _SignInScreenState extends State<SignInScreen>
     return dialogResult;
   }
 
-  // Get provider icon
   Widget _getProviderIcon(String provider, {double size = 18}) {
     switch (provider.toLowerCase()) {
       case 'google':
@@ -1017,7 +1055,6 @@ class _SignInScreenState extends State<SignInScreen>
     }
   }
 
-  // Get provider color
   Color _getProviderColor(String provider) {
     switch (provider.toLowerCase()) {
       case 'google':
@@ -1031,7 +1068,6 @@ class _SignInScreenState extends State<SignInScreen>
     }
   }
 
-  // Get role color
   Color _getRoleColor(String role) {
     switch (role.toLowerCase()) {
       case 'owner':
@@ -1045,7 +1081,6 @@ class _SignInScreenState extends State<SignInScreen>
     }
   }
 
-  // Get role display name
   String _getRoleDisplayName(String role) {
     switch (role.toLowerCase()) {
       case 'owner':
@@ -1059,7 +1094,6 @@ class _SignInScreenState extends State<SignInScreen>
     }
   }
 
-  // HYBRID GOOGLE SIGN-IN USING SERVICE
   Future<void> _signInWithGoogle() async {
     if (_loadingGoogle) return;
 
@@ -1068,7 +1102,6 @@ class _SignInScreenState extends State<SignInScreen>
 
       debugPrint('Starting Google Sign-In process...');
 
-      // Returning user check
       final returningUserCheck = await _checkIfReturningUser('google');
 
       debugPrint('Returning User Check - Google:');
@@ -1077,7 +1110,6 @@ class _SignInScreenState extends State<SignInScreen>
       debugPrint('   Auto Login Setting: ${returningUserCheck.hasAutoLoginSetting}');
       debugPrint('   Existing Roles: ${returningUserCheck.existingRoles}');
 
-      // Dialog එකට පරණ setting එක pass කරන්න
       final result = await _showCombinedOAuthDialog(
         provider: 'Google',
         scopes: ['email', 'profile'],
@@ -1122,7 +1154,6 @@ class _SignInScreenState extends State<SignInScreen>
         }
       }
 
-      // WEB: Supabase OAuth
       if (kIsWeb) {
         debugPrint('Web platform - starting Supabase OAuth');
         _authSubscription?.cancel();
@@ -1155,7 +1186,6 @@ class _SignInScreenState extends State<SignInScreen>
         return;
       }
 
-      // MOBILE: Use GoogleSignInService (Native)
       if (defaultTargetPlatform == TargetPlatform.android ||
           defaultTargetPlatform == TargetPlatform.iOS) {
         debugPrint('Mobile platform - using native Google Sign-In');
@@ -1193,7 +1223,6 @@ class _SignInScreenState extends State<SignInScreen>
         }
       }
 
-      // FALLBACK: Supabase OAuth
       debugPrint('Falling back to Supabase OAuth');
       _authSubscription?.cancel();
 
@@ -1269,14 +1298,12 @@ class _SignInScreenState extends State<SignInScreen>
       );
     }
 
-    // Check if user already has roles in database
     final userRolesResponse = await supabase
         .from('user_roles')
         .select('role_id')
         .eq('user_id', user.id);
 
     if (userRolesResponse.isEmpty) {
-      // New user - needs registration
       if (mounted) {
         context.go('/reg');
         return;
@@ -1286,7 +1313,6 @@ class _SignInScreenState extends State<SignInScreen>
     await _handlePostLogin(user.id);
   }
 
-  // Facebook Sign In
   Future<void> _signInWithFacebook() async {
     if (_loadingFacebook) return;
 
@@ -1299,7 +1325,6 @@ class _SignInScreenState extends State<SignInScreen>
         return;
       }
 
-      // Returning user check
       final returningUserCheck = await _checkIfReturningUser('facebook');
 
       final result = await _showCombinedOAuthDialog(
@@ -1332,7 +1357,6 @@ class _SignInScreenState extends State<SignInScreen>
         );
       }
 
-      // WEB: Supabase OAuth
       if (kIsWeb) {
         await _signInWithFacebookWeb(
           userWantsAutoLogin,
@@ -1342,7 +1366,6 @@ class _SignInScreenState extends State<SignInScreen>
         return;
       }
 
-      // MOBILE: Native Facebook Login
       if (defaultTargetPlatform == TargetPlatform.android ||
           defaultTargetPlatform == TargetPlatform.iOS) {
         try {
@@ -1376,7 +1399,6 @@ class _SignInScreenState extends State<SignInScreen>
         }
       }
 
-      // FALLBACK: Supabase OAuth
       await _signInWithFacebookWeb(
         userWantsAutoLogin,
         marketingConsent,
@@ -1460,14 +1482,12 @@ class _SignInScreenState extends State<SignInScreen>
       );
     }
 
-    // Check if user already has roles in database
     final userRolesResponse = await supabase
         .from('user_roles')
         .select('role_id')
         .eq('user_id', user.id);
 
     if (userRolesResponse.isEmpty) {
-      // New user - needs registration
       if (mounted) {
         context.go('/reg');
         return;
@@ -1477,14 +1497,12 @@ class _SignInScreenState extends State<SignInScreen>
     await _handlePostLogin(user.id);
   }
 
-  // Apple Sign In
   Future<void> _signInWithApple() async {
     if (_loadingApple) return;
 
     try {
       setState(() => _loadingApple = true);
 
-      // Returning user check
       final returningUserCheck = await _checkIfReturningUser('apple');
 
       final result = await _showCombinedOAuthDialog(
@@ -1517,7 +1535,6 @@ class _SignInScreenState extends State<SignInScreen>
         );
       }
 
-      // WEB: Supabase OAuth (Apple)
       if (kIsWeb) {
         debugPrint('Web platform - starting Apple OAuth');
         await _signInWithAppleWeb(
@@ -1528,7 +1545,6 @@ class _SignInScreenState extends State<SignInScreen>
         return;
       }
 
-      // Android: Use Supabase OAuth
       if (defaultTargetPlatform == TargetPlatform.android) {
         debugPrint('Android platform - starting Apple OAuth');
         await _signInWithAppleWeb(
@@ -1539,7 +1555,6 @@ class _SignInScreenState extends State<SignInScreen>
         return;
       }
 
-      // iOS: Try native Apple Sign-In
       if (defaultTargetPlatform == TargetPlatform.iOS) {
         debugPrint('iOS platform - trying native Apple Sign-In');
         try {
@@ -1574,11 +1589,9 @@ class _SignInScreenState extends State<SignInScreen>
           }
         } catch (e) {
           debugPrint('Native Apple Sign-In failed: $e');
-          // Fall back to OAuth
         }
       }
 
-      // FALLBACK: Supabase OAuth
       debugPrint('Falling back to Supabase OAuth for Apple');
       await _signInWithAppleWeb(
         userWantsAutoLogin,
@@ -1608,7 +1621,6 @@ class _SignInScreenState extends State<SignInScreen>
     }
   }
 
-  // Web/Android Apple Sign-In (Supabase OAuth)
   Future<void> _signInWithAppleWeb(
     bool userWantsAutoLogin,
     bool marketingConsent,
@@ -1671,14 +1683,12 @@ class _SignInScreenState extends State<SignInScreen>
       );
     }
 
-    // Check if user already has roles in database
     final userRolesResponse = await supabase
         .from('user_roles')
         .select('role_id')
         .eq('user_id', user.id);
 
     if (userRolesResponse.isEmpty) {
-      // New user - needs registration
       if (mounted) {
         context.go('/reg');
         return;
@@ -1688,7 +1698,6 @@ class _SignInScreenState extends State<SignInScreen>
     await _handlePostLogin(user.id);
   }
 
-  // 🔥 FIXED: Handle post-login with proper role fetching from user_roles
   Future<void> _handlePostLogin(String userId) async {
     try {
       if (!mounted) return;
@@ -1703,7 +1712,6 @@ class _SignInScreenState extends State<SignInScreen>
 
       final email = user.email!;
 
-      // 🔥 1. Check profile status (blocked/active)
       final profileCheck = await supabase
           .from('profiles')
           .select('is_blocked, is_active')
@@ -1742,7 +1750,6 @@ class _SignInScreenState extends State<SignInScreen>
         }
       }
 
-      // 🔥 2. FIXED: Get user roles from user_roles table (not profiles)
       final userRolesResponse = await supabase
           .from('user_roles')
           .select('''
@@ -1755,7 +1762,6 @@ class _SignInScreenState extends State<SignInScreen>
 
       debugPrint('📋 userRolesResponse: $userRolesResponse');
 
-      // 🔥 3. Extract role names
       final List<String> roleNames = [];
       for (var roleEntry in userRolesResponse) {
         final role = roleEntry['roles'] as Map?;
@@ -1766,17 +1772,14 @@ class _SignInScreenState extends State<SignInScreen>
 
       debugPrint('📋 Extracted role names: $roleNames');
 
-      // 🔥 4. Save to SessionManager
       await SessionManager.saveUserRoles(email: email, roles: roleNames);
 
-      // 🔥 5. No roles found - go to registration
       if (roleNames.isEmpty) {
         debugPrint('⚠️ No roles found, redirecting to /reg');
         if (mounted) context.go('/reg');
         return;
       }
 
-      // 🔥 6. Single role - direct dashboard
       if (roleNames.length == 1) {
         final singleRole = roleNames.first;
         debugPrint('✅ Single role: $singleRole, saving and redirecting');
@@ -1803,16 +1806,13 @@ class _SignInScreenState extends State<SignInScreen>
         return;
       }
 
-      // 🔥 7. Multiple roles
       if (roleNames.length > 1) {
         debugPrint('🔄 Multiple roles: $roleNames');
 
-        // Check if there's a saved role
         final savedRole = await SessionManager.getCurrentRole();
         debugPrint('📋 Saved role from SessionManager: $savedRole');
 
         if (savedRole != null && roleNames.contains(savedRole)) {
-          // Use saved role
           debugPrint('✅ Using saved role: $savedRole');
           await SessionManager.saveCurrentRole(savedRole);
           await appState.refreshState();
@@ -1833,7 +1833,6 @@ class _SignInScreenState extends State<SignInScreen>
           return;
         }
 
-        // No saved role - go to role selector
         debugPrint('🔄 No saved role, going to role selector');
         if (mounted) {
           context.go(
@@ -1844,7 +1843,6 @@ class _SignInScreenState extends State<SignInScreen>
         return;
       }
 
-      // Fallback
       debugPrint('⚠️ Fallback - refreshing app state');
       appState.refreshState();
       if (mounted) context.go('/');
@@ -1856,7 +1854,6 @@ class _SignInScreenState extends State<SignInScreen>
     }
   }
 
-  // OAuth error messages
   String _getOAuthErrorMessage(AuthException e, String provider) {
     if (kReleaseMode) {
       return "Unable to sign in with $provider. Please try again.";
@@ -1893,7 +1890,6 @@ $provider OAuth Configuration Required:
     }
   }
 
-  // OAuth buttons
   Widget _buildOAuthButtons() {
     final enabledProviders = _env.enabledOAuthProviders;
 
