@@ -1,10 +1,7 @@
-// screens/owner/barber_list_screen.dart
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
-// ignore: depend_on_referenced_packages
-import 'package:flutter/foundation.dart' show kIsWeb;
 
 class BarberListScreen extends StatefulWidget {
   final String? salonId;
@@ -21,6 +18,18 @@ class _BarberListScreenState extends State<BarberListScreen> {
   bool _isLoading = true;
   String? _selectedFilter = 'all';
   List<Map<String, dynamic>> _barbers = [];
+  
+  // Alternating card colors
+  final List<Color> _cardColors = [
+    const Color(0xFFE3F2FD), // Light Blue
+    const Color(0xFFFCE4EC), // Light Pink
+    const Color(0xFFE8F5E9), // Light Green
+    const Color(0xFFFFF3E0), // Light Orange
+    const Color(0xFFF3E5F5), // Light Purple
+    const Color(0xFFE0F7FA), // Light Cyan
+    const Color(0xFFFFEBEE), // Light Red
+    const Color(0xFFE8EAF6), // Light Indigo
+  ];
 
   @override
   void initState() {
@@ -30,14 +39,16 @@ class _BarberListScreenState extends State<BarberListScreen> {
 
   Future<void> _loadData() async {
     if (widget.salonId == null) {
-      setState(() {
-        _barbers = [];
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _barbers = [];
+          _isLoading = false;
+        });
+      }
       return;
     }
 
-    setState(() => _isLoading = true);
+    if (mounted) setState(() => _isLoading = true);
 
     try {
       final salonIdInt = int.parse(widget.salonId!);
@@ -58,10 +69,12 @@ class _BarberListScreenState extends State<BarberListScreen> {
       final salonBarbersResponse = await query.order('joined_at', ascending: false);
 
       if (salonBarbersResponse.isEmpty) {
-        setState(() {
-          _barbers = [];
-          _isLoading = false;
-        });
+        if (mounted) {
+          setState(() {
+            _barbers = [];
+            _isLoading = false;
+          });
+        }
         return;
       }
 
@@ -77,26 +90,16 @@ class _BarberListScreenState extends State<BarberListScreen> {
         profileMap[profile['id']] = profile;
       }
 
+      // Get service counts for each barber
       Map<String, int> serviceCountMap = {};
-      for (String barberId in barberIds) {
-        final salonBarber = await supabase
-            .from('salon_barbers')
+      for (var sb in salonBarbersResponse) {
+        final salonBarberId = sb['id'] as int;
+        final count = await supabase
+            .from('barber_services')
             .select('id')
-            .eq('barber_id', barberId)
-            .eq('salon_id', salonIdInt)
-            .maybeSingle();
-
-        if (salonBarber != null) {
-          final count = await supabase
-              .from('barber_services')
-              .select('id')
-              .eq('salon_barber_id', salonBarber['id']);
-              // .eq('status', 'active');
-
-          serviceCountMap[barberId] = count.length;
-        } else {
-          serviceCountMap[barberId] = 0;
-        }
+            .eq('salon_barber_id', salonBarberId);
+        
+        serviceCountMap[sb['barber_id']] = count.length;
       }
 
       List<Map<String, dynamic>> combinedList = [];
@@ -119,9 +122,11 @@ class _BarberListScreenState extends State<BarberListScreen> {
         });
       }
 
-      setState(() {
-        _barbers = combinedList;
-      });
+      if (mounted) {
+        setState(() {
+          _barbers = combinedList;
+        });
+      }
 
     } catch (e) {
       debugPrint('❌ Error loading barbers: $e');
@@ -155,6 +160,11 @@ class _BarberListScreenState extends State<BarberListScreen> {
       }
     } catch (e) {
       debugPrint('❌ Error activating barber: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
     }
   }
 
@@ -201,6 +211,11 @@ class _BarberListScreenState extends State<BarberListScreen> {
         }
       } catch (e) {
         debugPrint('❌ Error deactivating barber: $e');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          );
+        }
       }
     }
   }
@@ -267,6 +282,11 @@ class _BarberListScreenState extends State<BarberListScreen> {
         }
       } catch (e) {
         debugPrint('❌ Error deleting barber: $e');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          );
+        }
       }
     }
   }
@@ -314,6 +334,11 @@ class _BarberListScreenState extends State<BarberListScreen> {
         }
       } catch (e) {
         debugPrint('❌ Error restoring barber: $e');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          );
+        }
       }
     }
   }
@@ -321,6 +346,18 @@ class _BarberListScreenState extends State<BarberListScreen> {
   void _editBarberServices(Map<String, dynamic> barber) {
     context.push(
       '/owner/edit-barber-services?barberId=${barber['id']}&salonId=${widget.salonId}',
+    );
+  }
+
+  void _viewSchedule(Map<String, dynamic> barber) {
+    context.push(
+      '/owner/barber-schedule?barberId=${barber['id']}&salonId=${widget.salonId}',
+    );
+  }
+
+  void _viewLeaves(Map<String, dynamic> barber) {
+    context.push(
+      '/owner/barber-leaves?barberId=${barber['id']}&salonId=${widget.salonId}',
     );
   }
 
@@ -366,7 +403,6 @@ class _BarberListScreenState extends State<BarberListScreen> {
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
     final bool isDesktop = screenWidth > 800;
-    final bool isTablet = screenWidth > 600 && screenWidth <= 800;
     final double padding = isDesktop ? 24.0 : 16.0;
 
     return Scaffold(
@@ -461,20 +497,18 @@ class _BarberListScreenState extends State<BarberListScreen> {
       child: Column(
         children: [
           // Stats Cards
-          Container(
-            margin: const EdgeInsets.only(bottom: 16),
-            child: Row(
-              children: [
-                _buildStatCard('Total', _barbers.length.toString(), Icons.people, Colors.blue),
-                const SizedBox(width: 12),
-                _buildStatCard('Active', activeCount.toString(), Icons.check_circle, Colors.green),
-                const SizedBox(width: 12),
-                _buildStatCard('Inactive', inactiveCount.toString(), Icons.pause_circle, Colors.orange),
-                const SizedBox(width: 12),
-                _buildStatCard('Deleted', deletedCount.toString(), Icons.delete, Colors.red),
-              ],
-            ),
+          Row(
+            children: [
+              _buildStatCard('Total', _barbers.length.toString(), Icons.people, Colors.blue),
+              const SizedBox(width: 12),
+              _buildStatCard('Active', activeCount.toString(), Icons.check_circle, Colors.green),
+              const SizedBox(width: 12),
+              _buildStatCard('Inactive', inactiveCount.toString(), Icons.pause_circle, Colors.orange),
+              const SizedBox(width: 12),
+              _buildStatCard('Deleted', deletedCount.toString(), Icons.delete, Colors.red),
+            ],
           ),
+          const SizedBox(height: 16),
 
           // Table Header
           Container(
@@ -498,23 +532,24 @@ class _BarberListScreenState extends State<BarberListScreen> {
           const SizedBox(height: 8),
 
           // Table Rows
-          ..._barbers.map((barber) => _buildDesktopBarberRow(barber)),
+          ..._barbers.asMap().entries.map((entry) => _buildDesktopBarberRow(entry.value, entry.key)),
         ],
       ),
     );
   }
 
-  Widget _buildDesktopBarberRow(Map<String, dynamic> barber) {
+  Widget _buildDesktopBarberRow(Map<String, dynamic> barber, int index) {
     final status = barber['status'] ?? 'active';
     final statusColor = _getStatusColor(status);
     final statusText = _getStatusText(status);
     final statusIcon = _getStatusIcon(status);
+    final cardColor = _cardColors[index % _cardColors.length];
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 4),
+      margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: cardColor,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.grey[200]!),
         boxShadow: [
@@ -687,12 +722,12 @@ class _BarberListScreenState extends State<BarberListScreen> {
                 ),
                 IconButton(
                   icon: const Icon(Icons.schedule, color: Colors.teal),
-                  onPressed: () => context.push('/owner/barber-schedule?barberId=${barber['id']}'),
+                  onPressed: () => _viewSchedule(barber),
                   tooltip: 'View Schedule',
                 ),
                 IconButton(
                   icon: const Icon(Icons.beach_access, color: Colors.orange),
-                  onPressed: () => context.push('/owner/barber-leaves?barberId=${barber['id']}'),
+                  onPressed: () => _viewLeaves(barber),
                   tooltip: 'View Leaves',
                 ),
                 if (status == 'active')
@@ -727,7 +762,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
     );
   }
 
-  // ==================== MOBILE VIEW (RESPONSIVE) ====================
+  // ==================== MOBILE VIEW ====================
   
   Widget _buildMobileView(double padding) {
     return ListView.builder(
@@ -739,6 +774,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
         final statusColor = _getStatusColor(status);
         final statusText = _getStatusText(status);
         final statusIcon = _getStatusIcon(status);
+        final cardColor = _cardColors[index % _cardColors.length];
 
         return Card(
           margin: const EdgeInsets.only(bottom: 12),
@@ -747,13 +783,14 @@ class _BarberListScreenState extends State<BarberListScreen> {
           ),
           child: Container(
             decoration: BoxDecoration(
+              color: cardColor,
+              borderRadius: BorderRadius.circular(16),
               border: Border(
                 left: BorderSide(
                   color: statusColor,
                   width: 4,
                 ),
               ),
-              borderRadius: BorderRadius.circular(16),
             ),
             child: Column(
               children: [
@@ -888,7 +925,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
                   child: Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: Colors.grey[50],
+                      color: Colors.white.withValues(alpha: 0.5),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Row(
@@ -952,13 +989,13 @@ class _BarberListScreenState extends State<BarberListScreen> {
                         icon: Icons.schedule,
                         label: 'Schedule',
                         color: Colors.teal,
-                        onTap: () => context.push('/owner/barber-schedule?barberId=${barber['id']}'),
+                        onTap: () => _viewSchedule(barber),
                       ),
                       _buildMobileActionChip(
                         icon: Icons.beach_access,
                         label: 'Leaves',
                         color: Colors.orange,
-                        onTap: () => context.push('/owner/barber-leaves?barberId=${barber['id']}'),
+                        onTap: () => _viewLeaves(barber),
                       ),
                       if (status == 'active')
                         _buildMobileActionChip(
@@ -1095,7 +1132,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
-        builder: (context, setState) {
+        builder: (context, setDialogState) {
           return AlertDialog(
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             title: const Text('Filter Barbers'),
@@ -1108,7 +1145,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
                   currentFilter: tempFilter,
                   icon: Icons.people,
                   color: Colors.blue,
-                  onTap: () => setState(() => tempFilter = 'all'),
+                  onTap: () => setDialogState(() => tempFilter = 'all'),
                 ),
                 const Divider(),
                 _buildFilterOption(
@@ -1117,7 +1154,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
                   currentFilter: tempFilter,
                   icon: Icons.check_circle,
                   color: Colors.green,
-                  onTap: () => setState(() => tempFilter = 'active'),
+                  onTap: () => setDialogState(() => tempFilter = 'active'),
                 ),
                 const Divider(),
                 _buildFilterOption(
@@ -1126,7 +1163,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
                   currentFilter: tempFilter,
                   icon: Icons.pause_circle,
                   color: Colors.orange,
-                  onTap: () => setState(() => tempFilter = 'inactive'),
+                  onTap: () => setDialogState(() => tempFilter = 'inactive'),
                 ),
                 const Divider(),
                 _buildFilterOption(
@@ -1135,7 +1172,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
                   currentFilter: tempFilter,
                   icon: Icons.delete,
                   color: Colors.red,
-                  onTap: () => setState(() => tempFilter = 'deleted'),
+                  onTap: () => setDialogState(() => tempFilter = 'deleted'),
                 ),
               ],
             ),
@@ -1146,7 +1183,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
               ),
               ElevatedButton(
                 onPressed: () {
-                  this.setState(() {
+                  setState(() {
                     _selectedFilter = tempFilter;
                   });
                   Navigator.pop(context);

@@ -56,7 +56,7 @@ class _SideMenuState extends State<SideMenu> {
   }
 
   // ============================================================
-  // 🔥 LOAD USER ROLES FROM DATABASE (UPDATED - uses user_roles)
+  // 🔥 LOAD USER ROLES FROM DATABASE
   // ============================================================
   Future<void> _loadUserRolesFromDatabase() async {
     if (!mounted) return;
@@ -72,7 +72,6 @@ class _SideMenuState extends State<SideMenu> {
 
       debugPrint('📋 Loading roles for user: ${currentUser.id}');
 
-      // 🔥 NEW: Get user roles from user_roles table
       final userRolesResponse = await supabase
           .from('user_roles')
           .select('''
@@ -85,7 +84,6 @@ class _SideMenuState extends State<SideMenu> {
           ''')
           .eq('user_id', currentUser.id);
 
-      // Extract role names
       final List<String> roleNames = [];
       for (var roleEntry in userRolesResponse) {
         final role = roleEntry['roles'] as Map?;
@@ -94,15 +92,13 @@ class _SideMenuState extends State<SideMenu> {
         }
       }
       
-      _allUserRoles = roleNames.toSet().toList(); // Remove duplicates
+      _allUserRoles = roleNames.toSet().toList();
       
       debugPrint('📋 User roles from database: $_allUserRoles');
 
-      // 🔥 Get profile data for each role
       final List<Map<String, dynamic>> profiles = [];
 
       for (var roleName in _allUserRoles) {
-        // Get role ID
         final roleResponse = await supabase
             .from('roles')
             .select('id')
@@ -111,8 +107,6 @@ class _SideMenuState extends State<SideMenu> {
         
         final roleId = roleResponse['id'];
 
-        // Get profile for this user (profiles table doesn't have role_id anymore)
-        // We just get the main profile
         final profileResponse = await supabase
             .from('profiles')
             .select('''
@@ -157,7 +151,6 @@ class _SideMenuState extends State<SideMenu> {
           _availableProfiles = profiles;
         });
 
-        // Save to SessionManager
         await SessionManager.saveUserRoles(
           email: widget.userEmail ?? currentUser.email ?? '',
           roles: _allUserRoles,
@@ -173,7 +166,7 @@ class _SideMenuState extends State<SideMenu> {
   }
 
   // ============================================================
-  // 🔥 SWITCH PROFILE (UPDATED)
+  // 🔥 SWITCH PROFILE
   // ============================================================
   Future<void> _switchProfile(Map<String, dynamic> profile) async {
     if (!mounted) return;
@@ -183,12 +176,11 @@ class _SideMenuState extends State<SideMenu> {
       return;
     }
 
-    // Check if profile is active
     if (profile['is_active'] == false) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('This profile is inactive'),
+          const SnackBar(
+            content: Text('This profile is inactive'),
             backgroundColor: Colors.orange,
           ),
         );
@@ -196,12 +188,11 @@ class _SideMenuState extends State<SideMenu> {
       return;
     }
 
-    // Check if profile is blocked
     if (profile['is_blocked'] == true) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('This profile is blocked'),
+          const SnackBar(
+            content: Text('This profile is blocked'),
             backgroundColor: Colors.red,
           ),
         );
@@ -219,10 +210,8 @@ class _SideMenuState extends State<SideMenu> {
       
       if (email == null) throw Exception('No email found');
       
-      // 🔥 Update current role in SessionManager
       await SessionManager.updateUserRole(profile['role']);
       
-      // Update user metadata
       if (currentUser != null) {
         final currentMetadata = currentUser.userMetadata ?? {};
         await supabase.auth.updateUser(
@@ -237,10 +226,8 @@ class _SideMenuState extends State<SideMenu> {
       
       if (!mounted) return;
       
-      // Close drawer
       Navigator.pop(context);
       
-      // Show success message
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Switched to ${_getRoleDisplayName(profile['role'])} profile'),
@@ -249,12 +236,10 @@ class _SideMenuState extends State<SideMenu> {
         ),
       );
       
-      // Refresh app state
       await appState.refreshState();
       
       if (!mounted) return;
       
-      // Navigate to appropriate dashboard
       _navigateToDashboard(profile['role']);
     } catch (e) {
       debugPrint('❌ Error switching profile: $e');
@@ -271,21 +256,19 @@ class _SideMenuState extends State<SideMenu> {
   }
 
   // ============================================================
-  // 🔥 CREATE NEW PROFILE (FIXED NAVIGATION)
+  // 🔥 CREATE NEW PROFILE
   // ============================================================
   Future<void> _createNewProfile() async {
     if (!mounted) return;
     
     setState(() => _showProfileSwitcher = false);
     
-    // Get available roles (roles user doesn't have yet)
     final allRoles = ['owner', 'barber', 'customer'];
     final availableRoles = allRoles
         .where((role) => !_allUserRoles.contains(role))
         .toList();
 
     if (availableRoles.isEmpty) {
-      // User already has all roles
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -332,22 +315,19 @@ class _SideMenuState extends State<SideMenu> {
 
     debugPrint('🔄 Selected role for new profile: $selectedRole');
 
-    // Close drawer
     Navigator.pop(context);
     
-    // Small delay
     await Future.delayed(const Duration(milliseconds: 100));
     
     if (!mounted) return;
 
     debugPrint('➡️ Navigating to registration flow for role: $selectedRole');
     
-    // Navigate to registration with query parameters
     context.push('/reg?role=$selectedRole&new=true');
   }
 
   // ============================================================
-  // 🔥 HELPER: Get role icon
+  // 🔥 HELPER METHODS
   // ============================================================
   IconData _getRoleIcon(String role) {
     switch (role) {
@@ -358,9 +338,6 @@ class _SideMenuState extends State<SideMenu> {
     }
   }
 
-  // ============================================================
-  // 🔥 HELPER: Get role color
-  // ============================================================
   Color _getRoleColor(String role) {
     switch (role) {
       case 'owner': return Colors.blue;
@@ -370,9 +347,6 @@ class _SideMenuState extends State<SideMenu> {
     }
   }
 
-  // ============================================================
-  // 🔥 HELPER: Get role description
-  // ============================================================
   String _getRoleDescription(String role) {
     switch (role) {
       case 'owner': return 'Manage your salon';
@@ -382,9 +356,15 @@ class _SideMenuState extends State<SideMenu> {
     }
   }
 
-  // ============================================================
-  // 🔥 PROFILE TYPE OPTION WIDGET
-  // ============================================================
+  String _getRoleDisplayName(String role) {
+    switch (role) {
+      case 'owner': return 'Owner';
+      case 'barber': return 'Barber';
+      case 'customer': return 'Customer';
+      default: return role;
+    }
+  }
+
   Widget _buildProfileTypeOption({
     required IconData icon,
     required Color color,
@@ -440,9 +420,6 @@ class _SideMenuState extends State<SideMenu> {
     );
   }
 
-  // ============================================================
-  // 🔥 NAVIGATE TO DASHBOARD
-  // ============================================================
   void _navigateToDashboard(String role) {
     if (!mounted) return;
     
@@ -465,42 +442,15 @@ class _SideMenuState extends State<SideMenu> {
     });
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Drawer(
-      child: _isLoading
-          ? const Center(
-              child: CircularProgressIndicator(
-                color: Color(0xFFFF6B8B),
-              ),
-            )
-          : Container(
-              color: Colors.white,
-              child: Column(
-                children: [
-                  _buildProfileHeader(),
-                  if (_showProfileSwitcher) _buildProfileSwitcher(),
-                  Expanded(
-                    child: ListView(
-                      padding: EdgeInsets.zero,
-                      children: _buildMenuItems(context),
-                    ),
-                  ),
-                  _buildBottomSection(),
-                ],
-              ),
-            ),
-    );
-  }
-
   // ============================================================
-  // 🔥 PROFILE HEADER (UPDATED)
+  // 🔥 UPDATED PROFILE HEADER - NO FRAME, CLEAN DESIGN
   // ============================================================
   Widget _buildProfileHeader() {
-    // Count available profiles (excluding current)
+    final hasMultipleProfiles = _availableProfiles.length > 1;
     final otherProfilesCount = _availableProfiles
         .where((p) => p['is_current'] != true)
         .length;
+    final canCreateNewProfile = _allUserRoles.length < 3;
 
     return Container(
       decoration: const BoxDecoration(
@@ -513,29 +463,32 @@ class _SideMenuState extends State<SideMenu> {
       child: SafeArea(
         bottom: false,
         child: Padding(
-          padding: const EdgeInsets.all(16.0),
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Profile Row - NO FRAME, just clean layout
               Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // Profile Image / Avatar
                   GestureDetector(
-                    onTap: () {
-                      if (mounted) {
-                        setState(() {
-                          _showProfileSwitcher = !_showProfileSwitcher;
-                        });
-                      }
-                    },
+                    onTap: hasMultipleProfiles
+                        ? () {
+                            if (mounted) {
+                              setState(() {
+                                _showProfileSwitcher = !_showProfileSwitcher;
+                              });
+                            }
+                          }
+                        : null,
                     child: Stack(
                       children: [
                         Container(
-                          width: 60,
-                          height: 60,
+                          width: 70,
+                          height: 70,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white, width: 2),
+                            border: Border.all(color: Colors.white, width: 3),
                             image: (widget.profileImageUrl != null && widget.profileImageUrl!.isNotEmpty)
                                 ? DecorationImage(
                                     image: NetworkImage(widget.profileImageUrl!),
@@ -549,7 +502,7 @@ class _SideMenuState extends State<SideMenu> {
                                   child: Text(
                                     widget.userName.isNotEmpty ? widget.userName[0].toUpperCase() : 'U',
                                     style: const TextStyle(
-                                      fontSize: 24,
+                                      fontSize: 28,
                                       fontWeight: FontWeight.bold,
                                       color: Color(0xFFFF6B8B),
                                     ),
@@ -557,12 +510,13 @@ class _SideMenuState extends State<SideMenu> {
                                 )
                               : null,
                         ),
-                        if (otherProfilesCount > 0)
+                        // Multiple profiles badge
+                        if (hasMultipleProfiles)
                           Positioned(
                             bottom: 0,
                             right: 0,
                             child: Container(
-                              padding: const EdgeInsets.all(4),
+                              padding: const EdgeInsets.all(5),
                               decoration: BoxDecoration(
                                 color: Colors.blue,
                                 shape: BoxShape.circle,
@@ -582,6 +536,7 @@ class _SideMenuState extends State<SideMenu> {
                     ),
                   ),
                   const SizedBox(width: 16),
+                  // Profile Info
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -599,7 +554,8 @@ class _SideMenuState extends State<SideMenu> {
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),
-                            if (otherProfilesCount > 0)
+                            // Show SWAP icon only when multiple profiles exist
+                            if (hasMultipleProfiles)
                               GestureDetector(
                                 onTap: () {
                                   if (mounted) {
@@ -609,30 +565,42 @@ class _SideMenuState extends State<SideMenu> {
                                   }
                                 },
                                 child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 4,
-                                  ),
+                                  padding: const EdgeInsets.all(8),
                                   decoration: BoxDecoration(
                                     color: Colors.white.withValues(alpha: 0.2),
-                                    borderRadius: BorderRadius.circular(12),
+                                    shape: BoxShape.circle,
                                   ),
-                                  child: Row(
-                                    children: [
-                                      const Icon(
-                                        Icons.swap_horiz,
-                                        color: Colors.white,
-                                        size: 14,
-                                      ),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        'Switch',
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          color: Colors.white.withValues(alpha: 0.9),
-                                        ),
-                                      ),
-                                    ],
+                                  child: Icon(
+                                    _showProfileSwitcher 
+                                        ? Icons.keyboard_arrow_up
+                                        : Icons.swap_horiz,
+                                    color: Colors.white,
+                                    size: 22,
+                                  ),
+                                ),
+                              ),
+                            // Show ADD icon when single profile but can create new
+                            if (!hasMultipleProfiles && canCreateNewProfile)
+                              GestureDetector(
+                                onTap: () {
+                                  if (mounted) {
+                                    setState(() {
+                                      _showProfileSwitcher = !_showProfileSwitcher;
+                                    });
+                                  }
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withValues(alpha: 0.2),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Icon(
+                                    _showProfileSwitcher 
+                                        ? Icons.keyboard_arrow_up
+                                        : Icons.add,
+                                    color: Colors.white,
+                                    size: 22,
                                   ),
                                 ),
                               ),
@@ -643,26 +611,27 @@ class _SideMenuState extends State<SideMenu> {
                           Text(
                             widget.userEmail!,
                             style: TextStyle(
-                              fontSize: 12,
+                              fontSize: 13,
                               color: Colors.white.withValues(alpha: 0.9),
                             ),
                             overflow: TextOverflow.ellipsis,
                           ),
                         ],
-                        const SizedBox(height: 4),
+                        const SizedBox(height: 8),
+                        // Role badge
                         Container(
                           padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 2,
+                            horizontal: 10,
+                            vertical: 4,
                           ),
                           decoration: BoxDecoration(
                             color: Colors.white.withValues(alpha: 0.2),
-                            borderRadius: BorderRadius.circular(12),
+                            borderRadius: BorderRadius.circular(20),
                           ),
                           child: Text(
                             _getRoleDisplayName(widget.userRole),
                             style: const TextStyle(
-                              fontSize: 10,
+                              fontSize: 11,
                               color: Colors.white,
                               fontWeight: FontWeight.w600,
                             ),
@@ -673,6 +642,9 @@ class _SideMenuState extends State<SideMenu> {
                   ),
                 ],
               ),
+              // Profile Switcher Section
+              if (_showProfileSwitcher && (hasMultipleProfiles || canCreateNewProfile))
+                _buildProfileSwitcherSection(),
             ],
           ),
         ),
@@ -681,154 +653,222 @@ class _SideMenuState extends State<SideMenu> {
   }
 
   // ============================================================
-  // 🔥 PROFILE SWITCHER (UPDATED)
+  // 🔥 PROFILE SWITCHER SECTION - CLEAN MODERN DESIGN
   // ============================================================
-  Widget _buildProfileSwitcher() {
-    // Filter out current profile
+  Widget _buildProfileSwitcherSection() {
     final otherProfiles = _availableProfiles
         .where((p) => p['is_current'] != true)
         .toList();
-
-    if (otherProfiles.isEmpty) {
-      return Container(
-        color: Colors.grey[50],
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            const Text('No other profiles found'),
-            const SizedBox(height: 8),
-            ElevatedButton(
-              onPressed: _createNewProfile,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFFF6B8B),
-              ),
-              child: const Text('Create New Profile'),
-            ),
-          ],
-        ),
-      );
-    }
+    
+    final hasMultipleProfiles = _availableProfiles.length > 1;
+    final canCreateNewProfile = _allUserRoles.length < 3;
 
     return Container(
-      color: Colors.grey[50],
+      margin: const EdgeInsets.only(top: 16),
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.08),
+            blurRadius: 15,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-            child: Row(
-              children: [
-                const Icon(Icons.swap_horiz, size: 16, color: Colors.grey),
-                const SizedBox(width: 8),
-                Text(
-                  'Switch Profile',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.grey[700],
-                  ),
-                ),
-                const Spacer(),
-                Text(
-                  '${otherProfiles.length} available',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey[500],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          ...otherProfiles.map((profile) => ListTile(
-            leading: CircleAvatar(
-              radius: 18,
-              backgroundImage: profile['photo'] != null
-                  ? NetworkImage(profile['photo'])
-                  : null,
+          // Show other profiles if multiple profiles exist
+          if (hasMultipleProfiles && otherProfiles.isNotEmpty)
+            ...otherProfiles.map((profile) => _buildProfileSwitcherItem(profile)),
+          
+          // Show Create New Profile button if user doesn't have all roles
+          if (canCreateNewProfile)
+            _buildCreateNewProfileItem(),
+        ],
+      ),
+    );
+  }
+
+  // ============================================================
+  // 🔥 PROFILE SWITCHER ITEM - MODERN DESIGN
+  // ============================================================
+  Widget _buildProfileSwitcherItem(Map<String, dynamic> profile) {
+    return InkWell(
+      onTap: profile['is_active'] == true && profile['is_blocked'] == false
+          ? () => _switchProfile(profile)
+          : null,
+      borderRadius: BorderRadius.circular(16),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        child: Row(
+          children: [
+            // Profile image
+            Container(
+              width: 50,
+              height: 50,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: _getRoleColor(profile['role']).withValues(alpha: 0.1),
+                image: profile['photo'] != null
+                    ? DecorationImage(
+                        image: NetworkImage(profile['photo']),
+                        fit: BoxFit.cover,
+                      )
+                    : null,
+              ),
               child: profile['photo'] == null
-                  ? Text(
-                      profile['name'][0].toUpperCase(),
-                      style: const TextStyle(fontSize: 14),
+                  ? Center(
+                      child: Text(
+                        profile['name'][0].toUpperCase(),
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: _getRoleColor(profile['role']),
+                        ),
+                      ),
                     )
                   : null,
             ),
-            title: Row(
-              children: [
-                Text(
-                  _getRoleDisplayName(profile['role']),
-                  style: const TextStyle(fontWeight: FontWeight.w500),
-                ),
-                if (profile['is_active'] == false) ...[
-                  const SizedBox(width: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: Colors.orange,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: const Text(
-                      'Inactive',
-                      style: TextStyle(fontSize: 8, color: Colors.white, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ],
-                if (profile['is_blocked'] == true) ...[
-                  const SizedBox(width: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: Colors.red,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: const Text(
-                      'Blocked',
-                      style: TextStyle(fontSize: 8, color: Colors.white, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-            subtitle: Text(profile['email'] ?? ''),
-            enabled: profile['is_active'] == true && profile['is_blocked'] == false,
-            onTap: () => _switchProfile(profile),
-          )),
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: InkWell(
-              onTap: _createNewProfile,
-              borderRadius: BorderRadius.circular(8),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(
-                  border: Border.all(
-                    color: const Color(0xFFFF6B8B).withValues(alpha: 0.3),
-                  ),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.add_circle_outline,
-                      size: 16,
-                      color: const Color(0xFFFF6B8B),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Create New Profile',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                        color: const Color(0xFFFF6B8B),
+            const SizedBox(width: 14),
+            // Profile details
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        profile['name'],
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF1A1A1A),
+                        ),
                       ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          color: _getRoleColor(profile['role']).withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          _getRoleDisplayName(profile['role']),
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: _getRoleColor(profile['role']),
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      if (profile['is_active'] == false) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: Colors.orange,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Text(
+                            'Inactive',
+                            style: TextStyle(fontSize: 8, color: Colors.white),
+                          ),
+                        ),
+                      ],
+                      if (profile['is_blocked'] == true) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: Colors.red,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Text(
+                            'Blocked',
+                            style: TextStyle(fontSize: 8, color: Colors.white),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    profile['email'] ?? '',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey[500],
                     ),
-                  ],
-                ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
               ),
             ),
-          ),
-          const Divider(height: 1),
-        ],
+            // Arrow icon
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.arrow_forward_ios,
+                size: 14,
+                color: const Color(0xFFFF6B8B),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ============================================================
+  // 🔥 CREATE NEW PROFILE ITEM
+  // ============================================================
+  Widget _buildCreateNewProfileItem() {
+    return InkWell(
+      onTap: () {
+        setState(() {
+          _showProfileSwitcher = false;
+        });
+        _createNewProfile();
+      },
+      borderRadius: BorderRadius.circular(16),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.add,
+                size: 18,
+                color: Color(0xFFFF6B8B),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              'Create New Profile',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+                color: const Color(0xFFFF6B8B),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -841,7 +881,7 @@ class _SideMenuState extends State<SideMenu> {
       decoration: BoxDecoration(
         border: Border(
           top: BorderSide(
-            color: Colors.grey.withValues(alpha: 0.2),
+            color: Colors.grey.withValues(alpha: 0.15),
             width: 1,
           ),
         ),
@@ -853,7 +893,7 @@ class _SideMenuState extends State<SideMenu> {
             leading: Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: Colors.grey.withValues(alpha: 0.1),
+                color: Colors.grey.withValues(alpha: 0.08),
                 shape: BoxShape.circle,
               ),
               child: const Icon(Icons.settings_outlined, color: Colors.grey, size: 22),
@@ -868,7 +908,7 @@ class _SideMenuState extends State<SideMenu> {
             leading: Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: Colors.red.withValues(alpha: 0.1),
+                color: Colors.red.withValues(alpha: 0.08),
                 shape: BoxShape.circle,
               ),
               child: const Icon(Icons.logout, color: Colors.red, size: 22),
@@ -879,28 +919,17 @@ class _SideMenuState extends State<SideMenu> {
             ),
             onTap: () => _logout(context),
           ),
+          const SizedBox(height: 12),
           Padding(
             padding: const EdgeInsets.all(16),
             child: Text(
               'Version 1.0.0',
-              style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+              style: TextStyle(fontSize: 12, color: Colors.grey[400]),
             ),
           ),
         ],
       ),
     );
-  }
-
-  // ============================================================
-  // 🔥 GET ROLE DISPLAY NAME
-  // ============================================================
-  String _getRoleDisplayName(String role) {
-    switch (role) {
-      case 'owner': return '👑 Owner';
-      case 'barber': return '💇 Barber';
-      case 'customer': return '👤 Customer';
-      default: return role;
-    }
   }
 
   // ============================================================
@@ -924,7 +953,7 @@ class _SideMenuState extends State<SideMenu> {
     items.addAll(_getCommonMenuItems());
 
     return items.map((item) {
-      Color itemColor = Colors.grey;
+      Color itemColor = Colors.grey.shade700;
       if (item['color'] != null) {
         itemColor = item['color'] as Color;
       }
@@ -935,7 +964,7 @@ class _SideMenuState extends State<SideMenu> {
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
               child: Divider(
-                color: Colors.grey.withValues(alpha: 0.2),
+                color: Colors.grey.withValues(alpha: 0.15),
                 height: 1,
               ),
             ),
@@ -954,11 +983,11 @@ class _SideMenuState extends State<SideMenu> {
             ),
             title: Text(
               item['title'] as String? ?? 'Unknown',
-              style: const TextStyle(fontSize: 15),
+              style: const TextStyle(fontSize: 15, color: Color(0xFF333333)),
             ),
             trailing: item['badge'] != null
                 ? Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
                       color: Colors.red,
                       borderRadius: BorderRadius.circular(12),
@@ -967,12 +996,12 @@ class _SideMenuState extends State<SideMenu> {
                       item['badge'].toString(),
                       style: const TextStyle(
                         color: Colors.white,
-                        fontSize: 12,
+                        fontSize: 11,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
                   )
-                : const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.grey),
+                : Icon(Icons.arrow_forward_ios, size: 14, color: Colors.grey[400]),
             onTap: () {
               Navigator.pop(context);
               if (widget.onMenuItemSelected != null) {
@@ -1025,7 +1054,7 @@ class _SideMenuState extends State<SideMenu> {
   List<Map<String, dynamic>> _getCommonMenuItems() {
     return [
       {'icon': Icons.info_outline, 'title': 'About Us', 'route': '/about', 'color': Colors.blueGrey},
-      {'icon': Icons.help_outline, 'title': 'Help & Support', 'route': '/support', 'color': Colors.grey},
+      {'icon': Icons.help_outline, 'title': 'Help & Support', 'route': '/help', 'color': Colors.grey},
       {'icon': Icons.privacy_tip_outlined, 'title': 'Privacy Policy', 'route': '/privacy', 'color': Colors.grey},
       {'icon': Icons.description_outlined, 'title': 'Terms & Conditions', 'route': '/terms', 'color': Colors.grey},
     ];
@@ -1056,7 +1085,6 @@ class _SideMenuState extends State<SideMenu> {
     showLogoutConfirmation(
       context,
       onLogoutConfirmed: () async {
-        // Show loading dialog
         showDialog(
           context: context,
           barrierDismissible: false,
@@ -1070,38 +1098,30 @@ class _SideMenuState extends State<SideMenu> {
         );
 
         try {
-          // Call your logout function
           await SessionManager.logoutForContinue();
 
-          // Close loading dialog safely
           if (context.mounted) {
-            // Check if we can pop before trying
             if (Navigator.canPop(context)) {
               Navigator.pop(context);
             }
           }
 
-          // Update app state
           await appState.refreshState();
 
-          // Navigate to login/splash screen using post frame callback
           if (context.mounted) {
             WidgetsBinding.instance.addPostFrameCallback((_) {
               if (context.mounted) {
-                // Clear all routes and go to login
                 context.go('/');
               }
             });
           }
         } catch (e) {
-          // Close loading dialog safely
           if (context.mounted) {
             if (Navigator.canPop(context)) {
               Navigator.pop(context);
             }
           }
 
-          // Show error message
           if (context.mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
@@ -1113,6 +1133,33 @@ class _SideMenuState extends State<SideMenu> {
           }
         }
       },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Drawer(
+      child: _isLoading
+          ? const Center(
+              child: CircularProgressIndicator(
+                color: Color(0xFFFF6B8B),
+              ),
+            )
+          : Container(
+              color: Colors.white,
+              child: Column(
+                children: [
+                  _buildProfileHeader(),
+                  Expanded(
+                    child: ListView(
+                      padding: EdgeInsets.zero,
+                      children: _buildMenuItems(context),
+                    ),
+                  ),
+                  _buildBottomSection(),
+                ],
+              ),
+            ),
     );
   }
 }

@@ -25,7 +25,6 @@ class CustomerDashboard extends StatefulWidget {
 }
 
 class _CustomerDashboardState extends State<CustomerDashboard> {
-  // 🔑 GlobalKey for scaffold
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   final NotificationService _notificationService = NotificationService();
@@ -41,7 +40,6 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
   String _customerName = 'Guest User';
   String _customerEmail = '';
   String? _customerImage;
-  String? _customerId;
 
   // Booking Statistics
   int _upcomingBookings = 0;
@@ -54,7 +52,6 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
   // VIP Bookings
   int _vipBookings = 0;
   int _pendingVipBookings = 0;
-  List<Map<String, dynamic>> _vipRequests = [];
 
   // Upcoming Appointments
   List<Map<String, dynamic>> _upcomingAppointments = [];
@@ -80,7 +77,6 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
       final user = supabase.auth.currentUser;
       if (user == null) return;
 
-      _customerId = user.id;
       _customerEmail = user.email ?? '';
 
       // Get profile from database
@@ -101,7 +97,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
         });
       }
 
-      debugPrint('✅ Loaded customer: $_customerName');
+      debugPrint('✅ Loaded customer: $_customerName ($_customerEmail)');
     } catch (e) {
       debugPrint('❌ Error loading customer data: $e');
     }
@@ -109,12 +105,13 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
 
   // ==================== LOAD DASHBOARD DATA ====================
   Future<void> _loadDashboardData() async {
+    if (!mounted) return;
     setState(() => _isLoading = true);
 
     try {
       final user = supabase.auth.currentUser;
       if (user == null) {
-        setState(() => _isLoading = false);
+        if (mounted) setState(() => _isLoading = false);
         return;
       }
 
@@ -136,18 +133,18 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
             barber_id,
             service_id,
             variant_id,
-            barbers:barber_id (
-              full_name,
-              avatar_url
-            ),
-            services (
+            services!inner (
               name
             ),
-            service_variants (
+            service_variants!left (
               price,
               duration,
-              genders (display_name),
-              age_categories (display_name)
+              salon_genders!left (display_name),
+              salon_age_categories!left (display_name)
+            ),
+            profiles!appointments_customer_id_fkey (
+              full_name,
+              avatar_url
             )
           ''')
           .eq('customer_id', user.id)
@@ -160,12 +157,17 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
       int cancelled = 0;
       int vip = 0;
       int pendingVip = 0;
-      int totalSpent = 0;
+      double totalSpent = 0.0;
       List<Map<String, dynamic>> upcomingList = [];
 
       for (var apt in appointments) {
         final status = apt['status'] as String;
         final isVip = apt['is_vip'] == true;
+        
+        // Convert price to double
+        final double price = (apt['price'] as num?)?.toDouble() ?? 
+                             (apt['service_variants']?['price'] as num?)?.toDouble() ?? 
+                             0.0;
 
         // Count by status
         if (status == 'confirmed' || status == 'pending') {
@@ -180,7 +182,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
         if (status == 'pending') pending++;
         if (status == 'completed') {
           completed++;
-          totalSpent += (apt['price'] as num?)?.toInt() ?? 0;
+          totalSpent += price;
         }
         if (status == 'cancelled') cancelled++;
 
@@ -191,30 +193,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
         }
       }
 
-      // Get VIP booking requests
-      final vipRequests = await supabase
-          .from('vip_bookings')
-          .select('''
-            id,
-            booking_number,
-            event_date,
-            preferred_start_time,
-            status,
-            number_of_guests,
-            special_requirements,
-            vip_booking_types (
-              name,
-              priority_level
-            )
-          ''')
-          .eq('customer_id', user.id)
-          .order('created_at', ascending: false)
-          .limit(5);
-
-      // Calculate loyalty points (example: 10 points per 100 spent)
-      final points = (totalSpent / 10).round();
-
-      // Get favorite barbers (from appointments history)
+      // Get favorite barbers (from completed appointments)
       final favoriteBarbers = await _getFavoriteBarbers(user.id);
 
       // Sample offers (can be from database)
@@ -242,27 +221,26 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
         },
       ];
 
-      setState(() {
-        _upcomingBookings = upcoming;
-        _pendingBookings = pending;
-        _completedBookings = completed;
-        _cancelledBookings = cancelled;
-        _vipBookings = vip;
-        _pendingVipBookings = pendingVip;
-        _totalSpent = totalSpent;
-        _loyaltyPoints = points;
-        _upcomingAppointments = upcomingList.take(3).toList();
-        _vipRequests = List<Map<String, dynamic>>.from(vipRequests);
-        _favoriteBarbers = favoriteBarbers;
-        _offers = offers;
-      });
+      if (mounted) {
+        setState(() {
+          _upcomingBookings = upcoming;
+          _pendingBookings = pending;
+          _completedBookings = completed;
+          _cancelledBookings = cancelled;
+          _vipBookings = vip;
+          _pendingVipBookings = pendingVip;
+          _totalSpent = totalSpent.toInt();
+          _loyaltyPoints = (totalSpent / 10).round();
+          _upcomingAppointments = upcomingList.take(3).toList();
+          _favoriteBarbers = favoriteBarbers;
+          _offers = offers;
+        });
+      }
 
       // Check notification permission
       _hasPermission = await _notificationService.hasPermission();
       if (!_hasPermission) {
-        _showPermissionCard = await _permissionManager.shouldShowPermissionCard(
-          'customer_dashboard',
-        );
+        _showPermissionCard = await _permissionManager.shouldShowPermissionCard('customer_dashboard');
       } else {
         _showPermissionCard = false;
       }
@@ -283,27 +261,54 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
           .from('appointments')
           .select('''
             barber_id,
-            barbers:barber_id (
+            profiles!appointments_barber_id_fkey (
               full_name,
               avatar_url
-            ),
-            count
+            )
           ''')
           .eq('customer_id', customerId)
-          .eq('status', 'completed')
-          .order('count', ascending: false)
-          .limit(5);
+          .eq('status', 'completed');
 
-      return response.map<Map<String, dynamic>>((item) {
-        final barber = item['barbers'] as Map<String, dynamic>;
-        return {
-          'id': item['barber_id'],
-          'name': barber['full_name'] ?? 'Unknown',
-          'avatar': barber['avatar_url'],
-          'count': item['count'],
-          'rating': 4.5 + (item['count'] * 0.1), // Example rating calculation
-        };
-      }).toList();
+      // Count occurrences per barber
+      final Map<String, Map<String, dynamic>> barberCount = {};
+      for (var apt in response) {
+        final barberId = apt['barber_id'] as String;
+        final barberData = apt['profiles'] as Map?;
+        
+        if (!barberCount.containsKey(barberId)) {
+          barberCount[barberId] = {
+            'id': barberId,
+            'name': barberData?['full_name'] ?? 'Unknown',
+            'avatar': barberData?['avatar_url'],
+            'count': 0,
+          };
+        }
+        barberCount[barberId]!['count'] = barberCount[barberId]!['count'] + 1;
+      }
+
+      // Convert to list and sort by count
+      List<Map<String, dynamic>> barbers = barberCount.values.toList();
+      barbers.sort((a, b) => (b['count'] as int).compareTo(a['count'] as int));
+      
+      // Add rating
+      for (var barber in barbers.take(5)) {
+        final reviews = await supabase
+            .from('reviews')
+            .select('overall_rating')
+            .eq('barber_id', barber['id']);
+        
+        double avgRating = 0;
+        if (reviews.isNotEmpty) {
+          double total = 0;
+          for (var review in reviews) {
+            total += (review['overall_rating'] as num?)?.toDouble() ?? 0;
+          }
+          avgRating = total / reviews.length;
+        }
+        barber['rating'] = avgRating > 0 ? avgRating : 4.5;
+      }
+
+      return barbers.take(5).toList();
     } catch (e) {
       debugPrint('❌ Error getting favorite barbers: $e');
       return [];
@@ -356,15 +361,10 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: type == 'confirmed'
-                    ? Colors.green.withValues(alpha: 0.1)
-                    : Colors.blue.withValues(alpha: 0.1),
+                color: type == 'confirmed' ? Colors.green.withValues(alpha: 0.1) : Colors.blue.withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
-              child: Icon(
-                type == 'confirmed' ? Icons.check_circle : Icons.info,
-                color: type == 'confirmed' ? Colors.green : Colors.blue,
-              ),
+              child: Icon(type == 'confirmed' ? Icons.check_circle : Icons.info, color: type == 'confirmed' ? Colors.green : Colors.blue),
             ),
             const SizedBox(width: 12),
             Text(type == 'confirmed' ? 'Booking Confirmed!' : 'Booking Update'),
@@ -372,18 +372,13 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
         ),
         content: Text(message.notification?.body ?? 'Your booking has been updated'),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
           ElevatedButton(
             onPressed: () {
               Navigator.pop(context);
               _viewMyBookings();
             },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFFF6B8B),
-            ),
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF6B8B)),
             child: const Text('View'),
           ),
         ],
@@ -402,10 +397,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
           children: [
             Container(
               padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.amber.withValues(alpha: 0.1),
-                shape: BoxShape.circle,
-              ),
+              decoration: BoxDecoration(color: Colors.amber.withValues(alpha: 0.1), shape: BoxShape.circle),
               child: const Icon(Icons.star, color: Colors.amber),
             ),
             const SizedBox(width: 12),
@@ -414,18 +406,13 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
         ),
         content: Text(message.notification?.body ?? 'Your VIP request has been approved'),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
           ElevatedButton(
             onPressed: () {
               Navigator.pop(context);
               _viewVipBookings();
             },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFFF6B8B),
-            ),
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF6B8B)),
             child: const Text('View'),
           ),
         ],
@@ -447,11 +434,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
         ),
         backgroundColor: Colors.amber.shade700,
         duration: const Duration(seconds: 4),
-        action: SnackBarAction(
-          label: 'View',
-          textColor: Colors.white,
-          onPressed: _viewVipBookings,
-        ),
+        action: SnackBarAction(label: 'View', textColor: Colors.white, onPressed: _viewVipBookings),
       ),
     );
   }
@@ -470,11 +453,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
         ),
         backgroundColor: Colors.blue,
         duration: const Duration(seconds: 5),
-        action: SnackBarAction(
-          label: 'View',
-          textColor: Colors.white,
-          onPressed: _viewMyBookings,
-        ),
+        action: SnackBarAction(label: 'View', textColor: Colors.white, onPressed: _viewMyBookings),
       ),
     );
   }
@@ -490,10 +469,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
           children: [
             Container(
               padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.amber.withValues(alpha: 0.1),
-                shape: BoxShape.circle,
-              ),
+              decoration: BoxDecoration(color: Colors.amber.withValues(alpha: 0.1), shape: BoxShape.circle),
               child: const Icon(Icons.local_offer, color: Colors.amber),
             ),
             const SizedBox(width: 12),
@@ -502,18 +478,13 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
         ),
         content: Text(message.notification?.body ?? 'New offer available'),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Later'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Later')),
           ElevatedButton(
             onPressed: () {
               Navigator.pop(context);
               _viewOffers();
             },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFFF6B8B),
-            ),
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF6B8B)),
             child: const Text('View Offer'),
           ),
         ],
@@ -523,7 +494,6 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
 
   void _handleNotificationNavigation(Map<String, dynamic> data) {
     final type = data['type'];
-
     if (type == 'booking_confirmed' || type == 'booking_reminder') {
       _viewMyBookings();
     } else if (type == 'vip_approved' || type == 'vip_request_update') {
@@ -550,8 +520,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
         context: context,
         action: 'customer_dashboard',
         customTitle: '🔔 Get Booking Updates',
-        customMessage:
-            'Get instant notifications for booking confirmations, VIP approvals, and special offers',
+        customMessage: 'Get instant notifications for booking confirmations, VIP approvals, and special offers',
         onGranted: () async {
           await _permissionManager.markPermissionGranted();
           setState(() {
@@ -560,10 +529,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
           });
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('✅ Notifications enabled!'),
-                backgroundColor: Colors.green,
-              ),
+              const SnackBar(content: Text('✅ Notifications enabled!'), backgroundColor: Colors.green),
             );
           }
         },
@@ -571,10 +537,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
           await _permissionManager.markPermissionDenied(permanent: false);
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('You can enable later from settings'),
-                backgroundColor: Colors.orange,
-              ),
+              const SnackBar(content: Text('You can enable later from settings'), backgroundColor: Colors.orange),
             );
           }
         },
@@ -589,22 +552,15 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('🔔 Notifications Disabled'),
-        content: const Text(
-          'To enable notifications, please go to your device settings.',
-        ),
+        content: const Text('To enable notifications, please go to your device settings.'),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
           ElevatedButton(
             onPressed: () {
               Navigator.pop(context);
               _permissionService.openAppSettings();
             },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFFF6B8B),
-            ),
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF6B8B)),
             child: const Text('Open Settings'),
           ),
         ],
@@ -652,11 +608,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
 
   void _applyOffer(String code) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('✅ Offer code "$code" applied!'),
-        backgroundColor: Colors.green,
-        duration: const Duration(seconds: 2),
-      ),
+      SnackBar(content: Text('✅ Offer code "$code" applied!'), backgroundColor: Colors.green, duration: const Duration(seconds: 2)),
     );
   }
 
@@ -684,85 +636,20 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
           child: ListView(
             shrinkWrap: true,
             children: [
-              ListTile(
-                leading: const Icon(Icons.dashboard, color: Colors.blue),
-                title: const Text('Dashboard'),
-                onTap: () => Navigator.pop(context),
-              ),
-              ListTile(
-                leading: const Icon(Icons.calendar_today, color: Colors.green),
-                title: const Text('My Bookings'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _viewMyBookings();
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.star, color: Colors.amber),
-                title: const Text('VIP Bookings'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _viewVipBookings();
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.book_online, color: Colors.purple),
-                title: const Text('Book Appointment'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _bookAppointment();
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.favorite, color: Colors.red),
-                title: const Text('Favorites'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _viewFavoriteBarbers();
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.local_offer, color: Colors.amber),
-                title: const Text('Offers'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _viewOffers();
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.card_giftcard, color: Colors.green),
-                title: const Text('Loyalty Program'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _viewLoyaltyProgram();
-                },
-              ),
+              ListTile(leading: const Icon(Icons.dashboard, color: Colors.blue), title: const Text('Dashboard'), onTap: () => Navigator.pop(context)),
+              ListTile(leading: const Icon(Icons.calendar_today, color: Colors.green), title: const Text('My Bookings'), onTap: () { Navigator.pop(context); _viewMyBookings(); }),
+              ListTile(leading: const Icon(Icons.star, color: Colors.amber), title: const Text('VIP Bookings'), onTap: () { Navigator.pop(context); _viewVipBookings(); }),
+              ListTile(leading: const Icon(Icons.book_online, color: Colors.purple), title: const Text('Book Appointment'), onTap: () { Navigator.pop(context); _bookAppointment(); }),
+              ListTile(leading: const Icon(Icons.favorite, color: Colors.red), title: const Text('Favorites'), onTap: () { Navigator.pop(context); _viewFavoriteBarbers(); }),
+              ListTile(leading: const Icon(Icons.local_offer, color: Colors.amber), title: const Text('Offers'), onTap: () { Navigator.pop(context); _viewOffers(); }),
+              ListTile(leading: const Icon(Icons.card_giftcard, color: Colors.green), title: const Text('Loyalty Program'), onTap: () { Navigator.pop(context); _viewLoyaltyProgram(); }),
               const Divider(),
-              ListTile(
-                leading: const Icon(Icons.settings, color: Colors.grey),
-                title: const Text('Settings'),
-                onTap: () {
-                  Navigator.pop(context);
-                  context.push('/customer/settings');
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.logout, color: Colors.red),
-                title: const Text('Logout'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _logout(context);
-                },
-              ),
+              ListTile(leading: const Icon(Icons.settings, color: Colors.grey), title: const Text('Settings'), onTap: () { Navigator.pop(context); context.push('/customer/settings'); }),
+              ListTile(leading: const Icon(Icons.logout, color: Colors.red), title: const Text('Logout'), onTap: () { Navigator.pop(context); _logout(context); }),
             ],
           ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
-          ),
-        ],
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
       ),
     );
   }
@@ -777,9 +664,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
         showDialog(
           context: context,
           barrierDismissible: false,
-          builder: (context) => const Center(
-            child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
-          ),
+          builder: (context) => const Center(child: CircularProgressIndicator(color: Color(0xFFFF6B8B))),
         );
 
         try {
@@ -794,10 +679,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
           if (context.mounted) {
             Navigator.pop(context);
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Logout failed: $e'),
-                backgroundColor: Colors.red,
-              ),
+              SnackBar(content: Text('Logout failed: $e'), backgroundColor: Colors.red),
             );
           }
         }
@@ -813,91 +695,45 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
 
     return Scaffold(
       key: _scaffoldKey,
-
       appBar: AppBar(
         title: const Text('My Dashboard'),
         backgroundColor: const Color(0xFFFF6B8B),
         foregroundColor: Colors.white,
         elevation: 0,
         centerTitle: isWeb,
-
-        leading: IconButton(
-          icon: const Icon(Icons.menu),
-          onPressed: _openDrawer,
-          tooltip: 'Menu',
-          iconSize: 28,
-        ),
-
+        leading: IconButton(icon: const Icon(Icons.menu), onPressed: _openDrawer, tooltip: 'Menu', iconSize: 28),
         actions: [
-          // VIP Booking Button
-          IconButton(
-            icon: const Icon(Icons.star, color: Colors.white),
-            onPressed: _createVipBooking,
-            tooltip: 'VIP Booking',
-          ),
-
-          // Book Appointment button
-          IconButton(
-            icon: const Icon(Icons.add_circle_outline),
-            onPressed: _bookAppointment,
-            tooltip: 'Book Appointment',
-          ),
-
-          // Notification bell with badge
+          IconButton(icon: const Icon(Icons.star, color: Colors.white), onPressed: _createVipBooking, tooltip: 'VIP Booking'),
+          IconButton(icon: const Icon(Icons.add_circle_outline), onPressed: _bookAppointment, tooltip: 'Book Appointment'),
           Stack(
             clipBehavior: Clip.none,
             children: [
-              IconButton(
-                icon: const Icon(Icons.notifications_outlined),
-                onPressed: _viewMyBookings,
-              ),
+              IconButton(icon: const Icon(Icons.notifications_outlined), onPressed: _viewMyBookings),
               if (_pendingBookings + _pendingVipBookings > 0)
                 Positioned(
                   right: 8,
                   top: 8,
                   child: Container(
                     padding: const EdgeInsets.all(2),
-                    decoration: const BoxDecoration(
-                      color: Colors.red,
-                      shape: BoxShape.circle,
-                    ),
-                    constraints: const BoxConstraints(
-                      minWidth: 18,
-                      minHeight: 18,
-                    ),
-                    child: Text(
-                      '${_pendingBookings + _pendingVipBookings}',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
+                    decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
+                    constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+                    child: Text('${_pendingBookings + _pendingVipBookings}', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
                   ),
                 ),
             ],
           ),
-
-          // Refresh button
           IconButton(icon: const Icon(Icons.refresh), onPressed: _loadDashboardData),
         ],
       ),
-
       drawer: SideMenu(
         userRole: 'customer',
         userName: _customerName,
         userEmail: _customerEmail,
         profileImageUrl: _customerImage,
-        onMenuItemSelected: () {
-          _loadDashboardData();
-        },
+        onMenuItemSelected: () => _loadDashboardData(),
       ),
-
       body: _isLoading
-          ? const Center(
-              child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
-            )
+          ? const Center(child: CircularProgressIndicator(color: Color(0xFFFF6B8B)))
           : RefreshIndicator(
               onRefresh: _loadDashboardData,
               color: const Color(0xFFFF6B8B),
@@ -905,18 +741,14 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                 physics: const AlwaysScrollableScrollPhysics(),
                 child: Column(
                   children: [
-                    // Permission Card
                     if (_showPermissionCard && !_hasPermission)
                       PermissionCard(
                         onEnable: _enableNotifications,
                         onNotNow: _handleNotNow,
                         title: '🔔 Get Booking Updates',
-                        message:
-                            'Get instant notifications for booking confirmations, VIP approvals, and special offers',
+                        message: 'Get instant notifications for booking confirmations, VIP approvals, and special offers',
                         compact: false,
                       ),
-
-                    // Welcome Header with Profile
                     Padding(
                       padding: const EdgeInsets.all(16),
                       child: Row(
@@ -924,20 +756,9 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                           CircleAvatar(
                             radius: 35,
                             backgroundColor: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
-                            backgroundImage: _customerImage != null
-                                ? NetworkImage(_customerImage!)
-                                : null,
+                            backgroundImage: _customerImage != null ? NetworkImage(_customerImage!) : null,
                             child: _customerImage == null
-                                ? Text(
-                                    _customerName.isNotEmpty
-                                        ? _customerName[0].toUpperCase()
-                                        : '?',
-                                    style: const TextStyle(
-                                      fontSize: 28,
-                                      fontWeight: FontWeight.bold,
-                                      color: Color(0xFFFF6B8B),
-                                    ),
-                                  )
+                                ? Text(_customerName.isNotEmpty ? _customerName[0].toUpperCase() : '?', style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Color(0xFFFF6B8B)))
                                 : null,
                           ),
                           const SizedBox(width: 16),
@@ -945,49 +766,20 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(
-                                  'Welcome back,',
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    color: Colors.grey[600],
-                                  ),
-                                ),
-                                Text(
-                                  _customerName,
-                                  style: const TextStyle(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                Text(
-                                  _customerEmail,
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.grey[500],
-                                  ),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
+                                Text('Welcome back,', style: TextStyle(fontSize: 14, color: Colors.grey[600])),
+                                Text(_customerName, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
+                                Text(_customerEmail, style: TextStyle(fontSize: 12, color: Colors.grey[500]), overflow: TextOverflow.ellipsis),
                               ],
                             ),
                           ),
                         ],
                       ),
                     ),
-
-                    // Quick Action Buttons Row
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
                       child: Row(
                         children: [
-                          Expanded(
-                            child: _buildQuickActionButton(
-                              icon: Icons.book_online,
-                              label: 'Book Now',
-                              color: Colors.blue,
-                              onTap: _bookAppointment,
-                            ),
-                          ),
+                          Expanded(child: _buildQuickActionButton(icon: Icons.book_online, label: 'Book Now', color: Colors.blue, onTap: _bookAppointment)),
                           const SizedBox(width: 12),
                           Expanded(
                             child: _buildQuickActionButton(
@@ -999,132 +791,48 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                             ),
                           ),
                           const SizedBox(width: 12),
-                          Expanded(
-                            child: _buildQuickActionButton(
-                              icon: Icons.history,
-                              label: 'History',
-                              color: Colors.purple,
-                              onTap: _viewMyBookings,
-                            ),
-                          ),
+                          Expanded(child: _buildQuickActionButton(icon: Icons.history, label: 'History', color: Colors.purple, onTap: _viewMyBookings)),
                         ],
                       ),
                     ),
-
                     const SizedBox(height: 16),
-
-                    // Stats Cards
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
                       child: Row(
                         children: [
-                          Expanded(
-                            child: DashboardStatCard(
-                              title: 'Upcoming',
-                              value: '$_upcomingBookings',
-                              icon: Icons.calendar_today,
-                              color: Colors.blue,
-                              subtitle: 'Appointments',
-                              onTap: _viewMyBookings,
-                            ),
-                          ),
+                          Expanded(child: DashboardStatCard(title: 'Upcoming', value: '$_upcomingBookings', icon: Icons.calendar_today, color: Colors.blue, subtitle: 'Appointments', onTap: _viewMyBookings)),
                           const SizedBox(width: 12),
-                          Expanded(
-                            child: DashboardStatCard(
-                              title: 'VIP Bookings',
-                              value: '$_vipBookings',
-                              icon: Icons.star,
-                              color: Colors.amber,
-                              subtitle: 'Total',
-                              onTap: _viewVipBookings,
-                            ),
-                          ),
+                          Expanded(child: DashboardStatCard(title: 'VIP Bookings', value: '$_vipBookings', icon: Icons.star, color: Colors.amber, subtitle: 'Total', onTap: _viewVipBookings)),
                           const SizedBox(width: 12),
-                          Expanded(
-                            child: DashboardStatCard(
-                              title: 'Loyalty',
-                              value: '$_loyaltyPoints',
-                              icon: Icons.card_giftcard,
-                              color: Colors.green,
-                              subtitle: 'Points',
-                              onTap: _viewLoyaltyProgram,
-                            ),
-                          ),
+                          Expanded(child: DashboardStatCard(title: 'Loyalty', value: '$_loyaltyPoints', icon: Icons.card_giftcard, color: Colors.green, subtitle: 'Points', onTap: _viewLoyaltyProgram)),
                         ],
                       ),
                     ),
-
                     const SizedBox(height: 16),
-
-                    // VIP Section (if has pending VIP)
                     if (_pendingVipBookings > 0)
                       Container(
                         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                         padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [Colors.amber.shade300, Colors.amber.shade600],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          ),
-                          borderRadius: BorderRadius.circular(16),
-                        ),
+                        decoration: BoxDecoration(gradient: LinearGradient(colors: [Colors.amber.shade300, Colors.amber.shade600], begin: Alignment.topLeft, end: Alignment.bottomRight), borderRadius: BorderRadius.circular(16)),
                         child: Row(
                           children: [
-                            Container(
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.2),
-                                shape: BoxShape.circle,
-                              ),
-                              child: const Icon(
-                                Icons.star,
-                                color: Colors.white,
-                                size: 28,
-                              ),
-                            ),
+                            Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), shape: BoxShape.circle), child: const Icon(Icons.star, color: Colors.white, size: 28)),
                             const SizedBox(width: 16),
                             Expanded(
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const Text(
-                                    'VIP Request Pending',
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                  Text(
-                                    '$_pendingVipBookings VIP booking$_pendingVipBookings != 1 ? "s" : "" waiting for approval',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      color: Colors.white.withValues(alpha: 0.9),
-                                    ),
-                                  ),
+                                  const Text('VIP Request Pending', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                                  Text('$_pendingVipBookings VIP booking${_pendingVipBookings != 1 ? 's' : ''} waiting for approval', style: TextStyle(fontSize: 14, color: Colors.white.withValues(alpha: 0.9))),
                                 ],
                               ),
                             ),
-                            ElevatedButton(
-                              onPressed: _viewVipBookings,
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.white,
-                                foregroundColor: Colors.amber.shade700,
-                              ),
-                              child: const Text('View'),
-                            ),
+                            ElevatedButton(onPressed: _viewVipBookings, style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.amber.shade700), child: const Text('View')),
                           ],
                         ),
                       ),
-
                     const SizedBox(height: 16),
-
-                    // Upcoming Bookings Section
-                    SectionHeader(
-                      title: 'Upcoming Bookings',
-                      actionText: _upcomingBookings > 3 ? 'View All' : '',
-                    ),
+                    SectionHeader(title: 'Upcoming Bookings', actionText: _upcomingBookings > 3 ? 'View All' : ''),
                     const SizedBox(height: 8),
                     _upcomingAppointments.isNotEmpty
                         ? ListView.builder(
@@ -1135,14 +843,13 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                             itemBuilder: (context, index) {
                               final apt = _upcomingAppointments[index];
                               final isVip = apt['is_vip'] == true;
-                              final barber = apt['barbers'] as Map<String, dynamic>?;
                               final service = apt['services'] as Map<String, dynamic>?;
                               final variant = apt['service_variants'] as Map<String, dynamic>?;
                               
                               String serviceName = service?['name'] ?? 'Service';
                               if (variant != null) {
-                                final gender = variant['genders'] as Map<String, dynamic>?;
-                                final age = variant['age_categories'] as Map<String, dynamic>?;
+                                final gender = variant['salon_genders'] as Map<String, dynamic>?;
+                                final age = variant['salon_age_categories'] as Map<String, dynamic>?;
                                 if (gender != null && age != null) {
                                   serviceName += ' • ${gender['display_name']} ${age['display_name']}';
                                 }
@@ -1150,71 +857,47 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
 
                               final date = DateTime.parse(apt['appointment_date']);
                               final dateStr = DateFormat('MMM dd, yyyy').format(date);
-                              final timeStr = apt['start_time'].substring(0, 5);
+                              final timeStr = apt['start_time'].toString().substring(0, 5);
 
-                              // return BookingTile(
-                              //   customerName: 'You',
-                              //   serviceName: serviceName,
-                              //   time: '$dateStr at $timeStr',
-                              //   status: apt['status'] == 'confirmed' ? 'Confirmed' : 'Pending',
-                              //   statusColor: apt['status'] == 'confirmed' ? Colors.green : Colors.orange,
-                              //   barberName: barber?['full_name'] ?? 'Barber',
-                              //   price: apt['price'] ?? 0,
-                              //   isVip: isVip,
-                              //   queueNumber: apt['queue_number'],
-                              //   onTap: () => _viewBookingDetails(apt['id'].toString()),
-                              // );
+                              return BookingTile(
+                                customerName: 'You',
+                                serviceName: serviceName,
+                                time: '$dateStr at $timeStr',
+                                status: apt['status'] == 'confirmed' ? 'Confirmed' : 'Pending',
+                                statusColor: apt['status'] == 'confirmed' ? Colors.green : Colors.orange,
+                                barberName: 'Barber',
+                                price: (apt['price'] as num?)?.toDouble() ?? 
+                                       (apt['service_variants']?['price'] as num?)?.toDouble() ?? 
+                                       0.0,
+                                isVip: isVip,
+                                queueNumber: apt['queue_number'],
+                                queueToken: apt['queue_token'],
+                                onTap: () => _viewBookingDetails(apt['id'].toString()),
+                              );
                             },
                           )
                         : Container(
                             margin: const EdgeInsets.symmetric(horizontal: 16),
                             padding: const EdgeInsets.all(24),
-                            decoration: BoxDecoration(
-                              color: Colors.grey[50],
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: Colors.grey[200]!),
-                            ),
+                            decoration: BoxDecoration(color: Colors.grey[50], borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey[200]!)),
                             child: Column(
                               children: [
                                 Icon(Icons.calendar_today, size: 48, color: Colors.grey[400]),
                                 const SizedBox(height: 12),
-                                Text(
-                                  'No upcoming bookings',
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    color: Colors.grey[600],
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
+                                Text('No upcoming bookings', style: TextStyle(fontSize: 16, color: Colors.grey[600], fontWeight: FontWeight.w500)),
                                 const SizedBox(height: 8),
                                 Row(
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
-                                    ElevatedButton(
-                                      onPressed: _bookAppointment,
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: const Color(0xFFFF6B8B),
-                                      ),
-                                      child: const Text('Book Now'),
-                                    ),
+                                    ElevatedButton(onPressed: _bookAppointment, style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF6B8B)), child: const Text('Book Now')),
                                     const SizedBox(width: 12),
-                                    OutlinedButton(
-                                      onPressed: _createVipBooking,
-                                      style: OutlinedButton.styleFrom(
-                                        foregroundColor: Colors.amber,
-                                        side: const BorderSide(color: Colors.amber),
-                                      ),
-                                      child: const Text('VIP Booking'),
-                                    ),
+                                    OutlinedButton(onPressed: _createVipBooking, style: OutlinedButton.styleFrom(foregroundColor: Colors.amber, side: const BorderSide(color: Colors.amber)), child: const Text('VIP Booking')),
                                   ],
                                 ),
                               ],
                             ),
                           ),
-
                     const SizedBox(height: 16),
-
-                    // Special Offers Section
                     SectionHeader(title: 'Special Offers', actionText: 'View All'),
                     const SizedBox(height: 8),
                     SizedBox(
@@ -1223,15 +906,10 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                         scrollDirection: Axis.horizontal,
                         padding: const EdgeInsets.symmetric(horizontal: 16),
                         itemCount: _offers.length,
-                        itemBuilder: (context, index) {
-                          return _buildOfferCard(_offers[index]);
-                        },
+                        itemBuilder: (context, index) => _buildOfferCard(_offers[index]),
                       ),
                     ),
-
                     const SizedBox(height: 16),
-
-                    // Favorite Barbers Section
                     if (_favoriteBarbers.isNotEmpty) ...[
                       SectionHeader(title: 'Favorite Barbers', actionText: 'View All'),
                       const SizedBox(height: 8),
@@ -1241,117 +919,49 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                           scrollDirection: Axis.horizontal,
                           padding: const EdgeInsets.symmetric(horizontal: 16),
                           itemCount: _favoriteBarbers.length,
-                          itemBuilder: (context, index) {
-                            return _buildFavoriteBarberCard(_favoriteBarbers[index]);
-                          },
+                          itemBuilder: (context, index) => _buildFavoriteBarberCard(_favoriteBarbers[index]),
                         ),
                       ),
                       const SizedBox(height: 16),
                     ],
-
-                    // Activity Summary
                     Container(
                       margin: const EdgeInsets.all(16),
                       padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.grey[50],
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: Colors.grey[200]!),
-                      ),
+                      decoration: BoxDecoration(color: Colors.grey[50], borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.grey[200]!)),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
-                            'Activity Summary',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
+                          const Text('Activity Summary', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                           const SizedBox(height: 16),
                           Row(
                             children: [
-                              Expanded(
-                                child: _buildActivityItem(
-                                  icon: Icons.check_circle,
-                                  label: 'Completed',
-                                  value: '$_completedBookings',
-                                  color: Colors.green,
-                                ),
-                              ),
-                              Expanded(
-                                child: _buildActivityItem(
-                                  icon: Icons.cancel,
-                                  label: 'Cancelled',
-                                  value: '$_cancelledBookings',
-                                  color: Colors.red,
-                                ),
-                              ),
-                              Expanded(
-                                child: _buildActivityItem(
-                                  icon: Icons.star,
-                                  label: 'VIP',
-                                  value: '$_vipBookings',
-                                  color: Colors.amber,
-                                ),
-                              ),
+                              Expanded(child: _buildActivityItem(icon: Icons.check_circle, label: 'Completed', value: '$_completedBookings', color: Colors.green)),
+                              Expanded(child: _buildActivityItem(icon: Icons.cancel, label: 'Cancelled', value: '$_cancelledBookings', color: Colors.red)),
+                              Expanded(child: _buildActivityItem(icon: Icons.star, label: 'VIP', value: '$_vipBookings', color: Colors.amber)),
                             ],
                           ),
                           const SizedBox(height: 12),
                           Row(
                             children: [
-                              Expanded(
-                                child: _buildActivityItem(
-                                  icon: Icons.currency_rupee,
-                                  label: 'Total Spent',
-                                  value: 'Rs. $_totalSpent',
-                                  color: Colors.purple,
-                                ),
-                              ),
-                              Expanded(
-                                child: _buildActivityItem(
-                                  icon: Icons.card_giftcard,
-                                  label: 'Points',
-                                  value: '$_loyaltyPoints',
-                                  color: Colors.blue,
-                                ),
-                              ),
+                              Expanded(child: _buildActivityItem(icon: Icons.currency_rupee, label: 'Total Spent', value: 'Rs. $_totalSpent', color: Colors.purple)),
+                              Expanded(child: _buildActivityItem(icon: Icons.card_giftcard, label: 'Points', value: '$_loyaltyPoints', color: Colors.blue)),
                             ],
                           ),
                         ],
                       ),
                     ),
-
-                    // Notification Status
                     if (_hasPermission)
                       Container(
                         margin: const EdgeInsets.only(bottom: 16),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 8,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.green.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(color: Colors.green.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(20)),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Icon(
-                              Icons.notifications_active,
-                              size: 16,
-                              color: Colors.green[700],
-                            ),
+                            Icon(Icons.notifications_active, size: 16, color: Colors.green[700]),
                             const SizedBox(width: 4),
-                            Text(
-                              'Notifications active',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.green[700],
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
+                            Text('Notifications active', style: TextStyle(fontSize: 12, color: Colors.green[700], fontWeight: FontWeight.w500)),
                           ],
                         ),
                       ),
@@ -1377,23 +987,12 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
           onTap: onTap,
           child: Container(
             padding: const EdgeInsets.symmetric(vertical: 12),
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: color.withValues(alpha: 0.3)),
-            ),
+            decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12), border: Border.all(color: color.withValues(alpha: 0.3))),
             child: Column(
               children: [
                 Icon(icon, color: color, size: 24),
                 const SizedBox(height: 4),
-                Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: color,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
+                Text(label, style: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.w500)),
               ],
             ),
           ),
@@ -1404,23 +1003,9 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
             right: -5,
             child: Container(
               padding: const EdgeInsets.all(4),
-              decoration: const BoxDecoration(
-                color: Colors.red,
-                shape: BoxShape.circle,
-              ),
-              constraints: const BoxConstraints(
-                minWidth: 20,
-                minHeight: 20,
-              ),
-              child: Text(
-                badge,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
-                ),
-                textAlign: TextAlign.center,
-              ),
+              decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
+              constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
+              child: Text(badge, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
             ),
           ),
       ],
@@ -1433,64 +1018,24 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
       margin: const EdgeInsets.only(right: 12),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [Colors.amber.shade300, Colors.orange.shade400],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
+        gradient: LinearGradient(colors: [Colors.amber.shade300, Colors.orange.shade400], begin: Alignment.topLeft, end: Alignment.bottomRight),
         borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.orange.withValues(alpha: 0.3),
-            blurRadius: 8,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        boxShadow: [BoxShadow(color: Colors.orange.withValues(alpha: 0.3), blurRadius: 8, offset: const Offset(0, 4))],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            offer['image'] ?? '🎯',
-            style: const TextStyle(fontSize: 32),
-          ),
+          Text(offer['image'] ?? '🎯', style: const TextStyle(fontSize: 32)),
           const Spacer(),
-          Text(
-            offer['title'],
-            style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-            ),
-          ),
+          Text(offer['title'], style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
           const SizedBox(height: 4),
-          Text(
-            offer['description'],
-            style: const TextStyle(fontSize: 12, color: Colors.white70),
-          ),
+          Text(offer['description'], style: const TextStyle(fontSize: 12, color: Colors.white70)),
           const SizedBox(height: 8),
           Row(
             children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  offer['code'],
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 12,
-                  ),
-                ),
-              ),
+              Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(8)), child: Text(offer['code'], style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
               const Spacer(),
-              Text(
-                'Exp: ${offer['expiry']}',
-                style: const TextStyle(fontSize: 9, color: Colors.white70),
-              ),
+              Text('Exp: ${offer['expiry']}', style: const TextStyle(fontSize: 9, color: Colors.white70)),
             ],
           ),
           const SizedBox(height: 4),
@@ -1498,14 +1043,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
             width: double.infinity,
             child: ElevatedButton(
               onPressed: () => _applyOffer(offer['code']),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.white,
-                foregroundColor: Colors.orange.shade700,
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(20),
-                ),
-              ),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.orange.shade700, padding: const EdgeInsets.symmetric(vertical: 4), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20))),
               child: const Text('Apply', style: TextStyle(fontSize: 11)),
             ),
           ),
@@ -1519,62 +1057,26 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
       width: 160,
       margin: const EdgeInsets.only(right: 12),
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.shade200),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withValues(alpha: 0.1),
-            blurRadius: 4,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey.shade200), boxShadow: [BoxShadow(color: Colors.grey.withValues(alpha: 0.1), blurRadius: 4, offset: const Offset(0, 2))]),
       child: Column(
         children: [
           CircleAvatar(
             radius: 35,
             backgroundColor: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
-            backgroundImage: barber['avatar'] != null
-                ? NetworkImage(barber['avatar'])
-                : null,
-            child: barber['avatar'] == null
-                ? Text(
-                    barber['name'][0].toUpperCase(),
-                    style: const TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFFFF6B8B),
-                    ),
-                  )
-                : null,
+            backgroundImage: barber['avatar'] != null ? NetworkImage(barber['avatar']) : null,
+            child: barber['avatar'] == null ? Text(barber['name'][0].toUpperCase(), style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Color(0xFFFF6B8B))) : null,
           ),
           const SizedBox(height: 8),
-          Text(
-            barber['name'],
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
+          Text(barber['name'], style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis),
           const SizedBox(height: 4),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               const Icon(Icons.star, color: Colors.amber, size: 14),
               const SizedBox(width: 2),
-              Text(
-                barber['rating'].toStringAsFixed(1),
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
+              Text(barber['rating'].toStringAsFixed(1), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
               const SizedBox(width: 4),
-              Text(
-                '(${barber['count']} cuts)',
-                style: TextStyle(fontSize: 10, color: Colors.grey[500]),
-              ),
+              Text('(${barber['count']} cuts)', style: TextStyle(fontSize: 10, color: Colors.grey[500])),
             ],
           ),
           const SizedBox(height: 8),
@@ -1582,14 +1084,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
             width: double.infinity,
             child: OutlinedButton(
               onPressed: _bookAppointment,
-              style: OutlinedButton.styleFrom(
-                foregroundColor: const Color(0xFFFF6B8B),
-                side: const BorderSide(color: Color(0xFFFF6B8B)),
-                padding: const EdgeInsets.symmetric(vertical: 6),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
+              style: OutlinedButton.styleFrom(foregroundColor: const Color(0xFFFF6B8B), side: const BorderSide(color: Color(0xFFFF6B8B)), padding: const EdgeInsets.symmetric(vertical: 6), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
               child: const Text('Book', style: TextStyle(fontSize: 12)),
             ),
           ),
@@ -1598,24 +1093,12 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
     );
   }
 
-  Widget _buildActivityItem({
-    required IconData icon,
-    required String label,
-    required String value,
-    required Color color,
-  }) {
+  Widget _buildActivityItem({required IconData icon, required String label, required String value, required Color color}) {
     return Column(
       children: [
         Icon(icon, color: color, size: 20),
         const SizedBox(height: 4),
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.bold,
-            color: color,
-          ),
-        ),
+        Text(value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: color)),
         Text(label, style: TextStyle(fontSize: 11, color: Colors.grey[600])),
       ],
     );
