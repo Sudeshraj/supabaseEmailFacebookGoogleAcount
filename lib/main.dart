@@ -13,7 +13,9 @@ import 'package:flutter_application_1/screens/authantication/command/reset_passw
 import 'package:flutter_application_1/screens/authantication/command/reset_password_form.dart';
 import 'package:flutter_application_1/screens/authantication/command/reset_password_request.dart';
 import 'package:flutter_application_1/screens/authantication/command/role_selector_screen.dart';
+import 'package:flutter_application_1/screens/customer/booking_flow_screen.dart';
 import 'package:flutter_application_1/screens/customer/booking_screen.dart';
+import 'package:flutter_application_1/screens/customer/salon_profile_screen.dart';
 import 'package:flutter_application_1/screens/customer/vip_booking_request_screen.dart';
 import 'package:flutter_application_1/screens/owner/add_age_categories.dart';
 import 'package:flutter_application_1/screens/owner/add_barber_screen.dart';
@@ -875,12 +877,28 @@ GoRouter _createRouter() {
         },
       ),
       GoRoute(
+        path: '/customer/booking-flow',
+        name: 'booking-flow',
+        builder: (context, state) {
+          final salon = state.extra as Map<String, dynamic>?;
+          return BookingFlowScreen(initialSalon: salon);
+        },
+      ),
+      GoRoute(
         path: '/customer/book',
         builder: (context, state) => const BookingScreen(),
       ),
       GoRoute(
         path: '/customer/vip-booking',
         builder: (context, state) => const VIPBookingRequestScreen(),
+      ),
+      GoRoute(
+        path: '/customer/salon-profile',
+        name: 'salon-profile',
+        builder: (context, state) {
+          final salon = state.extra as Map<String, dynamic>;
+          return SalonProfileScreen(salon: salon);
+        },
       ),
     ],
   );

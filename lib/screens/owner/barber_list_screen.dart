@@ -476,7 +476,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
               icon: const Icon(Icons.person_add),
               label: const Text('Add Barber'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFFF6B8B),
+                backgroundColor: const Color.fromARGB(255, 237, 231, 233),
               ),
             ),
           ],

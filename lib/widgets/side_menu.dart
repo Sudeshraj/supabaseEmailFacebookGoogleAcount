@@ -285,22 +285,24 @@ class _SideMenuState extends State<SideMenu> {
       builder: (context) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Create New Profile'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('What type of profile would you like to create?'),
-            const SizedBox(height: 20),
-            ...availableRoles.map((role) => Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: _buildProfileTypeOption(
-                icon: _getRoleIcon(role),
-                color: _getRoleColor(role),
-                title: _getRoleDisplayName(role),
-                description: _getRoleDescription(role),
-                role: role,
-              ),
-            )),
-          ],
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('What type of profile would you like to create?'),
+              const SizedBox(height: 20),
+              ...availableRoles.map((role) => Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: _buildProfileTypeOption(
+                  icon: _getRoleIcon(role),
+                  color: _getRoleColor(role),
+                  title: _getRoleDisplayName(role),
+                  description: _getRoleDescription(role),
+                  role: role,
+                ),
+              )),
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -443,7 +445,7 @@ class _SideMenuState extends State<SideMenu> {
   }
 
   // ============================================================
-  // 🔥 UPDATED PROFILE HEADER - NO FRAME, CLEAN DESIGN
+  // 🔥 UPDATED PROFILE HEADER - FIXED OVERFLOW
   // ============================================================
   Widget _buildProfileHeader() {
     final hasMultipleProfiles = _availableProfiles.length > 1;
@@ -467,8 +469,9 @@ class _SideMenuState extends State<SideMenu> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Profile Row - NO FRAME, just clean layout
+              // Profile Row - FIXED OVERFLOW
               Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   // Profile Image / Avatar
                   GestureDetector(
@@ -536,11 +539,12 @@ class _SideMenuState extends State<SideMenu> {
                     ),
                   ),
                   const SizedBox(width: 16),
-                  // Profile Info
+                  // Profile Info - Expanded takes remaining space
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        // Name row with buttons
                         Row(
                           children: [
                             Expanded(
@@ -551,6 +555,7 @@ class _SideMenuState extends State<SideMenu> {
                                   fontWeight: FontWeight.bold,
                                   color: Colors.white,
                                 ),
+                                maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),
@@ -575,7 +580,7 @@ class _SideMenuState extends State<SideMenu> {
                                         ? Icons.keyboard_arrow_up
                                         : Icons.swap_horiz,
                                     color: Colors.white,
-                                    size: 22,
+                                    size: 20,
                                   ),
                                 ),
                               ),
@@ -600,7 +605,7 @@ class _SideMenuState extends State<SideMenu> {
                                         ? Icons.keyboard_arrow_up
                                         : Icons.add,
                                     color: Colors.white,
-                                    size: 22,
+                                    size: 20,
                                   ),
                                 ),
                               ),
@@ -614,6 +619,7 @@ class _SideMenuState extends State<SideMenu> {
                               fontSize: 13,
                               color: Colors.white.withValues(alpha: 0.9),
                             ),
+                            maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
                         ],
@@ -712,14 +718,14 @@ class _SideMenuState extends State<SideMenu> {
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: _getRoleColor(profile['role']).withValues(alpha: 0.1),
-                image: profile['photo'] != null
+                image: profile['photo'] != null && profile['photo'].toString().isNotEmpty
                     ? DecorationImage(
                         image: NetworkImage(profile['photo']),
                         fit: BoxFit.cover,
                       )
                     : null,
               ),
-              child: profile['photo'] == null
+              child: profile['photo'] == null || profile['photo'].toString().isEmpty
                   ? Center(
                       child: Text(
                         profile['name'][0].toUpperCase(),
@@ -733,12 +739,16 @@ class _SideMenuState extends State<SideMenu> {
                   : null,
             ),
             const SizedBox(width: 14),
-            // Profile details
+            // Profile details - Expanded to prevent overflow
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
+                  // Name and badges row - FIXED: Wrap instead of Row
+                  Wrap(
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: 6,
+                    runSpacing: 4,
                     children: [
                       Text(
                         profile['name'],
@@ -748,7 +758,6 @@ class _SideMenuState extends State<SideMenu> {
                           color: Color(0xFF1A1A1A),
                         ),
                       ),
-                      const SizedBox(width: 8),
                       Container(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 8,
@@ -767,8 +776,7 @@ class _SideMenuState extends State<SideMenu> {
                           ),
                         ),
                       ),
-                      if (profile['is_active'] == false) ...[
-                        const SizedBox(width: 6),
+                      if (profile['is_active'] == false)
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
                           decoration: BoxDecoration(
@@ -780,9 +788,7 @@ class _SideMenuState extends State<SideMenu> {
                             style: TextStyle(fontSize: 8, color: Colors.white),
                           ),
                         ),
-                      ],
-                      if (profile['is_blocked'] == true) ...[
-                        const SizedBox(width: 6),
+                      if (profile['is_blocked'] == true)
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
                           decoration: BoxDecoration(
@@ -794,7 +800,6 @@ class _SideMenuState extends State<SideMenu> {
                             style: TextStyle(fontSize: 8, color: Colors.white),
                           ),
                         ),
-                      ],
                     ],
                   ),
                   const SizedBox(height: 4),
@@ -859,12 +864,12 @@ class _SideMenuState extends State<SideMenu> {
               ),
             ),
             const SizedBox(width: 10),
-            Text(
+            const Text(
               'Create New Profile',
               style: TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w500,
-                color: const Color(0xFFFF6B8B),
+                color: Color(0xFFFF6B8B),
               ),
             ),
           ],
