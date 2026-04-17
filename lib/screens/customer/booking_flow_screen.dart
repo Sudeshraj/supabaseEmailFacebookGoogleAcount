@@ -53,6 +53,15 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   // Category tab state
   String? _selectedCategoryTab;
   
+  // Holiday check
+  Set<DateTime> _holidays = {};
+  Map<DateTime, String> _holidayNames = {};
+  bool _isDateUnavailable = false;
+  String? _unavailableReason;
+  
+  // Barber availability status
+  Map<String, Map<String, dynamic>> _barberAvailability = {};
+  
   // Colors
   final Color _primaryColor = const Color(0xFFFF6B8B);
   final Color _secondaryColor = const Color(0xFF4CAF50);
@@ -141,6 +150,10 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                   _availableSlots = [];
                   _selectedCategoryTab = null;
                   _salonServices = [];
+                  _holidays = {};
+                  _holidayNames = {};
+                  _isDateUnavailable = false;
+                  _barberAvailability = {};
                 });
               },
               child: Text(
@@ -229,8 +242,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
 
   // ==================== STEP 1: SALON SEARCH ====================
   Widget _buildSalonSearchStep() {
-    final isWeb = MediaQuery.of(context).size.width > 800;
-    
     return Column(
       children: [
         Container(
@@ -412,10 +423,34 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       _salonServices = [];
       _selectedServices = [];
       _selectedDate = null;
+      _loadHolidays();
     });
   }
 
-  // ==================== STEP 2: DATE SELECTION ====================
+  // ==================== STEP 2: DATE SELECTION WITH HOLIDAY CHECK ====================
+  Future<void> _loadHolidays() async {
+    if (_selectedSalon == null) return;
+    
+    try {
+      final response = await supabase
+          .from('salon_holidays')
+          .select('holiday_date, name')
+          .eq('salon_id', _selectedSalon!['id']);
+      
+      setState(() {
+        _holidays.clear();
+        _holidayNames.clear();
+        for (var holiday in response) {
+          final date = DateTime.parse(holiday['holiday_date']);
+          _holidays.add(date);
+          _holidayNames[date] = holiday['name'];
+        }
+      });
+    } catch (e) {
+      debugPrint('Error loading holidays: $e');
+    }
+  }
+
   Widget _buildDateSelectionStep() {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
@@ -458,26 +493,82 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                       initialDate: today,
                       firstDate: today,
                       lastDate: maxDate,
-                      onDateChanged: (date) {
+                      selectableDayPredicate: (date) {
+                        // Check if date is a holiday
+                        final isHoliday = _holidays.contains(date);
+                        return !isHoliday;
+                      },
+                      onDateChanged: (date) async {
                         setState(() {
                           _selectedDate = date;
+                          _isDateUnavailable = false;
+                          _unavailableReason = null;
                         });
+                        await _checkDateAvailability(date);
                       },
                     ),
                   ),
                 ),
+                // Show holiday information
+                if (_selectedDate != null && _holidays.contains(_selectedDate))
+                  Container(
+                    margin: const EdgeInsets.only(top: 12),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.red.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.red.shade200),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.event_busy, color: Colors.red.shade700),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Holiday: ${_holidayNames[_selectedDate]}',
+                            style: TextStyle(color: Colors.red.shade700, fontWeight: FontWeight.w500),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                if (_isDateUnavailable && !_holidays.contains(_selectedDate)) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.orange.shade200),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.warning_amber, color: Colors.orange.shade700),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _unavailableReason ?? 'No barbers available on this date',
+                            style: TextStyle(color: Colors.orange.shade700),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 16),
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
-                    onPressed: _selectedDate == null
-                        ? null
-                        : () async {
+                    onPressed: (_selectedDate != null && !_isDateUnavailable && !_holidays.contains(_selectedDate)) 
+                        ? () async {
                             setState(() => _currentStep = 2);
                             await _loadSalonServices();
-                          },
+                          } 
+                        : null,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: _selectedDate != null ? _primaryColor : Colors.grey[300],
+                      backgroundColor: (_selectedDate != null && !_isDateUnavailable && !_holidays.contains(_selectedDate)) 
+                          ? _primaryColor 
+                          : Colors.grey[300],
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -485,7 +576,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                     child: Text(
                       _selectedDate == null 
                           ? 'Select Date' 
-                          : 'Continue →',
+                          : (_holidays.contains(_selectedDate) 
+                              ? 'Holiday - Not Available' 
+                              : (_isDateUnavailable ? 'No Barbers Available' : 'Continue →')),
                       style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                     ),
                   ),
@@ -496,6 +589,39 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         ),
       ],
     );
+  }
+
+  Future<void> _checkDateAvailability(DateTime date) async {
+    if (_selectedSalon == null) return;
+    
+    final dateStr = DateFormat('yyyy-MM-dd').format(date);
+    final dayOfWeek = date.weekday;
+    
+    try {
+      // Check if any barber has schedule for this day
+      final schedules = await supabase
+          .from('barber_schedules')
+          .select('barber_id')
+          .eq('salon_id', _selectedSalon!['id'])
+          .eq('day_of_week', dayOfWeek)
+          .eq('is_working', true);
+      
+      if (schedules.isEmpty) {
+        setState(() {
+          _isDateUnavailable = true;
+          _unavailableReason = 'No barbers working on ${DateFormat('EEEE').format(date)}';
+        });
+        return;
+      }
+      
+      setState(() {
+        _isDateUnavailable = false;
+        _unavailableReason = null;
+      });
+      
+    } catch (e) {
+      debugPrint('Error checking date availability: $e');
+    }
   }
 
   // ==================== STEP 3: SERVICE SELECTION ====================
@@ -971,12 +1097,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     });
   }
 
-  void _removeService(Map<String, dynamic> service) {
-    setState(() {
-      _selectedServices.removeWhere((s) => s['id'] == service['id']);
-    });
-  }
-
   int _calculateTotalDuration() {
     return _selectedServices.fold(0, (sum, s) => sum + (s['duration'] as int));
   }
@@ -995,7 +1115,122 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     return Icons.build;
   }
 
-  // ==================== STEP 4: BARBER SELECTION ====================
+  // ==================== STEP 4: BARBER SELECTION WITH LEAVE & SCHEDULE CHECK ====================
+  Future<void> _checkBarberAvailability(String barberId, DateTime date) async {
+    final dateStr = DateFormat('yyyy-MM-dd').format(date);
+    final dayOfWeek = date.weekday;
+    
+    Map<String, dynamic> availability = {
+      'is_available': true,
+      'reason': null,
+      'available_from': null,
+      'available_to': null,
+    };
+    
+    try {
+      // 1. Check barber schedule for this day
+      final schedule = await supabase
+          .from('barber_schedules')
+          .select()
+          .eq('barber_id', barberId)
+          .eq('salon_id', _selectedSalon!['id'])
+          .eq('day_of_week', dayOfWeek)
+          .eq('is_working', true)
+          .maybeSingle();
+      
+      if (schedule == null) {
+        availability['is_available'] = false;
+        availability['reason'] = 'Not working on ${DateFormat('EEEE').format(date)}';
+        _barberAvailability[barberId] = availability;
+        return;
+      }
+      
+      // 2. Check full day leave
+      final fullDayLeave = await supabase
+          .from('barber_leaves')
+          .select()
+          .eq('barber_id', barberId)
+          .eq('leave_date', dateStr)
+          .eq('leave_type', 'full_day')
+          .eq('status', 'approved')
+          .maybeSingle();
+      
+      if (fullDayLeave != null) {
+        availability['is_available'] = false;
+        availability['reason'] = 'On leave (Full Day)';
+        _barberAvailability[barberId] = availability;
+        return;
+      }
+      
+      // 3. Check half day leave
+      final halfDayLeave = await supabase
+          .from('barber_leaves')
+          .select()
+          .eq('barber_id', barberId)
+          .eq('leave_date', dateStr)
+          .eq('leave_type', 'half_day')
+          .eq('status', 'approved')
+          .maybeSingle();
+      
+      if (halfDayLeave != null) {
+        final startTime = halfDayLeave['start_time']?.toString();
+        final endTime = halfDayLeave['end_time']?.toString();
+        
+        if (startTime != null && endTime != null) {
+          availability['is_available'] = false;
+          availability['reason'] = 'Half day leave (${_formatTime(startTime)} - ${_formatTime(endTime)})';
+          availability['available_from'] = endTime;
+          _barberAvailability[barberId] = availability;
+          return;
+        }
+      }
+      
+      // 4. Check emergency leave
+      final emergencyLeave = await supabase
+          .from('barber_leaves')
+          .select()
+          .eq('barber_id', barberId)
+          .eq('leave_date', dateStr)
+          .eq('leave_type', 'emergency')
+          .eq('status', 'approved')
+          .maybeSingle();
+      
+      if (emergencyLeave != null) {
+        availability['is_available'] = false;
+        availability['reason'] = 'Emergency leave';
+        _barberAvailability[barberId] = availability;
+        return;
+      }
+      
+      // 5. Check short leave (lunch break or short breaks)
+      final shortLeave = await supabase
+          .from('barber_lunch_breaks')
+          .select()
+          .eq('barber_id', barberId)
+          .eq('salon_id', _selectedSalon!['id'])
+          .or('break_date.is.null,break_date.eq.$dateStr')
+          .maybeSingle();
+      
+      if (shortLeave != null) {
+        final startTime = shortLeave['start_time'].toString();
+        final endTime = shortLeave['end_time'].toString();
+        availability['is_available'] = false;
+        availability['reason'] = 'Break (${_formatTime(startTime)} - ${_formatTime(endTime)})';
+        availability['available_from'] = endTime;
+        _barberAvailability[barberId] = availability;
+        return;
+      }
+      
+      availability['is_available'] = true;
+      _barberAvailability[barberId] = availability;
+      
+    } catch (e) {
+      debugPrint('Error checking barber availability: $e');
+      availability['is_available'] = true;
+      _barberAvailability[barberId] = availability;
+    }
+  }
+
   Widget _buildBarberSelectionStep() {
     if (!_barbersLoaded && !_isLoadingBarbers && _selectedSalon != null) {
       _barbersLoaded = true;
@@ -1025,6 +1260,26 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
             ],
           ),
         ),
+        if (_selectedDate != null)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            color: Colors.white,
+            child: Row(
+              children: [
+                Icon(Icons.calendar_today, size: 16, color: _secondaryColor),
+                const SizedBox(width: 8),
+                Text(
+                  DateFormat('EEEE, MMM dd, yyyy').format(_selectedDate!),
+                  style: const TextStyle(fontWeight: FontWeight.w500),
+                ),
+                const Spacer(),
+                TextButton(
+                  onPressed: () => setState(() => _currentStep = 1),
+                  child: Text('Change', style: TextStyle(color: _primaryColor)),
+                ),
+              ],
+            ),
+          ),
         Expanded(
           child: _isLoadingBarbers
               ? const Center(child: CircularProgressIndicator())
@@ -1086,60 +1341,180 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
 
   Widget _buildBarberCard(Map<String, dynamic> barber) {
     final isSelected = _selectedBarber?['id'] == barber['id'];
+    final availability = _barberAvailability[barber['id']];
+    final isAvailable = availability?['is_available'] ?? true;
+    final unavailableReason = availability?['reason'];
+    final availableFrom = availability?['available_from'];
     
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: isSelected ? _primaryColor : Colors.transparent, width: 2),
-      ),
-      child: InkWell(
-        onTap: () => setState(() => _selectedBarber = barber),
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Row(
-            children: [
-              CircleAvatar(
-                radius: 28,
-                backgroundColor: _primaryColor.withValues(alpha: 0.1),
-                backgroundImage: barber['avatar_url'] != null ? NetworkImage(barber['avatar_url']) : null,
-                child: barber['avatar_url'] == null
-                    ? Text(barber['full_name']?.substring(0, 1).toUpperCase() ?? 'B', 
-                        style: TextStyle(fontSize: 22, color: _primaryColor, fontWeight: FontWeight.bold))
-                    : null,
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(barber['full_name'] ?? 'Barber', 
-                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        Icon(Icons.star, size: 14, color: Colors.amber[700]),
-                        const SizedBox(width: 4),
-                        Text((barber['avg_rating'] as num?)?.toStringAsFixed(1) ?? '4.5',
-                            style: const TextStyle(fontSize: 12)),
-                        const SizedBox(width: 12),
-                        Icon(Icons.work, size: 14, color: Colors.grey[500]),
-                        const SizedBox(width: 4),
-                        Text('${barber['today_appointments'] ?? 0} today',
-                            style: TextStyle(fontSize: 12, color: Colors.grey[600])),
-                      ],
-                    ),
-                  ],
+    return Opacity(
+      opacity: isAvailable ? 1.0 : 0.6,
+      child: Card(
+        margin: const EdgeInsets.only(bottom: 12),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(
+            color: isSelected ? _primaryColor : (isAvailable ? Colors.transparent : Colors.red.shade200),
+            width: isSelected ? 2 : 1,
+          ),
+        ),
+        child: InkWell(
+          onTap: isAvailable ? () => setState(() => _selectedBarber = barber) : null,
+          borderRadius: BorderRadius.circular(12),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
+                CircleAvatar(
+                  radius: 28,
+                  backgroundColor: _primaryColor.withValues(alpha: 0.1),
+                  backgroundImage: barber['avatar_url'] != null ? NetworkImage(barber['avatar_url']) : null,
+                  child: barber['avatar_url'] == null
+                      ? Text(barber['full_name']?.substring(0, 1).toUpperCase() ?? 'B', 
+                          style: TextStyle(fontSize: 22, color: _primaryColor, fontWeight: FontWeight.bold))
+                      : null,
                 ),
-              ),
-              if (isSelected)
-                Icon(Icons.check_circle, color: _primaryColor, size: 24),
-            ],
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              barber['full_name'] ?? 'Barber', 
+                              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                          if (!isAvailable)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Colors.red.shade100,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                'Unavailable',
+                                style: TextStyle(fontSize: 10, color: Colors.red.shade700, fontWeight: FontWeight.w500),
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          Icon(Icons.star, size: 14, color: Colors.amber[700]),
+                          const SizedBox(width: 4),
+                          Text((barber['avg_rating'] as num?)?.toStringAsFixed(1) ?? '4.5',
+                              style: const TextStyle(fontSize: 12)),
+                          const SizedBox(width: 12),
+                          Icon(Icons.work, size: 14, color: Colors.grey[500]),
+                          const SizedBox(width: 4),
+                          Text('${barber['today_appointments'] ?? 0} today',
+                              style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                        ],
+                      ),
+                      if (!isAvailable && unavailableReason != null) ...[
+                        const SizedBox(height: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.orange.shade50,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.info_outline, size: 12, color: Colors.orange.shade700),
+                              const SizedBox(width: 4),
+                              Text(
+                                unavailableReason,
+                                style: TextStyle(fontSize: 11, color: Colors.orange.shade700),
+                              ),
+                              if (availableFrom != null) ...[
+                                const SizedBox(width: 4),
+                                Text(
+                                  '(Available from ${_formatTime(availableFrom)})',
+                                  style: TextStyle(fontSize: 11, color: Colors.orange.shade700, fontWeight: FontWeight.w500),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                if (isAvailable)
+                  Container(
+                    width: 24,
+                    height: 24,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: isSelected ? _primaryColor : Colors.grey[400]!,
+                        width: 2,
+                      ),
+                      color: isSelected ? _primaryColor : Colors.transparent,
+                    ),
+                    child: isSelected
+                        ? const Icon(Icons.check, color: Colors.white, size: 16)
+                        : null,
+                  ),
+                if (!isAvailable)
+                  const Icon(Icons.block, color: Colors.red, size: 24),
+              ],
+            ),
           ),
         ),
       ),
     );
+  }
+
+  // Helper methods
+  int _timeToMinutes(String time) {
+    try {
+      final parts = time.split(':');
+      final hour = int.parse(parts[0]);
+      final minute = int.parse(parts[1]);
+      return hour * 60 + minute;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  String _getLaterTime(String time1, String time2) {
+    final t1Minutes = _timeToMinutes(time1);
+    final t2Minutes = _timeToMinutes(time2);
+    return t1Minutes > t2Minutes ? time1 : time2;
+  }
+
+  String _getEarlierTime(String time1, String time2) {
+    final t1Minutes = _timeToMinutes(time1);
+    final t2Minutes = _timeToMinutes(time2);
+    return t1Minutes < t2Minutes ? time1 : time2;
+  }
+
+  String _minutesToTimeString(int minutes) {
+    final hour = (minutes ~/ 60) % 24;
+    final minute = minutes % 60;
+    return '${hour.toString().padLeft(2, '0')}:${minute.toString().padLeft(2, '0')}:00';
+  }
+
+  String _calculateEndTime(String startTime, int durationMinutes) {
+    try {
+      final parts = startTime.split(':');
+      final hour = int.parse(parts[0]);
+      final minute = int.parse(parts[1]);
+      
+      final totalMinutes = hour * 60 + minute + durationMinutes;
+      final newHour = (totalMinutes ~/ 60) % 24;
+      final newMinute = totalMinutes % 60;
+      
+      return '${newHour.toString().padLeft(2, '0')}:${newMinute.toString().padLeft(2, '0')}:00';
+    } catch (e) {
+      return startTime;
+    }
   }
 
   Future<void> _loadAvailableBarbers() async {
@@ -1180,9 +1555,15 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       
       final List<Map<String, dynamic>> barberList = [];
       final todayStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      final selectedDateStr = _selectedDate != null ? DateFormat('yyyy-MM-dd').format(_selectedDate!) : todayStr;
       
       for (var profile in profiles) {
         final barberId = profile['id'];
+        
+        // Check availability for selected date
+        if (_selectedDate != null) {
+          await _checkBarberAvailability(barberId, _selectedDate!);
+        }
         
         final todayAppointments = await supabase
             .from('appointments')
@@ -1205,14 +1586,25 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           avgRating = total / ratings.length;
         }
         
+        final availability = _barberAvailability[barberId];
         barberList.add({
           'id': barberId,
           'full_name': profile['full_name'] ?? 'Barber',
           'avatar_url': profile['avatar_url'],
           'avg_rating': avgRating,
           'today_appointments': todayAppointments.length,
+          'is_available': availability?['is_available'] ?? true,
+          'unavailable_reason': availability?['reason'],
+          'available_from': availability?['available_from'],
         });
       }
+      
+      // Sort: available barbers first, then unavailable
+      barberList.sort((a, b) {
+        if (a['is_available'] && !b['is_available']) return -1;
+        if (!a['is_available'] && b['is_available']) return 1;
+        return 0;
+      });
       
       setState(() {
         _availableBarbers = barberList;
@@ -1226,6 +1618,163 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   }
 
   // ==================== STEP 5: TIME SLOT SELECTION ====================
+  Future<void> _loadAvailableSlots() async {
+    if (_isLoadingSlots) return;
+    
+    setState(() => _isLoadingSlots = true);
+    
+    try {
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      final targetDate = _selectedDate ?? today;
+      
+      final dayOfWeek = targetDate.weekday;
+      
+      // Get barber schedule
+      final schedule = await supabase
+          .from('barber_schedules')
+          .select()
+          .eq('barber_id', _selectedBarber!['id'])
+          .eq('salon_id', _selectedSalon!['id'])
+          .eq('day_of_week', dayOfWeek)
+          .eq('is_working', true)
+          .maybeSingle();
+      
+      if (schedule == null) {
+        setState(() {
+          _availableSlots = [];
+          _isLoadingSlots = false;
+        });
+        return;
+      }
+      
+      // Check for leave on this date
+      final dateStr = DateFormat('yyyy-MM-dd').format(targetDate);
+      final leave = await supabase
+          .from('barber_leaves')
+          .select()
+          .eq('barber_id', _selectedBarber!['id'])
+          .eq('leave_date', dateStr)
+          .eq('status', 'approved')
+          .maybeSingle();
+      
+      if (leave != null) {
+        setState(() {
+          _availableSlots = [];
+          _isLoadingSlots = false;
+        });
+        return;
+      }
+      
+      // Get existing appointments
+      final existingAppointments = await supabase
+          .from('appointments')
+          .select('start_time, end_time, is_vip, queue_number')
+          .eq('barber_id', _selectedBarber!['id'])
+          .eq('appointment_date', dateStr)
+          .inFilter('status', ['confirmed', 'pending', 'in_progress'])
+          .order('queue_number', ascending: true);
+      
+      // Get salon hours
+      final salonOpen = _selectedSalon!['open_time']?.toString() ?? '09:00:00';
+      final salonClose = _selectedSalon!['close_time']?.toString() ?? '18:00:00';
+      
+      final scheduleStart = schedule['start_time'].toString();
+      final scheduleEnd = schedule['end_time'].toString();
+      
+      final workStartTimeStr = _getLaterTime(salonOpen, scheduleStart);
+      final workEndTimeStr = _getEarlierTime(salonClose, scheduleEnd);
+      
+      final serviceDuration = _calculateTotalDuration();
+      
+      int workStartMinutes = _timeToMinutes(workStartTimeStr);
+      int workEndMinutes = _timeToMinutes(workEndTimeStr);
+      int currentTimeMinutes = now.hour * 60 + now.minute;
+      
+      if (!targetDate.isAtSameMomentAs(today)) {
+        currentTimeMinutes = workStartMinutes;
+      }
+      
+      // Get max queue number from existing appointments
+      int maxQueueNumber = 0;
+      Map<int, Map<String, dynamic>> bookedSlotsMap = {};
+      
+      for (var apt in existingAppointments) {
+        final queueNum = apt['queue_number'] as int?;
+        if (queueNum != null) {
+          bookedSlotsMap[queueNum] = {
+            'start': _timeToMinutes(apt['start_time'].toString()),
+            'end': _timeToMinutes(apt['end_time'].toString()),
+            'start_time': apt['start_time'].toString(),
+            'end_time': apt['end_time'].toString(),
+          };
+          if (queueNum > maxQueueNumber) maxQueueNumber = queueNum;
+        }
+      }
+      
+      int nextQueueNumber = maxQueueNumber + 1;
+      int nextSlotStart;
+      int nextSlotEnd;
+      
+      if (bookedSlotsMap.isEmpty) {
+        nextSlotStart = currentTimeMinutes;
+        nextSlotEnd = nextSlotStart + serviceDuration;
+      } else {
+        int lastEndTime = 0;
+        for (int i = nextQueueNumber - 1; i >= 1; i--) {
+          if (bookedSlotsMap.containsKey(i)) {
+            lastEndTime = bookedSlotsMap[i]!['end'];
+            break;
+          }
+        }
+        
+        nextSlotStart = lastEndTime;
+        nextSlotEnd = nextSlotStart + serviceDuration;
+        
+        if (targetDate.isAtSameMomentAs(today) && nextSlotStart < currentTimeMinutes) {
+          nextSlotStart = currentTimeMinutes;
+          nextSlotEnd = nextSlotStart + serviceDuration;
+        }
+      }
+      
+      if (nextSlotStart < workStartMinutes) {
+        nextSlotStart = workStartMinutes;
+        nextSlotEnd = nextSlotStart + serviceDuration;
+      }
+      
+      Map<String, dynamic>? nextAvailableSlot;
+      
+      if (nextSlotEnd <= workEndMinutes) {
+        nextAvailableSlot = {
+          'start_time': _minutesToTimeString(nextSlotStart),
+          'end_time': _minutesToTimeString(nextSlotEnd),
+          'queue_number': nextQueueNumber,
+          'is_available': true,
+          'duration': serviceDuration,
+          'message': 'Your queue number will be #$nextQueueNumber',
+        };
+      } else {
+        nextAvailableSlot = {
+          'start_time': workStartTimeStr,
+          'end_time': _calculateEndTime(workStartTimeStr, serviceDuration),
+          'queue_number': nextQueueNumber,
+          'is_available': true,
+          'duration': serviceDuration,
+          'message': 'Next available slot tomorrow at ${_formatTime(workStartTimeStr)}. Queue #$nextQueueNumber',
+        };
+      }
+      
+      setState(() {
+        _availableSlots = [nextAvailableSlot!];
+        _isLoadingSlots = false;
+      });
+      
+    } catch (e) {
+      debugPrint('Error loading slots: $e');
+      setState(() => _isLoadingSlots = false);
+    }
+  }
+
   Widget _buildTimeSlotStep() {
     return Column(
       children: [
@@ -1262,6 +1811,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         if (_selectedDate != null)
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            color: Colors.white,
             child: Row(
               children: [
                 Icon(Icons.calendar_today, size: 16, color: _secondaryColor),
@@ -1332,153 +1882,143 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
 
   Widget _buildTimeSlotCard(Map<String, dynamic> slot) {
     final isSelected = _selectedSlot?['start_time'] == slot['start_time'];
-    final isAvailable = slot['is_available'] == true;
+    final queueNumber = slot['queue_number'];
+    final message = slot['message'];
     
     return Card(
-      margin: const EdgeInsets.only(bottom: 8),
+      margin: const EdgeInsets.only(bottom: 12),
       color: isSelected ? _primaryColor.withValues(alpha: 0.05) : Colors.white,
-      child: ListTile(
-        leading: Container(
-          width: 50,
-          height: 50,
-          decoration: BoxDecoration(
-            color: isSelected ? _primaryColor.withValues(alpha: 0.1) : Colors.grey[100],
-            borderRadius: BorderRadius.circular(10),
-          ),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(
+          color: isSelected ? _primaryColor : _primaryColor.withValues(alpha: 0.3),
+          width: isSelected ? 2 : 1,
+        ),
+      ),
+      child: InkWell(
+        onTap: () => setState(() => _selectedSlot = slot),
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.all(20),
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Text(
-                _formatTime(slot['start_time']),
-                style: TextStyle(fontWeight: FontWeight.bold, color: isSelected ? _primaryColor : _textDark),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 20),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [_primaryColor, _primaryColor.withValues(alpha: 0.8)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Column(
+                  children: [
+                    const Text(
+                      'Your Queue Number',
+                      style: TextStyle(
+                        color: Colors.white70,
+                        fontSize: 14,
+                        letterSpacing: 1,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '#$queueNumber',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 48,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              Text(
-                _formatTime(slot['end_time']),
-                style: TextStyle(fontSize: 10, color: Colors.grey[500]),
+              const SizedBox(height: 20),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.grey[100],
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.access_time, color: Color(0xFFFF6B8B), size: 20),
+                    const SizedBox(width: 8),
+                    Text(
+                      '${_formatTime(slot['start_time'])} - ${_formatTime(slot['end_time'])}',
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.timer, size: 16, color: Colors.grey[600]),
+                  const SizedBox(width: 4),
+                  Text(
+                    '${slot['duration']} minutes',
+                    style: TextStyle(color: Colors.grey[600]),
+                  ),
+                ],
+              ),
+              if (message != null) ...[
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.info_outline, size: 16, color: Colors.blue.shade700),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          message,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.blue.shade700,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () => setState(() => _selectedSlot = slot),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: isSelected ? _secondaryColor : _primaryColor,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: Text(
+                    isSelected ? 'Selected ✓' : 'Select This Time',
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                  ),
+                ),
               ),
             ],
           ),
         ),
-        title: Text(
-          slot['queue_number'] != null ? 'Queue #${slot['queue_number']}' : 'Slot',
-          style: TextStyle(fontWeight: FontWeight.bold, color: isSelected ? _primaryColor : _textDark),
-        ),
-        subtitle: Text('${slot['duration']} minutes'),
-        trailing: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-          decoration: BoxDecoration(
-            color: isAvailable ? _secondaryColor.withValues(alpha: 0.1) : Colors.red.withValues(alpha: 0.1),
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Text(
-            isAvailable ? 'Available' : 'Booked',
-            style: TextStyle(color: isAvailable ? _secondaryColor : Colors.red, fontSize: 12),
-          ),
-        ),
-        onTap: isAvailable ? () => setState(() => _selectedSlot = slot) : null,
       ),
     );
-  }
-
-  Future<void> _loadAvailableSlots() async {
-    if (_isLoadingSlots) return;
-    
-    setState(() => _isLoadingSlots = true);
-    
-    try {
-      final now = DateTime.now();
-      final today = DateTime(now.year, now.month, now.day);
-      final targetDate = _selectedDate ?? today;
-      
-      final dayOfWeek = targetDate.weekday;
-      
-      final schedule = await supabase
-          .from('barber_schedules')
-          .select()
-          .eq('barber_id', _selectedBarber!['id'])
-          .eq('salon_id', _selectedSalon!['id'])
-          .eq('day_of_week', dayOfWeek)
-          .eq('is_working', true)
-          .maybeSingle();
-      
-      if (schedule == null) {
-        setState(() {
-          _availableSlots = [];
-          _isLoadingSlots = false;
-        });
-        return;
-      }
-      
-      // Reset queue for this date
-      await supabase.rpc('reset_daily_queue', params: {
-        'p_barber_id': _selectedBarber!['id'],
-        'p_queue_date': DateFormat('yyyy-MM-dd').format(targetDate),
-      });
-      
-      final existingAppointments = await supabase
-          .from('appointments')
-          .select('start_time, end_time')
-          .eq('barber_id', _selectedBarber!['id'])
-          .eq('appointment_date', DateFormat('yyyy-MM-dd').format(targetDate))
-          .inFilter('status', ['confirmed', 'pending', 'in_progress']);
-      
-      final startTimeStr = schedule['start_time'].toString();
-      final endTimeStr = schedule['end_time'].toString();
-      
-      final startHour = int.parse(startTimeStr.substring(0, 2));
-      final startMinute = int.parse(startTimeStr.substring(3, 5));
-      final endHour = int.parse(endTimeStr.substring(0, 2));
-      final endMinute = int.parse(endTimeStr.substring(3, 5));
-      
-      final serviceDuration = _calculateTotalDuration();
-      
-      List<Map<String, dynamic>> slots = [];
-      int queueNumber = 1;
-      
-      DateTime currentSlot = DateTime(
-        targetDate.year, targetDate.month, targetDate.day,
-        startHour, startMinute,
-      );
-      
-      final endDateTime = DateTime(
-        targetDate.year, targetDate.month, targetDate.day,
-        endHour, endMinute,
-      );
-      
-      final bookedSlots = existingAppointments.map((a) => a['start_time'].toString()).toSet();
-      
-      while (currentSlot.add(Duration(minutes: serviceDuration)).isBefore(endDateTime) || 
-             currentSlot.add(Duration(minutes: serviceDuration)).isAtSameMomentAs(endDateTime)) {
-        
-        final slotStartStr = DateFormat('HH:mm:ss').format(currentSlot);
-        
-        bool isFutureSlot = true;
-        if (targetDate.isAtSameMomentAs(today)) {
-          isFutureSlot = currentSlot.isAfter(now);
-        }
-        
-        bool isBooked = bookedSlots.contains(slotStartStr);
-        
-        slots.add({
-          'start_time': slotStartStr,
-          'end_time': DateFormat('HH:mm:ss').format(currentSlot.add(Duration(minutes: serviceDuration))),
-          'queue_number': isBooked ? null : queueNumber,
-          'is_available': !isBooked && isFutureSlot,
-          'duration': serviceDuration,
-        });
-        
-        if (!isBooked && isFutureSlot) queueNumber++;
-        currentSlot = currentSlot.add(Duration(minutes: serviceDuration));
-      }
-      
-      setState(() {
-        _availableSlots = slots;
-        _isLoadingSlots = false;
-      });
-    } catch (e) {
-      debugPrint('Error loading slots: $e');
-      setState(() => _isLoadingSlots = false);
-    }
   }
 
   // ==================== STEP 6: CONFIRMATION ====================
@@ -1625,35 +2165,48 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       final user = supabase.auth.currentUser;
       if (user == null) throw Exception('Please login');
       
+      final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate!);
+      
       final nextQueue = await supabase
           .rpc('get_next_queue_number', params: {
             'p_barber_id': _selectedBarber!['id'],
-            'p_queue_date': DateFormat('yyyy-MM-dd').format(_selectedDate!),
+            'p_queue_date': dateStr,
           });
       
-      final appointmentData = {
-        'customer_id': user.id,
-        'barber_id': _selectedBarber!['id'],
-        'salon_id': _selectedSalon!['id'],
-        'service_id': _selectedServices.first['id'],
-        'variant_id': _selectedServices.first['variant_id'],
-        'appointment_date': DateFormat('yyyy-MM-dd').format(_selectedDate!),
-        'start_time': _selectedSlot!['start_time'],
-        'end_time': _selectedSlot!['end_time'],
-        'queue_number': nextQueue,
-        'queue_token': 'Q${nextQueue.toString().padLeft(3, '0')}',
-        'status': 'confirmed',
-        'price': _calculateTotalPrice(),
-        'notes': _selectedServices.map((s) => s['name']).join(', '),
-      };
+      final tokenResponse = await supabase.rpc('generate_queue_token');
+      final queueToken = tokenResponse as String;
       
-      await supabase.from('appointments').insert(appointmentData);
+      // Create appointment for each service
+      for (var service in _selectedServices) {
+        final appointmentData = {
+          'customer_id': user.id,
+          'barber_id': _selectedBarber!['id'],
+          'salon_id': _selectedSalon!['id'],
+          'service_id': service['id'],
+          'variant_id': service['variant_id'],
+          'appointment_date': dateStr,
+          'start_time': _selectedSlot!['start_time'],
+          'end_time': _selectedSlot!['end_time'],
+          'queue_number': nextQueue,
+          'queue_token': queueToken,
+          'status': 'confirmed',
+          'price': service['price'],
+          'notes': 'Combined booking with ${_selectedServices.length} services',
+          'created_at': DateTime.now().toIso8601String(),
+        };
+        
+        await supabase.from('appointments').insert(appointmentData);
+      }
       
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('✅ Booking confirmed! Queue #$nextQueue'), backgroundColor: _secondaryColor),
+          SnackBar(
+            content: Text('✅ Booking confirmed! Queue #$nextQueue | Token: $queueToken'),
+            backgroundColor: _secondaryColor,
+            duration: const Duration(seconds: 4),
+          ),
         );
-        Navigator.pop(context);
+        Navigator.pop(context, true);
       }
     } catch (e) {
       if (mounted) {
