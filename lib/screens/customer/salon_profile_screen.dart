@@ -17,13 +17,13 @@ class SalonProfileScreen extends StatefulWidget {
 
 class _SalonProfileScreenState extends State<SalonProfileScreen> {
   final supabase = Supabase.instance.client;
-  
+
   double _averageRating = 0.0;
   int _totalReviews = 0;
   bool _isLoadingRating = true;
   bool _isFollowing = false;
   int _followersCount = 0;
-  
+
   List<Map<String, dynamic>> _offers = [];
   bool _isLoadingOffers = true;
 
@@ -73,7 +73,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
           .from('salon_followers')
           .select('id')
           .eq('salon_id', widget.salon['id']);
-      
+
       setState(() {
         _followersCount = followers.length;
       });
@@ -150,37 +150,24 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
             .delete()
             .eq('customer_id', user.id)
             .eq('salon_id', widget.salon['id']);
-        
+
         setState(() {
           _isFollowing = false;
           _followersCount--;
         });
-        
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Unfollowed ${widget.salon['name']}')),
-        );
       } else {
-        await supabase
-            .from('salon_followers')
-            .insert({
-              'customer_id': user.id,
-              'salon_id': widget.salon['id'],
-            });
-        
+        await supabase.from('salon_followers').insert({
+          'customer_id': user.id,
+          'salon_id': widget.salon['id'],
+        });
+
         setState(() {
           _isFollowing = true;
           _followersCount++;
         });
-        
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Following ${widget.salon['name']}')),
-        );
       }
     } catch (e) {
       debugPrint('Error toggling follow: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Something went wrong'), backgroundColor: Colors.red),
-      );
     }
   }
 
@@ -199,21 +186,23 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     }
 
     final whatsappUrl = 'https://wa.me/$cleanPhone';
-    
+
     try {
       final Uri url = Uri.parse(whatsappUrl);
       if (await canLaunchUrl(url)) {
         await launchUrl(url, mode: LaunchMode.externalApplication);
       } else {
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('WhatsApp is not installed')),
         );
       }
     } catch (e) {
       debugPrint('Error opening WhatsApp: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not open WhatsApp')),
-      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Could not open WhatsApp')));
     }
   }
 
@@ -247,13 +236,19 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                 color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: Text(offer['image_url'] ?? '🎯', style: const TextStyle(fontSize: 24)),
+              child: Text(
+                offer['image_url'] ?? '🎯',
+                style: const TextStyle(fontSize: 24),
+              ),
             ),
             const SizedBox(width: 12),
             Expanded(
               child: Text(
                 offer['title'],
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
           ],
@@ -275,17 +270,29 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                   if (offer['discount_type'] == 'percentage')
                     Text(
                       '${offer['discount_value']}% OFF',
-                      style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Color(0xFFFF6B8B)),
+                      style: const TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFFFF6B8B),
+                      ),
                     )
                   else if (offer['discount_type'] == 'fixed')
                     Text(
                       'Rs. ${offer['discount_value']} OFF',
-                      style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Color(0xFFFF6B8B)),
+                      style: const TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFFFF6B8B),
+                      ),
                     )
                   else
                     Text(
                       'FREE SERVICE',
-                      style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Color(0xFFFF6B8B)),
+                      style: const TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFFFF6B8B),
+                      ),
                     ),
                   const SizedBox(height: 8),
                   if (offer['points_required'] > 0)
@@ -296,7 +303,10 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                         const SizedBox(width: 4),
                         Text(
                           '${offer['points_required']} points required',
-                          style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                          ),
                         ),
                       ],
                     ),
@@ -345,10 +355,10 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         duration: const Duration(seconds: 2),
       ),
     );
-    context.push('/customer/booking-flow', extra: {
-      'salon': widget.salon,
-      'offer': offer,
-    });
+    context.push(
+      '/customer/booking-flow',
+      extra: {'salon': widget.salon, 'offer': offer},
+    );
   }
 
   String _getDiscountText(Map<String, dynamic> offer) {
@@ -375,13 +385,17 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
   @override
   Widget build(BuildContext context) {
     final salon = widget.salon;
-    final openTime = salon['open_time'] != null 
-        ? DateFormat('h:mm a').format(DateTime.parse('2000-01-01 ${salon['open_time']}'))
+    final openTime = salon['open_time'] != null
+        ? DateFormat(
+            'h:mm a',
+          ).format(DateTime.parse('2000-01-01 ${salon['open_time']}'))
         : '09:00 AM';
-    final closeTime = salon['close_time'] != null 
-        ? DateFormat('h:mm a').format(DateTime.parse('2000-01-01 ${salon['close_time']}'))
+    final closeTime = salon['close_time'] != null
+        ? DateFormat(
+            'h:mm a',
+          ).format(DateTime.parse('2000-01-01 ${salon['close_time']}'))
         : '06:00 PM';
-    
+
     final screenWidth = MediaQuery.of(context).size.width;
     final isWeb = screenWidth > 800;
     final isTablet = screenWidth > 600 && screenWidth <= 800;
@@ -396,7 +410,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
             // Cover Image Section - Full width
             Stack(
               children: [
-                Container(
+                SizedBox(
                   width: double.infinity,
                   height: isWeb ? 350 : 280,
                   child: _buildCoverImage(),
@@ -432,7 +446,11 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                         color: Colors.black.withValues(alpha: 0.3),
                         shape: BoxShape.circle,
                       ),
-                      child: const Icon(Icons.arrow_back, color: Colors.white, size: 22),
+                      child: const Icon(
+                        Icons.arrow_back,
+                        color: Colors.white,
+                        size: 22,
+                      ),
                     ),
                     onPressed: () => Navigator.pop(context),
                   ),
@@ -451,7 +469,11 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                             color: Colors.black.withValues(alpha: 0.3),
                             shape: BoxShape.circle,
                           ),
-                          child: const Icon(Icons.share, color: Colors.white, size: 22),
+                          child: const Icon(
+                            Icons.share,
+                            color: Colors.white,
+                            size: 22,
+                          ),
                         ),
                         onPressed: () {},
                       ),
@@ -465,7 +487,9 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                             shape: BoxShape.circle,
                           ),
                           child: Icon(
-                            _isFollowing ? Icons.favorite : Icons.favorite_border,
+                            _isFollowing
+                                ? Icons.favorite
+                                : Icons.favorite_border,
                             color: _isFollowing ? Colors.red : Colors.white,
                             size: 22,
                           ),
@@ -477,7 +501,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                 ),
               ],
             ),
-            
+
             // Logo and Action Buttons (WhatsApp + Follow text button)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -503,7 +527,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                 ],
               ),
             ),
-            
+
             // Main Content
             Container(
               margin: EdgeInsets.only(top: 20),
@@ -528,9 +552,9 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                                 color: Colors.black87,
                               ),
                             ),
-                            
+
                             const SizedBox(height: 6),
-                            
+
                             // Rating and Followers
                             if (!_isLoadingRating)
                               Wrap(
@@ -545,7 +569,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                                       Text(
                                         _averageRating.toStringAsFixed(1),
                                         style: const TextStyle(
-                                          fontSize: 14, 
+                                          fontSize: 14,
                                           fontWeight: FontWeight.w600,
                                           color: Colors.black87,
                                         ),
@@ -553,7 +577,10 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                                       const SizedBox(width: 4),
                                       Text(
                                         '($_totalReviews reviews)',
-                                        style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          color: Colors.grey[600],
+                                        ),
                                       ),
                                     ],
                                   ),
@@ -568,36 +595,50 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                                   Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      Icon(Icons.people, size: 16, color: Colors.grey[600]),
+                                      Icon(
+                                        Icons.people,
+                                        size: 16,
+                                        color: Colors.grey[600],
+                                      ),
                                       const SizedBox(width: 4),
                                       Text(
                                         '$_followersCount followers',
-                                        style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          color: Colors.grey[600],
+                                        ),
                                       ),
                                     ],
                                   ),
                                 ],
                               ),
-                            
+
                             const SizedBox(height: 12),
-                            
+
                             // Address
                             if (salon['address'] != null)
                               Row(
                                 children: [
-                                  Icon(Icons.location_on, size: 16, color: Colors.grey[600]),
+                                  Icon(
+                                    Icons.location_on,
+                                    size: 16,
+                                    color: Colors.grey[600],
+                                  ),
                                   const SizedBox(width: 6),
                                   Expanded(
                                     child: Text(
                                       salon['address'],
-                                      style: TextStyle(fontSize: 14, color: Colors.grey[700]),
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        color: Colors.grey[700],
+                                      ),
                                     ),
                                   ),
                                 ],
                               ),
-                            
+
                             const SizedBox(height: 10),
-                            
+
                             // Hours & Status
                             Wrap(
                               spacing: 16,
@@ -606,18 +647,28 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                                 Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Icon(Icons.access_time, size: 16, color: Colors.grey[600]),
+                                    Icon(
+                                      Icons.access_time,
+                                      size: 16,
+                                      color: Colors.grey[600],
+                                    ),
                                     const SizedBox(width: 6),
                                     Text(
                                       '$openTime - $closeTime',
-                                      style: TextStyle(fontSize: 14, color: Colors.grey[700]),
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        color: Colors.grey[700],
+                                      ),
                                     ),
                                   ],
                                 ),
                                 Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 4,
+                                  ),
                                   decoration: BoxDecoration(
-                                    color: _isOpenNow(openTime, closeTime) 
+                                    color: _isOpenNow(openTime, closeTime)
                                         ? Colors.green.withValues(alpha: 0.1)
                                         : Colors.red.withValues(alpha: 0.1),
                                     borderRadius: BorderRadius.circular(20),
@@ -629,16 +680,22 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                                         width: 8,
                                         height: 8,
                                         decoration: BoxDecoration(
-                                          color: _isOpenNow(openTime, closeTime) ? Colors.green : Colors.red,
+                                          color: _isOpenNow(openTime, closeTime)
+                                              ? Colors.green
+                                              : Colors.red,
                                           shape: BoxShape.circle,
                                         ),
                                       ),
                                       const SizedBox(width: 6),
                                       Text(
-                                        _isOpenNow(openTime, closeTime) ? 'Open Now' : 'Closed',
+                                        _isOpenNow(openTime, closeTime)
+                                            ? 'Open Now'
+                                            : 'Closed',
                                         style: TextStyle(
                                           fontSize: 12,
-                                          color: _isOpenNow(openTime, closeTime) ? Colors.green : Colors.red,
+                                          color: _isOpenNow(openTime, closeTime)
+                                              ? Colors.green
+                                              : Colors.red,
                                           fontWeight: FontWeight.w500,
                                         ),
                                       ),
@@ -647,9 +704,9 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                                 ),
                               ],
                             ),
-                            
+
                             const SizedBox(height: 24),
-                            
+
                             // ==================== BOOKING BUTTONS ====================
                             isWeb || isTablet
                                 ? Row(
@@ -658,16 +715,29 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                                         flex: 2,
                                         child: ElevatedButton.icon(
                                           onPressed: _startBookingFlow,
-                                          icon: const Icon(Icons.calendar_today, color: Colors.white, size: 20),
+                                          icon: const Icon(
+                                            Icons.calendar_today,
+                                            color: Colors.white,
+                                            size: 20,
+                                          ),
                                           label: const Text(
                                             'Book Appointment',
-                                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.white),
+                                            style: TextStyle(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.w600,
+                                              color: Colors.white,
+                                            ),
                                           ),
                                           style: ElevatedButton.styleFrom(
-                                            backgroundColor: const Color(0xFFFF6B8B),
-                                            padding: const EdgeInsets.symmetric(vertical: 14),
+                                            backgroundColor: const Color(
+                                              0xFFFF6B8B,
+                                            ),
+                                            padding: const EdgeInsets.symmetric(
+                                              vertical: 14,
+                                            ),
                                             shape: RoundedRectangleBorder(
-                                              borderRadius: BorderRadius.circular(12),
+                                              borderRadius:
+                                                  BorderRadius.circular(12),
                                             ),
                                             elevation: 2,
                                           ),
@@ -678,16 +748,30 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                                         flex: 1,
                                         child: OutlinedButton.icon(
                                           onPressed: _navigateToVipBooking,
-                                          icon: const Icon(Icons.star, color: Colors.amber, size: 20),
+                                          icon: const Icon(
+                                            Icons.star,
+                                            color: Colors.amber,
+                                            size: 20,
+                                          ),
                                           label: const Text(
                                             'VIP',
-                                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.amber),
+                                            style: TextStyle(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.w600,
+                                              color: Colors.amber,
+                                            ),
                                           ),
                                           style: OutlinedButton.styleFrom(
-                                            side: const BorderSide(color: Colors.amber, width: 1.5),
-                                            padding: const EdgeInsets.symmetric(vertical: 14),
+                                            side: const BorderSide(
+                                              color: Colors.amber,
+                                              width: 1.5,
+                                            ),
+                                            padding: const EdgeInsets.symmetric(
+                                              vertical: 14,
+                                            ),
                                             shape: RoundedRectangleBorder(
-                                              borderRadius: BorderRadius.circular(12),
+                                              borderRadius:
+                                                  BorderRadius.circular(12),
                                             ),
                                           ),
                                         ),
@@ -700,16 +784,29 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                                         width: double.infinity,
                                         child: ElevatedButton.icon(
                                           onPressed: _startBookingFlow,
-                                          icon: const Icon(Icons.calendar_today, color: Colors.white, size: 20),
+                                          icon: const Icon(
+                                            Icons.calendar_today,
+                                            color: Colors.white,
+                                            size: 20,
+                                          ),
                                           label: const Text(
                                             'Book Appointment',
-                                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.white),
+                                            style: TextStyle(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.w600,
+                                              color: Colors.white,
+                                            ),
                                           ),
                                           style: ElevatedButton.styleFrom(
-                                            backgroundColor: const Color(0xFFFF6B8B),
-                                            padding: const EdgeInsets.symmetric(vertical: 14),
+                                            backgroundColor: const Color(
+                                              0xFFFF6B8B,
+                                            ),
+                                            padding: const EdgeInsets.symmetric(
+                                              vertical: 14,
+                                            ),
                                             shape: RoundedRectangleBorder(
-                                              borderRadius: BorderRadius.circular(12),
+                                              borderRadius:
+                                                  BorderRadius.circular(12),
                                             ),
                                             elevation: 2,
                                           ),
@@ -720,30 +817,44 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                                         width: double.infinity,
                                         child: OutlinedButton.icon(
                                           onPressed: _navigateToVipBooking,
-                                          icon: const Icon(Icons.star, color: Colors.amber, size: 20),
+                                          icon: const Icon(
+                                            Icons.star,
+                                            color: Colors.amber,
+                                            size: 20,
+                                          ),
                                           label: const Text(
                                             'VIP Booking',
-                                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.amber),
+                                            style: TextStyle(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.w600,
+                                              color: Colors.amber,
+                                            ),
                                           ),
                                           style: OutlinedButton.styleFrom(
-                                            side: const BorderSide(color: Colors.amber, width: 1.5),
-                                            padding: const EdgeInsets.symmetric(vertical: 14),
+                                            side: const BorderSide(
+                                              color: Colors.amber,
+                                              width: 1.5,
+                                            ),
+                                            padding: const EdgeInsets.symmetric(
+                                              vertical: 14,
+                                            ),
                                             shape: RoundedRectangleBorder(
-                                              borderRadius: BorderRadius.circular(12),
+                                              borderRadius:
+                                                  BorderRadius.circular(12),
                                             ),
                                           ),
                                         ),
                                       ),
                                     ],
                                   ),
-                            
+
                             const SizedBox(height: 32),
                             Divider(color: Colors.grey[200], height: 1),
                             const SizedBox(height: 24),
                           ],
                         ),
                       ),
-                      
+
                       // ==================== OFFERS SECTION ====================
                       if (_offers.isNotEmpty || _isLoadingOffers)
                         Padding(
@@ -752,18 +863,25 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
                                 children: [
                                   const Text(
                                     '🔥 Special Offers',
-                                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                                    style: TextStyle(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.bold,
+                                    ),
                                   ),
                                   if (_offers.length > 2)
                                     TextButton(
                                       onPressed: _showAllOffersDialog,
                                       child: const Text(
                                         'View All',
-                                        style: TextStyle(color: Color(0xFFFF6B8B), fontWeight: FontWeight.w600),
+                                        style: TextStyle(
+                                          color: Color(0xFFFF6B8B),
+                                          fontWeight: FontWeight.w600,
+                                        ),
                                       ),
                                     ),
                                 ],
@@ -773,15 +891,23 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                                   ? const Center(
                                       child: Padding(
                                         padding: EdgeInsets.all(32),
-                                        child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+                                        child: CircularProgressIndicator(
+                                          color: Color(0xFFFF6B8B),
+                                        ),
                                       ),
                                     )
                                   : SizedBox(
                                       height: 260,
                                       child: ListView.builder(
                                         scrollDirection: Axis.horizontal,
-                                        itemCount: _offers.length > 3 ? 3 : _offers.length,
-                                        itemBuilder: (context, index) => _buildOfferCard(_offers[index], index),
+                                        itemCount: _offers.length > 3
+                                            ? 3
+                                            : _offers.length,
+                                        itemBuilder: (context, index) =>
+                                            _buildOfferCard(
+                                              _offers[index],
+                                              index,
+                                            ),
                                       ),
                                     ),
                               const SizedBox(height: 20),
@@ -789,11 +915,12 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                             ],
                           ),
                         ),
-                      
+
                       const SizedBox(height: 24),
-                      
+
                       // ==================== ABOUT SECTION ====================
-                      if (salon['description'] != null && salon['description'].toString().isNotEmpty)
+                      if (salon['description'] != null &&
+                          salon['description'].toString().isNotEmpty)
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 16),
                           child: Column(
@@ -801,7 +928,10 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                             children: [
                               const Text(
                                 'About',
-                                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                                style: TextStyle(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
                               const SizedBox(height: 12),
                               Container(
@@ -813,7 +943,11 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                                 ),
                                 child: Text(
                                   salon['description'],
-                                  style: TextStyle(fontSize: 14, color: Colors.grey[700], height: 1.5),
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    color: Colors.grey[700],
+                                    height: 1.5,
+                                  ),
                                 ),
                               ),
                               const SizedBox(height: 24),
@@ -821,9 +955,9 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                             ],
                           ),
                         ),
-                      
+
                       const SizedBox(height: 24),
-                      
+
                       // ==================== CONTACT SECTION ====================
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -832,7 +966,10 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                           children: [
                             const Text(
                               'Contact & Location',
-                              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                              style: TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
                             const SizedBox(height: 12),
                             Container(
@@ -843,67 +980,118 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                               ),
                               child: Column(
                                 children: [
-                                  if (salon['phone'] != null && salon['phone'].toString().isNotEmpty)
+                                  if (salon['phone'] != null &&
+                                      salon['phone'].toString().isNotEmpty)
                                     ListTile(
                                       leading: Container(
                                         padding: const EdgeInsets.all(10),
                                         decoration: BoxDecoration(
-                                          color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
-                                          borderRadius: BorderRadius.circular(12),
+                                          color: const Color(
+                                            0xFFFF6B8B,
+                                          ).withValues(alpha: 0.1),
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
                                         ),
-                                        child: const Icon(Icons.phone, color: Color(0xFFFF6B8B), size: 22),
+                                        child: const Icon(
+                                          Icons.phone,
+                                          color: Color(0xFFFF6B8B),
+                                          size: 22,
+                                        ),
                                       ),
                                       title: const Text(
                                         'Phone',
-                                        style: TextStyle(fontWeight: FontWeight.w600),
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w600,
+                                        ),
                                       ),
                                       subtitle: Text(
                                         salon['phone'],
-                                        style: TextStyle(color: Colors.grey[600]),
+                                        style: TextStyle(
+                                          color: Colors.grey[600],
+                                        ),
                                       ),
-                                      trailing: const Icon(Icons.chevron_right, size: 20, color: Colors.grey),
+                                      trailing: const Icon(
+                                        Icons.chevron_right,
+                                        size: 20,
+                                        color: Colors.grey,
+                                      ),
                                       onTap: _openWhatsApp,
                                     ),
-                                  if (salon['email'] != null && salon['email'].toString().isNotEmpty)
+                                  if (salon['email'] != null &&
+                                      salon['email'].toString().isNotEmpty)
                                     ListTile(
                                       leading: Container(
                                         padding: const EdgeInsets.all(10),
                                         decoration: BoxDecoration(
-                                          color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
-                                          borderRadius: BorderRadius.circular(12),
+                                          color: const Color(
+                                            0xFFFF6B8B,
+                                          ).withValues(alpha: 0.1),
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
                                         ),
-                                        child: const Icon(Icons.email, color: Color(0xFFFF6B8B), size: 22),
+                                        child: const Icon(
+                                          Icons.email,
+                                          color: Color(0xFFFF6B8B),
+                                          size: 22,
+                                        ),
                                       ),
                                       title: const Text(
                                         'Email',
-                                        style: TextStyle(fontWeight: FontWeight.w600),
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w600,
+                                        ),
                                       ),
                                       subtitle: Text(
                                         salon['email'],
-                                        style: TextStyle(color: Colors.grey[600]),
+                                        style: TextStyle(
+                                          color: Colors.grey[600],
+                                        ),
                                       ),
-                                      trailing: const Icon(Icons.chevron_right, size: 20, color: Colors.grey),
+                                      trailing: const Icon(
+                                        Icons.chevron_right,
+                                        size: 20,
+                                        color: Colors.grey,
+                                      ),
                                       onTap: () {},
                                     ),
-                                  if (salon['address'] != null && salon['address'].toString().isNotEmpty)
+                                  if (salon['address'] != null &&
+                                      salon['address'].toString().isNotEmpty)
                                     ListTile(
                                       leading: Container(
                                         padding: const EdgeInsets.all(10),
                                         decoration: BoxDecoration(
-                                          color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
-                                          borderRadius: BorderRadius.circular(12),
+                                          color: const Color(
+                                            0xFFFF6B8B,
+                                          ).withValues(alpha: 0.1),
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
                                         ),
-                                        child: const Icon(Icons.location_on, color: Color(0xFFFF6B8B), size: 22),
+                                        child: const Icon(
+                                          Icons.location_on,
+                                          color: Color(0xFFFF6B8B),
+                                          size: 22,
+                                        ),
                                       ),
                                       title: const Text(
                                         'Address',
-                                        style: TextStyle(fontWeight: FontWeight.w600),
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w600,
+                                        ),
                                       ),
                                       subtitle: Text(
                                         salon['address'],
-                                        style: TextStyle(color: Colors.grey[600]),
+                                        style: TextStyle(
+                                          color: Colors.grey[600],
+                                        ),
                                       ),
-                                      trailing: const Icon(Icons.chevron_right, size: 20, color: Colors.grey),
+                                      trailing: const Icon(
+                                        Icons.chevron_right,
+                                        size: 20,
+                                        color: Colors.grey,
+                                      ),
                                       onTap: () {},
                                     ),
                                 ],
@@ -914,9 +1102,9 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                           ],
                         ),
                       ),
-                      
+
                       const SizedBox(height: 24),
-                      
+
                       // ==================== SERVICES SECTION ====================
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -925,14 +1113,17 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                           children: [
                             const Text(
                               'Popular Services',
-                              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                              style: TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
                             const SizedBox(height: 16),
                             _buildServicesPreview(),
                           ],
                         ),
                       ),
-                      
+
                       const SizedBox(height: 40),
                     ],
                   ),
@@ -949,19 +1140,16 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     final screenWidth = MediaQuery.of(context).size.width;
     final isDesktop = screenWidth > 800;
     final logoSize = isDesktop ? 120.0 : 90.0;
-    
+
     final logoUrl = widget.salon['logo_url'];
     final hasLogo = logoUrl != null && logoUrl.toString().isNotEmpty;
-    
+
     return Container(
       width: logoSize,
       height: logoSize,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        border: Border.all(
-          color: Colors.white,
-          width: isDesktop ? 4 : 3,
-        ),
+        border: Border.all(color: Colors.white, width: isDesktop ? 4 : 3),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.2),
@@ -970,10 +1158,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
           ),
         ],
         image: hasLogo
-            ? DecorationImage(
-                image: NetworkImage(logoUrl),
-                fit: BoxFit.cover,
-              )
+            ? DecorationImage(image: NetworkImage(logoUrl), fit: BoxFit.cover)
             : null,
       ),
       child: !hasLogo
@@ -1000,16 +1185,16 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
   Widget _buildWhatsAppButton() {
     final phone = widget.salon['phone'];
     final hasPhone = phone != null && phone.toString().isNotEmpty;
-    
+
     return OutlinedButton(
       onPressed: hasPhone ? _openWhatsApp : null,
       style: OutlinedButton.styleFrom(
         foregroundColor: const Color(0xFF25D366),
-        side: BorderSide(color: hasPhone ? const Color(0xFF25D366) : Colors.grey[300]!),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(30),
+        side: BorderSide(
+          color: hasPhone ? const Color(0xFF25D366) : Colors.grey[300]!,
         ),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -1033,27 +1218,24 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     return ElevatedButton(
       onPressed: _toggleFollow,
       style: ElevatedButton.styleFrom(
-        backgroundColor: _isFollowing ? Colors.grey[200] : const Color(0xFFFF6B8B),
+        backgroundColor: _isFollowing
+            ? Colors.grey[200]
+            : const Color(0xFFFF6B8B),
         foregroundColor: _isFollowing ? Colors.grey[600] : Colors.white,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(30),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
         elevation: 0,
       ),
       child: Text(
         _isFollowing ? 'Following' : 'Follow',
-        style: const TextStyle(
-          fontSize: 14,
-          fontWeight: FontWeight.w600,
-        ),
+        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
       ),
     );
   }
 
   Widget _buildCoverImage() {
     final coverUrl = widget.salon['cover_url'];
-    
+
     if (coverUrl != null && coverUrl.toString().isNotEmpty) {
       return Image.network(
         coverUrl,
@@ -1085,7 +1267,11 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.content_cut, size: 60, color: Colors.white.withValues(alpha: 0.7)),
+            Icon(
+              Icons.content_cut,
+              size: 60,
+              color: Colors.white.withValues(alpha: 0.7),
+            ),
             const SizedBox(height: 12),
             Text(
               widget.salon['name'] ?? 'Salon',
@@ -1110,7 +1296,11 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         } else if (index < rating && rating - index > 0.5) {
           return const Icon(Icons.star_half, color: Colors.amber, size: 16);
         } else {
-          return Icon(Icons.star_border, color: Colors.amber.withValues(alpha: 0.7), size: 16);
+          return Icon(
+            Icons.star_border,
+            color: Colors.amber.withValues(alpha: 0.7),
+            size: 16,
+          );
         }
       }),
     );
@@ -1120,7 +1310,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     final color = _getOfferColor(index);
     final validTo = DateTime.parse(offer['valid_to']);
     final daysLeft = validTo.difference(DateTime.now()).inDays;
-    
+
     return Container(
       width: 280,
       margin: const EdgeInsets.only(right: 12),
@@ -1133,7 +1323,11 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: color.withValues(alpha: 0.3)),
         boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8, offset: const Offset(0, 2)),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
         ],
       ),
       child: Material(
@@ -1157,7 +1351,8 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                       ),
                       child: Center(
                         child: Text(
-                          offer['image_url'] ?? _getOfferIcon(offer['discount_type']),
+                          offer['image_url'] ??
+                              _getOfferIcon(offer['discount_type']),
                           style: const TextStyle(fontSize: 28),
                         ),
                       ),
@@ -1169,20 +1364,31 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                         children: [
                           Text(
                             offer['title'],
-                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: color),
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: color,
+                            ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
                           const SizedBox(height: 4),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 2,
+                            ),
                             decoration: BoxDecoration(
                               color: color.withValues(alpha: 0.1),
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: Text(
                               _getDiscountText(offer),
-                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: color),
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: color,
+                              ),
                             ),
                           ),
                         ],
@@ -1202,7 +1408,10 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                   children: [
                     if (offer['points_required'] > 0)
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
                         decoration: BoxDecoration(
                           color: Colors.amber.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(8),
@@ -1210,32 +1419,52 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Icon(Icons.star, color: Colors.amber, size: 12),
+                            const Icon(
+                              Icons.star,
+                              color: Colors.amber,
+                              size: 12,
+                            ),
                             const SizedBox(width: 2),
                             Text(
                               '${offer['points_required']} pts',
-                              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w500),
+                              style: const TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w500,
+                              ),
                             ),
                           ],
                         ),
                       ),
                     const Spacer(),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
                       decoration: BoxDecoration(
-                        color: daysLeft <= 3 ? Colors.red.withValues(alpha: 0.1) : Colors.grey.withValues(alpha: 0.1),
+                        color: daysLeft <= 3
+                            ? Colors.red.withValues(alpha: 0.1)
+                            : Colors.grey.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.access_time, size: 10, color: daysLeft <= 3 ? Colors.red : Colors.grey[600]),
+                          Icon(
+                            Icons.access_time,
+                            size: 10,
+                            color: daysLeft <= 3
+                                ? Colors.red
+                                : Colors.grey[600],
+                          ),
                           const SizedBox(width: 2),
                           Text(
                             daysLeft <= 0 ? 'Expired' : '$daysLeft days left',
                             style: TextStyle(
                               fontSize: 10,
-                              color: daysLeft <= 3 ? Colors.red : Colors.grey[600],
+                              color: daysLeft <= 3
+                                  ? Colors.red
+                                  : Colors.grey[600],
                             ),
                           ),
                         ],
@@ -1252,9 +1481,17 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                       backgroundColor: color,
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 8),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
                     ),
-                    child: const Text('Claim Offer', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                    child: const Text(
+                      'Claim Offer',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                   ),
                 ),
               ],
@@ -1352,7 +1589,9 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
           );
         }
 
-        if (!snapshot.hasData || snapshot.data == null || snapshot.data!.isEmpty) {
+        if (!snapshot.hasData ||
+            snapshot.data == null ||
+            snapshot.data!.isEmpty) {
           return Container(
             width: double.infinity,
             padding: const EdgeInsets.all(32),
@@ -1365,12 +1604,14 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         }
 
         final services = snapshot.data! as List;
-        
+
         return Column(
           children: services.map((service) {
             final variants = service['service_variants'] as List?;
             final lowestPrice = variants != null && variants.isNotEmpty
-                ? variants.map((v) => (v['price'] as num?)?.toDouble() ?? 0).reduce((a, b) => a < b ? a : b)
+                ? variants
+                      .map((v) => (v['price'] as num?)?.toDouble() ?? 0)
+                      .reduce((a, b) => a < b ? a : b)
                 : 0.0;
 
             return Container(
@@ -1390,7 +1631,11 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                       color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: const Icon(Icons.content_cut, color: Color(0xFFFF6B8B), size: 24),
+                    child: const Icon(
+                      Icons.content_cut,
+                      color: Color(0xFFFF6B8B),
+                      size: 24,
+                    ),
                   ),
                   const SizedBox(width: 14),
                   Expanded(
@@ -1399,12 +1644,18 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                       children: [
                         Text(
                           service['name'] ?? 'Service',
-                          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                         if (service['description'] != null)
                           Text(
                             service['description'],
-                            style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[500],
+                            ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -1413,7 +1664,11 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                   ),
                   Text(
                     'Rs. ${lowestPrice.toInt()}',
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFFFF6B8B)),
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFFFF6B8B),
+                    ),
                   ),
                 ],
               ),
@@ -1429,11 +1684,29 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
       final now = DateTime.now();
       final openTime = DateFormat('h:mm a').parse(openTimeStr);
       final closeTime = DateFormat('h:mm a').parse(closeTimeStr);
-      
-      final nowTime = DateTime(now.year, now.month, now.day, now.hour, now.minute);
-      final openDateTime = DateTime(now.year, now.month, now.day, openTime.hour, openTime.minute);
-      final closeDateTime = DateTime(now.year, now.month, now.day, closeTime.hour, closeTime.minute);
-      
+
+      final nowTime = DateTime(
+        now.year,
+        now.month,
+        now.day,
+        now.hour,
+        now.minute,
+      );
+      final openDateTime = DateTime(
+        now.year,
+        now.month,
+        now.day,
+        openTime.hour,
+        openTime.minute,
+      );
+      final closeDateTime = DateTime(
+        now.year,
+        now.month,
+        now.day,
+        closeTime.hour,
+        closeTime.minute,
+      );
+
       return nowTime.isAfter(openDateTime) && nowTime.isBefore(closeDateTime);
     } catch (e) {
       return true;
