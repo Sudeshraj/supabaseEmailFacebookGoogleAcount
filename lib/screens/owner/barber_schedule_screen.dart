@@ -760,7 +760,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
     final bool isWeb = screenWidth > 800;
-    final double padding = isWeb ? 24.0 : 16.0;
+    final double padding = isWeb ? 24.0 : 0.0;
 
     return Scaffold(
       appBar: AppBar(
@@ -784,7 +784,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
           ? _buildEmptyState(isWeb, padding)
           : isWeb
           ? _buildWebView(padding, screenWidth)
-          : _buildMobileView(padding),
+          : _buildMobileView(),
     );
   }
 
@@ -891,24 +891,13 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     );
   }
 
-  Widget _buildMobileView(double padding) {
+  Widget _buildMobileView() {
     return ListView.builder(
-      padding: EdgeInsets.all(padding),
+      padding: EdgeInsets.zero,
       itemCount: _barbers.length,
       itemBuilder: (context, index) {
         final barber = _barbers[index];
-        final barberSchedules = _groupedSchedules[barber['id']] ?? [];
-        final barberBreaks = _groupedBreaks[barber['id']] ?? [];
-        final barberSpecialSchedules = _groupedSpecialSchedules[barber['id']] ?? [];
-        final barberSpecialBreaks = _groupedSpecialBreaks[barber['id']] ?? [];
-        return _buildBarberCard(
-          barber, 
-          barberSchedules, 
-          barberBreaks,
-          barberSpecialSchedules,
-          barberSpecialBreaks,
-          false
-        );
+        return _buildMobileBarberCard(barber);
       },
     );
   }
@@ -926,7 +915,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: isWeb
           ? _buildWebBarberCard(barber, schedules, breaks, specialSchedules, specialBreaks)
-          : _buildMobileBarberCard(barber, schedules, breaks, specialSchedules, specialBreaks),
+          : _buildMobileBarberCard(barber), // Only pass barber for mobile
     );
   }
 
@@ -1183,6 +1172,8 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     final startTime = _formatTime(schedule['start_time']);
     final endTime = _formatTime(schedule['end_time']);
     final isWorking = schedule['is_working'] ?? true;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isMobile = screenWidth < 600;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 4),
@@ -1202,42 +1193,60 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
       child: Row(
         children: [
           Expanded(
-            flex: 2,
+            flex: isMobile ? 3 : 2,
             child: Row(
               children: [
                 Icon(
                   isWorking ? Icons.check_circle : Icons.cancel,
-                  size: 14,
+                  size: isMobile ? 12 : 14,
                   color: isWorking ? Colors.green : Colors.red,
                 ),
                 const SizedBox(width: 4),
                 Text(
-                  dayName.substring(0, 3),
+                  isMobile ? dayName.substring(0, 3) : dayName.substring(0, 3),
                   style: TextStyle(
                     fontWeight: FontWeight.w600,
-                    fontSize: 12,
+                    fontSize: isMobile ? 11 : 12,
                     color: isWorking ? Colors.black87 : Colors.grey[600],
                   ),
                 ),
               ],
             ),
           ),
-          Expanded(
-            flex: 3,
-            child: Text(
-              '$startTime - $endTime',
-              style: TextStyle(
-                fontSize: 11,
-                color: isWorking ? Colors.grey[700] : Colors.grey[500],
-                decoration: isWorking ? null : TextDecoration.lineThrough,
+          if (!isMobile)
+            Expanded(
+              flex: 3,
+              child: Text(
+                '$startTime - $endTime',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: isWorking ? Colors.grey[700] : Colors.grey[500],
+                  decoration: isWorking ? null : TextDecoration.lineThrough,
+                ),
+              ),
+            )
+          else
+            Expanded(
+              flex: 4,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '$startTime - $endTime',
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: isWorking ? Colors.grey[700] : Colors.grey[500],
+                      decoration: isWorking ? null : TextDecoration.lineThrough,
+                    ),
+                  ),
+                ],
               ),
             ),
-          ),
           SizedBox(
-            width: 40,
-            height: 30,
+            width: isMobile ? 35 : 40,
+            height: isMobile ? 25 : 30,
             child: Transform.scale(
-              scale: 0.7,
+              scale: isMobile ? 0.6 : 0.7,
               child: Switch(
                 value: isWorking,
                 onChanged: (_) => _toggleWorkingStatus(schedule),
@@ -1248,13 +1257,13 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
             ),
           ),
           IconButton(
-            icon: const Icon(Icons.edit, size: 14),
+            icon: Icon(Icons.edit, size: isMobile ? 16 : 18),
             onPressed: () => _editSchedule(schedule),
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(),
           ),
           IconButton(
-            icon: const Icon(Icons.delete, size: 14, color: Colors.red),
+            icon: Icon(Icons.delete, size: isMobile ? 16 : 18, color: Colors.red),
             onPressed: () => _deleteSchedule(schedule),
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(),
@@ -1273,6 +1282,8 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
       (b) => b['id'] == breakType,
       orElse: () => _breakTypes.last,
     );
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isMobile = screenWidth < 600;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 4),
@@ -1285,36 +1296,57 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
       child: Row(
         children: [
           Expanded(
-            flex: 2,
+            flex: isMobile ? 3 : 2,
             child: Row(
               children: [
-                Icon(breakTypeData['icon'], size: 14, color: Colors.orange),
+                Icon(breakTypeData['icon'], size: isMobile ? 12 : 14, color: Colors.orange),
                 const SizedBox(width: 4),
                 Text(
-                  dayName.substring(0, 3),
-                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
+                  isMobile ? dayName.substring(0, 3) : dayName.substring(0, 3),
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: isMobile ? 11 : 12,
+                  ),
                 ),
               ],
             ),
           ),
-          Expanded(
-            flex: 3,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('$startTime - $endTime', style: const TextStyle(fontSize: 11, color: Colors.grey)),
-                Text(breakTypeData['name'], style: const TextStyle(fontSize: 10, color: Colors.orange)),
-              ],
+          if (!isMobile)
+            Expanded(
+              flex: 3,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('$startTime - $endTime', style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                  Text(breakTypeData['name'], style: const TextStyle(fontSize: 10, color: Colors.orange)),
+                ],
+              ),
+            )
+          else
+            Expanded(
+              flex: 4,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '$startTime - $endTime',
+                    style: TextStyle(fontSize: 10, color: Colors.grey[600]),
+                  ),
+                  Text(
+                    breakTypeData['name'],
+                    style: const TextStyle(fontSize: 9, color: Colors.orange),
+                  ),
+                ],
+              ),
             ),
-          ),
           IconButton(
-            icon: const Icon(Icons.edit, size: 14),
+            icon: Icon(Icons.edit, size: isMobile ? 16 : 18),
             onPressed: () => _editBreak(breakItem),
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(),
           ),
           IconButton(
-            icon: const Icon(Icons.delete, size: 14, color: Colors.red),
+            icon: Icon(Icons.delete, size: isMobile ? 16 : 18, color: Colors.red),
             onPressed: () => _deleteBreak(breakItem),
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(),
@@ -1324,100 +1356,211 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     );
   }
 
-  Widget _buildMobileBarberCard(
-    Map<String, dynamic> barber,
-    List<Map<String, dynamic>> schedules,
-    List<Map<String, dynamic>> breaks,
-    List<Map<String, dynamic>> specialSchedules,
-    List<Map<String, dynamic>> specialBreaks,
-  ) {
+  // Mobile view - Only profile name responsive, everything else full screen
+  Widget _buildMobileBarberCard(Map<String, dynamic> barber) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final fontSize = screenWidth < 400 ? 16.0 : (screenWidth < 600 ? 18.0 : 20.0);
+    
     return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Theme(
-        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-        child: ExpansionTile(
-          leading: CircleAvatar(
-            backgroundColor: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
-            backgroundImage: barber['avatar'] != null
-                ? NetworkImage(barber['avatar'])
-                : null,
-            child: barber['avatar'] == null
-                ? Text(
-                    barber['name'][0].toUpperCase(),
-                    style: const TextStyle(
-                      color: Color(0xFFFF6B8B),
-                      fontWeight: FontWeight.bold,
-                    ),
-                  )
-                : null,
-          ),
-          title: Text(
-            barber['name'],
-            style: const TextStyle(fontWeight: FontWeight.bold),
-          ),
-          subtitle: Text(
-            '${schedules.where((s) => s['is_working'] == true).length} Working / ${schedules.length} Regular',
-            style: TextStyle(color: Colors.grey[600], fontSize: 12),
-          ),
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
+      margin: const EdgeInsets.all(0),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+      child: InkWell(
+        onTap: () {
+          // Navigate to barber details or show schedule
+          _showBarberScheduleDialog(barber);
+        },
+        child: Container(
+          width: double.infinity,
+          padding: EdgeInsets.symmetric(vertical: screenWidth < 400 ? 30 : 40),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              IconButton(
-                icon: const Icon(Icons.event_busy, color: Colors.teal),
-                onPressed: () => _addSpecialBreak(barber['id']),
-                tooltip: 'Special Break',
+              CircleAvatar(
+                radius: screenWidth < 400 ? 40 : 50,
+                backgroundColor: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                backgroundImage: barber['avatar'] != null
+                    ? NetworkImage(barber['avatar'])
+                    : null,
+                child: barber['avatar'] == null
+                    ? Text(
+                        barber['name'][0].toUpperCase(),
+                        style: TextStyle(
+                          color: const Color(0xFFFF6B8B),
+                          fontWeight: FontWeight.bold,
+                          fontSize: fontSize + 8,
+                        ),
+                      )
+                    : null,
               ),
-              IconButton(
-                icon: const Icon(Icons.event, color: Colors.purple),
-                onPressed: () => _addSpecialSchedule(barber['id']),
-                tooltip: 'Special Schedule',
+              const SizedBox(height: 20),
+              Text(
+                barber['name'],
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: fontSize,
+                ),
+                textAlign: TextAlign.center,
               ),
-              IconButton(
-                icon: const Icon(Icons.free_breakfast, color: Colors.orange),
-                onPressed: () => _addBreak(barber['id']),
-                tooltip: 'Add Break',
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: const Icon(
+                  Icons.arrow_forward,
+                  color: Color(0xFFFF6B8B),
+                  size: 20,
+                ),
               ),
-              IconButton(
-                icon: const Icon(Icons.add, color: Colors.green),
-                onPressed: () => _addSchedule(barber['id']),
-                tooltip: 'Add Schedule',
-              ),
-              const Icon(Icons.keyboard_arrow_down),
             ],
           ),
-          children: [
-            if (specialSchedules.isNotEmpty) ...[
-              const Padding(
-                padding: EdgeInsets.only(left: 16, top: 8),
-                child: Text('🌟 Special Schedules', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.purple)),
-              ),
-              ...specialSchedules.map((ss) => _buildSpecialScheduleItem(ss)),
-            ],
-            if (specialBreaks.isNotEmpty) ...[
-              const Padding(
-                padding: EdgeInsets.only(left: 16, top: 8),
-                child: Text('⏰ Special Breaks', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.teal)),
-              ),
-              ...specialBreaks.map((sb) => _buildSpecialBreakItem(sb)),
-            ],
-            if (schedules.isNotEmpty) ...[
-              const Padding(
-                padding: EdgeInsets.only(left: 16, top: 8),
-                child: Text('📅 Regular Schedules', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.green)),
-              ),
-              ...schedules.map((schedule) => _buildScheduleItem(schedule)),
-            ],
-            if (breaks.isNotEmpty) ...[
-              const Padding(
-                padding: EdgeInsets.only(left: 16, top: 8),
-                child: Text('☕ Regular Breaks', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.orange)),
-              ),
-              ...breaks.map((breakItem) => _buildBreakItem(breakItem)),
-            ],
-          ],
         ),
       ),
+    );
+  }
+
+  void _showBarberScheduleDialog(Map<String, dynamic> barber) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.9,
+        minChildSize: 0.5,
+        maxChildSize: 0.95,
+        builder: (context, scrollController) {
+          final schedules = _groupedSchedules[barber['id']] ?? [];
+          final breaks = _groupedBreaks[barber['id']] ?? [];
+          final specialSchedules = _groupedSpecialSchedules[barber['id']] ?? [];
+          final specialBreaks = _groupedSpecialBreaks[barber['id']] ?? [];
+          
+          return Container(
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+            ),
+            child: Column(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: const BoxDecoration(
+                    border: Border(
+                      bottom: BorderSide(color: Colors.grey, width: 0.5),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      CircleAvatar(
+                        radius: 20,
+                        backgroundColor: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                        backgroundImage: barber['avatar'] != null
+                            ? NetworkImage(barber['avatar'])
+                            : null,
+                        child: barber['avatar'] == null
+                            ? Text(
+                                barber['name'][0].toUpperCase(),
+                                style: const TextStyle(
+                                  color: Color(0xFFFF6B8B),
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
+                                ),
+                              )
+                            : null,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              barber['name'],
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                            ),
+                            Text(
+                              '${schedules.where((s) => s['is_working'] == true).length} Working / ${schedules.length} Regular',
+                              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: ListView(
+                    controller: scrollController,
+                    padding: const EdgeInsets.all(16),
+                    children: [
+                      // Action Buttons
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          _buildActionChip('Special Break', Icons.event_busy, Colors.teal, () => _addSpecialBreak(barber['id'])),
+                          _buildActionChip('Special Schedule', Icons.event, Colors.purple, () => _addSpecialSchedule(barber['id'])),
+                          _buildActionChip('Break', Icons.free_breakfast, Colors.orange, () => _addBreak(barber['id'])),
+                          _buildActionChip('Schedule', Icons.add, Colors.green, () => _addSchedule(barber['id'])),
+                        ],
+                      ),
+                      const SizedBox(height: 20),
+                      
+                      // Special Schedules Section
+                      if (specialSchedules.isNotEmpty) ...[
+                        _buildSectionHeader('🌟 Special Schedules', Colors.purple, Icons.event),
+                        const SizedBox(height: 8),
+                        ...specialSchedules.map((ss) => _buildSpecialScheduleItem(ss)),
+                        const SizedBox(height: 16),
+                      ],
+                      
+                      // Special Breaks Section
+                      if (specialBreaks.isNotEmpty) ...[
+                        _buildSectionHeader('⏰ Special Breaks', Colors.teal, Icons.event_busy),
+                        const SizedBox(height: 8),
+                        ...specialBreaks.map((sb) => _buildSpecialBreakItem(sb)),
+                        const SizedBox(height: 16),
+                      ],
+                      
+                      // Regular Schedules Section
+                      if (schedules.isNotEmpty) ...[
+                        _buildSectionHeader('📅 Regular Schedules', Colors.green, Icons.schedule),
+                        const SizedBox(height: 8),
+                        ...schedules.map((schedule) => _buildScheduleItem(schedule)),
+                        const SizedBox(height: 16),
+                      ],
+                      
+                      // Regular Breaks Section
+                      if (breaks.isNotEmpty) ...[
+                        _buildSectionHeader('☕ Regular Breaks', Colors.orange, Icons.free_breakfast),
+                        const SizedBox(height: 8),
+                        ...breaks.map((breakItem) => _buildBreakItem(breakItem)),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildActionChip(String label, IconData icon, Color color, VoidCallback onPressed) {
+    return ActionChip(
+      avatar: Icon(icon, size: 18, color: color),
+      label: Text(label),
+      onPressed: onPressed,
+      backgroundColor: color.withValues(alpha: 0.1),
+      side: BorderSide(color: color.withValues(alpha: 0.3)),
     );
   }
 }
