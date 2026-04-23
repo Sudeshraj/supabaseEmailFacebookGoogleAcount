@@ -882,395 +882,491 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     return widgets;
   }
 
-  // ==================== ADD BARBER ====================
-  Future<void> _addBarber() async {
-    if (_selectedBarberId == null) {
-      if (mounted) _showSnackBar('Please select a barber', Colors.red);
-      return;
+// ==================== ADD BARBER ====================
+Future<void> _addBarber() async {
+  if (_selectedBarberId == null) {
+    if (mounted) _showSnackBar('Please select a barber', Colors.red);
+    return;
+  }
+  if (_selectedSalonId == null) {
+    if (mounted) _showSnackBar('Please select a salon', Colors.red);
+    return;
+  }
+  if (_totalSelectedItems == 0) {
+    if (mounted) {
+      _showSnackBar('Please select at least one service', Colors.red);
     }
-    if (_selectedSalonId == null) {
-      if (mounted) _showSnackBar('Please select a salon', Colors.red);
-      return;
-    }
-    if (_totalSelectedItems == 0) {
-      if (mounted) {
-        _showSnackBar('Please select at least one service', Colors.red);
-      }
-      return;
-    }
+    return;
+  }
 
-    final alreadyExists = await _isBarberAlreadyInSalon(
-      _selectedBarberId!,
-      int.parse(_selectedSalonId!),
-    );
+  final alreadyExists = await _isBarberAlreadyInSalon(
+    _selectedBarberId!,
+    int.parse(_selectedSalonId!),
+  );
 
-    if (alreadyExists) {
-      if (mounted) {
-        _showSnackBar(
-          'This barber is already added to the salon',
-          Colors.orange,
-        );
-      }
-      return;
+  if (alreadyExists) {
+    if (mounted) {
+      _showSnackBar(
+        'This barber is already added to the salon',
+        Colors.orange,
+      );
     }
-    if (!mounted) return;
-    final confirm = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: const BoxDecoration(
-                color: Color(0xFFFF6B8B),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.person_add,
-                color: Colors.white,
-                size: 24,
-              ),
+    return;
+  }
+  if (!mounted) return;
+  final confirm = await showDialog<bool>(
+    context: context,
+    barrierDismissible: false,
+    builder: (dialogContext) => AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      title: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: const BoxDecoration(
+              color: Color(0xFFFF6B8B),
+              shape: BoxShape.circle,
             ),
-            const SizedBox(width: 12),
-            const Text(
-              'Confirm Add Barber',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-          ],
-        ),
-        content: SizedBox(
-          width: _isWeb ? 450 : null,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFF6B8B).withValues(alpha: 0.05),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(
-                      Icons.person,
-                      color: Color(0xFFFF6B8B),
-                      size: 20,
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        'Add ${_getBarberName()} to ${_selectedSalonDetails?['name'] ?? 'salon'}?',
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.green.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.schedule, color: Colors.green, size: 20),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Auto Schedule',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 13,
-                            ),
-                          ),
-                          Text(
-                            'All days (Mon-Sun) will be set as working days with salon hours',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: Colors.grey[700],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 20),
-              const Text(
-                'Selected Services:',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-              ),
-              const SizedBox(height: 12),
-              Container(
-                constraints: const BoxConstraints(maxHeight: 300),
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: _buildSelectedServicesList(),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text(
-              'Cancel',
-              style: TextStyle(fontSize: 14, color: Colors.grey),
+            child: const Icon(
+              Icons.person_add,
+              color: Colors.white,
+              size: 24,
             ),
           ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFFF6B8B),
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
-            ),
-            child: const Text(
-              'Confirm Add',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
+          const SizedBox(width: 12),
+          const Text(
+            'Confirm Add Barber',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
           ),
         ],
       ),
-    );
+      content: SizedBox(
+        width: _isWeb ? 450 : null,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFF6B8B).withValues(alpha: 0.05),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.person,
+                    color: Color(0xFFFF6B8B),
+                    size: 20,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Add ${_getBarberName()} to ${_selectedSalonDetails?['name'] ?? 'salon'}?',
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.green.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.schedule, color: Colors.green, size: 20),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Auto Schedule',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
+                        ),
+                        Text(
+                          'All days (Mon-Sun) will be set as working days with salon hours',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.grey[700],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.orange.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.restaurant, color: Colors.orange, size: 20),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Lunch Break',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
+                        ),
+                        Text(
+                          'Lunch break will be set from 12:00 PM to 1:00 PM',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.grey[700],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+            const Text(
+              'Selected Services:',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              constraints: const BoxConstraints(maxHeight: 300),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: _buildSelectedServicesList(),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(dialogContext, false),
+          child: const Text(
+            'Cancel',
+            style: TextStyle(fontSize: 14, color: Colors.grey),
+          ),
+        ),
+        ElevatedButton(
+          onPressed: () => Navigator.pop(dialogContext, true),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFFFF6B8B),
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+          child: const Text(
+            'Confirm Add',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+          ),
+        ),
+      ],
+    ),
+  );
 
-    if (confirm != true) return;
+  if (confirm != true) return;
 
-    if (mounted) setState(() => _isLoading = true);
+  if (mounted) setState(() => _isLoading = true);
 
-    try {
-      final salonIdInt = int.parse(_selectedSalonId!);
+  try {
+    final salonIdInt = int.parse(_selectedSalonId!);
 
-      final salonResponse = await supabase
-          .from('salons')
-          .select('open_time, close_time')
-          .eq('id', salonIdInt)
-          .single();
+    final salonResponse = await supabase
+        .from('salons')
+        .select('open_time, close_time')
+        .eq('id', salonIdInt)
+        .single();
 
-      final openTime = salonResponse['open_time'] as String? ?? '09:00:00';
-      final closeTime = salonResponse['close_time'] as String? ?? '18:00:00';
+    final openTime = salonResponse['open_time'] as String? ?? '09:00:00';
+    final closeTime = salonResponse['close_time'] as String? ?? '18:00:00';
 
-      final List<int> weekDays = [1, 2, 3, 4, 5, 6, 7];
-      final Map<int, String> dayNames = {
-        1: 'Monday',
-        2: 'Tuesday',
-        3: 'Wednesday',
-        4: 'Thursday',
-        5: 'Friday',
-        6: 'Saturday',
-        7: 'Sunday',
-      };
+    final List<int> weekDays = [1, 2, 3, 4, 5, 6, 7];
+    final Map<int, String> dayNames = {
+      1: 'Monday',
+      2: 'Tuesday',
+      3: 'Wednesday',
+      4: 'Thursday',
+      5: 'Friday',
+      6: 'Saturday',
+      7: 'Sunday',
+    };
 
-      final salonBarberResponse = await supabase
+    final salonBarberResponse = await supabase
+        .from('salon_barbers')
+        .select('id')
+        .eq('salon_id', salonIdInt)
+        .eq('barber_id', _selectedBarberId!)
+        .maybeSingle();
+
+    int salonBarberId;
+
+    if (salonBarberResponse == null) {
+      final newSalonBarber = await supabase
           .from('salon_barbers')
+          .insert({
+            'salon_id': salonIdInt,
+            'barber_id': _selectedBarberId!,
+            'status': 'active',
+          })
           .select('id')
-          .eq('salon_id', salonIdInt)
-          .eq('barber_id', _selectedBarberId!)
-          .maybeSingle();
+          .single();
+      salonBarberId = newSalonBarber['id'];
+    } else {
+      salonBarberId = salonBarberResponse['id'];
+      await supabase
+          .from('salon_barbers')
+          .update({'status': 'active'})
+          .eq('id', salonBarberId);
+    }
 
-      int salonBarberId;
+    // ==================== CREATE WORK SCHEDULES ====================
+    int createdCount = 0, updatedCount = 0, errorCount = 0;
+    List<String> errorDays = [];
 
-      if (salonBarberResponse == null) {
-        final newSalonBarber = await supabase
-            .from('salon_barbers')
-            .insert({
-              'salon_id': salonIdInt,
-              'barber_id': _selectedBarberId!,
-              'status': 'active',
-            })
+    for (int dayOfWeek in weekDays) {
+      try {
+        final existingSchedule = await supabase
+            .from('barber_schedules')
             .select('id')
-            .single();
-        salonBarberId = newSalonBarber['id'];
-      } else {
-        salonBarberId = salonBarberResponse['id'];
-        await supabase
-            .from('salon_barbers')
-            .update({'status': 'active'})
-            .eq('id', salonBarberId);
-      }
-
-      int createdCount = 0, updatedCount = 0, errorCount = 0;
-      List<String> errorDays = [];
-
-      for (int dayOfWeek in weekDays) {
-        try {
-          final existingSchedule = await supabase
-              .from('barber_schedules')
-              .select('id')
-              .eq('barber_id', _selectedBarberId!)
-              .eq('salon_id', salonIdInt)
-              .eq('day_of_week', dayOfWeek)
-              .maybeSingle();
-
-          if (existingSchedule == null) {
-            await supabase.from('barber_schedules').insert({
-              'barber_id': _selectedBarberId!,
-              'salon_id': salonIdInt,
-              'day_of_week': dayOfWeek,
-              'start_time': openTime,
-              'end_time': closeTime,
-              'is_working': true,
-            });
-            createdCount++;
-          } else {
-            await supabase
-                .from('barber_schedules')
-                .update({
-                  'is_working': true,
-                  'start_time': openTime,
-                  'end_time': closeTime,
-                })
-                .eq('id', existingSchedule['id']);
-            updatedCount++;
-          }
-        } catch (e) {
-          errorCount++;
-          errorDays.add(dayNames[dayOfWeek] ?? 'Day $dayOfWeek');
-        }
-      }
-
-      final userRoleCheck = await supabase
-          .from('user_roles')
-          .select()
-          .eq('user_id', _selectedBarberId!);
-      if (userRoleCheck.isEmpty) {
-        final roleResponse = await supabase
-            .from('roles')
-            .select('id')
-            .eq('name', 'barber')
+            .eq('barber_id', _selectedBarberId!)
+            .eq('salon_id', salonIdInt)
+            .eq('day_of_week', dayOfWeek)
             .maybeSingle();
-        if (roleResponse != null) {
-          await supabase.from('user_roles').insert({
-            'user_id': _selectedBarberId!,
-            'role_id': roleResponse['id'],
+
+        if (existingSchedule == null) {
+          await supabase.from('barber_schedules').insert({
+            'barber_id': _selectedBarberId!,
+            'salon_id': salonIdInt,
+            'day_of_week': dayOfWeek,
+            'start_time': openTime,
+            'end_time': closeTime,
+            'is_working': true,
           });
+          createdCount++;
+        } else {
+          await supabase
+              .from('barber_schedules')
+              .update({
+                'is_working': true,
+                'start_time': openTime,
+                'end_time': closeTime,
+              })
+              .eq('id', existingSchedule['id']);
+          updatedCount++;
+        }
+      } catch (e) {
+        errorCount++;
+        errorDays.add(dayNames[dayOfWeek] ?? 'Day $dayOfWeek');
+      }
+    }
+
+    // ==================== CREATE LUNCH BREAKS ====================
+    // Lunch break: 12:00 to 13:00 for all days (Monday to Sunday)
+    int lunchBreakCreatedCount = 0;
+    int lunchBreakUpdatedCount = 0;
+    List<String> lunchBreakErrorDays = [];
+
+    for (int dayOfWeek in weekDays) {
+      try {
+        // Check if lunch break already exists for this day
+        final existingBreak = await supabase
+            .from('barber_breaks')
+            .select('id')
+            .eq('barber_id', _selectedBarberId!)
+            .eq('salon_id', salonIdInt)
+            .eq('day_of_week', dayOfWeek)
+            .eq('break_type', 'lunch')
+            .maybeSingle();
+
+        if (existingBreak == null) {
+          // Insert new lunch break
+          await supabase.from('barber_breaks').insert({
+            'barber_id': _selectedBarberId!,
+            'salon_id': salonIdInt,
+            'day_of_week': dayOfWeek,
+            'start_time': '12:00:00',
+            'end_time': '13:00:00',
+            'break_type': 'lunch',
+          });
+          lunchBreakCreatedCount++;
+        } else {
+          // Update existing lunch break
+          await supabase
+              .from('barber_breaks')
+              .update({
+                'start_time': '12:00:00',
+                'end_time': '13:00:00',
+                'updated_at': DateTime.now().toIso8601String(),
+              })
+              .eq('id', existingBreak['id']);
+          lunchBreakUpdatedCount++;
+        }
+      } catch (e) {
+        lunchBreakErrorDays.add(dayNames[dayOfWeek] ?? 'Day $dayOfWeek');
+        debugPrint('❌ Error creating lunch break for ${dayNames[dayOfWeek]}: $e');
+      }
+    }
+
+    // ==================== ENSURE BARBER ROLE ====================
+    final userRoleCheck = await supabase
+        .from('user_roles')
+        .select()
+        .eq('user_id', _selectedBarberId!);
+    if (userRoleCheck.isEmpty) {
+      final roleResponse = await supabase
+          .from('roles')
+          .select('id')
+          .eq('name', 'barber')
+          .maybeSingle();
+      if (roleResponse != null) {
+        await supabase.from('user_roles').insert({
+          'user_id': _selectedBarberId!,
+          'role_id': roleResponse['id'],
+        });
+      }
+    }
+
+    // ==================== ADD SELECTED SERVICES ====================
+    final selectedServicesList = [];
+    int servicesAddedCount = 0, variantsAddedCount = 0;
+
+    for (var entry in _selectedItems.entries) {
+      final serviceId = int.parse(entry.key);
+      final variantIds = entry.value;
+
+      Map<String, dynamic>? service;
+      for (var s in _services) {
+        if (s['id'] == entry.key) {
+          service = s;
+          break;
         }
       }
+      if (service == null) continue;
 
-      final selectedServicesList = [];
-      int servicesAddedCount = 0, variantsAddedCount = 0;
-
-      for (var entry in _selectedItems.entries) {
-        final serviceId = int.parse(entry.key);
-        final variantIds = entry.value;
-
-        Map<String, dynamic>? service;
-        for (var s in _services) {
-          if (s['id'] == entry.key) {
-            service = s;
-            break;
-          }
+      if (variantIds.isEmpty) {
+        selectedServicesList.add({
+          'service_id': serviceId,
+          'service_name': service['name'] ?? 'Unknown',
+          'type': 'full_service',
+        });
+        final existing = await supabase
+            .from('barber_services')
+            .select()
+            .eq('salon_barber_id', salonBarberId)
+            .eq('service_id', serviceId)
+            .filter('variant_id', 'is', null);
+        if (existing.isEmpty) {
+          await supabase.from('barber_services').insert({
+            'salon_barber_id': salonBarberId,
+            'service_id': serviceId,
+            'variant_id': null,
+          });
+          servicesAddedCount++;
         }
-        if (service == null) continue;
-
-        if (variantIds.isEmpty) {
+      } else {
+        for (var variantId in variantIds) {
+          final variant = _findVariantById(entry.key, variantId);
           selectedServicesList.add({
             'service_id': serviceId,
             'service_name': service['name'] ?? 'Unknown',
-            'type': 'full_service',
+            'variant_id': variantId,
+            'variant_details': variant != null
+                ? (variant['display_text'] ?? 'Variant')
+                : 'Variant',
+            'type': 'variant',
           });
           final existing = await supabase
               .from('barber_services')
               .select()
               .eq('salon_barber_id', salonBarberId)
-              .eq('service_id', serviceId)
-              .filter('variant_id', 'is', null);
+              .eq('variant_id', variantId);
           if (existing.isEmpty) {
             await supabase.from('barber_services').insert({
               'salon_barber_id': salonBarberId,
               'service_id': serviceId,
-              'variant_id': null,
-            });
-            servicesAddedCount++;
-          }
-        } else {
-          for (var variantId in variantIds) {
-            final variant = _findVariantById(entry.key, variantId);
-            selectedServicesList.add({
-              'service_id': serviceId,
-              'service_name': service['name'] ?? 'Unknown',
               'variant_id': variantId,
-              'variant_details': variant != null
-                  ? (variant['display_text'] ?? 'Variant')
-                  : 'Variant',
-              'type': 'variant',
             });
-            final existing = await supabase
-                .from('barber_services')
-                .select()
-                .eq('salon_barber_id', salonBarberId)
-                .eq('variant_id', variantId);
-            if (existing.isEmpty) {
-              await supabase.from('barber_services').insert({
-                'salon_barber_id': salonBarberId,
-                'service_id': serviceId,
-                'variant_id': variantId,
-              });
-              variantsAddedCount++;
-            }
+            variantsAddedCount++;
           }
         }
       }
-
-      await _logOwnerActivity(
-        actionType: 'add_barber',
-        targetType: 'barber',
-        targetId: _selectedBarberId,
-        details: {
-          'barber_name': _getBarberName(),
-          'barber_id': _selectedBarberId,
-          'salon_id': salonIdInt,
-          'salon_name': _selectedSalonDetails?['name'],
-          'selected_services_count': _totalSelectedItems,
-          'selected_services': selectedServicesList,
-          'schedules_created': createdCount,
-          'schedules_updated': updatedCount,
-          'services_added': servicesAddedCount,
-          'variants_added': variantsAddedCount,
-        },
-      );
-
-      if (mounted) {
-        String message =
-            'Barber added successfully!\n• $createdCount schedules created\n• $servicesAddedCount services, $variantsAddedCount variants added';
-        _showSnackBar(message, errorCount > 0 ? Colors.orange : Colors.green);
-
-        setState(() {
-          _selectedBarberId = null;
-          _selectedItems.clear();
-          _expandedServices.clear();
-          _searchController.clear();
-          _searchResults = [];
-          _isSearching = false;
-          _selectedCategoryTab = null;
-        });
-      }
-    } catch (e) {
-      debugPrint('❌ Error adding barber: $e');
-      if (mounted) _showSnackBar('Error: ${e.toString()}', Colors.red);
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
     }
+
+    // ==================== LOG ACTIVITY ====================
+    await _logOwnerActivity(
+      actionType: 'add_barber',
+      targetType: 'barber',
+      targetId: _selectedBarberId,
+      details: {
+        'barber_name': _getBarberName(),
+        'barber_id': _selectedBarberId,
+        'salon_id': salonIdInt,
+        'salon_name': _selectedSalonDetails?['name'],
+        'selected_services_count': _totalSelectedItems,
+        'selected_services': selectedServicesList,
+        'schedules_created': createdCount,
+        'schedules_updated': updatedCount,
+        'lunch_breaks_created': lunchBreakCreatedCount,
+        'lunch_breaks_updated': lunchBreakUpdatedCount,
+        'services_added': servicesAddedCount,
+        'variants_added': variantsAddedCount,
+      },
+    );
+
+    if (mounted) {
+      String message = 
+          'Barber added successfully!\n'
+          '• $createdCount schedules created\n'
+          '• $lunchBreakCreatedCount lunch breaks added (12:00-13:00)\n'
+          '• $servicesAddedCount services, $variantsAddedCount variants added';
+      
+      if (lunchBreakErrorDays.isNotEmpty) {
+        message += '\n⚠️ Lunch break failed for: ${lunchBreakErrorDays.join(', ')}';
+      }
+      
+      _showSnackBar(message, errorCount > 0 || lunchBreakErrorDays.isNotEmpty ? Colors.orange : Colors.green);
+
+      setState(() {
+        _selectedBarberId = null;
+        _selectedItems.clear();
+        _expandedServices.clear();
+        _searchController.clear();
+        _searchResults = [];
+        _isSearching = false;
+        _selectedCategoryTab = null;
+      });
+    }
+  } catch (e) {
+    debugPrint('❌ Error adding barber: $e');
+    if (mounted) _showSnackBar('Error: ${e.toString()}', Colors.red);
+  } finally {
+    if (mounted) setState(() => _isLoading = false);
   }
+}
 
   void _showSnackBar(String message, Color color) {
     if (!mounted) return;

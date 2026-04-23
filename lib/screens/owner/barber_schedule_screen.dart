@@ -19,6 +19,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   List<Map<String, dynamic>> _barbers = [];
   List<Map<String, dynamic>> _schedules = [];
   Map<String, List<Map<String, dynamic>>> _groupedSchedules = {};
+  Map<String, List<Map<String, dynamic>>> _groupedBreaks = {};
 
   // Salon default times
   TimeOfDay? _salonOpenTime;
@@ -34,6 +35,13 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     6: 'Saturday',
     7: 'Sunday',
   };
+
+  // Break types
+  final List<Map<String, dynamic>> _breakTypes = [
+    {'id': 'lunch', 'name': '🍽️ Lunch Break', 'icon': Icons.lunch_dining},
+    {'id': 'tea', 'name': '☕ Tea Break', 'icon': Icons.coffee},
+    {'id': 'custom', 'name': '📝 Custom Break', 'icon': Icons.free_breakfast},
+  ];
 
   @override
   void initState() {
@@ -144,6 +152,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
       _barbers = barbersList;
 
       if (_barbers.isNotEmpty) {
+        // Load schedules
         final schedulesResponse = await supabase
             .from('barber_schedules')
             .select()
@@ -160,10 +169,26 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
           }
           _groupedSchedules[barberId]!.add(schedule);
         }
+
+        // Load breaks
+        final breaksResponse = await supabase
+            .from('barber_breaks')
+            .select()
+            .eq('salon_id', salonIdInt)
+            .order('day_of_week');
+
+        _groupedBreaks = {};
+        for (var breakItem in breaksResponse) {
+          final barberId = breakItem['barber_id'] as String;
+          if (!_groupedBreaks.containsKey(barberId)) {
+            _groupedBreaks[barberId] = [];
+          }
+          _groupedBreaks[barberId]!.add(breakItem);
+        }
       }
 
       debugPrint(
-        '✅ Loaded ${_barbers.length} barbers, ${_schedules.length} schedules',
+        '✅ Loaded ${_barbers.length} barbers, ${_schedules.length} schedules, ${_groupedBreaks.values.expand((i) => i).length} breaks',
       );
     } catch (e) {
       debugPrint('❌ Error loading schedules: $e');
@@ -206,6 +231,34 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     }
   }
 
+  Future<void> _addBreak(String barberId) async {
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => _AddBreakDialog(
+        barberId: barberId,
+        salonId: widget.salonId!,
+        existingBreaks: _groupedBreaks[barberId] ?? [],
+        breakTypes: _breakTypes,
+        defaultOpenTime: _salonOpenTime,
+        defaultCloseTime: _salonCloseTime,
+      ),
+    );
+
+    if (result != null && result['success'] == true) {
+      await _loadData();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Break added successfully'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> _editSchedule(Map<String, dynamic> schedule) async {
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
@@ -223,6 +276,32 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Schedule updated successfully'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _editBreak(Map<String, dynamic> breakItem) async {
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => _EditBreakDialog(
+        breakItem: breakItem,
+        breakTypes: _breakTypes,
+        defaultOpenTime: _salonOpenTime,
+        defaultCloseTime: _salonCloseTime,
+      ),
+    );
+
+    if (result != null && result['success'] == true) {
+      await _loadData();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Break updated successfully'),
             backgroundColor: Colors.green,
             duration: Duration(seconds: 2),
           ),
@@ -334,6 +413,54 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
         }
       } catch (e) {
         debugPrint('❌ Error deleting schedule: $e');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          );
+          setState(() => _isLoading = false);
+        }
+      }
+    }
+  }
+
+  Future<void> _deleteBreak(int breakId) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Delete Break'),
+        content: const Text('Are you sure you want to delete this break?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      setState(() => _isLoading = true);
+
+      try {
+        await supabase.from('barber_breaks').delete().eq('id', breakId);
+        await _loadData();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Break deleted'),
+              backgroundColor: Colors.orange,
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      } catch (e) {
+        debugPrint('❌ Error deleting break: $e');
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
@@ -461,10 +588,10 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
                   const SizedBox(width: 24),
                   Container(width: 1, height: 30, color: Colors.grey[300]),
                   const SizedBox(width: 24),
-                  Icon(Icons.toggle_on, color: Colors.blue),
+                  Icon(Icons.free_breakfast, color: Colors.orange),
                   const SizedBox(width: 12),
                   Text(
-                    'Working Days: ${_schedules.where((s) => s['is_working'] == true).length}',
+                    'Total Breaks: ${_groupedBreaks.values.expand((i) => i).length}',
                     style: const TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
@@ -481,7 +608,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
             physics: const NeverScrollableScrollPhysics(),
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: screenWidth > 1200 ? 3 : 2,
-              childAspectRatio: 1.2,
+              childAspectRatio: 1.4,
               crossAxisSpacing: 16,
               mainAxisSpacing: 16,
             ),
@@ -489,7 +616,8 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
             itemBuilder: (context, index) {
               final barber = _barbers[index];
               final barberSchedules = _groupedSchedules[barber['id']] ?? [];
-              return _buildBarberCard(barber, barberSchedules, true);
+              final barberBreaks = _groupedBreaks[barber['id']] ?? [];
+              return _buildBarberCard(barber, barberSchedules, barberBreaks, true);
             },
           ),
         ],
@@ -504,7 +632,8 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
       itemBuilder: (context, index) {
         final barber = _barbers[index];
         final barberSchedules = _groupedSchedules[barber['id']] ?? [];
-        return _buildBarberCard(barber, barberSchedules, false);
+        final barberBreaks = _groupedBreaks[barber['id']] ?? [];
+        return _buildBarberCard(barber, barberSchedules, barberBreaks, false);
       },
     );
   }
@@ -512,20 +641,22 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   Widget _buildBarberCard(
     Map<String, dynamic> barber,
     List<Map<String, dynamic>> schedules,
+    List<Map<String, dynamic>> breaks,
     bool isWeb,
   ) {
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: isWeb
-          ? _buildWebBarberCard(barber, schedules)
-          : _buildMobileBarberCard(barber, schedules),
+          ? _buildWebBarberCard(barber, schedules, breaks)
+          : _buildMobileBarberCard(barber, schedules, breaks),
     );
   }
 
   Widget _buildWebBarberCard(
     Map<String, dynamic> barber,
     List<Map<String, dynamic>> schedules,
+    List<Map<String, dynamic>> breaks,
   ) {
     return Padding(
       padding: const EdgeInsets.all(12),
@@ -570,38 +701,56 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
                   ],
                 ),
               ),
-              IconButton(
-                icon: const Icon(Icons.add_circle, color: Colors.green),
-                onPressed: () => _addSchedule(barber['id']),
-                tooltip: 'Add Schedule',
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
+              Row(
+                children: [
+                  Tooltip(
+                    message: 'Add Break',
+                    child: IconButton(
+                      icon: const Icon(Icons.free_breakfast, color: Colors.orange),
+                      onPressed: () => _addBreak(barber['id']),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Tooltip(
+                    message: 'Add Schedule',
+                    child: IconButton(
+                      icon: const Icon(Icons.add_circle, color: Colors.green),
+                      onPressed: () => _addSchedule(barber['id']),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
           const Divider(height: 16),
           Expanded(
-            child: schedules.isEmpty
-                ? Center(
-                    child: Text(
-                      'No schedules',
-                      style: TextStyle(color: Colors.grey[400]),
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Schedules Section
+                  if (schedules.isNotEmpty) ...[
+                    const Text(
+                      'Working Hours',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                        color: Colors.grey,
+                      ),
                     ),
-                  )
-                : ListView.separated(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    itemCount: schedules.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 4),
-                    itemBuilder: (context, idx) {
-                      final schedule = schedules[idx];
-                      final dayName =
-                          _dayNames[schedule['day_of_week']] ?? 'Unknown';
+                    const SizedBox(height: 4),
+                    ...schedules.map((schedule) {
+                      final dayName = _dayNames[schedule['day_of_week']] ?? 'Unknown';
                       final startTime = _formatTime(schedule['start_time']);
                       final endTime = _formatTime(schedule['end_time']);
                       final isWorking = schedule['is_working'] ?? true;
 
                       return Container(
+                        margin: const EdgeInsets.only(bottom: 4),
                         padding: const EdgeInsets.symmetric(
                           horizontal: 8,
                           vertical: 4,
@@ -662,7 +811,6 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
                                 ),
                               ),
                             ),
-                            // Working Day Toggle Switch (FIXED)
                             SizedBox(
                               width: 40,
                               height: 30,
@@ -698,8 +846,114 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
                           ],
                         ),
                       );
-                    },
-                  ),
+                    }),
+                  ],
+
+                  const SizedBox(height: 8),
+
+                  // Breaks Section
+                  if (breaks.isNotEmpty) ...[
+                    const Text(
+                      'Breaks',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                        color: Colors.grey,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    ...breaks.map((breakItem) {
+                      final dayName = _dayNames[breakItem['day_of_week']] ?? 'Unknown';
+                      final startTime = _formatTime(breakItem['start_time']);
+                      final endTime = _formatTime(breakItem['end_time']);
+                      final breakType = breakItem['break_type'] ?? 'custom';
+                      final breakTypeData = _breakTypes.firstWhere(
+                        (b) => b['id'] == breakType,
+                        orElse: () => _breakTypes.last,
+                      );
+
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 4),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.orange.withValues(alpha: 0.05),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: Colors.orange.withValues(alpha: 0.3),
+                            width: 0.5,
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              flex: 2,
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    breakTypeData['icon'],
+                                    size: 14,
+                                    color: Colors.orange,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    dayName.substring(0, 3),
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Expanded(
+                              flex: 3,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '$startTime - $endTime',
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.grey,
+                                    ),
+                                  ),
+                                  Text(
+                                    breakTypeData['name'],
+                                    style: const TextStyle(
+                                      fontSize: 10,
+                                      color: Colors.orange,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.edit, size: 14),
+                              onPressed: () => _editBreak(breakItem),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                            ),
+                            IconButton(
+                              icon: const Icon(
+                                Icons.delete,
+                                size: 14,
+                                color: Colors.red,
+                              ),
+                              onPressed: () => _deleteBreak(breakItem['id']),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
+                  ],
+                ],
+              ),
+            ),
           ),
         ],
       ),
@@ -709,6 +963,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   Widget _buildMobileBarberCard(
     Map<String, dynamic> barber,
     List<Map<String, dynamic>> schedules,
+    List<Map<String, dynamic>> breaks,
   ) {
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -743,6 +998,11 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               IconButton(
+                icon: const Icon(Icons.free_breakfast, color: Colors.orange),
+                onPressed: () => _addBreak(barber['id']),
+                tooltip: 'Add Break',
+              ),
+              IconButton(
                 icon: const Icon(Icons.add, color: Colors.green),
                 onPressed: () => _addSchedule(barber['id']),
                 tooltip: 'Add Schedule',
@@ -750,200 +1010,731 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
               const Icon(Icons.keyboard_arrow_down),
             ],
           ),
-          children: schedules.isEmpty
-              ? [
-                  const Padding(
-                    padding: EdgeInsets.all(16),
-                    child: Center(
-                      child: Text(
-                        'No schedules set',
-                        style: TextStyle(color: Colors.grey),
-                      ),
+          children: [
+            if (schedules.isEmpty && breaks.isEmpty)
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Center(
+                  child: Text(
+                    'No schedules or breaks set',
+                    style: TextStyle(color: Colors.grey),
+                  ),
+                ),
+              ),
+            if (schedules.isNotEmpty) ...[
+              const Padding(
+                padding: EdgeInsets.only(left: 16, top: 8),
+                child: Text(
+                  'Working Hours',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                ),
+              ),
+              ...schedules.map((schedule) {
+                final dayName = _dayNames[schedule['day_of_week']] ?? 'Unknown';
+                final startTime = _formatTime(schedule['start_time']);
+                final endTime = _formatTime(schedule['end_time']);
+                final isWorking = schedule['is_working'] ?? true;
+
+                return Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: isWorking
+                        ? Colors.green.withValues(alpha: 0.05)
+                        : Colors.red.withValues(alpha: 0.05),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: isWorking
+                          ? Colors.green.withValues(alpha: 0.3)
+                          : Colors.red.withValues(alpha: 0.3),
+                      width: 0.5,
                     ),
                   ),
-                ]
-              : schedules.map((schedule) {
-                  final dayName =
-                      _dayNames[schedule['day_of_week']] ?? 'Unknown';
-                  final startTime = _formatTime(schedule['start_time']);
-                  final endTime = _formatTime(schedule['end_time']);
-                  final isWorking = schedule['is_working'] ?? true;
-
-                  return Container(
-                    margin: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: isWorking
-                          ? Colors.green.withValues(alpha: 0.05)
-                          : Colors.red.withValues(alpha: 0.05),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: isWorking
-                            ? Colors.green.withValues(alpha: 0.3)
-                            : Colors.red.withValues(alpha: 0.3),
-                        width: 0.5,
-                      ),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        vertical: 8,
-                        horizontal: 12,
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Day and Status Row
-                          Row(
-                            children: [
-                              Container(
-                                width: 36,
-                                height: 36,
-                                decoration: BoxDecoration(
-                                  color: isWorking
-                                      ? Colors.green.withValues(alpha: 0.1)
-                                      : Colors.red.withValues(alpha: 0.1),
-                                  shape: BoxShape.circle,
-                                ),
-                                child: Icon(
-                                  isWorking ? Icons.work : Icons.work_off,
-                                  color: isWorking ? Colors.green : Colors.red,
-                                  size: 18,
-                                ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              width: 36,
+                              height: 36,
+                              decoration: BoxDecoration(
+                                color: isWorking
+                                    ? Colors.green.withValues(alpha: 0.1)
+                                    : Colors.red.withValues(alpha: 0.1),
+                                shape: BoxShape.circle,
                               ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        Text(
-                                          dayName,
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.w600,
-                                            fontSize: 14,
-                                          ),
+                              child: Icon(
+                                isWorking ? Icons.work : Icons.work_off,
+                                color: isWorking ? Colors.green : Colors.red,
+                                size: 18,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Text(
+                                        dayName,
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w600,
+                                          fontSize: 14,
                                         ),
-                                        const SizedBox(width: 8),
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 8,
-                                            vertical: 2,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: isWorking
-                                                ? Colors.green
-                                                : Colors.red,
-                                            borderRadius: BorderRadius.circular(
-                                              12,
-                                            ),
-                                          ),
-                                          child: Text(
-                                            isWorking ? 'Working' : 'Off',
-                                            style: const TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 10,
-                                              fontWeight: FontWeight.bold,
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      '$startTime - $endTime',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: isWorking
-                                            ? Colors.grey[700]
-                                            : Colors.grey[500],
-                                        decoration: isWorking
-                                            ? null
-                                            : TextDecoration.lineThrough,
                                       ),
+                                      const SizedBox(width: 8),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 8,
+                                          vertical: 2,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: isWorking ? Colors.green : Colors.red,
+                                          borderRadius: BorderRadius.circular(12),
+                                        ),
+                                        child: Text(
+                                          isWorking ? 'Working' : 'Off',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    '$startTime - $endTime',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: isWorking ? Colors.grey[700] : Colors.grey[500],
+                                      decoration: isWorking ? null : TextDecoration.lineThrough,
                                     ),
-                                  ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                            SizedBox(
+                              width: 50,
+                              height: 40,
+                              child: Transform.scale(
+                                scale: 0.7,
+                                child: Switch(
+                                  value: isWorking,
+                                  onChanged: (_) => _toggleWorkingStatus(schedule),
+                                  activeThumbColor: Colors.green,
+                                  inactiveThumbColor: Colors.red,
+                                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                                 ),
                               ),
-                              // Working Day Toggle Switch
-                              SizedBox(
-                                width: 50,
-                                height: 40,
-                                child: Transform.scale(
-                                  scale: 0.7,
-                                  child: Switch(
-                                    value: isWorking,
-                                    onChanged: (_) =>
-                                        _toggleWorkingStatus(schedule),
-                                    activeThumbColor: Colors.green,
-                                    inactiveThumbColor: Colors.red,
-                                    materialTapTargetSize:
-                                        MaterialTapTargetSize.shrinkWrap,
-                                  ),
-                                ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            TextButton.icon(
+                              onPressed: () => _editSchedule(schedule),
+                              icon: const Icon(Icons.edit, size: 16),
+                              label: const Text('Edit', style: TextStyle(fontSize: 12)),
+                              style: TextButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                minimumSize: Size.zero,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                               ),
-                            ],
-                          ),
-                          // Action Buttons Row
-                          const SizedBox(height: 8),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.end,
-                            children: [
-                              TextButton.icon(
-                                onPressed: () => _editSchedule(schedule),
-                                icon: const Icon(Icons.edit, size: 16),
-                                label: const Text(
-                                  'Edit',
-                                  style: TextStyle(fontSize: 12),
-                                ),
-                                style: TextButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 4,
-                                  ),
-                                  minimumSize: Size.zero,
-                                  tapTargetSize:
-                                      MaterialTapTargetSize.shrinkWrap,
-                                ),
+                            ),
+                            const SizedBox(width: 8),
+                            TextButton.icon(
+                              onPressed: () => _deleteSchedule(schedule['id']),
+                              icon: const Icon(Icons.delete, size: 16, color: Colors.red),
+                              label: const Text('Delete', style: TextStyle(fontSize: 12, color: Colors.red)),
+                              style: TextButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                minimumSize: Size.zero,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                               ),
-                              const SizedBox(width: 8),
-                              TextButton.icon(
-                                onPressed: () =>
-                                    _deleteSchedule(schedule['id']),
-                                icon: const Icon(
-                                  Icons.delete,
-                                  size: 16,
-                                  color: Colors.red,
-                                ),
-                                label: const Text(
-                                  'Delete',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.red,
-                                  ),
-                                ),
-                                style: TextButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 4,
-                                  ),
-                                  minimumSize: Size.zero,
-                                  tapTargetSize:
-                                      MaterialTapTargetSize.shrinkWrap,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
-                  );
-                }).toList(),
+                  ),
+                );
+              }),
+            ],
+            if (breaks.isNotEmpty) ...[
+              const Padding(
+                padding: EdgeInsets.only(left: 16, top: 8),
+                child: Text(
+                  'Breaks',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                ),
+              ),
+              ...breaks.map((breakItem) {
+                final dayName = _dayNames[breakItem['day_of_week']] ?? 'Unknown';
+                final startTime = _formatTime(breakItem['start_time']);
+                final endTime = _formatTime(breakItem['end_time']);
+                final breakType = breakItem['break_type'] ?? 'custom';
+                final breakTypeData = _breakTypes.firstWhere(
+                  (b) => b['id'] == breakType,
+                  orElse: () => _breakTypes.last,
+                );
+
+                return Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withValues(alpha: 0.05),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.orange.withValues(alpha: 0.3), width: 0.5),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              width: 36,
+                              height: 36,
+                              decoration: BoxDecoration(
+                                color: Colors.orange.withValues(alpha: 0.1),
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(breakTypeData['icon'], color: Colors.orange, size: 18),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    dayName,
+                                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    '$startTime - $endTime',
+                                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                                  ),
+                                  Text(
+                                    breakTypeData['name'],
+                                    style: const TextStyle(fontSize: 10, color: Colors.orange),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            TextButton.icon(
+                              onPressed: () => _editBreak(breakItem),
+                              icon: const Icon(Icons.edit, size: 16),
+                              label: const Text('Edit', style: TextStyle(fontSize: 12)),
+                              style: TextButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                minimumSize: Size.zero,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            TextButton.icon(
+                              onPressed: () => _deleteBreak(breakItem['id']),
+                              icon: const Icon(Icons.delete, size: 16, color: Colors.red),
+                              label: const Text('Delete', style: TextStyle(fontSize: 12, color: Colors.red)),
+                              style: TextButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                minimumSize: Size.zero,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }),
+            ],
+          ],
         ),
       ),
     );
+  }
+}
+
+// ==================== ADD BREAK DIALOG ====================
+class _AddBreakDialog extends StatefulWidget {
+  final String barberId;
+  final String salonId;
+  final List<Map<String, dynamic>> existingBreaks;
+  final List<Map<String, dynamic>> breakTypes;
+  final TimeOfDay? defaultOpenTime;
+  final TimeOfDay? defaultCloseTime;
+
+  const _AddBreakDialog({
+    required this.barberId,
+    required this.salonId,
+    required this.existingBreaks,
+    required this.breakTypes,
+    this.defaultOpenTime,
+    this.defaultCloseTime,
+  });
+
+  @override
+  State<_AddBreakDialog> createState() => _AddBreakDialogState();
+}
+
+class _AddBreakDialogState extends State<_AddBreakDialog> {
+  final supabase = Supabase.instance.client;
+
+  int? _selectedDay;
+  TimeOfDay? _startTime;
+  TimeOfDay? _endTime;
+  String _selectedBreakType = 'lunch';
+  bool _isLoading = false;
+
+  final List<Map<String, dynamic>> _days = const [
+    {'id': 1, 'name': 'Monday'},
+    {'id': 2, 'name': 'Tuesday'},
+    {'id': 3, 'name': 'Wednesday'},
+    {'id': 4, 'name': 'Thursday'},
+    {'id': 5, 'name': 'Friday'},
+    {'id': 6, 'name': 'Saturday'},
+    {'id': 7, 'name': 'Sunday'},
+  ];
+
+  List<int> get _availableDays {
+    final existingDays = widget.existingBreaks
+        .where((b) => b['day_of_week'] != null)
+        .map((b) => b['day_of_week'] as int)
+        .toSet();
+    return _days
+        .where((d) => !existingDays.contains(d['id']))
+        .map((d) => d['id'] as int)
+        .toList();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _startTime = widget.defaultOpenTime;
+    _endTime = widget.defaultCloseTime;
+    
+    // Default break times
+    if (_startTime != null && _endTime != null) {
+      final lunchHour = _startTime!.hour + 4;
+      if (lunchHour < _endTime!.hour) {
+        _startTime = TimeOfDay(hour: lunchHour, minute: 0);
+        _endTime = TimeOfDay(hour: lunchHour + 1, minute: 0);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isWeb = screenWidth > 800;
+
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Container(
+        width: isWeb ? 500 : screenWidth * 0.9,
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.8,
+        ),
+        padding: EdgeInsets.all(isWeb ? 24 : 16),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Add Break',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 20),
+
+              // Break Type Selection
+              const Text(
+                'Break Type',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: widget.breakTypes.map((type) {
+                  final isSelected = _selectedBreakType == type['id'];
+                  return FilterChip(
+                    label: Text(type['name']),
+                    selected: isSelected,
+                    onSelected: (selected) {
+                      if (selected) {
+                        setState(() => _selectedBreakType = type['id']);
+                      }
+                    },
+                    avatar: Icon(type['icon'], size: 18),
+                    backgroundColor: Colors.grey[100],
+                    selectedColor: const Color(0xFFFF6B8B).withValues(alpha: 0.2),
+                    checkmarkColor: const Color(0xFFFF6B8B),
+                  );
+                }).toList(),
+              ),
+
+              const SizedBox(height: 16),
+
+              // Day Selection
+              const Text(
+                'Select Day',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: _days.map((day) {
+                  final isSelected = _selectedDay == day['id'];
+                  final isAvailable = _availableDays.contains(day['id']);
+                  return FilterChip(
+                    label: Text(day['name']),
+                    selected: isSelected,
+                    onSelected: isAvailable
+                        ? (selected) => setState(() => _selectedDay = day['id'])
+                        : null,
+                    backgroundColor: Colors.grey[100],
+                    selectedColor: const Color(0xFFFF6B8B).withValues(alpha: 0.2),
+                    checkmarkColor: const Color(0xFFFF6B8B),
+                    avatar: isAvailable ? null : const Icon(Icons.lock, size: 16),
+                  );
+                }).toList(),
+              ),
+
+              if (_availableDays.isEmpty && _selectedDay == null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    'All days already have breaks!',
+                    style: TextStyle(color: Colors.orange[700], fontSize: 12),
+                  ),
+                ),
+
+              const SizedBox(height: 16),
+
+              // Time Selection
+              Row(
+                children: [
+                  Expanded(
+                    child: _TimePickerField(
+                      label: 'Start Time',
+                      initialTime: _startTime,
+                      isRequired: true,
+                      onTimeSelected: (time) => setState(() => _startTime = time),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _TimePickerField(
+                      label: 'End Time',
+                      initialTime: _endTime,
+                      isRequired: true,
+                      onTimeSelected: (time) => setState(() => _endTime = time),
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 24),
+
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 12),
+                  ElevatedButton(
+                    onPressed:
+                        _selectedDay != null &&
+                            _startTime != null &&
+                            _endTime != null &&
+                            !_isLoading
+                        ? _saveBreak
+                        : null,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFFF6B8B),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 12,
+                      ),
+                    ),
+                    child: _isLoading
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : const Text(
+                            'Add Break',
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _saveBreak() async {
+    setState(() => _isLoading = true);
+
+    try {
+      final salonIdInt = int.parse(widget.salonId);
+      final startTimeString =
+          '${_startTime!.hour.toString().padLeft(2, '0')}:${_startTime!.minute.toString().padLeft(2, '0')}:00';
+      final endTimeString =
+          '${_endTime!.hour.toString().padLeft(2, '0')}:${_endTime!.minute.toString().padLeft(2, '0')}:00';
+
+      await supabase.from('barber_breaks').insert({
+        'barber_id': widget.barberId,
+        'salon_id': salonIdInt,
+        'day_of_week': _selectedDay,
+        'start_time': startTimeString,
+        'end_time': endTimeString,
+        'break_type': _selectedBreakType,
+      });
+
+      if (mounted) Navigator.pop(context, {'success': true});
+    } catch (e) {
+      debugPrint('❌ Error saving break: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+}
+
+// ==================== EDIT BREAK DIALOG ====================
+class _EditBreakDialog extends StatefulWidget {
+  final Map<String, dynamic> breakItem;
+  final List<Map<String, dynamic>> breakTypes;
+  final TimeOfDay? defaultOpenTime;
+  final TimeOfDay? defaultCloseTime;
+
+  const _EditBreakDialog({
+    required this.breakItem,
+    required this.breakTypes,
+    this.defaultOpenTime,
+    this.defaultCloseTime,
+  });
+
+  @override
+  State<_EditBreakDialog> createState() => _EditBreakDialogState();
+}
+
+class _EditBreakDialogState extends State<_EditBreakDialog> {
+  late TimeOfDay _startTime;
+  late TimeOfDay _endTime;
+  late String _selectedBreakType;
+  bool _isLoading = false;
+  final supabase = Supabase.instance.client;
+
+  final Map<int, String> _dayNames = {
+    1: 'Monday',
+    2: 'Tuesday',
+    3: 'Wednesday',
+    4: 'Thursday',
+    5: 'Friday',
+    6: 'Saturday',
+    7: 'Sunday',
+  };
+
+  @override
+  void initState() {
+    super.initState();
+    final startParts = (widget.breakItem['start_time'] as String).split(':');
+    _startTime = TimeOfDay(
+      hour: int.parse(startParts[0]),
+      minute: int.parse(startParts[1]),
+    );
+    final endParts = (widget.breakItem['end_time'] as String).split(':');
+    _endTime = TimeOfDay(
+      hour: int.parse(endParts[0]),
+      minute: int.parse(endParts[1]),
+    );
+    _selectedBreakType = widget.breakItem['break_type'] ?? 'lunch';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isWeb = screenWidth > 800;
+    final dayName = _dayNames[widget.breakItem['day_of_week']] ?? 'Unknown';
+
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Container(
+        width: isWeb ? 500 : screenWidth * 0.9,
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.8,
+        ),
+        padding: EdgeInsets.all(isWeb ? 24 : 16),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Edit Break - $dayName',
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 20),
+
+              // Break Type Selection
+              const Text(
+                'Break Type',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: widget.breakTypes.map((type) {
+                  final isSelected = _selectedBreakType == type['id'];
+                  return FilterChip(
+                    label: Text(type['name']),
+                    selected: isSelected,
+                    onSelected: (selected) {
+                      if (selected) {
+                        setState(() => _selectedBreakType = type['id']);
+                      }
+                    },
+                    avatar: Icon(type['icon'], size: 18),
+                    backgroundColor: Colors.grey[100],
+                    selectedColor: const Color(0xFFFF6B8B).withValues(alpha: 0.2),
+                    checkmarkColor: const Color(0xFFFF6B8B),
+                  );
+                }).toList(),
+              ),
+
+              const SizedBox(height: 16),
+
+              // Time Selection
+              Row(
+                children: [
+                  Expanded(
+                    child: _TimePickerField(
+                      label: 'Start Time',
+                      initialTime: _startTime,
+                      isRequired: true,
+                      onTimeSelected: (time) => setState(() => _startTime = time),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _TimePickerField(
+                      label: 'End Time',
+                      initialTime: _endTime,
+                      isRequired: true,
+                      onTimeSelected: (time) => setState(() => _endTime = time),
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 24),
+
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 12),
+                  ElevatedButton(
+                    onPressed: _isLoading ? null : _updateBreak,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFFF6B8B),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 12,
+                      ),
+                    ),
+                    child: _isLoading
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : const Text(
+                            'Update Break',
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _updateBreak() async {
+    setState(() => _isLoading = true);
+
+    try {
+      final startTimeString =
+          '${_startTime.hour.toString().padLeft(2, '0')}:${_startTime.minute.toString().padLeft(2, '0')}:00';
+      final endTimeString =
+          '${_endTime.hour.toString().padLeft(2, '0')}:${_endTime.minute.toString().padLeft(2, '0')}:00';
+
+      await supabase
+          .from('barber_breaks')
+          .update({
+            'start_time': startTimeString,
+            'end_time': endTimeString,
+            'break_type': _selectedBreakType,
+          })
+          .eq('id', widget.breakItem['id']);
+
+      if (mounted) Navigator.pop(context, {'success': true});
+    } catch (e) {
+      debugPrint('❌ Error updating break: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+        setState(() => _isLoading = false);
+      }
+    }
   }
 }
 
@@ -1451,13 +2242,9 @@ class _AddScheduleDialogState extends State<_AddScheduleDialog> {
                         ? (selected) => setState(() => _selectedDay = day['id'])
                         : null,
                     backgroundColor: Colors.grey[100],
-                    selectedColor: const Color(
-                      0xFFFF6B8B,
-                    ).withValues(alpha: 0.2),
+                    selectedColor: const Color(0xFFFF6B8B).withValues(alpha: 0.2),
                     checkmarkColor: const Color(0xFFFF6B8B),
-                    avatar: isAvailable
-                        ? null
-                        : const Icon(Icons.lock, size: 16),
+                    avatar: isAvailable ? null : const Icon(Icons.lock, size: 16),
                   );
                 }).toList(),
               ),
@@ -1480,8 +2267,7 @@ class _AddScheduleDialogState extends State<_AddScheduleDialog> {
                       label: 'Start Time',
                       initialTime: _startTime,
                       isRequired: true,
-                      onTimeSelected: (time) =>
-                          setState(() => _startTime = time),
+                      onTimeSelected: (time) => setState(() => _startTime = time),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -1718,8 +2504,7 @@ class _EditScheduleDialogState extends State<_EditScheduleDialog> {
                       label: 'Start Time',
                       initialTime: _startTime,
                       isRequired: true,
-                      onTimeSelected: (time) =>
-                          setState(() => _startTime = time),
+                      onTimeSelected: (time) => setState(() => _startTime = time),
                     ),
                   ),
                   const SizedBox(width: 12),
