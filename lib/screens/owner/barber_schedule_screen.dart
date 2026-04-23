@@ -1,5 +1,6 @@
 // screens/owner/barber_schedule_screen.dart
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -18,8 +19,12 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   bool _isLoading = true;
   List<Map<String, dynamic>> _barbers = [];
   List<Map<String, dynamic>> _schedules = [];
+  List<Map<String, dynamic>> _specialSchedules = [];
+  List<Map<String, dynamic>> _specialBreaks = [];
   Map<String, List<Map<String, dynamic>>> _groupedSchedules = {};
   Map<String, List<Map<String, dynamic>>> _groupedBreaks = {};
+  Map<String, List<Map<String, dynamic>>> _groupedSpecialSchedules = {};
+  Map<String, List<Map<String, dynamic>>> _groupedSpecialBreaks = {};
 
   // Salon default times
   TimeOfDay? _salonOpenTime;
@@ -79,12 +84,8 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
           );
         }
       }
-
-      debugPrint(
-        '✅ Salon times loaded - Open: $_salonOpenTime, Close: $_salonCloseTime',
-      );
     } catch (e) {
-      debugPrint('❌ Error loading salon times: $e');
+      debugPrint('Error loading salon times: $e');
     }
   }
 
@@ -102,7 +103,6 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
 
     try {
       final salonIdInt = int.parse(widget.salonId!);
-
       await _loadSalonTimes();
 
       final salonBarbersResponse = await supabase
@@ -152,46 +152,12 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
       _barbers = barbersList;
 
       if (_barbers.isNotEmpty) {
-        // Load schedules
-        final schedulesResponse = await supabase
-            .from('barber_schedules')
-            .select()
-            .eq('salon_id', salonIdInt)
-            .order('day_of_week');
-
-        _schedules = List<Map<String, dynamic>>.from(schedulesResponse);
-
-        _groupedSchedules = {};
-        for (var schedule in _schedules) {
-          final barberId = schedule['barber_id'] as String;
-          if (!_groupedSchedules.containsKey(barberId)) {
-            _groupedSchedules[barberId] = [];
-          }
-          _groupedSchedules[barberId]!.add(schedule);
-        }
-
-        // Load breaks
-        final breaksResponse = await supabase
-            .from('barber_breaks')
-            .select()
-            .eq('salon_id', salonIdInt)
-            .order('day_of_week');
-
-        _groupedBreaks = {};
-        for (var breakItem in breaksResponse) {
-          final barberId = breakItem['barber_id'] as String;
-          if (!_groupedBreaks.containsKey(barberId)) {
-            _groupedBreaks[barberId] = [];
-          }
-          _groupedBreaks[barberId]!.add(breakItem);
-        }
+        await _loadAllDataForBarbers(salonIdInt);
       }
 
-      debugPrint(
-        '✅ Loaded ${_barbers.length} barbers, ${_schedules.length} schedules, ${_groupedBreaks.values.expand((i) => i).length} breaks',
-      );
+      debugPrint('Loaded ${_barbers.length} barbers');
     } catch (e) {
-      debugPrint('❌ Error loading schedules: $e');
+      debugPrint('Error loading schedules: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
@@ -202,6 +168,145 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     }
   }
 
+  Future<void> _loadAllDataForBarbers(int salonIdInt) async {
+    // Load regular schedules
+    final schedulesResponse = await supabase
+        .from('barber_schedules')
+        .select()
+        .eq('salon_id', salonIdInt)
+        .order('day_of_week');
+
+    _schedules = List<Map<String, dynamic>>.from(schedulesResponse);
+    _groupedSchedules = {};
+    for (var schedule in _schedules) {
+      final barberId = schedule['barber_id'] as String;
+      if (!_groupedSchedules.containsKey(barberId)) {
+        _groupedSchedules[barberId] = [];
+      }
+      _groupedSchedules[barberId]!.add(schedule);
+    }
+
+    // Load regular breaks
+    final breaksResponse = await supabase
+        .from('barber_breaks')
+        .select()
+        .eq('salon_id', salonIdInt)
+        .order('day_of_week');
+
+    _groupedBreaks = {};
+    for (var breakItem in breaksResponse) {
+      final barberId = breakItem['barber_id'] as String;
+      if (!_groupedBreaks.containsKey(barberId)) {
+        _groupedBreaks[barberId] = [];
+      }
+      _groupedBreaks[barberId]!.add(breakItem);
+    }
+
+    // Load special schedules
+    final specialSchedulesResponse = await supabase
+        .from('barber_special_schedules')
+        .select()
+        .eq('salon_id', salonIdInt)
+        .order('schedule_date');
+
+    _specialSchedules = List<Map<String, dynamic>>.from(specialSchedulesResponse);
+    _groupedSpecialSchedules = {};
+    for (var ss in _specialSchedules) {
+      final barberId = ss['barber_id'] as String;
+      if (!_groupedSpecialSchedules.containsKey(barberId)) {
+        _groupedSpecialSchedules[barberId] = [];
+      }
+      _groupedSpecialSchedules[barberId]!.add(ss);
+    }
+
+    // Load special breaks
+    final specialBreaksResponse = await supabase
+        .from('barber_special_breaks')
+        .select()
+        .eq('salon_id', salonIdInt)
+        .order('break_date');
+
+    _specialBreaks = List<Map<String, dynamic>>.from(specialBreaksResponse);
+    _groupedSpecialBreaks = {};
+    for (var sb in _specialBreaks) {
+      final barberId = sb['barber_id'] as String;
+      if (!_groupedSpecialBreaks.containsKey(barberId)) {
+        _groupedSpecialBreaks[barberId] = [];
+      }
+      _groupedSpecialBreaks[barberId]!.add(sb);
+    }
+  }
+
+  // ==================== UPDATE SINGLE BARBER DATA (NO PAGE RELOAD) ====================
+  
+  Future<void> _updateBarberData(String barberId) async {
+    try {
+      final salonIdInt = int.parse(widget.salonId!);
+      
+      // Fetch regular schedules for this barber
+      final schedulesResponse = await supabase
+          .from('barber_schedules')
+          .select()
+          .eq('salon_id', salonIdInt)
+          .eq('barber_id', barberId)
+          .order('day_of_week');
+      
+      // Fetch regular breaks for this barber
+      final breaksResponse = await supabase
+          .from('barber_breaks')
+          .select()
+          .eq('salon_id', salonIdInt)
+          .eq('barber_id', barberId)
+          .order('day_of_week');
+      
+      // Fetch special schedules for this barber
+      final specialSchedulesResponse = await supabase
+          .from('barber_special_schedules')
+          .select()
+          .eq('salon_id', salonIdInt)
+          .eq('barber_id', barberId)
+          .order('schedule_date');
+      
+      // Fetch special breaks for this barber
+      final specialBreaksResponse = await supabase
+          .from('barber_special_breaks')
+          .select()
+          .eq('salon_id', salonIdInt)
+          .eq('barber_id', barberId)
+          .order('break_date');
+      
+      setState(() {
+        // Update regular schedules
+        _groupedSchedules[barberId] = List<Map<String, dynamic>>.from(schedulesResponse);
+        
+        // Update regular breaks
+        _groupedBreaks[barberId] = List<Map<String, dynamic>>.from(breaksResponse);
+        
+        // Update special schedules
+        _groupedSpecialSchedules[barberId] = List<Map<String, dynamic>>.from(specialSchedulesResponse);
+        
+        // Update special breaks
+        _groupedSpecialBreaks[barberId] = List<Map<String, dynamic>>.from(specialBreaksResponse);
+        
+        // Update global lists
+        final otherSchedules = _schedules.where((s) => s['barber_id'] != barberId).toList();
+        _schedules = [...otherSchedules, ..._groupedSchedules[barberId]!];
+        
+        final otherSpecialSchedules = _specialSchedules.where((ss) => ss['barber_id'] != barberId).toList();
+        _specialSchedules = [...otherSpecialSchedules, ..._groupedSpecialSchedules[barberId]!];
+        
+        final otherSpecialBreaks = _specialBreaks.where((sb) => sb['barber_id'] != barberId).toList();
+        _specialBreaks = [...otherSpecialBreaks, ..._groupedSpecialBreaks[barberId]!];
+      });
+    } catch (e) {
+      debugPrint('Error updating barber data: $e');
+      await _loadAllDataForBarbers(int.parse(widget.salonId!));
+      if (mounted) setState(() {});
+    }
+  }
+
+  // ==================== REGULAR SCHEDULE CRUD ====================
+
   Future<void> _addSchedule(String barberId) async {
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
@@ -209,16 +314,14 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
       builder: (context) => _AddScheduleDialog(
         barberId: barberId,
         salonId: widget.salonId!,
-        existingSchedules: _schedules
-            .where((s) => s['barber_id'] == barberId)
-            .toList(),
+        existingSchedules: _groupedSchedules[barberId] ?? [],
         defaultOpenTime: _salonOpenTime,
         defaultCloseTime: _salonCloseTime,
       ),
     );
 
     if (result != null && result['success'] == true) {
-      await _loadData();
+      await _updateBarberData(barberId);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -246,7 +349,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     );
 
     if (result != null && result['success'] == true) {
-      await _loadData();
+      await _updateBarberData(barberId);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -271,7 +374,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     );
 
     if (result != null && result['success'] == true) {
-      await _loadData();
+      await _updateBarberData(schedule['barber_id']);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -297,7 +400,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     );
 
     if (result != null && result['success'] == true) {
-      await _loadData();
+      await _updateBarberData(breakItem['barber_id']);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -315,10 +418,6 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
 
     // Optimistic update
     setState(() {
-      final index = _schedules.indexWhere((s) => s['id'] == schedule['id']);
-      if (index != -1) {
-        _schedules[index]['is_working'] = newStatus;
-      }
       final barberId = schedule['barber_id'] as String;
       if (_groupedSchedules.containsKey(barberId)) {
         final scheduleIndex = _groupedSchedules[barberId]!.indexWhere(
@@ -339,34 +438,14 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(
-              newStatus ? 'Working day enabled' : 'Working day disabled',
-            ),
+            content: Text(newStatus ? 'Working day enabled' : 'Working day disabled'),
             backgroundColor: newStatus ? Colors.green : Colors.orange,
             duration: const Duration(seconds: 1),
           ),
         );
       }
     } catch (e) {
-      // Revert on error
-      debugPrint('❌ Error updating working status: $e');
-      setState(() {
-        final index = _schedules.indexWhere((s) => s['id'] == schedule['id']);
-        if (index != -1) {
-          _schedules[index]['is_working'] = !newStatus;
-        }
-        final barberId = schedule['barber_id'] as String;
-        if (_groupedSchedules.containsKey(barberId)) {
-          final scheduleIndex = _groupedSchedules[barberId]!.indexWhere(
-            (s) => s['id'] == schedule['id'],
-          );
-          if (scheduleIndex != -1) {
-            _groupedSchedules[barberId]![scheduleIndex]['is_working'] =
-                !newStatus;
-          }
-        }
-      });
-
+      await _updateBarberData(schedule['barber_id']);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
@@ -375,7 +454,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     }
   }
 
-  Future<void> _deleteSchedule(int scheduleId) async {
+  Future<void> _deleteSchedule(Map<String, dynamic> schedule) async {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -397,11 +476,9 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     );
 
     if (confirm == true) {
-      setState(() => _isLoading = true);
-
       try {
-        await supabase.from('barber_schedules').delete().eq('id', scheduleId);
-        await _loadData();
+        await supabase.from('barber_schedules').delete().eq('id', schedule['id']);
+        await _updateBarberData(schedule['barber_id']);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -412,18 +489,17 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
           );
         }
       } catch (e) {
-        debugPrint('❌ Error deleting schedule: $e');
+        debugPrint('Error deleting schedule: $e');
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
           );
-          setState(() => _isLoading = false);
         }
       }
     }
   }
 
-  Future<void> _deleteBreak(int breakId) async {
+  Future<void> _deleteBreak(Map<String, dynamic> breakItem) async {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -445,11 +521,9 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     );
 
     if (confirm == true) {
-      setState(() => _isLoading = true);
-
       try {
-        await supabase.from('barber_breaks').delete().eq('id', breakId);
-        await _loadData();
+        await supabase.from('barber_breaks').delete().eq('id', breakItem['id']);
+        await _updateBarberData(breakItem['barber_id']);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -460,12 +534,209 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
           );
         }
       } catch (e) {
-        debugPrint('❌ Error deleting break: $e');
+        debugPrint('Error deleting break: $e');
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
           );
-          setState(() => _isLoading = false);
+        }
+      }
+    }
+  }
+
+  // ==================== SPECIAL SCHEDULE CRUD ====================
+
+  Future<void> _addSpecialSchedule(String barberId) async {
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => _AddSpecialScheduleDialog(
+        barberId: barberId,
+        salonId: widget.salonId!,
+        defaultOpenTime: _salonOpenTime,
+        defaultCloseTime: _salonCloseTime,
+      ),
+    );
+
+    if (result != null && result['success'] == true) {
+      await _updateBarberData(barberId);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Special schedule added successfully'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _addSpecialBreak(String barberId) async {
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => _AddSpecialBreakDialog(
+        barberId: barberId,
+        salonId: widget.salonId!,
+        breakTypes: _breakTypes,
+        defaultOpenTime: _salonOpenTime,
+        defaultCloseTime: _salonCloseTime,
+      ),
+    );
+
+    if (result != null && result['success'] == true) {
+      await _updateBarberData(barberId);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Special break added successfully'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _editSpecialSchedule(Map<String, dynamic> schedule) async {
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => _EditSpecialScheduleDialog(
+        schedule: schedule,
+        defaultOpenTime: _salonOpenTime,
+        defaultCloseTime: _salonCloseTime,
+      ),
+    );
+
+    if (result != null && result['success'] == true) {
+      await _updateBarberData(schedule['barber_id']);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Special schedule updated successfully'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _editSpecialBreak(Map<String, dynamic> breakItem) async {
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => _EditSpecialBreakDialog(
+        breakItem: breakItem,
+        breakTypes: _breakTypes,
+        defaultOpenTime: _salonOpenTime,
+        defaultCloseTime: _salonCloseTime,
+      ),
+    );
+
+    if (result != null && result['success'] == true) {
+      await _updateBarberData(breakItem['barber_id']);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Special break updated successfully'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _deleteSpecialSchedule(Map<String, dynamic> schedule) async {
+    final date = DateTime.parse(schedule['schedule_date']);
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Delete Special Schedule'),
+        content: Text('Delete special schedule for ${DateFormat('yyyy-MM-dd').format(date)}?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      try {
+        await supabase.from('barber_special_schedules').delete().eq('id', schedule['id']);
+        await _updateBarberData(schedule['barber_id']);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Special schedule deleted'),
+              backgroundColor: Colors.orange,
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      } catch (e) {
+        debugPrint('Error deleting special schedule: $e');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          );
+        }
+      }
+    }
+  }
+
+  Future<void> _deleteSpecialBreak(Map<String, dynamic> breakItem) async {
+    final date = DateTime.parse(breakItem['break_date']);
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Delete Special Break'),
+        content: Text('Delete special break for ${DateFormat('yyyy-MM-dd').format(date)}?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      try {
+        await supabase.from('barber_special_breaks').delete().eq('id', breakItem['id']);
+        await _updateBarberData(breakItem['barber_id']);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Special break deleted'),
+              backgroundColor: Colors.orange,
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      } catch (e) {
+        debugPrint('Error deleting special break: $e');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          );
         }
       }
     }
@@ -562,41 +833,15 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
             ),
             child: Padding(
               padding: EdgeInsets.all(padding),
-              child: Row(
+              child: Wrap(
+                spacing: 24,
+                runSpacing: 12,
                 children: [
-                  Icon(Icons.people, color: const Color(0xFFFF6B8B)),
-                  const SizedBox(width: 12),
-                  Text(
-                    'Total Barbers: ${_barbers.length}',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(width: 24),
-                  Container(width: 1, height: 30, color: Colors.grey[300]),
-                  const SizedBox(width: 24),
-                  Icon(Icons.schedule, color: Colors.green),
-                  const SizedBox(width: 12),
-                  Text(
-                    'Total Schedules: ${_schedules.length}',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(width: 24),
-                  Container(width: 1, height: 30, color: Colors.grey[300]),
-                  const SizedBox(width: 24),
-                  Icon(Icons.free_breakfast, color: Colors.orange),
-                  const SizedBox(width: 12),
-                  Text(
-                    'Total Breaks: ${_groupedBreaks.values.expand((i) => i).length}',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
+                  _buildStatItem(Icons.people, 'Barbers', _barbers.length, const Color(0xFFFF6B8B)),
+                  _buildStatItem(Icons.schedule, 'Schedules', _schedules.length, Colors.green),
+                  _buildStatItem(Icons.free_breakfast, 'Breaks', _groupedBreaks.values.expand((i) => i).length, Colors.orange),
+                  _buildStatItem(Icons.event, 'Special Schedules', _specialSchedules.length, Colors.purple),
+                  _buildStatItem(Icons.event_busy, 'Special Breaks', _specialBreaks.length, Colors.teal),
                 ],
               ),
             ),
@@ -608,7 +853,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
             physics: const NeverScrollableScrollPhysics(),
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: screenWidth > 1200 ? 3 : 2,
-              childAspectRatio: 1.4,
+              childAspectRatio: 1.3,
               crossAxisSpacing: 16,
               mainAxisSpacing: 16,
             ),
@@ -617,11 +862,32 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
               final barber = _barbers[index];
               final barberSchedules = _groupedSchedules[barber['id']] ?? [];
               final barberBreaks = _groupedBreaks[barber['id']] ?? [];
-              return _buildBarberCard(barber, barberSchedules, barberBreaks, true);
+              final barberSpecialSchedules = _groupedSpecialSchedules[barber['id']] ?? [];
+              final barberSpecialBreaks = _groupedSpecialBreaks[barber['id']] ?? [];
+              return _buildBarberCard(
+                barber, 
+                barberSchedules, 
+                barberBreaks,
+                barberSpecialSchedules,
+                barberSpecialBreaks,
+                true
+              );
             },
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildStatItem(IconData icon, String label, int value, Color color) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, color: color, size: 20),
+        const SizedBox(width: 8),
+        Text('$label: ', style: const TextStyle(fontSize: 14, color: Colors.grey)),
+        Text('$value', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: color)),
+      ],
     );
   }
 
@@ -633,7 +899,16 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
         final barber = _barbers[index];
         final barberSchedules = _groupedSchedules[barber['id']] ?? [];
         final barberBreaks = _groupedBreaks[barber['id']] ?? [];
-        return _buildBarberCard(barber, barberSchedules, barberBreaks, false);
+        final barberSpecialSchedules = _groupedSpecialSchedules[barber['id']] ?? [];
+        final barberSpecialBreaks = _groupedSpecialBreaks[barber['id']] ?? [];
+        return _buildBarberCard(
+          barber, 
+          barberSchedules, 
+          barberBreaks,
+          barberSpecialSchedules,
+          barberSpecialBreaks,
+          false
+        );
       },
     );
   }
@@ -642,14 +917,16 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     Map<String, dynamic> barber,
     List<Map<String, dynamic>> schedules,
     List<Map<String, dynamic>> breaks,
+    List<Map<String, dynamic>> specialSchedules,
+    List<Map<String, dynamic>> specialBreaks,
     bool isWeb,
   ) {
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: isWeb
-          ? _buildWebBarberCard(barber, schedules, breaks)
-          : _buildMobileBarberCard(barber, schedules, breaks),
+          ? _buildWebBarberCard(barber, schedules, breaks, specialSchedules, specialBreaks)
+          : _buildMobileBarberCard(barber, schedules, breaks, specialSchedules, specialBreaks),
     );
   }
 
@@ -657,6 +934,8 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     Map<String, dynamic> barber,
     List<Map<String, dynamic>> schedules,
     List<Map<String, dynamic>> breaks,
+    List<Map<String, dynamic>> specialSchedules,
+    List<Map<String, dynamic>> specialBreaks,
   ) {
     return Padding(
       padding: const EdgeInsets.all(12),
@@ -695,7 +974,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
                       ),
                     ),
                     Text(
-                      '${schedules.where((s) => s['is_working'] == true).length} Working / ${schedules.length} Total',
+                      '${schedules.where((s) => s['is_working'] == true).length} Working / ${schedules.length} Regular',
                       style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                     ),
                   ],
@@ -703,6 +982,24 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
               ),
               Row(
                 children: [
+                  Tooltip(
+                    message: 'Add Special Break',
+                    child: IconButton(
+                      icon: const Icon(Icons.event_busy, color: Colors.teal),
+                      onPressed: () => _addSpecialBreak(barber['id']),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                    ),
+                  ),
+                  Tooltip(
+                    message: 'Add Special Schedule',
+                    child: IconButton(
+                      icon: const Icon(Icons.event, color: Colors.purple),
+                      onPressed: () => _addSpecialSchedule(barber['id']),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                    ),
+                  ),
                   Tooltip(
                     message: 'Add Break',
                     child: IconButton(
@@ -712,7 +1009,6 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
                       constraints: const BoxConstraints(),
                     ),
                   ),
-                  const SizedBox(width: 8),
                   Tooltip(
                     message: 'Add Schedule',
                     child: IconButton(
@@ -732,224 +1028,31 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Schedules Section
-                  if (schedules.isNotEmpty) ...[
-                    const Text(
-                      'Working Hours',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12,
-                        color: Colors.grey,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    ...schedules.map((schedule) {
-                      final dayName = _dayNames[schedule['day_of_week']] ?? 'Unknown';
-                      final startTime = _formatTime(schedule['start_time']);
-                      final endTime = _formatTime(schedule['end_time']);
-                      final isWorking = schedule['is_working'] ?? true;
-
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 4),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: isWorking
-                              ? Colors.green.withValues(alpha: 0.05)
-                              : Colors.red.withValues(alpha: 0.05),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                            color: isWorking
-                                ? Colors.green.withValues(alpha: 0.3)
-                                : Colors.red.withValues(alpha: 0.3),
-                            width: 0.5,
-                          ),
-                        ),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              flex: 2,
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    isWorking
-                                        ? Icons.check_circle
-                                        : Icons.cancel,
-                                    size: 14,
-                                    color: isWorking
-                                        ? Colors.green
-                                        : Colors.red,
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    dayName.substring(0, 3),
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: 12,
-                                      color: isWorking
-                                          ? Colors.black87
-                                          : Colors.grey[600],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            Expanded(
-                              flex: 3,
-                              child: Text(
-                                '$startTime - $endTime',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: isWorking
-                                      ? Colors.grey[700]
-                                      : Colors.grey[500],
-                                  decoration: isWorking
-                                      ? null
-                                      : TextDecoration.lineThrough,
-                                ),
-                              ),
-                            ),
-                            SizedBox(
-                              width: 40,
-                              height: 30,
-                              child: Transform.scale(
-                                scale: 0.7,
-                                child: Switch(
-                                  value: isWorking,
-                                  onChanged: (_) =>
-                                      _toggleWorkingStatus(schedule),
-                                  activeThumbColor: Colors.green,
-                                  inactiveThumbColor: Colors.red,
-                                  materialTapTargetSize:
-                                      MaterialTapTargetSize.shrinkWrap,
-                                ),
-                              ),
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.edit, size: 14),
-                              onPressed: () => _editSchedule(schedule),
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(),
-                            ),
-                            IconButton(
-                              icon: const Icon(
-                                Icons.delete,
-                                size: 14,
-                                color: Colors.red,
-                              ),
-                              onPressed: () => _deleteSchedule(schedule['id']),
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(),
-                            ),
-                          ],
-                        ),
-                      );
-                    }),
+                  // Special Schedules Section
+                  if (specialSchedules.isNotEmpty) ...[
+                    _buildSectionHeader('🌟 Special Schedules', Colors.purple, Icons.event),
+                    ...specialSchedules.map((ss) => _buildSpecialScheduleItem(ss)),
+                    const SizedBox(height: 8),
                   ],
-
-                  const SizedBox(height: 8),
-
-                  // Breaks Section
+                  
+                  // Special Breaks Section
+                  if (specialBreaks.isNotEmpty) ...[
+                    _buildSectionHeader('⏰ Special Breaks', Colors.teal, Icons.event_busy),
+                    ...specialBreaks.map((sb) => _buildSpecialBreakItem(sb)),
+                    const SizedBox(height: 8),
+                  ],
+                  
+                  // Regular Schedules Section
+                  if (schedules.isNotEmpty) ...[
+                    _buildSectionHeader('📅 Regular Schedules', Colors.green, Icons.schedule),
+                    ...schedules.map((schedule) => _buildScheduleItem(schedule)),
+                    const SizedBox(height: 8),
+                  ],
+                  
+                  // Regular Breaks Section
                   if (breaks.isNotEmpty) ...[
-                    const Text(
-                      'Breaks',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12,
-                        color: Colors.grey,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    ...breaks.map((breakItem) {
-                      final dayName = _dayNames[breakItem['day_of_week']] ?? 'Unknown';
-                      final startTime = _formatTime(breakItem['start_time']);
-                      final endTime = _formatTime(breakItem['end_time']);
-                      final breakType = breakItem['break_type'] ?? 'custom';
-                      final breakTypeData = _breakTypes.firstWhere(
-                        (b) => b['id'] == breakType,
-                        orElse: () => _breakTypes.last,
-                      );
-
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 4),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.orange.withValues(alpha: 0.05),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                            color: Colors.orange.withValues(alpha: 0.3),
-                            width: 0.5,
-                          ),
-                        ),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              flex: 2,
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    breakTypeData['icon'],
-                                    size: 14,
-                                    color: Colors.orange,
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    dayName.substring(0, 3),
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            Expanded(
-                              flex: 3,
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    '$startTime - $endTime',
-                                    style: const TextStyle(
-                                      fontSize: 11,
-                                      color: Colors.grey,
-                                    ),
-                                  ),
-                                  Text(
-                                    breakTypeData['name'],
-                                    style: const TextStyle(
-                                      fontSize: 10,
-                                      color: Colors.orange,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.edit, size: 14),
-                              onPressed: () => _editBreak(breakItem),
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(),
-                            ),
-                            IconButton(
-                              icon: const Icon(
-                                Icons.delete,
-                                size: 14,
-                                color: Colors.red,
-                              ),
-                              onPressed: () => _deleteBreak(breakItem['id']),
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(),
-                            ),
-                          ],
-                        ),
-                      );
-                    }),
+                    _buildSectionHeader('☕ Regular Breaks', Colors.orange, Icons.free_breakfast),
+                    ...breaks.map((breakItem) => _buildBreakItem(breakItem)),
                   ],
                 ],
               ),
@@ -960,10 +1063,273 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     );
   }
 
+  Widget _buildSectionHeader(String title, Color color, IconData icon) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 8, bottom: 4),
+      child: Row(
+        children: [
+          Icon(icon, size: 14, color: color),
+          const SizedBox(width: 4),
+          Text(title, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: color)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSpecialScheduleItem(Map<String, dynamic> schedule) {
+    final date = DateTime.parse(schedule['schedule_date']);
+    final startTime = _formatTime(schedule['start_time']);
+    final endTime = _formatTime(schedule['end_time']);
+    final isWorking = schedule['is_working'] ?? true;
+    final reason = schedule['reason'] ?? 'Special day';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.purple.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.purple.withValues(alpha: 0.3), width: 0.5),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 2,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(DateFormat('MMM dd, yyyy').format(date), style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 11)),
+                Text(reason, style: TextStyle(fontSize: 9, color: Colors.purple[600])),
+              ],
+            ),
+          ),
+          Expanded(
+            flex: 2,
+            child: Text('$startTime - $endTime', style: const TextStyle(fontSize: 11)),
+          ),
+          if (!isWorking)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(color: Colors.red, borderRadius: BorderRadius.circular(10)),
+              child: const Text('Off', style: TextStyle(color: Colors.white, fontSize: 9)),
+            ),
+          IconButton(
+            icon: const Icon(Icons.edit, size: 14),
+            onPressed: () => _editSpecialSchedule(schedule),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete, size: 14, color: Colors.red),
+            onPressed: () => _deleteSpecialSchedule(schedule),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSpecialBreakItem(Map<String, dynamic> breakItem) {
+    final date = DateTime.parse(breakItem['break_date']);
+    final startTime = _formatTime(breakItem['start_time']);
+    final endTime = _formatTime(breakItem['end_time']);
+    final breakType = breakItem['break_type'] ?? 'custom';
+    final breakTypeData = _breakTypes.firstWhere(
+      (b) => b['id'] == breakType,
+      orElse: () => _breakTypes.last,
+    );
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.teal.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.teal.withValues(alpha: 0.3), width: 0.5),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 2,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(DateFormat('MMM dd, yyyy').format(date), style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 11)),
+                Text(breakTypeData['name'], style: TextStyle(fontSize: 9, color: Colors.teal[600])),
+              ],
+            ),
+          ),
+          Expanded(flex: 2, child: Text('$startTime - $endTime', style: const TextStyle(fontSize: 11))),
+          IconButton(
+            icon: const Icon(Icons.edit, size: 14),
+            onPressed: () => _editSpecialBreak(breakItem),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete, size: 14, color: Colors.red),
+            onPressed: () => _deleteSpecialBreak(breakItem),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildScheduleItem(Map<String, dynamic> schedule) {
+    final dayName = _dayNames[schedule['day_of_week']] ?? 'Unknown';
+    final startTime = _formatTime(schedule['start_time']);
+    final endTime = _formatTime(schedule['end_time']);
+    final isWorking = schedule['is_working'] ?? true;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: isWorking
+            ? Colors.green.withValues(alpha: 0.05)
+            : Colors.red.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: isWorking
+              ? Colors.green.withValues(alpha: 0.3)
+              : Colors.red.withValues(alpha: 0.3),
+          width: 0.5,
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 2,
+            child: Row(
+              children: [
+                Icon(
+                  isWorking ? Icons.check_circle : Icons.cancel,
+                  size: 14,
+                  color: isWorking ? Colors.green : Colors.red,
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  dayName.substring(0, 3),
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12,
+                    color: isWorking ? Colors.black87 : Colors.grey[600],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            flex: 3,
+            child: Text(
+              '$startTime - $endTime',
+              style: TextStyle(
+                fontSize: 11,
+                color: isWorking ? Colors.grey[700] : Colors.grey[500],
+                decoration: isWorking ? null : TextDecoration.lineThrough,
+              ),
+            ),
+          ),
+          SizedBox(
+            width: 40,
+            height: 30,
+            child: Transform.scale(
+              scale: 0.7,
+              child: Switch(
+                value: isWorking,
+                onChanged: (_) => _toggleWorkingStatus(schedule),
+                activeThumbColor: Colors.green,
+                inactiveThumbColor: Colors.red,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.edit, size: 14),
+            onPressed: () => _editSchedule(schedule),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete, size: 14, color: Colors.red),
+            onPressed: () => _deleteSchedule(schedule),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBreakItem(Map<String, dynamic> breakItem) {
+    final dayName = _dayNames[breakItem['day_of_week']] ?? 'Unknown';
+    final startTime = _formatTime(breakItem['start_time']);
+    final endTime = _formatTime(breakItem['end_time']);
+    final breakType = breakItem['break_type'] ?? 'custom';
+    final breakTypeData = _breakTypes.firstWhere(
+      (b) => b['id'] == breakType,
+      orElse: () => _breakTypes.last,
+    );
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.orange.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.orange.withValues(alpha: 0.3), width: 0.5),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 2,
+            child: Row(
+              children: [
+                Icon(breakTypeData['icon'], size: 14, color: Colors.orange),
+                const SizedBox(width: 4),
+                Text(
+                  dayName.substring(0, 3),
+                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            flex: 3,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('$startTime - $endTime', style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                Text(breakTypeData['name'], style: const TextStyle(fontSize: 10, color: Colors.orange)),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.edit, size: 14),
+            onPressed: () => _editBreak(breakItem),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete, size: 14, color: Colors.red),
+            onPressed: () => _deleteBreak(breakItem),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildMobileBarberCard(
     Map<String, dynamic> barber,
     List<Map<String, dynamic>> schedules,
     List<Map<String, dynamic>> breaks,
+    List<Map<String, dynamic>> specialSchedules,
+    List<Map<String, dynamic>> specialBreaks,
   ) {
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -991,12 +1357,22 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
             style: const TextStyle(fontWeight: FontWeight.bold),
           ),
           subtitle: Text(
-            '${schedules.where((s) => s['is_working'] == true).length} Working / ${schedules.length} Total',
+            '${schedules.where((s) => s['is_working'] == true).length} Working / ${schedules.length} Regular',
             style: TextStyle(color: Colors.grey[600], fontSize: 12),
           ),
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
+              IconButton(
+                icon: const Icon(Icons.event_busy, color: Colors.teal),
+                onPressed: () => _addSpecialBreak(barber['id']),
+                tooltip: 'Special Break',
+              ),
+              IconButton(
+                icon: const Icon(Icons.event, color: Colors.purple),
+                onPressed: () => _addSpecialSchedule(barber['id']),
+                tooltip: 'Special Schedule',
+              ),
               IconButton(
                 icon: const Icon(Icons.free_breakfast, color: Colors.orange),
                 onPressed: () => _addBreak(barber['id']),
@@ -1011,263 +1387,817 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
             ],
           ),
           children: [
-            if (schedules.isEmpty && breaks.isEmpty)
+            if (specialSchedules.isNotEmpty) ...[
               const Padding(
-                padding: EdgeInsets.all(16),
-                child: Center(
-                  child: Text(
-                    'No schedules or breaks set',
-                    style: TextStyle(color: Colors.grey),
-                  ),
-                ),
+                padding: EdgeInsets.only(left: 16, top: 8),
+                child: Text('🌟 Special Schedules', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.purple)),
               ),
+              ...specialSchedules.map((ss) => _buildSpecialScheduleItem(ss)),
+            ],
+            if (specialBreaks.isNotEmpty) ...[
+              const Padding(
+                padding: EdgeInsets.only(left: 16, top: 8),
+                child: Text('⏰ Special Breaks', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.teal)),
+              ),
+              ...specialBreaks.map((sb) => _buildSpecialBreakItem(sb)),
+            ],
             if (schedules.isNotEmpty) ...[
               const Padding(
                 padding: EdgeInsets.only(left: 16, top: 8),
-                child: Text(
-                  'Working Hours',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-                ),
+                child: Text('📅 Regular Schedules', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.green)),
               ),
-              ...schedules.map((schedule) {
-                final dayName = _dayNames[schedule['day_of_week']] ?? 'Unknown';
-                final startTime = _formatTime(schedule['start_time']);
-                final endTime = _formatTime(schedule['end_time']);
-                final isWorking = schedule['is_working'] ?? true;
-
-                return Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: isWorking
-                        ? Colors.green.withValues(alpha: 0.05)
-                        : Colors.red.withValues(alpha: 0.05),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: isWorking
-                          ? Colors.green.withValues(alpha: 0.3)
-                          : Colors.red.withValues(alpha: 0.3),
-                      width: 0.5,
-                    ),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Container(
-                              width: 36,
-                              height: 36,
-                              decoration: BoxDecoration(
-                                color: isWorking
-                                    ? Colors.green.withValues(alpha: 0.1)
-                                    : Colors.red.withValues(alpha: 0.1),
-                                shape: BoxShape.circle,
-                              ),
-                              child: Icon(
-                                isWorking ? Icons.work : Icons.work_off,
-                                color: isWorking ? Colors.green : Colors.red,
-                                size: 18,
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    children: [
-                                      Text(
-                                        dayName,
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.w600,
-                                          fontSize: 14,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 8,
-                                          vertical: 2,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: isWorking ? Colors.green : Colors.red,
-                                          borderRadius: BorderRadius.circular(12),
-                                        ),
-                                        child: Text(
-                                          isWorking ? 'Working' : 'Off',
-                                          style: const TextStyle(
-                                            color: Colors.white,
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    '$startTime - $endTime',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: isWorking ? Colors.grey[700] : Colors.grey[500],
-                                      decoration: isWorking ? null : TextDecoration.lineThrough,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            SizedBox(
-                              width: 50,
-                              height: 40,
-                              child: Transform.scale(
-                                scale: 0.7,
-                                child: Switch(
-                                  value: isWorking,
-                                  onChanged: (_) => _toggleWorkingStatus(schedule),
-                                  activeThumbColor: Colors.green,
-                                  inactiveThumbColor: Colors.red,
-                                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            TextButton.icon(
-                              onPressed: () => _editSchedule(schedule),
-                              icon: const Icon(Icons.edit, size: 16),
-                              label: const Text('Edit', style: TextStyle(fontSize: 12)),
-                              style: TextButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                minimumSize: Size.zero,
-                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            TextButton.icon(
-                              onPressed: () => _deleteSchedule(schedule['id']),
-                              icon: const Icon(Icons.delete, size: 16, color: Colors.red),
-                              label: const Text('Delete', style: TextStyle(fontSize: 12, color: Colors.red)),
-                              style: TextButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                minimumSize: Size.zero,
-                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              }),
+              ...schedules.map((schedule) => _buildScheduleItem(schedule)),
             ],
             if (breaks.isNotEmpty) ...[
               const Padding(
                 padding: EdgeInsets.only(left: 16, top: 8),
-                child: Text(
-                  'Breaks',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-                ),
+                child: Text('☕ Regular Breaks', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.orange)),
               ),
-              ...breaks.map((breakItem) {
-                final dayName = _dayNames[breakItem['day_of_week']] ?? 'Unknown';
-                final startTime = _formatTime(breakItem['start_time']);
-                final endTime = _formatTime(breakItem['end_time']);
-                final breakType = breakItem['break_type'] ?? 'custom';
-                final breakTypeData = _breakTypes.firstWhere(
-                  (b) => b['id'] == breakType,
-                  orElse: () => _breakTypes.last,
-                );
-
-                return Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: Colors.orange.withValues(alpha: 0.05),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.orange.withValues(alpha: 0.3), width: 0.5),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Container(
-                              width: 36,
-                              height: 36,
-                              decoration: BoxDecoration(
-                                color: Colors.orange.withValues(alpha: 0.1),
-                                shape: BoxShape.circle,
-                              ),
-                              child: Icon(breakTypeData['icon'], color: Colors.orange, size: 18),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    dayName,
-                                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    '$startTime - $endTime',
-                                    style: const TextStyle(fontSize: 12, color: Colors.grey),
-                                  ),
-                                  Text(
-                                    breakTypeData['name'],
-                                    style: const TextStyle(fontSize: 10, color: Colors.orange),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            TextButton.icon(
-                              onPressed: () => _editBreak(breakItem),
-                              icon: const Icon(Icons.edit, size: 16),
-                              label: const Text('Edit', style: TextStyle(fontSize: 12)),
-                              style: TextButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                minimumSize: Size.zero,
-                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            TextButton.icon(
-                              onPressed: () => _deleteBreak(breakItem['id']),
-                              icon: const Icon(Icons.delete, size: 16, color: Colors.red),
-                              label: const Text('Delete', style: TextStyle(fontSize: 12, color: Colors.red)),
-                              style: TextButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                minimumSize: Size.zero,
-                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              }),
+              ...breaks.map((breakItem) => _buildBreakItem(breakItem)),
             ],
           ],
         ),
       ),
     );
+  }
+}
+
+// ==================== ADD SPECIAL SCHEDULE DIALOG ====================
+class _AddSpecialScheduleDialog extends StatefulWidget {
+  final String barberId;
+  final String salonId;
+  final TimeOfDay? defaultOpenTime;
+  final TimeOfDay? defaultCloseTime;
+
+  const _AddSpecialScheduleDialog({
+    required this.barberId,
+    required this.salonId,
+    this.defaultOpenTime,
+    this.defaultCloseTime,
+  });
+
+  @override
+  State<_AddSpecialScheduleDialog> createState() => _AddSpecialScheduleDialogState();
+}
+
+class _AddSpecialScheduleDialogState extends State<_AddSpecialScheduleDialog> {
+  final supabase = Supabase.instance.client;
+
+  DateTime? _selectedDate;
+  TimeOfDay? _startTime;
+  TimeOfDay? _endTime;
+  bool _isWorking = true;
+  final TextEditingController _reasonController = TextEditingController();
+  bool _isLoading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _startTime = widget.defaultOpenTime;
+    _endTime = widget.defaultCloseTime;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isWeb = screenWidth > 800;
+
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Container(
+        width: isWeb ? 500 : screenWidth * 0.9,
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.8,
+        ),
+        padding: EdgeInsets.all(isWeb ? 24 : 16),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Add Special Schedule',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 20),
+
+              const Text(
+                'Select Date',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              GestureDetector(
+                onTap: () async {
+                  final date = await showDatePicker(
+                    context: context,
+                    initialDate: DateTime.now(),
+                    firstDate: DateTime.now(),
+                    lastDate: DateTime.now().add(const Duration(days: 365)),
+                  );
+                  if (date != null) setState(() => _selectedDate = date);
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.grey[300]!),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.calendar_today, color: _selectedDate != null ? const Color(0xFFFF6B8B) : Colors.grey),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          _selectedDate != null
+                              ? DateFormat('yyyy-MM-dd').format(_selectedDate!)
+                              : 'Select date',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 16),
+
+              Row(
+                children: [
+                  Expanded(
+                    child: _TimePickerField(
+                      label: 'Start Time',
+                      initialTime: _startTime,
+                      isRequired: true,
+                      onTimeSelected: (time) => setState(() => _startTime = time),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _TimePickerField(
+                      label: 'End Time',
+                      initialTime: _endTime,
+                      isRequired: true,
+                      onTimeSelected: (time) => setState(() => _endTime = time),
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 16),
+
+              TextField(
+                controller: _reasonController,
+                decoration: const InputDecoration(
+                  labelText: 'Reason (e.g., Training, Holiday)',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+
+              const SizedBox(height: 16),
+
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: _isWorking ? Colors.green.withValues(alpha: 0.1) : Colors.red.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: _isWorking ? Colors.green.withValues(alpha: 0.3) : Colors.red.withValues(alpha: 0.3),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(_isWorking ? Icons.check_circle : Icons.cancel, color: _isWorking ? Colors.green : Colors.red),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        _isWorking ? 'Working on this day' : 'Not working on this day',
+                      ),
+                    ),
+                    Switch(
+                      value: _isWorking,
+                      onChanged: (value) => setState(() => _isWorking = value),
+                      activeThumbColor: Colors.green,
+                      inactiveThumbColor: Colors.red,
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 24),
+
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 12),
+                  ElevatedButton(
+                    onPressed: (_selectedDate != null && _startTime != null && _endTime != null && !_isLoading)
+                        ? _saveSpecialSchedule
+                        : null,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFFF6B8B),
+                      foregroundColor: Colors.white,
+                    ),
+                    child: _isLoading
+                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Text('Add Special Schedule'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _saveSpecialSchedule() async {
+    setState(() => _isLoading = true);
+
+    try {
+      final salonIdInt = int.parse(widget.salonId);
+      final startTimeString = '${_startTime!.hour.toString().padLeft(2, '0')}:${_startTime!.minute.toString().padLeft(2, '0')}:00';
+      final endTimeString = '${_endTime!.hour.toString().padLeft(2, '0')}:${_endTime!.minute.toString().padLeft(2, '0')}:00';
+
+      await supabase.from('barber_special_schedules').insert({
+        'barber_id': widget.barberId,
+        'salon_id': salonIdInt,
+        'schedule_date': _selectedDate!.toIso8601String().split('T').first,
+        'start_time': startTimeString,
+        'end_time': endTimeString,
+        'is_working': _isWorking,
+        'reason': _reasonController.text.isNotEmpty ? _reasonController.text : null,
+      });
+
+      if (mounted) Navigator.pop(context, {'success': true});
+    } catch (e) {
+      debugPrint('Error saving special schedule: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+}
+
+// ==================== ADD SPECIAL BREAK DIALOG ====================
+class _AddSpecialBreakDialog extends StatefulWidget {
+  final String barberId;
+  final String salonId;
+  final List<Map<String, dynamic>> breakTypes;
+  final TimeOfDay? defaultOpenTime;
+  final TimeOfDay? defaultCloseTime;
+
+  const _AddSpecialBreakDialog({
+    required this.barberId,
+    required this.salonId,
+    required this.breakTypes,
+    this.defaultOpenTime,
+    this.defaultCloseTime,
+  });
+
+  @override
+  State<_AddSpecialBreakDialog> createState() => _AddSpecialBreakDialogState();
+}
+
+class _AddSpecialBreakDialogState extends State<_AddSpecialBreakDialog> {
+  final supabase = Supabase.instance.client;
+
+  DateTime? _selectedDate;
+  TimeOfDay? _startTime;
+  TimeOfDay? _endTime;
+  String _selectedBreakType = 'lunch';
+  bool _isLoading = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isWeb = screenWidth > 800;
+
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Container(
+        width: isWeb ? 500 : screenWidth * 0.9,
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.8,
+        ),
+        padding: EdgeInsets.all(isWeb ? 24 : 16),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Add Special Break',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 20),
+
+              const Text(
+                'Select Date',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              GestureDetector(
+                onTap: () async {
+                  final date = await showDatePicker(
+                    context: context,
+                    initialDate: DateTime.now(),
+                    firstDate: DateTime.now(),
+                    lastDate: DateTime.now().add(const Duration(days: 365)),
+                  );
+                  if (date != null) setState(() => _selectedDate = date);
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.grey[300]!),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.calendar_today, color: _selectedDate != null ? const Color(0xFFFF6B8B) : Colors.grey),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          _selectedDate != null
+                              ? DateFormat('yyyy-MM-dd').format(_selectedDate!)
+                              : 'Select date',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 16),
+
+              const Text(
+                'Break Type',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: widget.breakTypes.map((type) {
+                  final isSelected = _selectedBreakType == type['id'];
+                  return FilterChip(
+                    label: Text(type['name']),
+                    selected: isSelected,
+                    onSelected: (selected) {
+                      if (selected) {
+                        setState(() => _selectedBreakType = type['id']);
+                      }
+                    },
+                    avatar: Icon(type['icon'], size: 18),
+                    backgroundColor: Colors.grey[100],
+                    selectedColor: const Color(0xFFFF6B8B).withValues(alpha: 0.2),
+                    checkmarkColor: const Color(0xFFFF6B8B),
+                  );
+                }).toList(),
+              ),
+
+              const SizedBox(height: 16),
+
+              Row(
+                children: [
+                  Expanded(
+                    child: _TimePickerField(
+                      label: 'Start Time',
+                      initialTime: _startTime,
+                      isRequired: true,
+                      onTimeSelected: (time) => setState(() => _startTime = time),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _TimePickerField(
+                      label: 'End Time',
+                      initialTime: _endTime,
+                      isRequired: true,
+                      onTimeSelected: (time) => setState(() => _endTime = time),
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 24),
+
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 12),
+                  ElevatedButton(
+                    onPressed: (_selectedDate != null && _startTime != null && _endTime != null && !_isLoading)
+                        ? _saveSpecialBreak
+                        : null,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFFF6B8B),
+                      foregroundColor: Colors.white,
+                    ),
+                    child: _isLoading
+                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Text('Add Special Break'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _saveSpecialBreak() async {
+    setState(() => _isLoading = true);
+
+    try {
+      final salonIdInt = int.parse(widget.salonId);
+      final startTimeString = '${_startTime!.hour.toString().padLeft(2, '0')}:${_startTime!.minute.toString().padLeft(2, '0')}:00';
+      final endTimeString = '${_endTime!.hour.toString().padLeft(2, '0')}:${_endTime!.minute.toString().padLeft(2, '0')}:00';
+
+      await supabase.from('barber_special_breaks').insert({
+        'barber_id': widget.barberId,
+        'salon_id': salonIdInt,
+        'break_date': _selectedDate!.toIso8601String().split('T').first,
+        'start_time': startTimeString,
+        'end_time': endTimeString,
+        'break_type': _selectedBreakType,
+      });
+
+      if (mounted) Navigator.pop(context, {'success': true});
+    } catch (e) {
+      debugPrint('Error saving special break: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+}
+
+// ==================== EDIT SPECIAL SCHEDULE DIALOG ====================
+class _EditSpecialScheduleDialog extends StatefulWidget {
+  final Map<String, dynamic> schedule;
+  final TimeOfDay? defaultOpenTime;
+  final TimeOfDay? defaultCloseTime;
+
+  const _EditSpecialScheduleDialog({
+    required this.schedule,
+    this.defaultOpenTime,
+    this.defaultCloseTime,
+  });
+
+  @override
+  State<_EditSpecialScheduleDialog> createState() => _EditSpecialScheduleDialogState();
+}
+
+class _EditSpecialScheduleDialogState extends State<_EditSpecialScheduleDialog> {
+  late TimeOfDay _startTime;
+  late TimeOfDay _endTime;
+  late bool _isWorking;
+  final TextEditingController _reasonController = TextEditingController();
+  bool _isLoading = false;
+  final supabase = Supabase.instance.client;
+
+  @override
+  void initState() {
+    super.initState();
+    final startParts = (widget.schedule['start_time'] as String).split(':');
+    _startTime = TimeOfDay(
+      hour: int.parse(startParts[0]),
+      minute: int.parse(startParts[1]),
+    );
+    final endParts = (widget.schedule['end_time'] as String).split(':');
+    _endTime = TimeOfDay(
+      hour: int.parse(endParts[0]),
+      minute: int.parse(endParts[1]),
+    );
+    _isWorking = widget.schedule['is_working'] ?? true;
+    _reasonController.text = widget.schedule['reason'] ?? '';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isWeb = screenWidth > 800;
+    final date = DateTime.parse(widget.schedule['schedule_date']);
+
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Container(
+        width: isWeb ? 500 : screenWidth * 0.9,
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.8,
+        ),
+        padding: EdgeInsets.all(isWeb ? 24 : 16),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Edit Special Schedule - ${DateFormat('yyyy-MM-dd').format(date)}',
+                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 20),
+
+              Row(
+                children: [
+                  Expanded(
+                    child: _TimePickerField(
+                      label: 'Start Time',
+                      initialTime: _startTime,
+                      isRequired: true,
+                      onTimeSelected: (time) => setState(() => _startTime = time),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _TimePickerField(
+                      label: 'End Time',
+                      initialTime: _endTime,
+                      isRequired: true,
+                      onTimeSelected: (time) => setState(() => _endTime = time),
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 16),
+
+              TextField(
+                controller: _reasonController,
+                decoration: const InputDecoration(
+                  labelText: 'Reason',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+
+              const SizedBox(height: 16),
+
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: _isWorking ? Colors.green.withValues(alpha: 0.1) : Colors.red.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    Icon(_isWorking ? Icons.check_circle : Icons.cancel, color: _isWorking ? Colors.green : Colors.red),
+                    const SizedBox(width: 12),
+                    Expanded(child: Text(_isWorking ? 'Working on this day' : 'Not working on this day')),
+                    Switch(
+                      value: _isWorking,
+                      onChanged: (value) => setState(() => _isWorking = value),
+                      activeThumbColor: Colors.green,
+                      inactiveThumbColor: Colors.red,
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 24),
+
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 12),
+                  ElevatedButton(
+                    onPressed: _isLoading ? null : _updateSpecialSchedule,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFFF6B8B),
+                      foregroundColor: Colors.white,
+                    ),
+                    child: _isLoading
+                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Text('Update'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _updateSpecialSchedule() async {
+    setState(() => _isLoading = true);
+
+    try {
+      final startTimeString = '${_startTime.hour.toString().padLeft(2, '0')}:${_startTime.minute.toString().padLeft(2, '0')}:00';
+      final endTimeString = '${_endTime.hour.toString().padLeft(2, '0')}:${_endTime.minute.toString().padLeft(2, '0')}:00';
+
+      await supabase
+          .from('barber_special_schedules')
+          .update({
+            'start_time': startTimeString,
+            'end_time': endTimeString,
+            'is_working': _isWorking,
+            'reason': _reasonController.text.isNotEmpty ? _reasonController.text : null,
+          })
+          .eq('id', widget.schedule['id']);
+
+      if (mounted) Navigator.pop(context, {'success': true});
+    } catch (e) {
+      debugPrint('Error updating special schedule: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+}
+
+// ==================== EDIT SPECIAL BREAK DIALOG ====================
+class _EditSpecialBreakDialog extends StatefulWidget {
+  final Map<String, dynamic> breakItem;
+  final List<Map<String, dynamic>> breakTypes;
+  final TimeOfDay? defaultOpenTime;
+  final TimeOfDay? defaultCloseTime;
+
+  const _EditSpecialBreakDialog({
+    required this.breakItem,
+    required this.breakTypes,
+    this.defaultOpenTime,
+    this.defaultCloseTime,
+  });
+
+  @override
+  State<_EditSpecialBreakDialog> createState() => _EditSpecialBreakDialogState();
+}
+
+class _EditSpecialBreakDialogState extends State<_EditSpecialBreakDialog> {
+  late TimeOfDay _startTime;
+  late TimeOfDay _endTime;
+  late String _selectedBreakType;
+  bool _isLoading = false;
+  final supabase = Supabase.instance.client;
+
+  @override
+  void initState() {
+    super.initState();
+    final startParts = (widget.breakItem['start_time'] as String).split(':');
+    _startTime = TimeOfDay(
+      hour: int.parse(startParts[0]),
+      minute: int.parse(startParts[1]),
+    );
+    final endParts = (widget.breakItem['end_time'] as String).split(':');
+    _endTime = TimeOfDay(
+      hour: int.parse(endParts[0]),
+      minute: int.parse(endParts[1]),
+    );
+    _selectedBreakType = widget.breakItem['break_type'] ?? 'lunch';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isWeb = screenWidth > 800;
+    final date = DateTime.parse(widget.breakItem['break_date']);
+
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Container(
+        width: isWeb ? 500 : screenWidth * 0.9,
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.8,
+        ),
+        padding: EdgeInsets.all(isWeb ? 24 : 16),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Edit Special Break - ${DateFormat('yyyy-MM-dd').format(date)}',
+                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 20),
+
+              const Text(
+                'Break Type',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: widget.breakTypes.map((type) {
+                  final isSelected = _selectedBreakType == type['id'];
+                  return FilterChip(
+                    label: Text(type['name']),
+                    selected: isSelected,
+                    onSelected: (selected) {
+                      if (selected) {
+                        setState(() => _selectedBreakType = type['id']);
+                      }
+                    },
+                    avatar: Icon(type['icon'], size: 18),
+                    backgroundColor: Colors.grey[100],
+                    selectedColor: const Color(0xFFFF6B8B).withValues(alpha: 0.2),
+                    checkmarkColor: const Color(0xFFFF6B8B),
+                  );
+                }).toList(),
+              ),
+
+              const SizedBox(height: 16),
+
+              Row(
+                children: [
+                  Expanded(
+                    child: _TimePickerField(
+                      label: 'Start Time',
+                      initialTime: _startTime,
+                      isRequired: true,
+                      onTimeSelected: (time) => setState(() => _startTime = time),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _TimePickerField(
+                      label: 'End Time',
+                      initialTime: _endTime,
+                      isRequired: true,
+                      onTimeSelected: (time) => setState(() => _endTime = time),
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 24),
+
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 12),
+                  ElevatedButton(
+                    onPressed: _isLoading ? null : _updateSpecialBreak,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFFF6B8B),
+                      foregroundColor: Colors.white,
+                    ),
+                    child: _isLoading
+                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Text('Update'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _updateSpecialBreak() async {
+    setState(() => _isLoading = true);
+
+    try {
+      final startTimeString = '${_startTime.hour.toString().padLeft(2, '0')}:${_startTime.minute.toString().padLeft(2, '0')}:00';
+      final endTimeString = '${_endTime.hour.toString().padLeft(2, '0')}:${_endTime.minute.toString().padLeft(2, '0')}:00';
+
+      await supabase
+          .from('barber_special_breaks')
+          .update({
+            'start_time': startTimeString,
+            'end_time': endTimeString,
+            'break_type': _selectedBreakType,
+          })
+          .eq('id', widget.breakItem['id']);
+
+      if (mounted) Navigator.pop(context, {'success': true});
+    } catch (e) {
+      debugPrint('Error updating special break: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+        setState(() => _isLoading = false);
+      }
+    }
   }
 }
 
@@ -1329,7 +2259,6 @@ class _AddBreakDialogState extends State<_AddBreakDialog> {
     _startTime = widget.defaultOpenTime;
     _endTime = widget.defaultCloseTime;
     
-    // Default break times
     if (_startTime != null && _endTime != null) {
       final lunchHour = _startTime!.hour + 4;
       if (lunchHour < _endTime!.hour) {
@@ -1363,7 +2292,6 @@ class _AddBreakDialogState extends State<_AddBreakDialog> {
               ),
               const SizedBox(height: 20),
 
-              // Break Type Selection
               const Text(
                 'Break Type',
                 style: TextStyle(fontWeight: FontWeight.bold),
@@ -1392,7 +2320,6 @@ class _AddBreakDialogState extends State<_AddBreakDialog> {
 
               const SizedBox(height: 16),
 
-              // Day Selection
               const Text(
                 'Select Day',
                 style: TextStyle(fontWeight: FontWeight.bold),
@@ -1429,7 +2356,6 @@ class _AddBreakDialogState extends State<_AddBreakDialog> {
 
               const SizedBox(height: 16),
 
-              // Time Selection
               Row(
                 children: [
                   Expanded(
@@ -1522,7 +2448,7 @@ class _AddBreakDialogState extends State<_AddBreakDialog> {
 
       if (mounted) Navigator.pop(context, {'success': true});
     } catch (e) {
-      debugPrint('❌ Error saving break: $e');
+      debugPrint('Error saving break: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
@@ -1612,7 +2538,6 @@ class _EditBreakDialogState extends State<_EditBreakDialog> {
               ),
               const SizedBox(height: 20),
 
-              // Break Type Selection
               const Text(
                 'Break Type',
                 style: TextStyle(fontWeight: FontWeight.bold),
@@ -1641,7 +2566,6 @@ class _EditBreakDialogState extends State<_EditBreakDialog> {
 
               const SizedBox(height: 16),
 
-              // Time Selection
               Row(
                 children: [
                   Expanded(
@@ -1727,7 +2651,7 @@ class _EditBreakDialogState extends State<_EditBreakDialog> {
 
       if (mounted) Navigator.pop(context, {'success': true});
     } catch (e) {
-      debugPrint('❌ Error updating break: $e');
+      debugPrint('Error updating break: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
@@ -2410,7 +3334,7 @@ class _AddScheduleDialogState extends State<_AddScheduleDialog> {
 
       if (mounted) Navigator.pop(context, {'success': true});
     } catch (e) {
-      debugPrint('❌ Error saving schedule: $e');
+      debugPrint('Error saving schedule: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
@@ -2640,7 +3564,7 @@ class _EditScheduleDialogState extends State<_EditScheduleDialog> {
 
       if (mounted) Navigator.pop(context, {'success': true});
     } catch (e) {
-      debugPrint('❌ Error updating schedule: $e');
+      debugPrint('Error updating schedule: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
