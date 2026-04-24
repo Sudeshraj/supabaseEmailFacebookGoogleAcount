@@ -62,6 +62,13 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   // Barber availability status
   Map<String, Map<String, dynamic>> _barberAvailability = {};
   
+  // ==================== PERSON SELECTION FIELDS ====================
+  final TextEditingController _childNameController = TextEditingController();
+  String? _selectedChildName;
+  bool _isSameAsCustomer = true;
+  bool _isCheckingDuplicate = false;
+  String? _duplicateError;
+  
   // Colors
   final Color _primaryColor = const Color(0xFFFF6B8B);
   final Color _secondaryColor = const Color(0xFF4CAF50);
@@ -96,6 +103,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   @override
   void dispose() {
     _searchController.dispose();
+    _childNameController.dispose();
     super.dispose();
   }
 
@@ -132,33 +140,10 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         actions: [
           if (_currentStep > 0)
             TextButton(
-              onPressed: () {
-                setState(() {
-                  _currentStep = 0;
-                  _selectedSalon = null;
-                  _selectedDate = null;
-                  _selectedServices = [];
-                  _selectedBarber = null;
-                  _selectedSlot = null;
-                  _searchController.clear();
-                  _searchResults = [];
-                  _isInitialized = false;
-                  _servicesLoaded = false;
-                  _barbersLoaded = false;
-                  _slotsLoaded = false;
-                  _availableBarbers = [];
-                  _availableSlots = [];
-                  _selectedCategoryTab = null;
-                  _salonServices = [];
-                  _holidays = {};
-                  _holidayNames = {};
-                  _isDateUnavailable = false;
-                  _barberAvailability = {};
-                });
-              },
+              onPressed: () => _resetBooking(),
               child: Text(
                 'Reset',
-                style: TextStyle(color: Colors.white.withValues(alpha: 0.9)),
+                style: TextStyle(color: Colors.white.withOpacity(0.9)),
               ),
             ),
         ],
@@ -179,9 +164,11 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                 Expanded(child: Container(height: 2, color: _currentStep > 2 ? _primaryColor : Colors.grey[300])),
                 _buildStepIndicator(3, 'Barber', Icons.person),
                 Expanded(child: Container(height: 2, color: _currentStep > 3 ? _primaryColor : Colors.grey[300])),
-                _buildStepIndicator(4, 'Time', Icons.access_time),
+                _buildStepIndicator(4, 'Person', Icons.badge),
                 Expanded(child: Container(height: 2, color: _currentStep > 4 ? _primaryColor : Colors.grey[300])),
-                _buildStepIndicator(5, 'Confirm', Icons.check_circle),
+                _buildStepIndicator(5, 'Time', Icons.access_time),
+                Expanded(child: Container(height: 2, color: _currentStep > 5 ? _primaryColor : Colors.grey[300])),
+                _buildStepIndicator(6, 'Confirm', Icons.check_circle),
               ],
             ),
           ),
@@ -193,6 +180,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                 _buildDateSelectionStep(),
                 _buildServiceSelectionStep(),
                 _buildBarberSelectionStep(),
+                _buildPersonSelectionStep(),
                 _buildTimeSlotStep(),
                 _buildConfirmationStep(),
               ],
@@ -201,6 +189,35 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         ],
       ),
     );
+  }
+
+  void _resetBooking() {
+    setState(() {
+      _currentStep = 0;
+      _selectedSalon = null;
+      _selectedDate = null;
+      _selectedServices = [];
+      _selectedBarber = null;
+      _selectedSlot = null;
+      _searchController.clear();
+      _searchResults = [];
+      _isInitialized = false;
+      _servicesLoaded = false;
+      _barbersLoaded = false;
+      _slotsLoaded = false;
+      _availableBarbers = [];
+      _availableSlots = [];
+      _selectedCategoryTab = null;
+      _salonServices = [];
+      _holidays = {};
+      _holidayNames = {};
+      _isDateUnavailable = false;
+      _barberAvailability = {};
+      _childNameController.clear();
+      _selectedChildName = null;
+      _isSameAsCustomer = true;
+      _duplicateError = null;
+    });
   }
 
   Widget _buildStepIndicator(int step, String label, IconData icon) {
@@ -215,7 +232,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           height: 40,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: isCompleted ? _primaryColor : (isActive ? _primaryColor.withValues(alpha: 0.1) : Colors.grey[200]),
+            color: isCompleted ? _primaryColor : (isActive ? _primaryColor.withOpacity(0.1) : Colors.grey[200]),
             border: Border.all(
               color: isActive ? _primaryColor : Colors.grey[300]!,
               width: isActive ? 2 : 1,
@@ -330,7 +347,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                 width: 55,
                 height: 55,
                 decoration: BoxDecoration(
-                  color: _primaryColor.withValues(alpha: 0.1),
+                  color: _primaryColor.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Center(
@@ -423,11 +440,11 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       _salonServices = [];
       _selectedServices = [];
       _selectedDate = null;
-      _loadHolidays();
     });
+    _loadHolidays();
   }
 
-  // ==================== STEP 2: DATE SELECTION WITH HOLIDAY CHECK ====================
+  // ==================== STEP 2: DATE SELECTION ====================
   Future<void> _loadHolidays() async {
     if (_selectedSalon == null) return;
     
@@ -494,7 +511,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                       firstDate: today,
                       lastDate: maxDate,
                       selectableDayPredicate: (date) {
-                        // Check if date is a holiday
                         final isHoliday = _holidays.contains(date);
                         return !isHoliday;
                       },
@@ -509,7 +525,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                     ),
                   ),
                 ),
-                // Show holiday information
                 if (_selectedDate != null && _holidays.contains(_selectedDate))
                   Container(
                     margin: const EdgeInsets.only(top: 12),
@@ -594,11 +609,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   Future<void> _checkDateAvailability(DateTime date) async {
     if (_selectedSalon == null) return;
     
-    final dateStr = DateFormat('yyyy-MM-dd').format(date);
     final dayOfWeek = date.weekday;
     
     try {
-      // Check if any barber has schedule for this day
       final schedules = await supabase
           .from('barber_schedules')
           .select('barber_id')
@@ -698,7 +711,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
             padding: const EdgeInsets.all(12),
             margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             decoration: BoxDecoration(
-              color: _primaryColor.withValues(alpha: 0.05),
+              color: _primaryColor.withOpacity(0.05),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Column(
@@ -729,7 +742,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
               ],
             ),
           ),
-        // Category chips
         Container(
           height: 45,
           margin: const EdgeInsets.symmetric(vertical: 12),
@@ -942,7 +954,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
-          color: isSelected ? _primaryColor.withValues(alpha: 0.1) : Colors.white,
+          color: isSelected ? _primaryColor.withOpacity(0.1) : Colors.white,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(color: isSelected ? _primaryColor : Colors.grey[200]!),
         ),
@@ -1115,7 +1127,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     return Icons.build;
   }
 
-  // ==================== STEP 4: BARBER SELECTION WITH LEAVE & SCHEDULE CHECK ====================
+  // ==================== STEP 4: BARBER SELECTION ====================
   Future<void> _checkBarberAvailability(String barberId, DateTime date) async {
     final dateStr = DateFormat('yyyy-MM-dd').format(date);
     final dayOfWeek = date.weekday;
@@ -1128,7 +1140,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     };
     
     try {
-      // 1. Check barber schedule for this day
       final schedule = await supabase
           .from('barber_schedules')
           .select()
@@ -1145,7 +1156,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         return;
       }
       
-      // 2. Check full day leave
       final fullDayLeave = await supabase
           .from('barber_leaves')
           .select()
@@ -1162,7 +1172,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         return;
       }
       
-      // 3. Check half day leave
       final halfDayLeave = await supabase
           .from('barber_leaves')
           .select()
@@ -1185,7 +1194,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         }
       }
       
-      // 4. Check emergency leave
       final emergencyLeave = await supabase
           .from('barber_leaves')
           .select()
@@ -1202,7 +1210,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         return;
       }
       
-      // 5. Check short leave (lunch break or short breaks)
       final shortLeave = await supabase
           .from('barber_lunch_breaks')
           .select()
@@ -1317,10 +1324,11 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
               onPressed: _selectedBarber == null ? null : () {
                 setState(() {
                   _currentStep = 4;
-                  _slotsLoaded = false;
-                  _availableSlots = [];
+                  _childNameController.clear();
+                  _selectedChildName = null;
+                  _isSameAsCustomer = true;
+                  _duplicateError = null;
                 });
-                _loadAvailableSlots();
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: _selectedBarber != null ? _primaryColor : Colors.grey[300],
@@ -1366,7 +1374,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
               children: [
                 CircleAvatar(
                   radius: 28,
-                  backgroundColor: _primaryColor.withValues(alpha: 0.1),
+                  backgroundColor: _primaryColor.withOpacity(0.1),
                   backgroundImage: barber['avatar_url'] != null ? NetworkImage(barber['avatar_url']) : null,
                   child: barber['avatar_url'] == null
                       ? Text(barber['full_name']?.substring(0, 1).toUpperCase() ?? 'B', 
@@ -1471,52 +1479,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     );
   }
 
-  // Helper methods
-  int _timeToMinutes(String time) {
-    try {
-      final parts = time.split(':');
-      final hour = int.parse(parts[0]);
-      final minute = int.parse(parts[1]);
-      return hour * 60 + minute;
-    } catch (e) {
-      return 0;
-    }
-  }
-
-  String _getLaterTime(String time1, String time2) {
-    final t1Minutes = _timeToMinutes(time1);
-    final t2Minutes = _timeToMinutes(time2);
-    return t1Minutes > t2Minutes ? time1 : time2;
-  }
-
-  String _getEarlierTime(String time1, String time2) {
-    final t1Minutes = _timeToMinutes(time1);
-    final t2Minutes = _timeToMinutes(time2);
-    return t1Minutes < t2Minutes ? time1 : time2;
-  }
-
-  String _minutesToTimeString(int minutes) {
-    final hour = (minutes ~/ 60) % 24;
-    final minute = minutes % 60;
-    return '${hour.toString().padLeft(2, '0')}:${minute.toString().padLeft(2, '0')}:00';
-  }
-
-  String _calculateEndTime(String startTime, int durationMinutes) {
-    try {
-      final parts = startTime.split(':');
-      final hour = int.parse(parts[0]);
-      final minute = int.parse(parts[1]);
-      
-      final totalMinutes = hour * 60 + minute + durationMinutes;
-      final newHour = (totalMinutes ~/ 60) % 24;
-      final newMinute = totalMinutes % 60;
-      
-      return '${newHour.toString().padLeft(2, '0')}:${newMinute.toString().padLeft(2, '0')}:00';
-    } catch (e) {
-      return startTime;
-    }
-  }
-
   Future<void> _loadAvailableBarbers() async {
     if (_isLoadingBarbers) return;
     
@@ -1555,12 +1517,10 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       
       final List<Map<String, dynamic>> barberList = [];
       final todayStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
-      final selectedDateStr = _selectedDate != null ? DateFormat('yyyy-MM-dd').format(_selectedDate!) : todayStr;
       
       for (var profile in profiles) {
         final barberId = profile['id'];
         
-        // Check availability for selected date
         if (_selectedDate != null) {
           await _checkBarberAvailability(barberId, _selectedDate!);
         }
@@ -1599,7 +1559,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         });
       }
       
-      // Sort: available barbers first, then unavailable
       barberList.sort((a, b) {
         if (a['is_available'] && !b['is_available']) return -1;
         if (!a['is_available'] && b['is_available']) return 1;
@@ -1617,7 +1576,519 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     }
   }
 
-  // ==================== STEP 5: TIME SLOT SELECTION ====================
+  // ==================== STEP 5: PERSON SELECTION ====================
+  Widget _buildPersonSelectionStep() {
+    final user = supabase.auth.currentUser;
+    final customerName = user?.userMetadata?['full_name'] ?? 
+                         user?.email?.split('@').first ?? 
+                         'Customer';
+    
+    return Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(16),
+          color: Colors.white,
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  CircleAvatar(
+                    radius: 20,
+                    backgroundColor: _primaryColor.withOpacity(0.1),
+                    child: Text(_selectedBarber?['full_name']?.substring(0, 1).toUpperCase() ?? 'B',
+                        style: TextStyle(color: _primaryColor, fontWeight: FontWeight.bold)),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(_selectedBarber?['full_name'] ?? 'Barber',
+                            style: const TextStyle(fontWeight: FontWeight.bold)),
+                        Text('${_calculateTotalDuration()} min service',
+                            style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                      ],
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => setState(() => _currentStep = 3),
+                    child: Text('Change', style: TextStyle(color: _primaryColor)),
+                  ),
+                ],
+              ),
+              if (_selectedDate != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Row(
+                    children: [
+                      Icon(Icons.calendar_today, size: 16, color: _secondaryColor),
+                      const SizedBox(width: 8),
+                      Text(
+                        DateFormat('EEEE, MMM dd, yyyy').format(_selectedDate!),
+                        style: const TextStyle(fontWeight: FontWeight.w500),
+                      ),
+                      const Spacer(),
+                      TextButton(
+                        onPressed: () => setState(() => _currentStep = 1),
+                        child: Text('Change', style: TextStyle(color: _primaryColor)),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+        
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Who is this appointment for?',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Select who will receive the service',
+                  style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+                ),
+                const SizedBox(height: 20),
+                
+                // Option 1: Myself
+                Card(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    side: BorderSide(
+                      color: _isSameAsCustomer ? _primaryColor : Colors.grey[300]!,
+                      width: _isSameAsCustomer ? 2 : 1,
+                    ),
+                  ),
+                  child: InkWell(
+                    onTap: () {
+                      setState(() {
+                        _isSameAsCustomer = true;
+                        _selectedChildName = null;
+                        _childNameController.clear();
+                        _duplicateError = null;
+                      });
+                      _checkDuplicateBooking();
+                    },
+                    borderRadius: BorderRadius.circular(12),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 50,
+                            height: 50,
+                            decoration: BoxDecoration(
+                              color: _primaryColor.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(25),
+                            ),
+                            child: Icon(Icons.person, size: 28, color: _primaryColor),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Myself',
+                                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  customerName,
+                                  style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+                                ),
+                                Text(
+                                  'Booking for yourself',
+                                  style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Container(
+                            width: 24,
+                            height: 24,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: _isSameAsCustomer ? _primaryColor : Colors.transparent,
+                              border: Border.all(color: _isSameAsCustomer ? _primaryColor : Colors.grey[400]!),
+                            ),
+                            child: _isSameAsCustomer
+                                ? const Icon(Icons.check, size: 16, color: Colors.white)
+                                : null,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                
+                // Option 2: Someone else
+                Card(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    side: BorderSide(
+                      color: !_isSameAsCustomer ? _primaryColor : Colors.grey[300]!,
+                      width: !_isSameAsCustomer ? 2 : 1,
+                    ),
+                  ),
+                  child: InkWell(
+                    onTap: () {
+                      setState(() {
+                        _isSameAsCustomer = false;
+                        _duplicateError = null;
+                      });
+                    },
+                    borderRadius: BorderRadius.circular(12),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 50,
+                            height: 50,
+                            decoration: BoxDecoration(
+                              color: _primaryColor.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(25),
+                            ),
+                            child: Icon(Icons.group, size: 28, color: _primaryColor),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Someone else',
+                                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  'Family member, friend, or child',
+                                  style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+                                ),
+                                if (!_isSameAsCustomer && _selectedChildName != null && _selectedChildName!.isNotEmpty)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 4),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: _primaryColor.withOpacity(0.1),
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: Text(
+                                        'Will book for: $_selectedChildName',
+                                        style: TextStyle(fontSize: 11, color: _primaryColor),
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                          Container(
+                            width: 24,
+                            height: 24,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: !_isSameAsCustomer ? _primaryColor : Colors.transparent,
+                              border: Border.all(color: !_isSameAsCustomer ? _primaryColor : Colors.grey[400]!),
+                            ),
+                            child: !_isSameAsCustomer
+                                ? const Icon(Icons.check, size: 16, color: Colors.white)
+                                : null,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                
+                // Name input for "Someone else"
+                if (!_isSameAsCustomer) ...[
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[50],
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.badge, size: 20, color: _primaryColor),
+                            const SizedBox(width: 8),
+                            const Text(
+                              'Person\'s Name',
+                              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              '*',
+                              style: TextStyle(color: Colors.red.shade700),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: _childNameController,
+                          autofocus: true,
+                          decoration: InputDecoration(
+                            hintText: 'Enter full name (e.g., Kamal Perera)',
+                            prefixIcon: Icon(Icons.person_outline, color: _primaryColor),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide(color: _primaryColor, width: 2),
+                            ),
+                            filled: true,
+                            fillColor: Colors.white,
+                            contentPadding: const EdgeInsets.symmetric(vertical: 14),
+                          ),
+                          onChanged: (value) {
+                            setState(() {
+                              _selectedChildName = value.trim();
+                              _duplicateError = null;
+                            });
+                            _checkDuplicateBooking();
+                          },
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Icon(Icons.info_outline, size: 12, color: Colors.grey[500]),
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(
+                                'Use the person\'s real name as it will appear on their booking',
+                                style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                
+                // Selection summary
+                if ((_isSameAsCustomer) || (_selectedChildName != null && _selectedChildName!.isNotEmpty))
+                  Container(
+                    margin: const EdgeInsets.only(top: 16),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [_primaryColor.withOpacity(0.1), _primaryColor.withOpacity(0.05)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: _primaryColor.withOpacity(0.3)),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: _primaryColor,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Icon(
+                            _isSameAsCustomer ? Icons.person : Icons.badge,
+                            size: 20,
+                            color: Colors.white,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Booking for',
+                                style: TextStyle(fontSize: 11, color: _primaryColor),
+                              ),
+                              Text(
+                                _isSameAsCustomer ? customerName : _selectedChildName!,
+                                style: const TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (!_isSameAsCustomer)
+                          IconButton(
+                            icon: Icon(Icons.edit, size: 18, color: _primaryColor),
+                            onPressed: () {
+                              _childNameController.clear();
+                              setState(() {
+                                _selectedChildName = null;
+                              });
+                            },
+                          ),
+                      ],
+                    ),
+                  ),
+                
+                // Duplicate error
+                if (_duplicateError != null) ...[
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.red.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.red.shade200),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.warning_amber, color: Colors.red.shade700),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            _duplicateError!,
+                            style: TextStyle(color: Colors.red.shade700, fontSize: 13),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                
+                const SizedBox(height: 16),
+                
+                // Info box
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.info, color: Colors.blue.shade700),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Each person can only have one booking per day. You can book for multiple different people on the same day.',
+                          style: TextStyle(fontSize: 12, color: Colors.blue.shade700),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        
+        // Continue button
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: _canProceedToTimeSlot() ? () async {
+                if (await _validateAndProceed()) {
+                  setState(() {
+                    _currentStep = 5;
+                    _slotsLoaded = false;
+                    _availableSlots = [];
+                  });
+                  _loadAvailableSlots();
+                }
+              } : null,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _canProceedToTimeSlot() ? _primaryColor : Colors.grey[300],
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              child: _isCheckingDuplicate
+                  ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  : Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Text('Continue', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                        const SizedBox(width: 8),
+                        Icon(Icons.arrow_forward, size: 18),
+                      ],
+                    ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+  
+  bool _canProceedToTimeSlot() {
+    if (_isCheckingDuplicate) return false;
+    if (_duplicateError != null) return false;
+    if (_isSameAsCustomer) return true;
+    return _selectedChildName != null && _selectedChildName!.trim().isNotEmpty;
+  }
+  
+  Future<void> _checkDuplicateBooking() async {
+    if (_selectedDate == null) return;
+    
+    final user = supabase.auth.currentUser;
+    if (user == null) return;
+    
+    final childName = _isSameAsCustomer ? '' : (_selectedChildName?.trim() ?? '');
+    if (!_isSameAsCustomer && childName.isEmpty) return;
+    
+    setState(() => _isCheckingDuplicate = true);
+    
+    try {
+      final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate!);
+      
+      final existingBookings = await supabase
+          .from('appointments')
+          .select('id, child_name, status')
+          .eq('customer_id', user.id)
+          .eq('appointment_date', dateStr)
+          .eq('child_name', childName)
+          .not('status', 'in', '("cancelled","no_show")');
+      
+      if (existingBookings.isNotEmpty) {
+        setState(() {
+          _duplicateError = '⚠️ You already have a booking for ${childName.isEmpty ? "yourself" : childName} on ${DateFormat('MMM dd').format(_selectedDate!)}.\n\nEach person can only have one booking per day.';
+        });
+      } else {
+        setState(() {
+          _duplicateError = null;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error checking duplicate: $e');
+    } finally {
+      setState(() => _isCheckingDuplicate = false);
+    }
+  }
+  
+  Future<bool> _validateAndProceed() async {
+    await _checkDuplicateBooking();
+    return _duplicateError == null;
+  }
+  
+  String _getChildNameForBooking() {
+    if (_isSameAsCustomer) return '';
+    return _selectedChildName?.trim() ?? '';
+  }
+
+  // ==================== STEP 6: TIME SLOT SELECTION ====================
   Future<void> _loadAvailableSlots() async {
     if (_isLoadingSlots) return;
     
@@ -1630,7 +2101,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       
       final dayOfWeek = targetDate.weekday;
       
-      // Get barber schedule
       final schedule = await supabase
           .from('barber_schedules')
           .select()
@@ -1648,7 +2118,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         return;
       }
       
-      // Check for leave on this date
       final dateStr = DateFormat('yyyy-MM-dd').format(targetDate);
       final leave = await supabase
           .from('barber_leaves')
@@ -1666,7 +2135,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         return;
       }
       
-      // Get existing appointments
       final existingAppointments = await supabase
           .from('appointments')
           .select('start_time, end_time, is_vip, queue_number')
@@ -1675,7 +2143,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           .inFilter('status', ['confirmed', 'pending', 'in_progress'])
           .order('queue_number', ascending: true);
       
-      // Get salon hours
       final salonOpen = _selectedSalon!['open_time']?.toString() ?? '09:00:00';
       final salonClose = _selectedSalon!['close_time']?.toString() ?? '18:00:00';
       
@@ -1695,7 +2162,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         currentTimeMinutes = workStartMinutes;
       }
       
-      // Get max queue number from existing appointments
       int maxQueueNumber = 0;
       Map<int, Map<String, dynamic>> bookedSlotsMap = {};
       
@@ -1758,9 +2224,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           'start_time': workStartTimeStr,
           'end_time': _calculateEndTime(workStartTimeStr, serviceDuration),
           'queue_number': nextQueueNumber,
-          'is_available': true,
+          'is_available': false,
           'duration': serviceDuration,
-          'message': 'Next available slot tomorrow at ${_formatTime(workStartTimeStr)}. Queue #$nextQueueNumber',
+          'message': 'No slots available today. Please select another date.',
         };
       }
       
@@ -1785,7 +2251,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
             children: [
               CircleAvatar(
                 radius: 20,
-                backgroundColor: _primaryColor.withValues(alpha: 0.1),
+                backgroundColor: _primaryColor.withOpacity(0.1),
                 child: Text(_selectedBarber?['full_name']?.substring(0, 1).toUpperCase() ?? 'B',
                     style: TextStyle(color: _primaryColor, fontWeight: FontWeight.bold)),
               ),
@@ -1862,9 +2328,13 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           child: SizedBox(
             width: double.infinity,
             child: ElevatedButton(
-              onPressed: _selectedSlot == null ? null : () => setState(() => _currentStep = 5),
+              onPressed: _selectedSlot == null || (_availableSlots.isNotEmpty && _availableSlots[0]['is_available'] == false) 
+                  ? null 
+                  : () => setState(() => _currentStep = 6),
               style: ElevatedButton.styleFrom(
-                backgroundColor: _selectedSlot != null ? _primaryColor : Colors.grey[300],
+                backgroundColor: (_selectedSlot != null && _availableSlots.isNotEmpty && _availableSlots[0]['is_available'] == true) 
+                    ? _primaryColor 
+                    : Colors.grey[300],
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -1882,147 +2352,164 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
 
   Widget _buildTimeSlotCard(Map<String, dynamic> slot) {
     final isSelected = _selectedSlot?['start_time'] == slot['start_time'];
+    final isAvailable = slot['is_available'] ?? true;
     final queueNumber = slot['queue_number'];
     final message = slot['message'];
     
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      color: isSelected ? _primaryColor.withValues(alpha: 0.05) : Colors.white,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(
-          color: isSelected ? _primaryColor : _primaryColor.withValues(alpha: 0.3),
-          width: isSelected ? 2 : 1,
+    return Opacity(
+      opacity: isAvailable ? 1.0 : 0.6,
+      child: Card(
+        margin: const EdgeInsets.only(bottom: 12),
+        color: isSelected ? _primaryColor.withOpacity(0.05) : Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(
+            color: isSelected ? _primaryColor : _primaryColor.withOpacity(0.3),
+            width: isSelected ? 2 : 1,
+          ),
         ),
-      ),
-      child: InkWell(
-        onTap: () => setState(() => _selectedSlot = slot),
-        borderRadius: BorderRadius.circular(16),
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            children: [
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(vertical: 20),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [_primaryColor, _primaryColor.withValues(alpha: 0.8)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Column(
-                  children: [
-                    const Text(
-                      'Your Queue Number',
-                      style: TextStyle(
-                        color: Colors.white70,
-                        fontSize: 14,
-                        letterSpacing: 1,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '#$queueNumber',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 48,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 20),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.grey[100],
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.access_time, color: Color(0xFFFF6B8B), size: 20),
-                    const SizedBox(width: 8),
-                    Text(
-                      '${_formatTime(slot['start_time'])} - ${_formatTime(slot['end_time'])}',
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.timer, size: 16, color: Colors.grey[600]),
-                  const SizedBox(width: 4),
-                  Text(
-                    '${slot['duration']} minutes',
-                    style: TextStyle(color: Colors.grey[600]),
-                  ),
-                ],
-              ),
-              if (message != null) ...[
-                const SizedBox(height: 16),
+        child: InkWell(
+          onTap: isAvailable ? () => setState(() => _selectedSlot = slot) : null,
+          borderRadius: BorderRadius.circular(16),
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              children: [
                 Container(
-                  padding: const EdgeInsets.all(10),
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 20),
                   decoration: BoxDecoration(
-                    color: Colors.blue.shade50,
-                    borderRadius: BorderRadius.circular(8),
+                    gradient: LinearGradient(
+                      colors: isAvailable 
+                          ? [_primaryColor, _primaryColor.withOpacity(0.8)]
+                          : [Colors.grey, Colors.grey.shade400],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Row(
+                  child: Column(
                     children: [
-                      Icon(Icons.info_outline, size: 16, color: Colors.blue.shade700),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          message,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.blue.shade700,
-                          ),
+                      const Text(
+                        'Your Queue Number',
+                        style: TextStyle(
+                          color: Colors.white70,
+                          fontSize: 14,
+                          letterSpacing: 1,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        '#$queueNumber',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 48,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
                     ],
                   ),
                 ),
-              ],
-              const SizedBox(height: 16),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () => setState(() => _selectedSlot = slot),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: isSelected ? _secondaryColor : _primaryColor,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
+                const SizedBox(height: 20),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[100],
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Text(
-                    isSelected ? 'Selected ✓' : 'Select This Time',
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.access_time, color: isAvailable ? _primaryColor : Colors.grey, size: 20),
+                      const SizedBox(width: 8),
+                      Text(
+                        '${_formatTime(slot['start_time'])} - ${_formatTime(slot['end_time'])}',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: isAvailable ? _textDark : Colors.grey,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ),
-            ],
+                const SizedBox(height: 12),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.timer, size: 16, color: Colors.grey[600]),
+                    const SizedBox(width: 4),
+                    Text(
+                      '${slot['duration']} minutes',
+                      style: TextStyle(color: Colors.grey[600]),
+                    ),
+                  ],
+                ),
+                if (message != null) ...[
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: isAvailable ? Colors.blue.shade50 : Colors.orange.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          isAvailable ? Icons.info_outline : Icons.warning_amber,
+                          size: 16,
+                          color: isAvailable ? Colors.blue.shade700 : Colors.orange.shade700,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            message,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: isAvailable ? Colors.blue.shade700 : Colors.orange.shade700,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: isAvailable ? () => setState(() => _selectedSlot = slot) : null,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: isSelected ? _secondaryColor : (isAvailable ? _primaryColor : Colors.grey),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: Text(
+                      isSelected ? 'Selected ✓' : (isAvailable ? 'Select This Time' : 'Not Available'),
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  // ==================== STEP 6: CONFIRMATION ====================
+  // ==================== STEP 7: CONFIRMATION ====================
   Widget _buildConfirmationStep() {
+    final user = supabase.auth.currentUser;
+    final customerName = user?.userMetadata?['full_name'] ?? 
+                         user?.email?.split('@').first ?? 
+                         'Customer';
+    final displayName = _isSameAsCustomer ? customerName : _getChildNameForBooking();
+    
     if (_selectedSalon == null || _selectedServices.isEmpty || _selectedBarber == null || _selectedSlot == null || _selectedDate == null) {
       return Center(
         child: Column(
@@ -2033,7 +2520,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
             Text('Missing information', style: TextStyle(color: Colors.grey[600])),
             const SizedBox(height: 16),
             ElevatedButton(
-              onPressed: () => setState(() => _currentStep = 0),
+              onPressed: () => _resetBooking(),
               style: ElevatedButton.styleFrom(backgroundColor: _primaryColor),
               child: const Text('Start Over'),
             ),
@@ -2061,6 +2548,13 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                   title: 'Date & Time',
                   value: DateFormat('EEEE, MMM dd, yyyy').format(_selectedDate!),
                   subtitle: '${_formatTime(_selectedSlot!['start_time'])} - ${_formatTime(_selectedSlot!['end_time'])} • Queue #${_selectedSlot!['queue_number']}',
+                ),
+                const SizedBox(height: 12),
+                _buildConfirmationTile(
+                  icon: Icons.badge,
+                  title: 'Booking For',
+                  value: displayName,
+                  subtitle: _isSameAsCustomer ? 'Self booking' : 'Booking for family/friend',
                 ),
                 const SizedBox(height: 12),
                 _buildConfirmationTile(
@@ -2130,7 +2624,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: _primaryColor.withValues(alpha: 0.1),
+              color: _primaryColor.withOpacity(0.1),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Icon(icon, size: 20, color: _primaryColor),
@@ -2166,6 +2660,20 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       if (user == null) throw Exception('Please login');
       
       final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate!);
+      final childName = _getChildNameForBooking();
+      
+      // Final duplicate check before booking
+      final existingCheck = await supabase
+          .from('appointments')
+          .select('id')
+          .eq('customer_id', user.id)
+          .eq('appointment_date', dateStr)
+          .eq('child_name', childName)
+          .not('status', 'in', '("cancelled","no_show")');
+      
+      if (existingCheck.isNotEmpty) {
+        throw Exception('Duplicate booking detected. You already have a booking for ${childName.isEmpty ? "yourself" : childName} on this date.');
+      }
       
       final nextQueue = await supabase
           .rpc('get_next_queue_number', params: {
@@ -2176,22 +2684,26 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       final tokenResponse = await supabase.rpc('generate_queue_token');
       final queueToken = tokenResponse as String;
       
-      // Create appointment for each service
-      for (var service in _selectedServices) {
+      if (_selectedServices.isNotEmpty) {
+        final firstService = _selectedServices.first;
+        
         final appointmentData = {
           'customer_id': user.id,
           'barber_id': _selectedBarber!['id'],
           'salon_id': _selectedSalon!['id'],
-          'service_id': service['id'],
-          'variant_id': service['variant_id'],
+          'service_id': firstService['id'],
+          'variant_id': firstService['variant_id'],
           'appointment_date': dateStr,
           'start_time': _selectedSlot!['start_time'],
           'end_time': _selectedSlot!['end_time'],
           'queue_number': nextQueue,
           'queue_token': queueToken,
           'status': 'confirmed',
-          'price': service['price'],
-          'notes': 'Combined booking with ${_selectedServices.length} services',
+          'price': _calculateTotalPrice(),
+          'notes': _selectedServices.length > 1 
+              ? 'Combined booking with ${_selectedServices.length} services: ${_selectedServices.map((s) => s['name']).join(', ')}'
+              : null,
+          'child_name': childName.isEmpty ? null : childName,
           'created_at': DateTime.now().toIso8601String(),
         };
         
@@ -2201,7 +2713,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('✅ Booking confirmed! Queue #$nextQueue | Token: $queueToken'),
+            content: Text('✅ Booking confirmed${childName.isNotEmpty ? ' for $childName' : ''}! Queue #$nextQueue | Token: $queueToken'),
             backgroundColor: _secondaryColor,
             duration: const Duration(seconds: 4),
           ),
@@ -2216,6 +2728,52 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       }
     } finally {
       if (mounted) setState(() => _isBooking = false);
+    }
+  }
+
+  // Helper methods
+  int _timeToMinutes(String time) {
+    try {
+      final parts = time.split(':');
+      final hour = int.parse(parts[0]);
+      final minute = int.parse(parts[1]);
+      return hour * 60 + minute;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  String _getLaterTime(String time1, String time2) {
+    final t1Minutes = _timeToMinutes(time1);
+    final t2Minutes = _timeToMinutes(time2);
+    return t1Minutes > t2Minutes ? time1 : time2;
+  }
+
+  String _getEarlierTime(String time1, String time2) {
+    final t1Minutes = _timeToMinutes(time1);
+    final t2Minutes = _timeToMinutes(time2);
+    return t1Minutes < t2Minutes ? time1 : time2;
+  }
+
+  String _minutesToTimeString(int minutes) {
+    final hour = (minutes ~/ 60) % 24;
+    final minute = minutes % 60;
+    return '${hour.toString().padLeft(2, '0')}:${minute.toString().padLeft(2, '0')}:00';
+  }
+
+  String _calculateEndTime(String startTime, int durationMinutes) {
+    try {
+      final parts = startTime.split(':');
+      final hour = int.parse(parts[0]);
+      final minute = int.parse(parts[1]);
+      
+      final totalMinutes = hour * 60 + minute + durationMinutes;
+      final newHour = (totalMinutes ~/ 60) % 24;
+      final newMinute = totalMinutes % 60;
+      
+      return '${newHour.toString().padLeft(2, '0')}:${newMinute.toString().padLeft(2, '0')}:00';
+    } catch (e) {
+      return startTime;
     }
   }
 }
