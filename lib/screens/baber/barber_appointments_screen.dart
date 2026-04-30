@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../services/timezone_service.dart';
 
 class BarberAppointmentsScreen extends StatefulWidget {
   const BarberAppointmentsScreen({super.key});
@@ -21,7 +22,6 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen> wit
   final Color _dangerColor = const Color(0xFFF44336);
   
   // Data
-  List<Map<String, dynamic>> _appointments = [];
   List<Map<String, dynamic>> _todayAppointments = [];
   List<Map<String, dynamic>> _upcomingAppointments = [];
   List<Map<String, dynamic>> _pastAppointments = [];
@@ -29,14 +29,12 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen> wit
   bool _isLoading = true;
   String? _error;
   String? _barberName;
-  String? _barberAvatar;
   
   // Tab controller
   late TabController _tabController;
   
   // Date selection
   DateTime _selectedDate = DateTime.now();
-  bool _showDatePicker = false;
   
   // Action states
   bool _isProcessing = false;
@@ -62,14 +60,13 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen> wit
       
       final profile = await supabase
           .from('profiles')
-          .select('full_name, avatar_url')
+          .select('full_name')
           .eq('id', user.id)
           .maybeSingle();
       
       if (profile != null && mounted) {
         setState(() {
           _barberName = profile['full_name'] ?? 'Barber';
-          _barberAvatar = profile['avatar_url'];
         });
       }
     } catch (e) {
@@ -77,305 +74,347 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen> wit
     }
   }
   
-// Replace your existing _loadAppointments function with this
-Future<void> _loadAppointments() async {
-  if (!mounted) return;
+  // =====================================================
+  // LOAD APPOINTMENTS WITH TIMEZONE SERVICE
+  // =====================================================
+  Future<void> _loadAppointments() async {
+    if (!mounted) return;
+    
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+    
+    try {
+      final user = supabase.auth.currentUser;
+      if (user == null) {
+        setState(() {
+          _error = 'Please login to continue';
+          _isLoading = false;
+        });
+        return;
+      }
+      
+      // Step 1: Get all appointments for this barber
+      final appointments = await supabase
+          .from('appointments')
+          .select('*')
+          .eq('barber_id', user.id)
+          .order('appointment_date', ascending: true);
+      
+      if (appointments.isEmpty) {
+        setState(() {
+          _todayAppointments = [];
+          _upcomingAppointments = [];
+          _pastAppointments = [];
+          _isLoading = false;
+        });
+        return;
+      }
+      
+      // Step 2: Get all unique customer IDs
+      final customerIds = appointments
+          .map((a) => a['customer_id'] as String?)
+          .where((id) => id != null)
+          .toSet()
+          .toList();
+      
+      // Step 3: Fetch all customers in one query
+      Map<String, Map<String, dynamic>> customersMap = {};
+      if (customerIds.isNotEmpty) {
+        final customers = await supabase
+            .from('profiles')
+            .select('id, full_name, avatar_url, phone')
+            .inFilter('id', customerIds);
+        
+        for (var customer in customers) {
+          customersMap[customer['id']] = customer as Map<String, dynamic>;
+        }
+      }
+      
+      // Step 4: Get all unique service IDs
+      final serviceIds = appointments
+          .map((a) => a['service_id'] as int?)
+          .where((id) => id != null)
+          .toSet()
+          .toList();
+      
+      Map<int, String> servicesMap = {};
+      if (serviceIds.isNotEmpty) {
+        final services = await supabase
+            .from('services')
+            .select('id, name')
+            .inFilter('id', serviceIds);
+        
+        for (var service in services) {
+          servicesMap[service['id']] = service['name'];
+        }
+      }
+      
+      // Step 5: Get all unique salon IDs
+      final salonIds = appointments
+          .map((a) => a['salon_id'] as int?)
+          .where((id) => id != null)
+          .toSet()
+          .toList();
+      
+      Map<int, String> salonsMap = {};
+      if (salonIds.isNotEmpty) {
+        final salons = await supabase
+            .from('salons')
+            .select('id, name')
+            .inFilter('id', salonIds);
+        
+        for (var salon in salons) {
+          salonsMap[salon['id']] = salon['name'];
+        }
+      }
+      
+      // Step 6: Process appointments with TIMEZONE SERVICE
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      
+      final List<Map<String, dynamic>> todayList = [];
+      final List<Map<String, dynamic>> upcomingList = [];
+      final List<Map<String, dynamic>> pastList = [];
+      
+      for (var apt in appointments) {
+        final customer = customersMap[apt['customer_id']];
+        final serviceName = servicesMap[apt['service_id']] ?? 'Service';
+        final salonName = salonsMap[apt['salon_id']] ?? 'Salon';
+        
+        final appointmentDate = DateTime.parse(apt['appointment_date']);
+        final appointmentDateOnly = DateTime(appointmentDate.year, appointmentDate.month, appointmentDate.day);
+        
+        // 🔥 TIMEZONE FIX: Convert UTC to Local time using TimezoneService
+        final utcStart = apt['start_time'] as String;
+        final utcEnd = apt['end_time'] as String;
+        final localStart = TimezoneService.utcToLocalTime(utcStart, appointmentDate);
+        final localEnd = TimezoneService.utcToLocalTime(utcEnd, appointmentDate);
+        
+        final appointmentData = {
+          'id': apt['id'],
+          'booking_number': apt['booking_number'],
+          'appointment_date': apt['appointment_date'],
+          'start_time': apt['start_time'],
+          'end_time': apt['end_time'],
+          'status': apt['status'],
+          'is_vip': apt['is_vip'] ?? false,
+          'price': apt['price'] ?? 0.0,
+          'queue_number': apt['queue_number'],
+          'child_name': apt['child_name'],
+          'customer_name': customer?['full_name'] ?? 'Customer',
+          'customer_avatar': customer?['avatar_url'],
+          'customer_phone': customer?['phone'],
+          'service_name': serviceName,
+          'salon_name': salonName,
+          'local_start_time': localStart,
+          'local_end_time': localEnd,
+          'date_display': DateFormat('MMM dd, yyyy').format(appointmentDate),
+          'day_display': DateFormat('EEEE').format(appointmentDate),
+          'time_display': '$localStart - $localEnd',
+        };
+        
+        // Categorize
+        if (apt['status'] == 'cancelled' || apt['status'] == 'no_show') {
+          pastList.add(appointmentData);
+        } else if (appointmentDateOnly.isAtSameMomentAs(today)) {
+          todayList.add(appointmentData);
+        } else if (appointmentDateOnly.isAfter(today)) {
+          upcomingList.add(appointmentData);
+        } else {
+          pastList.add(appointmentData);
+        }
+      }
+      
+      // Sort today's appointments by time
+      todayList.sort((a, b) => a['local_start_time'].compareTo(b['local_start_time']));
+      upcomingList.sort((a, b) => a['appointment_date'].compareTo(b['appointment_date']));
+      pastList.sort((a, b) => b['appointment_date'].compareTo(a['appointment_date']));
+      
+      if (mounted) {
+        setState(() {
+          _todayAppointments = todayList;
+          _upcomingAppointments = upcomingList;
+          _pastAppointments = pastList;
+          _isLoading = false;
+        });
+      }
+      
+      debugPrint('✅ Loaded ${todayList.length} today, ${upcomingList.length} upcoming, ${pastList.length} past');
+      
+    } catch (e) {
+      debugPrint('❌ Error loading appointments: $e');
+      if (mounted) {
+        setState(() {
+          _error = 'Failed to load appointments: $e';
+          _isLoading = false;
+        });
+      }
+    }
+  }
   
-  setState(() {
-    _isLoading = true;
-    _error = null;
-  });
+  // =====================================================
+  // START APPOINTMENT
+  // =====================================================
+Future<void> _startAppointment(Map<String, dynamic> appointment) async {
+  if (_isProcessing) return;
+  
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Start Appointment?'),
+      content: Text('Are you ready to start ${appointment['customer_name']}\'s appointment?'),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('CANCEL'),
+        ),
+        ElevatedButton(
+          onPressed: () => Navigator.pop(context, true),
+          style: ElevatedButton.styleFrom(backgroundColor: _secondaryColor),
+          child: const Text('START NOW'),
+        ),
+      ],
+    ),
+  );
+  
+  if (confirmed != true) return;
+  
+  setState(() => _isProcessing = true);
   
   try {
-    final user = supabase.auth.currentUser;
-    if (user == null) {
-      setState(() {
-        _error = 'Please login to continue';
-        _isLoading = false;
-      });
-      return;
-    }
+    // 🔥 Get current UTC time (not local)
+    final nowUtc = DateTime.now().toUtc();
     
-    // Query with proper foreign key relationships
-    final response = await supabase
+    await supabase
         .from('appointments')
-        .select('''
-          *,
-          customers:profiles!appointments_customer_id_fkey (
-            id,
-            full_name,
-            avatar_url,
-            phone
-          ),
-          services (
-            id,
-            name
-          ),
-          service_variants (
-            id,
-            price,
-            duration,
-            salon_genders!left (
-              display_name
-            ),
-            salon_age_categories!left (
-              display_name
-            )
-          ),
-          salons (
-            id,
-            name,
-            address,
-            phone
-          )
-        ''')
-        .eq('barber_id', user.id)
-        .order('appointment_date', ascending: true)
-        .order('start_time', ascending: true);
-    
-    final List<Map<String, dynamic>> allAppointments = List<Map<String, dynamic>>.from(response);
-    final List<Map<String, dynamic>> processedAppointments = [];
-    
-    for (var apt in allAppointments) {
-      final customer = apt['customers'] as Map<String, dynamic>?;
-      final service = apt['services'] as Map<String, dynamic>?;
-      final variant = apt['service_variants'] as Map<String, dynamic>?;
-      final salon = apt['salons'] as Map<String, dynamic>?;
-      
-      // Build service name
-      String serviceName = service?['name'] ?? 'Service';
-      if (variant != null) {
-        final gender = variant['salon_genders'] as Map<String, dynamic>?;
-        final age = variant['salon_age_categories'] as Map<String, dynamic>?;
-        if (gender?['display_name'] != null) serviceName = '${gender!['display_name']} $serviceName';
-        if (age?['display_name'] != null) serviceName = '$serviceName (${age!['display_name']})';
-      }
-      
-      final appointmentDate = DateTime.parse(apt['appointment_date']);
-      final utcStart = apt['start_time'] as String;
-      final utcEnd = apt['end_time'] as String;
-      
-      processedAppointments.add({
-        ...apt,
-        'customers': customer,
-        'services': service,
-        'service_variants': variant,
-        'salons': salon,
-        'service_name': serviceName,
-        'customer_name': customer?['full_name'] ?? 'Customer',
-        'customer_avatar': customer?['avatar_url'],
-        'customer_phone': customer?['phone'],
-        'salon_name': salon?['name'] ?? 'Salon',
-        'local_start_time': _formatTime(utcStart),
-        'local_end_time': _formatTime(utcEnd),
-        'date_display': DateFormat('MMM dd, yyyy').format(appointmentDate),
-        'day_display': DateFormat('EEEE').format(appointmentDate),
-      });
-    }
-    
-    // Categorize by date
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final todayList = <Map<String, dynamic>>[];
-    final upcomingList = <Map<String, dynamic>>[];
-    final pastList = <Map<String, dynamic>>[];
-    
-    for (var apt in processedAppointments) {
-      final aptDate = DateTime.parse(apt['appointment_date']);
-      final aptDateOnly = DateTime(aptDate.year, aptDate.month, aptDate.day);
-      
-      if (apt['status'] == 'cancelled') {
-        pastList.add(apt);
-      } else if (aptDateOnly.isAtSameMomentAs(today)) {
-        todayList.add(apt);
-      } else if (aptDateOnly.isAfter(today)) {
-        upcomingList.add(apt);
-      } else {
-        pastList.add(apt);
-      }
-    }
-    
-    todayList.sort((a, b) => a['local_start_time'].compareTo(b['local_start_time']));
+        .update({
+          'status': 'in_progress',
+          'actual_start_time': nowUtc.toIso8601String(),  // ✅ UTC time
+          'is_started': true,
+          'updated_at': nowUtc.toIso8601String(),        // ✅ UTC time
+        })
+        .eq('id', appointment['id']);
     
     if (mounted) {
-      setState(() {
-        _todayAppointments = todayList;
-        _upcomingAppointments = upcomingList;
-        _pastAppointments = pastList;
-        _isLoading = false;
-      });
-    }
-    
-  } catch (e) {
-    debugPrint('Error loading appointments: $e');
-    if (mounted) {
-      setState(() {
-        _error = 'Failed to load appointments: $e';
-        _isLoading = false;
-      });
-    }
-  }
-}
-
-String _formatTime(String time) {
-  if (time.isEmpty) return '--:--';
-  final parts = time.split(':');
-  if (parts.length >= 2) {
-    return '${parts[0].padLeft(2, '0')}:${parts[1].padLeft(2, '0')}';
-  }
-  return time;
-}
-
-
-  
-  
-  Future<void> _startAppointment(Map<String, dynamic> appointment) async {
-    if (_isProcessing) return;
-    
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Start Appointment?'),
-        content: Text('Are you ready to start ${appointment['customer_name']}\'s appointment?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('CANCEL'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: _secondaryColor),
-            child: const Text('START NOW'),
-          ),
-        ],
-      ),
-    );
-    
-    if (confirmed != true) return;
-    
-    setState(() => _isProcessing = true);
-    
-    try {
-      final now = DateTime.now();
-      final result = await supabase
-          .from('appointments')
-          .update({
-            'status': 'in_progress',
-            'actual_start_time': now.toIso8601String(),
-            'is_started': true,
-            'updated_at': now.toIso8601String(),
-          })
-          .eq('id', appointment['id'])
-          .select();
-      
-      if (result != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('✅ Appointment started!'),
-            backgroundColor: Color(0xFF4CAF50),
-          ),
-        );
-        await _loadAppointments();
-      }
-    } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-      );
-    } finally {
-      if (mounted) setState(() => _isProcessing = false);
-    }
-  }
-  
-  Future<void> _completeAppointment(Map<String, dynamic> appointment) async {
-    if (_isProcessing) return;
-    
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Complete Appointment?'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Mark ${appointment['customer_name']}\'s appointment as completed?'),
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.grey[100],
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Column(
-                children: [
-                  Row(
-                    children: [
-                      Icon(Icons.access_time, size: 16, color: _primaryColor),
-                      const SizedBox(width: 8),
-                      Text('Started: ${appointment['local_start_time']}'),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      Icon(Icons.timer, size: 16, color: _primaryColor),
-                      const SizedBox(width: 8),
-                      Text('Duration: ${appointment['service_variants']?['duration'] ?? 30} min'),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ],
+        const SnackBar(
+          content: Text('✅ Appointment started!'),
+          backgroundColor: Color(0xFF4CAF50),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('CANCEL'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: _secondaryColor),
-            child: const Text('COMPLETE'),
-          ),
-        ],
-      ),
-    );
-    
-    if (confirmed != true) return;
-    
-    setState(() => _isProcessing = true);
-    
-    try {
-      final now = DateTime.now();
-      final result = await supabase
-          .from('appointments')
-          .update({
-            'status': 'completed',
-            'actual_end_time': now.toIso8601String(),
-            'is_completed': true,
-            'updated_at': now.toIso8601String(),
-          })
-          .eq('id', appointment['id'])
-          .select();
-      
-      if (result != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('✅ Appointment completed!'),
-            backgroundColor: Color(0xFF4CAF50),
-          ),
-        );
-        await _loadAppointments();
-      }
-    } catch (e) {
+      );
+      await _loadAppointments();
+    }
+  } catch (e) {
+    if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
       );
-    } finally {
-      if (mounted) setState(() => _isProcessing = false);
     }
+  } finally {
+    if (mounted) setState(() => _isProcessing = false);
   }
+}
   
+  // =====================================================
+  // COMPLETE APPOINTMENT
+  // =====================================================
+Future<void> _completeAppointment(Map<String, dynamic> appointment) async {
+  if (_isProcessing) return;
+  
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Complete Appointment?'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Mark ${appointment['customer_name']}\'s appointment as completed?'),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.grey[100],
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.access_time, size: 16, color: _primaryColor),
+                    const SizedBox(width: 8),
+                    Text('Time: ${appointment['local_start_time']}'),
+                  ],
+                ),
+                Row(
+                  children: [
+                    Icon(Icons.person, size: 16, color: _primaryColor),
+                    const SizedBox(width: 8),
+                    Text('Customer: ${appointment['customer_name']}'),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('CANCEL'),
+        ),
+        ElevatedButton(
+          onPressed: () => Navigator.pop(context, true),
+          style: ElevatedButton.styleFrom(backgroundColor: _secondaryColor),
+          child: const Text('COMPLETE'),
+        ),
+      ],
+    ),
+  );
+  
+  if (confirmed != true) return;
+  
+  setState(() => _isProcessing = true);
+  
+  try {
+    // 🔥 Get current UTC time (not local)
+    final nowUtc = DateTime.now().toUtc();
+    
+    await supabase
+        .from('appointments')
+        .update({
+          'status': 'completed',
+          'actual_end_time': nowUtc.toIso8601String(),  // ✅ UTC time
+          'is_completed': true,
+          'updated_at': nowUtc.toIso8601String(),      // ✅ UTC time
+        })
+        .eq('id', appointment['id']);
+    
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('✅ Appointment completed!'),
+          backgroundColor: Color(0xFF4CAF50),
+        ),
+      );
+      await _loadAppointments();
+    }
+  } catch (e) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+      );
+    }
+  } finally {
+    if (mounted) setState(() => _isProcessing = false);
+  }
+}
+  
+  // =====================================================
+  // CANCEL APPOINTMENT
+  // =====================================================
   Future<void> _cancelAppointment(Map<String, dynamic> appointment) async {
     if (_isProcessing) return;
     
@@ -403,17 +442,16 @@ String _formatTime(String time) {
     setState(() => _isProcessing = true);
     
     try {
-      final result = await supabase
+      await supabase
           .from('appointments')
           .update({
             'status': 'cancelled',
             'cancel_reason': 'Cancelled by barber',
             'updated_at': DateTime.now().toIso8601String(),
           })
-          .eq('id', appointment['id'])
-          .select();
+          .eq('id', appointment['id']);
       
-      if (result != null) {
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('❌ Appointment cancelled'),
@@ -423,18 +461,20 @@ String _formatTime(String time) {
         await _loadAppointments();
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
     } finally {
       if (mounted) setState(() => _isProcessing = false);
     }
   }
   
+  // =====================================================
+  // SHOW CUSTOMER INFO
+  // =====================================================
   Future<void> _showCustomerInfo(Map<String, dynamic> appointment) async {
-    final customer = appointment['customers'] as Map<String, dynamic>?;
-    if (customer == null) return;
-    
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
@@ -462,12 +502,12 @@ String _formatTime(String time) {
                 CircleAvatar(
                   radius: 30,
                   backgroundColor: _primaryColor.withOpacity(0.1),
-                  backgroundImage: customer['avatar_url'] != null 
-                      ? NetworkImage(customer['avatar_url']) 
+                  backgroundImage: appointment['customer_avatar'] != null 
+                      ? NetworkImage(appointment['customer_avatar']) 
                       : null,
-                  child: customer['avatar_url'] == null
+                  child: appointment['customer_avatar'] == null
                       ? Text(
-                          (customer['full_name'] ?? 'C')[0].toUpperCase(),
+                          (appointment['customer_name'][0]).toUpperCase(),
                           style: TextStyle(fontSize: 24, color: _primaryColor),
                         )
                       : null,
@@ -478,12 +518,12 @@ String _formatTime(String time) {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        customer['full_name'] ?? 'Customer',
+                        appointment['customer_name'],
                         style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                       ),
-                      if (customer['phone'] != null)
+                      if (appointment['customer_phone'] != null)
                         Text(
-                          customer['phone'],
+                          appointment['customer_phone'],
                           style: TextStyle(fontSize: 14, color: Colors.grey[600]),
                         ),
                     ],
@@ -494,10 +534,12 @@ String _formatTime(String time) {
             const SizedBox(height: 20),
             _buildInfoTile('Service', appointment['service_name']),
             _buildInfoTile('Time', appointment['time_display']),
-            _buildInfoTile('Duration', '${appointment['service_variants']?['duration'] ?? 30} minutes'),
+            _buildInfoTile('Salon', appointment['salon_name']),
             _buildInfoTile('Price', 'Rs. ${(appointment['price'] as num?)?.toStringAsFixed(2) ?? '0.00'}'),
             if (appointment['child_name'] != null && appointment['child_name'].toString().isNotEmpty)
               _buildInfoTile('Booked For', appointment['child_name']),
+            if (appointment['queue_number'] != null)
+              _buildInfoTile('Queue Number', '#${appointment['queue_number']}'),
             const SizedBox(height: 20),
             SizedBox(
               width: double.infinity,
@@ -538,6 +580,7 @@ String _formatTime(String time) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text('Select Date'),
         content: SizedBox(
           width: 300,
@@ -569,7 +612,6 @@ String _formatTime(String time) {
         foregroundColor: Colors.white,
         elevation: 0,
         actions: [
-          // Date picker button
           IconButton(
             icon: const Icon(Icons.calendar_today),
             onPressed: _showDatePickerDialog,
@@ -634,7 +676,7 @@ String _formatTime(String time) {
               : Column(
                   children: [
                     // Stats summary
-                    Container(
+                    Padding(
                       padding: const EdgeInsets.all(16),
                       child: Row(
                         children: [
@@ -790,7 +832,7 @@ String _formatTime(String time) {
             // Header
             Row(
               children: [
-                // Time
+                // Time (Local time already converted)
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
