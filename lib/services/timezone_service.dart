@@ -1,4 +1,4 @@
-import 'package:timezone/data/latest.dart' as tz;
+import 'package:flutter/material.dart';
 import 'package:flutter_native_timezone/flutter_native_timezone.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -7,133 +7,303 @@ class TimezoneService {
   static String _currentTimezone = 'Asia/Colombo'; // Default
   static int _utcOffsetHours = 5;
   static int _utcOffsetMinutes = 30;
-  
+  static String _currentCountryCode = 'LK';
+  static String _currentCountryName = 'Sri Lanka';
+
+  // Available timezones by country
+  static final Map<String, List<Map<String, String>>> countryTimezones = {
+    'LK': [
+      {
+        'name': 'Sri Lanka',
+        'timezone': 'Asia/Colombo',
+        'offset': '+5:30',
+        'flag': '🇱🇰',
+      },
+    ],
+    'US': [
+      {
+        'name': 'Eastern Time',
+        'timezone': 'America/New_York',
+        'offset': '-5:00',
+        'flag': '🇺🇸',
+      },
+      {
+        'name': 'Central Time',
+        'timezone': 'America/Chicago',
+        'offset': '-6:00',
+        'flag': '🇺🇸',
+      },
+      {
+        'name': 'Mountain Time',
+        'timezone': 'America/Denver',
+        'offset': '-7:00',
+        'flag': '🇺🇸',
+      },
+      {
+        'name': 'Pacific Time',
+        'timezone': 'America/Los_Angeles',
+        'offset': '-8:00',
+        'flag': '🇺🇸',
+      },
+    ],
+    'GB': [
+      {
+        'name': 'United Kingdom',
+        'timezone': 'Europe/London',
+        'offset': '+0:00',
+        'flag': '🇬🇧',
+      },
+    ],
+    'AU': [
+      {
+        'name': 'Sydney',
+        'timezone': 'Australia/Sydney',
+        'offset': '+10:00',
+        'flag': '🇦🇺',
+      },
+      {
+        'name': 'Perth',
+        'timezone': 'Australia/Perth',
+        'offset': '+8:00',
+        'flag': '🇦🇺',
+      },
+    ],
+    'CA': [
+      {
+        'name': 'Toronto',
+        'timezone': 'America/Toronto',
+        'offset': '-5:00',
+        'flag': '🇨🇦',
+      },
+      {
+        'name': 'Vancouver',
+        'timezone': 'America/Vancouver',
+        'offset': '-8:00',
+        'flag': '🇨🇦',
+      },
+    ],
+    'IN': [
+      {
+        'name': 'India',
+        'timezone': 'Asia/Kolkata',
+        'offset': '+5:30',
+        'flag': '🇮🇳',
+      },
+    ],
+    'AE': [
+      {
+        'name': 'Dubai',
+        'timezone': 'Asia/Dubai',
+        'offset': '+4:00',
+        'flag': '🇦🇪',
+      },
+    ],
+    'SG': [
+      {
+        'name': 'Singapore',
+        'timezone': 'Asia/Singapore',
+        'offset': '+8:00',
+        'flag': '🇸🇬',
+      },
+    ],
+    'MY': [
+      {
+        'name': 'Malaysia',
+        'timezone': 'Asia/Kuala_Lumpur',
+        'offset': '+8:00',
+        'flag': '🇲🇾',
+      },
+    ],
+    'JP': [
+      {
+        'name': 'Japan',
+        'timezone': 'Asia/Tokyo',
+        'offset': '+9:00',
+        'flag': '🇯🇵',
+      },
+    ],
+    'KR': [
+      {
+        'name': 'South Korea',
+        'timezone': 'Asia/Seoul',
+        'offset': '+9:00',
+        'flag': '🇰🇷',
+      },
+    ],
+  };
+
   // Initialize timezone service
   static Future<void> initialize() async {
     if (_initialized) return;
-    
-    // Initialize timezone database
-    tz.initializeTimeZones();
     _initialized = true;
-    
-    // Load timezone
     await _loadTimezone();
   }
-  
+
   // Load timezone from device (auto-detect)
   static Future<void> _loadTimezone() async {
     try {
       // Try to get from SharedPreferences first (cached)
       final prefs = await SharedPreferences.getInstance();
       final cachedTimezone = prefs.getString('cached_timezone');
-      
-      if (cachedTimezone != null) {
+
+      if (cachedTimezone != null && cachedTimezone.isNotEmpty) {
         _currentTimezone = cachedTimezone;
         _updateOffsets(_currentTimezone);
-        print('Loaded cached timezone: $_currentTimezone');
+        _updateCountryInfo(_currentTimezone);
+        print('✅ Loaded cached timezone: $_currentTimezone');
         return;
       }
-      
+
       // Auto-detect from device
-      final String deviceTimezone = await FlutterNativeTimezone.getLocalTimezone();
-      print('Device timezone: $deviceTimezone');
-      
+      final String deviceTimezone =
+          await FlutterNativeTimezone.getLocalTimezone();
+      print('📍 Device timezone: $deviceTimezone');
+
       // Validate and set
       if (_isValidTimezone(deviceTimezone)) {
         _currentTimezone = deviceTimezone;
         _updateOffsets(_currentTimezone);
-        
+        _updateCountryInfo(_currentTimezone);
+
         // Cache for next time
         await prefs.setString('cached_timezone', _currentTimezone);
-        print('Saved timezone to cache: $_currentTimezone');
+        print('✅ Saved timezone to cache: $_currentTimezone');
       } else {
-        print('Timezone $deviceTimezone not supported, using default');
+        print('⚠️ Timezone $deviceTimezone not supported, using default');
         _currentTimezone = 'Asia/Colombo';
         _updateOffsets(_currentTimezone);
+        _updateCountryInfo(_currentTimezone);
       }
-      
     } catch (e) {
-      print('Error detecting timezone: $e');
+      print('❌ Error detecting timezone: $e');
       _currentTimezone = 'Asia/Colombo';
       _updateOffsets(_currentTimezone);
+      _updateCountryInfo(_currentTimezone);
     }
   }
-  
+
+  // Update country info from timezone
+  static void _updateCountryInfo(String timezone) {
+    for (var entry in countryTimezones.entries) {
+      for (var tz in entry.value) {
+        if (tz['timezone'] == timezone) {
+          _currentCountryCode = entry.key;
+          _currentCountryName = tz['name']!;
+          return;
+        }
+      }
+    }
+    _currentCountryCode = 'LK';
+    _currentCountryName = 'Sri Lanka';
+  }
+
   // Check if timezone is supported
   static bool _isValidTimezone(String timezone) {
-    final supportedTimezones = [
-      'Asia/Colombo', 'Asia/Kolkata', 'Asia/Dubai', 'Asia/Singapore',
-      'Asia/Kuala_Lumpur', 'Asia/Bangkok', 'Asia/Tokyo', 'Asia/Shanghai',
-      'Europe/London', 'Europe/Berlin', 'Europe/Paris',
-      'America/New_York', 'America/Los_Angeles', 'America/Chicago',
-      'America/Toronto', 'Australia/Sydney', 'Australia/Melbourne',
-    ];
-    return supportedTimezones.contains(timezone);
+    for (var entry in countryTimezones.entries) {
+      for (var tz in entry.value) {
+        if (tz['timezone'] == timezone) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
-  
+
   // Update UTC offsets based on timezone
   static void _updateOffsets(String timezone) {
-    final offsets = {
-      'Asia/Colombo': {'hours': 5, 'minutes': 30},
-      'Asia/Kolkata': {'hours': 5, 'minutes': 30},
-      'Asia/Dubai': {'hours': 4, 'minutes': 0},
-      'Asia/Singapore': {'hours': 8, 'minutes': 0},
-      'Asia/Kuala_Lumpur': {'hours': 8, 'minutes': 0},
-      'Asia/Bangkok': {'hours': 7, 'minutes': 0},
-      'Asia/Tokyo': {'hours': 9, 'minutes': 0},
-      'Asia/Shanghai': {'hours': 8, 'minutes': 0},
-      'Europe/London': {'hours': 1, 'minutes': 0},
-      'Europe/Berlin': {'hours': 2, 'minutes': 0},
-      'Europe/Paris': {'hours': 2, 'minutes': 0},
-      'America/New_York': {'hours': -4, 'minutes': 0},
-      'America/Los_Angeles': {'hours': -7, 'minutes': 0},
-      'America/Chicago': {'hours': -5, 'minutes': 0},
-      'America/Toronto': {'hours': -4, 'minutes': 0},
-      'Australia/Sydney': {'hours': 10, 'minutes': 0},
-      'Australia/Melbourne': {'hours': 10, 'minutes': 0},
-    };
-    
-    final offset = offsets[timezone];
-    if (offset != null) {
-      _utcOffsetHours = offset['hours']!;
-      _utcOffsetMinutes = offset['minutes']!;
-    } else {
-      _utcOffsetHours = 5;
-      _utcOffsetMinutes = 30;
+    for (var entry in countryTimezones.entries) {
+      for (var tz in entry.value) {
+        if (tz['timezone'] == timezone) {
+          final offsetStr = tz['offset']!;
+          final isNegative = offsetStr.startsWith('-');
+          final parts = offsetStr.replaceAll(RegExp(r'[+-]'), '').split(':');
+          int hours = int.parse(parts[0]);
+          int minutes = parts.length > 1 ? int.parse(parts[1]) : 0;
+
+          if (isNegative) {
+            _utcOffsetHours = -hours;
+            _utcOffsetMinutes = -minutes;
+          } else {
+            _utcOffsetHours = hours;
+            _utcOffsetMinutes = minutes;
+          }
+          return;
+        }
+      }
     }
-    
-    print('UTC Offset for $_currentTimezone: $_utcOffsetHours:$_utcOffsetMinutes');
+    _utcOffsetHours = 5;
+    _utcOffsetMinutes = 30;
   }
-  
+
+  // Set timezone manually
+  static Future<void> setTimezone(String timezone) async {
+    _currentTimezone = timezone;
+    _updateOffsets(timezone);
+    _updateCountryInfo(timezone);
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('cached_timezone', timezone);
+    print('✅ Manually set timezone: $timezone');
+  }
+
+  // Get available timezones for a country
+  static List<Map<String, String>> getTimezonesForCountry(String countryCode) {
+    return countryTimezones[countryCode] ?? countryTimezones['LK']!;
+  }
+
+  // Get all available countries
+  static List<Map<String, String>> getAllCountries() {
+    final countries = <Map<String, String>>[];
+    for (var entry in countryTimezones.entries) {
+      final firstTz = entry.value.first;
+      countries.add({
+        'code': entry.key,
+        'name': firstTz['name']!,
+        'flag': firstTz['flag']!,
+        'timezone': firstTz['timezone']!,
+      });
+    }
+    return countries;
+  }
+
   // Get current timezone
-  static String getCurrentTimezone() {
-    return _currentTimezone;
+  static String getCurrentTimezone() => _currentTimezone;
+
+  static String getCurrentCountryCode() => _currentCountryCode;
+
+  static String getCurrentCountryName() => _currentCountryName;
+
+  static String getCurrentFlag() {
+    for (var entry in countryTimezones.entries) {
+      for (var tz in entry.value) {
+        if (tz['timezone'] == _currentTimezone) {
+          return tz['flag']!;
+        }
+      }
+    }
+    return '🇱🇰';
   }
-  
+
   // Get UTC offset hours
-  static int getUtcOffsetHours() {
-    return _utcOffsetHours;
-  }
-  
+  static int getUtcOffsetHours() => _utcOffsetHours;
+
   // Get UTC offset minutes
-  static int getUtcOffsetMinutes() {
-    return _utcOffsetMinutes;
-  }
-  
+  static int getUtcOffsetMinutes() => _utcOffsetMinutes;
+
   // Convert UTC time to local time
   static String utcToLocalTime(String utcTime, DateTime date) {
     try {
       final parts = utcTime.split(':');
       if (parts.length < 2) return utcTime;
-      
+
       int utcHour = int.parse(parts[0]);
       int utcMinute = int.parse(parts[1]);
       int utcSecond = parts.length >= 3 ? int.parse(parts[2]) : 0;
-      
+
       // Add offset
       int localHour = utcHour + _utcOffsetHours;
       int localMinute = utcMinute + _utcOffsetMinutes;
-      
+
       // Adjust minutes
       if (localMinute >= 60) {
         localMinute -= 60;
@@ -143,7 +313,7 @@ class TimezoneService {
         localMinute += 60;
         localHour -= 1;
       }
-      
+
       // Adjust hours
       if (localHour >= 24) {
         localHour -= 24;
@@ -151,26 +321,26 @@ class TimezoneService {
       if (localHour < 0) {
         localHour += 24;
       }
-      
-      return '${localHour.toString().padLeft(2, '0')}:${localMinute.toString().padLeft(2, '0')}:00';
+
+      return '${localHour.toString().padLeft(2, '0')}:${localMinute.toString().padLeft(2, '0')}';
     } catch (e) {
       return utcTime;
     }
   }
-  
+
   // Convert local time to UTC
   static String localToUtcTime(String localTime, DateTime date) {
     try {
       final parts = localTime.split(':');
       if (parts.length < 2) return localTime;
-      
+
       int localHour = int.parse(parts[0]);
       int localMinute = int.parse(parts[1]);
-      
+
       // Subtract offset
       int utcHour = localHour - _utcOffsetHours;
       int utcMinute = localMinute - _utcOffsetMinutes;
-      
+
       // Adjust minutes
       if (utcMinute < 0) {
         utcMinute += 60;
@@ -180,7 +350,7 @@ class TimezoneService {
         utcMinute -= 60;
         utcHour += 1;
       }
-      
+
       // Adjust hours
       if (utcHour < 0) {
         utcHour += 24;
@@ -188,62 +358,28 @@ class TimezoneService {
       if (utcHour >= 24) {
         utcHour -= 24;
       }
-      
+
       return '${utcHour.toString().padLeft(2, '0')}:${utcMinute.toString().padLeft(2, '0')}:00';
     } catch (e) {
       return localTime;
     }
   }
-  
+
   // Get timezone display name
   static String getTimezoneDisplayName() {
-    final names = {
-      'Asia/Colombo': 'Sri Lanka',
-      'Asia/Kolkata': 'India',
-      'Asia/Dubai': 'UAE',
-      'Asia/Singapore': 'Singapore',
-      'Asia/Kuala_Lumpur': 'Malaysia',
-      'Asia/Bangkok': 'Thailand',
-      'Asia/Tokyo': 'Japan',
-      'Asia/Shanghai': 'China',
-      'Europe/London': 'United Kingdom',
-      'Europe/Berlin': 'Germany',
-      'Europe/Paris': 'France',
-      'America/New_York': 'USA (East)',
-      'America/Los_Angeles': 'USA (West)',
-      'America/Chicago': 'USA (Central)',
-      'America/Toronto': 'Canada',
-      'Australia/Sydney': 'Australia',
-    };
-    return names[_currentTimezone] ?? _currentTimezone;
+    return _currentCountryName;
   }
-  
+
   // Get timezone flag
   static String getTimezoneFlag() {
-    final flags = {
-      'Asia/Colombo': '🇱🇰',
-      'Asia/Kolkata': '🇮🇳',
-      'Asia/Dubai': '🇦🇪',
-      'Asia/Singapore': '🇸🇬',
-      'Asia/Kuala_Lumpur': '🇲🇾',
-      'Asia/Bangkok': '🇹🇭',
-      'Asia/Tokyo': '🇯🇵',
-      'Asia/Shanghai': '🇨🇳',
-      'Europe/London': '🇬🇧',
-      'Europe/Berlin': '🇩🇪',
-      'Europe/Paris': '🇫🇷',
-      'America/New_York': '🇺🇸',
-      'America/Los_Angeles': '🇺🇸',
-      'America/Chicago': '🇺🇸',
-      'America/Toronto': '🇨🇦',
-      'Australia/Sydney': '🇦🇺',
-    };
-    return flags[_currentTimezone] ?? '🌍';
+    return getCurrentFlag();
   }
-  
+
   // Get UTC offset string
   static String getUtcOffsetString() {
     final sign = _utcOffsetHours >= 0 ? '+' : '';
-    return 'UTC$sign$_utcOffsetHours:${_utcOffsetMinutes.toString().padLeft(2, '0')}';
+    final hours = _utcOffsetHours.abs();
+    final minutes = _utcOffsetMinutes.abs();
+    return 'UTC$sign$hours:${minutes.toString().padLeft(2, '0')}';
   }
 }
