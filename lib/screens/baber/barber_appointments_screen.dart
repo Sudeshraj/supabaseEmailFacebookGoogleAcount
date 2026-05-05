@@ -95,7 +95,6 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen> wit
         return;
       }
       
-      // Step 1: Get all appointments for this barber
       final appointments = await supabase
           .from('appointments')
           .select('*')
@@ -112,14 +111,13 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen> wit
         return;
       }
       
-      // Step 2: Get all unique customer IDs
+      // Get all unique customer IDs
       final customerIds = appointments
           .map((a) => a['customer_id'] as String?)
           .where((id) => id != null)
           .toSet()
           .toList();
       
-      // Step 3: Fetch all customers in one query
       Map<String, Map<String, dynamic>> customersMap = {};
       if (customerIds.isNotEmpty) {
         final customers = await supabase
@@ -132,7 +130,7 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen> wit
         }
       }
       
-      // Step 4: Get all unique service IDs
+      // Get all unique service IDs
       final serviceIds = appointments
           .map((a) => a['service_id'] as int?)
           .where((id) => id != null)
@@ -151,7 +149,7 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen> wit
         }
       }
       
-      // Step 5: Get all unique salon IDs
+      // Get all unique salon IDs
       final salonIds = appointments
           .map((a) => a['salon_id'] as int?)
           .where((id) => id != null)
@@ -170,7 +168,7 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen> wit
         }
       }
       
-      // Step 6: Process appointments with TIMEZONE SERVICE
+      // Process appointments
       final now = DateTime.now();
       final today = DateTime(now.year, now.month, now.day);
       
@@ -186,7 +184,7 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen> wit
         final appointmentDate = DateTime.parse(apt['appointment_date']);
         final appointmentDateOnly = DateTime(appointmentDate.year, appointmentDate.month, appointmentDate.day);
         
-        // 🔥 TIMEZONE FIX: Convert UTC to Local time using TimezoneService
+        // Convert UTC to Local time
         final utcStart = apt['start_time'] as String;
         final utcEnd = apt['end_time'] as String;
         final localStart = TimezoneService.utcToLocalTime(utcStart, appointmentDate);
@@ -227,7 +225,7 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen> wit
         }
       }
       
-      // Sort today's appointments by time
+      // Sort
       todayList.sort((a, b) => a['local_start_time'].compareTo(b['local_start_time']));
       upcomingList.sort((a, b) => a['appointment_date'].compareTo(b['appointment_date']));
       pastList.sort((a, b) => b['appointment_date'].compareTo(a['appointment_date']));
@@ -241,10 +239,8 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen> wit
         });
       }
       
-      debugPrint('✅ Loaded ${todayList.length} today, ${upcomingList.length} upcoming, ${pastList.length} past');
-      
     } catch (e) {
-      debugPrint('❌ Error loading appointments: $e');
+      debugPrint('Error loading appointments: $e');
       if (mounted) {
         setState(() {
           _error = 'Failed to load appointments: $e';
@@ -255,165 +251,327 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen> wit
   }
   
   // =====================================================
-  // START APPOINTMENT
+  // START APPOINTMENT (UPDATED WITH adjust_on_appointment_start)
   // =====================================================
-Future<void> _startAppointment(Map<String, dynamic> appointment) async {
-  if (_isProcessing) return;
-  
-  final confirmed = await showDialog<bool>(
-    context: context,
-    builder: (context) => AlertDialog(
-      title: const Text('Start Appointment?'),
-      content: Text('Are you ready to start ${appointment['customer_name']}\'s appointment?'),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context, false),
-          child: const Text('CANCEL'),
-        ),
-        ElevatedButton(
-          onPressed: () => Navigator.pop(context, true),
-          style: ElevatedButton.styleFrom(backgroundColor: _secondaryColor),
-          child: const Text('START NOW'),
-        ),
-      ],
-    ),
-  );
-  
-  if (confirmed != true) return;
-  
-  setState(() => _isProcessing = true);
-  
-  try {
-    // 🔥 Get current UTC time (not local)
-    final nowUtc = DateTime.now().toUtc();
+  Future<void> _startAppointment(Map<String, dynamic> appointment) async {
+    if (_isProcessing) return;
     
-    await supabase
-        .from('appointments')
-        .update({
-          'status': 'in_progress',
-          'actual_start_time': nowUtc.toIso8601String(),  // ✅ UTC time
-          'is_started': true,
-          'updated_at': nowUtc.toIso8601String(),        // ✅ UTC time
-        })
-        .eq('id', appointment['id']);
-    
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('✅ Appointment started!'),
-          backgroundColor: Color(0xFF4CAF50),
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Start Appointment?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Are you ready to start ${appointment['customer_name']}\'s appointment?'),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.grey[100],
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.access_time, size: 16, color: _primaryColor),
+                      const SizedBox(width: 8),
+                      Text('Scheduled: ${appointment['local_start_time']}'),
+                    ],
+                  ),
+                  Row(
+                    children: [
+                      Icon(Icons.person, size: 16, color: _primaryColor),
+                      const SizedBox(width: 8),
+                      Text('Customer: ${appointment['customer_name']}'),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '⚠️ If you start late, next appointments will be adjusted automatically.',
+              style: TextStyle(fontSize: 11, color: _warningColor),
+            ),
+          ],
         ),
-      );
-      await _loadAppointments();
-    }
-  } catch (e) {
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-      );
-    }
-  } finally {
-    if (mounted) setState(() => _isProcessing = false);
-  }
-}
-  
-  // =====================================================
-  // COMPLETE APPOINTMENT
-  // =====================================================
-Future<void> _completeAppointment(Map<String, dynamic> appointment) async {
-  if (_isProcessing) return;
-  
-  final confirmed = await showDialog<bool>(
-    context: context,
-    builder: (context) => AlertDialog(
-      title: const Text('Complete Appointment?'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Mark ${appointment['customer_name']}\'s appointment as completed?'),
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.grey[100],
-              borderRadius: BorderRadius.circular(8),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('CANCEL'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _secondaryColor,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             ),
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    Icon(Icons.access_time, size: 16, color: _primaryColor),
-                    const SizedBox(width: 8),
-                    Text('Time: ${appointment['local_start_time']}'),
-                  ],
-                ),
-                Row(
-                  children: [
-                    Icon(Icons.person, size: 16, color: _primaryColor),
-                    const SizedBox(width: 8),
-                    Text('Customer: ${appointment['customer_name']}'),
-                  ],
-                ),
-              ],
-            ),
+            child: const Text('START NOW'),
           ),
         ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context, false),
-          child: const Text('CANCEL'),
-        ),
-        ElevatedButton(
-          onPressed: () => Navigator.pop(context, true),
-          style: ElevatedButton.styleFrom(backgroundColor: _secondaryColor),
-          child: const Text('COMPLETE'),
-        ),
-      ],
-    ),
-  );
-  
-  if (confirmed != true) return;
-  
-  setState(() => _isProcessing = true);
-  
-  try {
-    // 🔥 Get current UTC time (not local)
-    final nowUtc = DateTime.now().toUtc();
+    );
     
-    await supabase
-        .from('appointments')
-        .update({
-          'status': 'completed',
-          'actual_end_time': nowUtc.toIso8601String(),  // ✅ UTC time
-          'is_completed': true,
-          'updated_at': nowUtc.toIso8601String(),      // ✅ UTC time
-        })
-        .eq('id', appointment['id']);
+    if (confirmed != true) return;
     
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('✅ Appointment completed!'),
-          backgroundColor: Color(0xFF4CAF50),
-        ),
-      );
-      await _loadAppointments();
+    setState(() => _isProcessing = true);
+    
+    try {
+      final user = supabase.auth.currentUser;
+      if (user == null) throw Exception('User not found');
+      
+      // Get current UTC time
+      final nowUtc = DateTime.now().toUtc();
+      
+      // Call the adjust_on_appointment_start function
+      final result = await supabase.rpc('adjust_on_appointment_start', params: {
+        'p_appointment_id': appointment['id'],
+        'p_actual_start_time': nowUtc.toIso8601String(),
+      });
+      
+      if (result['success'] == true) {
+        if (mounted) {
+          String message = '✅ Appointment started!';
+          if (result['start_delay_minutes'] != null && result['start_delay_minutes'] > 0) {
+            message = '⚠️ Started ${result['start_delay_minutes']} min late. Next appointments adjusted.';
+          }
+          
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(message),
+              backgroundColor: result['start_delay_minutes'] > 0 ? _warningColor : _secondaryColor,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+          await _loadAppointments();
+        }
+      } else {
+        throw Exception(result['message'] ?? 'Failed to start appointment');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isProcessing = false);
     }
-  } catch (e) {
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-      );
-    }
-  } finally {
-    if (mounted) setState(() => _isProcessing = false);
   }
-}
   
   // =====================================================
-  // CANCEL APPOINTMENT
+  // COMPLETE APPOINTMENT (UPDATED WITH adjust_queue_on_appointment_end)
+  // =====================================================
+  Future<void> _completeAppointment(Map<String, dynamic> appointment) async {
+    if (_isProcessing) return;
+    
+    // Check if there's an overflow warning
+    final hasOverflow = await _checkForOverflowWarning(appointment['id']);
+    
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Complete Appointment?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Mark ${appointment['customer_name']}\'s appointment as completed?'),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.grey[100],
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.access_time, size: 16, color: _primaryColor),
+                      const SizedBox(width: 8),
+                      Text('Started: ${appointment['local_start_time']}'),
+                    ],
+                  ),
+                  Row(
+                    children: [
+                      Icon(Icons.person, size: 16, color: _primaryColor),
+                      const SizedBox(width: 8),
+                      Text('Customer: ${appointment['customer_name']}'),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            if (hasOverflow)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: _warningColor.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: _warningColor),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.warning_amber, size: 18, color: _warningColor),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          '⚠️ This appointment has an overflow warning. Completing will notify the customer.',
+                          style: TextStyle(fontSize: 12, color: _warningColor),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('CANCEL'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _secondaryColor,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            child: const Text('COMPLETE'),
+          ),
+        ],
+      ),
+    );
+    
+    if (confirmed != true) return;
+    
+    setState(() => _isProcessing = true);
+    
+    try {
+      final user = supabase.auth.currentUser;
+      if (user == null) throw Exception('User not found');
+      
+      // Get current UTC time
+      final nowUtc = DateTime.now().toUtc();
+      
+      // Call the adjust_queue_on_appointment_end function
+      final result = await supabase.rpc('adjust_queue_on_appointment_end', params: {
+        'p_appointment_id': appointment['id'],
+        'p_actual_end_time': nowUtc.toIso8601String(),
+        'p_customer_decision': null,  // Will be handled via notifications
+      });
+      
+      if (result['success'] == true) {
+        if (mounted) {
+          String message = '✅ Appointment completed!';
+          if (result['delay_minutes'] != null && result['delay_minutes'] > 0) {
+            message = '⚠️ Completed ${result['delay_minutes']} min late. Next appointments adjusted.';
+          }
+          
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(message),
+              backgroundColor: result['delay_minutes'] > 0 ? _warningColor : _secondaryColor,
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 3),
+            ),
+          );
+          
+          // Check if needs customer decision (overflow > 15 min)
+          if (result['needs_confirmation'] == true) {
+            _showOverflowNotificationDialog(result);
+          }
+          
+          await _loadAppointments();
+        }
+      } else {
+        throw Exception(result['message'] ?? 'Failed to complete appointment');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isProcessing = false);
+    }
+  }
+  
+  // =====================================================
+  // CHECK FOR OVERFLOW WARNING
+  // =====================================================
+  Future<bool> _checkForOverflowWarning(int appointmentId) async {
+    try {
+      final result = await supabase
+          .from('overflow_notifications')
+          .select('id')
+          .eq('appointment_id', appointmentId)
+          .eq('status', 'PENDING')
+          .maybeSingle();
+      
+      return result != null;
+    } catch (e) {
+      return false;
+    }
+  }
+  
+  // =====================================================
+  // SHOW OVERFLOW NOTIFICATION DIALOG
+  // =====================================================
+  void _showOverflowNotificationDialog(Map<String, dynamic> result) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Icon(Icons.warning_amber, color: _warningColor),
+            const SizedBox(width: 8),
+            const Text('Customer Notification Sent'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(result['message'] ?? 'Appointment exceeds salon hours.'),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: _warningColor.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Text(
+                'Customer has been notified and can choose to MOVE or CANCEL.\n\nIf no response within 30 minutes, the appointment will be auto-cancelled.',
+                style: TextStyle(fontSize: 12),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  // =====================================================
+  // CANCEL APPOINTMENT (UPDATED)
   // =====================================================
   Future<void> _cancelAppointment(Map<String, dynamic> appointment) async {
     if (_isProcessing) return;
@@ -421,8 +579,27 @@ Future<void> _completeAppointment(Map<String, dynamic> appointment) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text('Cancel Appointment?'),
-        content: Text('Are you sure you want to cancel ${appointment['customer_name']}\'s appointment?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Are you sure you want to cancel ${appointment['customer_name']}\'s appointment?'),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.grey[100],
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                '${appointment['date_display']} at ${appointment['local_start_time']}',
+                style: const TextStyle(fontWeight: FontWeight.w500),
+              ),
+            ),
+          ],
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -430,7 +607,11 @@ Future<void> _completeAppointment(Map<String, dynamic> appointment) async {
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: _dangerColor),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _dangerColor,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
             child: const Text('YES, CANCEL'),
           ),
         ],
@@ -442,23 +623,29 @@ Future<void> _completeAppointment(Map<String, dynamic> appointment) async {
     setState(() => _isProcessing = true);
     
     try {
-      await supabase
-          .from('appointments')
-          .update({
-            'status': 'cancelled',
-            'cancel_reason': 'Cancelled by barber',
-            'updated_at': DateTime.now().toIso8601String(),
-          })
-          .eq('id', appointment['id']);
+      final user = supabase.auth.currentUser;
+      if (user == null) throw Exception('User not found');
       
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('❌ Appointment cancelled'),
-            backgroundColor: Colors.orange,
-          ),
-        );
-        await _loadAppointments();
+      // Use cancel_booking_and_reorder function
+      final result = await supabase.rpc('cancel_booking_and_reorder', params: {
+        'p_appointment_id': appointment['id'],
+        'p_customer_id': user.id,
+        'p_cancel_reason': 'Cancelled by barber',
+      });
+      
+      if (result['success'] == true) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('❌ Appointment cancelled'),
+              backgroundColor: Colors.orange,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+          await _loadAppointments();
+        }
+      } else {
+        throw Exception(result['message'] ?? 'Cancellation failed');
       }
     } catch (e) {
       if (mounted) {
@@ -832,7 +1019,7 @@ Future<void> _completeAppointment(Map<String, dynamic> appointment) async {
             // Header
             Row(
               children: [
-                // Time (Local time already converted)
+                // Time
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
@@ -915,7 +1102,6 @@ Future<void> _completeAppointment(Map<String, dynamic> appointment) async {
                     ],
                   ),
                 ),
-                // Customer info button
                 IconButton(
                   icon: Icon(Icons.info_outline, color: Colors.grey[500], size: 20),
                   onPressed: () => _showCustomerInfo(appointment),
@@ -942,7 +1128,7 @@ Future<void> _completeAppointment(Map<String, dynamic> appointment) async {
               ],
             ),
             const SizedBox(height: 12),
-            // Action buttons
+            // Action buttons (UPDATED)
             if (isToday && isConfirmed && !isCancelled && !isCompleted)
               Row(
                 children: [
