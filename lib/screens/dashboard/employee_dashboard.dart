@@ -672,7 +672,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
   // ============================================================
   
   void _viewMySchedule() {
-    context.push('/employee/schedule');
+    context.push('/barber/appointments');
   }
 
   void _viewMyCustomers() {

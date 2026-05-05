@@ -835,7 +835,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
 
   // ==================== NAVIGATION METHODS ====================
   void _viewMyBookings() {
-    context.push('/customer/bookings');
+    context.push('/customer/my-bookings');
   }
 
   void _viewVipBookings() {
