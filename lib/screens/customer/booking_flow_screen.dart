@@ -1,6 +1,3 @@
-// lib/screens/customer/booking_flow_screen.dart
-// FULLY UPDATED - Fixed double loading, removed # from queue numbers
-
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -61,6 +58,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   List<Map<String, dynamic>> _availableSlots = [];
   Map<String, dynamic>? _selectedSlot;
   bool _isLoadingSlots = false;
+  String? _slotErrorMessage;
 
   // Step 7: Confirm
   bool _isBooking = false;
@@ -150,6 +148,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       _selectedChildName = null;
       _isSameAsCustomer = true;
       _duplicateError = null;
+      _slotErrorMessage = null;
     });
   }
 
@@ -161,7 +160,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         margin: const EdgeInsets.only(right: 8),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.2),
+          color: Colors.white.withValues(alpha: 0.2),
           borderRadius: BorderRadius.circular(25),
         ),
         child: Row(
@@ -174,7 +173,11 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
             const SizedBox(width: 6),
             Text(
               TimezoneService.getTimezoneDisplayName(),
-              style: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w500),
+              style: const TextStyle(
+                fontSize: 13,
+                color: Colors.white,
+                fontWeight: FontWeight.w500,
+              ),
             ),
             const SizedBox(width: 4),
             const Icon(Icons.arrow_drop_down, size: 20, color: Colors.white),
@@ -229,7 +232,10 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                               value: country['code'],
                               child: Row(
                                 children: [
-                                  Text(country['flag']!, style: const TextStyle(fontSize: 18)),
+                                  Text(
+                                    country['flag']!,
+                                    style: const TextStyle(fontSize: 18),
+                                  ),
                                   const SizedBox(width: 10),
                                   Text(country['name']!),
                                 ],
@@ -243,9 +249,10 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                             selectedCountryCode = value;
                             final newTimezones =
                                 TimezoneService.getTimezonesForCountry(value);
-                            if (newTimezones.isNotEmpty)
+                            if (newTimezones.isNotEmpty) {
                               selectedTimezone =
                                   newTimezones.first['timezone']!;
+                            }
                           });
                         }
                       },
@@ -294,20 +301,33 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
               ),
               ElevatedButton(
                 onPressed: () async {
+                  final currentContext = context;
+                  final currentState = this;
+
                   await TimezoneService.setTimezone(selectedTimezone);
-                  Navigator.pop(context);
-                  if (mounted) {
-                    setState(() {});
-                    if (_selectedSlot != null) await _loadAvailableSlots();
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          'Timezone changed to ${TimezoneService.getTimezoneDisplayName()}',
+
+                  if (currentContext.mounted) {
+                    Navigator.pop(currentContext);
+                  }
+
+                  if (currentState.mounted) {
+                    currentState.setState(() {});
+                    if (currentState._selectedSlot != null) {
+                      await currentState._loadAvailableSlots();
+                    }
+
+                    if (currentContext.mounted) {
+                      ScaffoldMessenger.of(currentContext).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            'Timezone changed to ${TimezoneService.getTimezoneDisplayName()}',
+                          ),
+                          backgroundColor: _primaryColor,
+                          behavior: SnackBarBehavior.floating,
+                          duration: const Duration(seconds: 2),
                         ),
-                        backgroundColor: _primaryColor,
-                        behavior: SnackBarBehavior.floating,
-                      ),
-                    );
+                      );
+                    }
                   }
                 },
                 style: ElevatedButton.styleFrom(
@@ -371,7 +391,10 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
             ),
             filled: true,
             fillColor: Colors.grey[50],
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 16,
+            ),
           ),
         ),
       ),
@@ -432,7 +455,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
               width: 60,
               height: 60,
               decoration: BoxDecoration(
-                color: _primaryColor.withOpacity(0.1),
+                color: _primaryColor.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(16),
               ),
               child: Center(
@@ -459,7 +482,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                  const SizedBox(height: 4),
                   if (salon['address'] != null)
                     Row(
                       children: [
@@ -482,7 +504,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                         ),
                       ],
                     ),
-                  const SizedBox(height: 4),
                   Row(
                     children: [
                       Icon(
@@ -611,14 +632,20 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                     const SizedBox(height: 4),
                     Text(
                       _selectedSalon?['name'] ?? '',
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ],
                 ),
               ),
               TextButton(
                 onPressed: () => setState(() => _currentStep = 0),
-                child: Text('Change', style: TextStyle(color: _primaryColor, fontSize: 14)),
+                child: Text(
+                  'Change',
+                  style: TextStyle(color: _primaryColor, fontSize: 14),
+                ),
               ),
             ],
           ),
@@ -686,12 +713,18 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                     ),
                     child: Row(
                       children: [
-                        Icon(Icons.warning_amber, color: Colors.orange.shade700),
+                        Icon(
+                          Icons.warning_amber,
+                          color: Colors.orange.shade700,
+                        ),
                         const SizedBox(width: 10),
                         Expanded(
                           child: Text(
                             _unavailableReason ?? 'No barbers available',
-                            style: TextStyle(color: Colors.orange.shade700, fontSize: 14),
+                            style: TextStyle(
+                              color: Colors.orange.shade700,
+                              fontSize: 14,
+                            ),
                           ),
                         ),
                       ],
@@ -833,8 +866,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       (grouped[s['category_name']] ??= []).add(s);
     }
     final categories = grouped.keys.toList();
-    if (_selectedCategoryTab == null && categories.isNotEmpty)
+    if (_selectedCategoryTab == null && categories.isNotEmpty) {
       _selectedCategoryTab = categories.first;
+    }
     final servicesToShow = _selectedCategoryTab == null
         ? _salonServices
         : grouped[_selectedCategoryTab] ?? [];
@@ -856,14 +890,20 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                     const SizedBox(height: 4),
                     Text(
                       _selectedSalon?['name'] ?? '',
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ],
                 ),
               ),
               TextButton(
                 onPressed: () => setState(() => _currentStep = 1),
-                child: Text('Change', style: TextStyle(color: _primaryColor, fontSize: 14)),
+                child: Text(
+                  'Change',
+                  style: TextStyle(color: _primaryColor, fontSize: 14),
+                ),
               ),
             ],
           ),
@@ -873,9 +913,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
             padding: const EdgeInsets.all(14),
             margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             decoration: BoxDecoration(
-              color: _primaryColor.withOpacity(0.08),
+              color: _primaryColor.withValues(alpha: 0.08),
               borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: _primaryColor.withOpacity(0.2)),
+              border: Border.all(color: _primaryColor.withValues(alpha: 0.2)),
             ),
             child: Column(
               children: [
@@ -935,7 +975,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                 backgroundColor: Colors.white,
                 selectedColor: _primaryColor,
                 labelStyle: TextStyle(
-                  color: _selectedCategoryTab == null ? Colors.white : Colors.grey[700],
+                  color: _selectedCategoryTab == null
+                      ? Colors.white
+                      : Colors.grey[700],
                 ),
               ),
               const SizedBox(width: 8),
@@ -949,7 +991,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                     backgroundColor: Colors.white,
                     selectedColor: _primaryColor,
                     labelStyle: TextStyle(
-                      color: _selectedCategoryTab == c ? Colors.white : Colors.grey[700],
+                      color: _selectedCategoryTab == c
+                          ? Colors.white
+                          : Colors.grey[700],
                     ),
                   ),
                 ),
@@ -998,7 +1042,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                         _barbersLoaded = false;
                         _barberAvailability.clear();
                         _availableBarbers = [];
-                        _selectedBarber = null; // Reset selected barber
+                        _selectedBarber = null;
                       });
                       _loadAvailableBarbers();
                     },
@@ -1014,7 +1058,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                 elevation: 2,
               ),
               child: Text(
-                _selectedServices.isEmpty ? 'Please select a service' : 'Continue to Barber →',
+                _selectedServices.isEmpty
+                    ? 'Please select a service'
+                    : 'Continue to Barber →',
                 style: const TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
@@ -1072,7 +1118,10 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                       children: [
                         Text(
                           service['name'] ?? 'Service',
-                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                         Text(
                           service['category_name'] ?? '',
@@ -1115,7 +1164,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: isSelected ? _primaryColor.withOpacity(0.1) : Colors.white,
+          color: isSelected
+              ? _primaryColor.withValues(alpha: 0.1)
+              : Colors.white,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: isSelected ? _primaryColor : Colors.grey[200]!,
@@ -1137,12 +1188,13 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                   Text(
                     '${variant['gender'] ?? ''} ${variant['age'] ?? ''}'.trim(),
                     style: TextStyle(
-                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                      fontWeight: isSelected
+                          ? FontWeight.w600
+                          : FontWeight.w500,
                       fontSize: 15,
                       color: isSelected ? _primaryColor : _textDark,
                     ),
                   ),
-                  const SizedBox(height: 2),
                   Text(
                     'Rs. ${variant['price']} • ${variant['duration']} min',
                     style: TextStyle(fontSize: 12, color: Colors.grey[600]),
@@ -1188,7 +1240,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     return Icons.people;
   }
 
-  // ==================== STEP 4: BARBER SELECTION (FIXED - NO DOUBLE LOAD) ====================
+  // ==================== STEP 4: BARBER SELECTION ====================
   Future<Map<String, dynamic>> _checkBarberFullAvailability(
     String barberId,
     DateTime date,
@@ -1230,12 +1282,12 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   }
 
   Widget _buildBarberSelectionStep() {
-    // Only load once - check if not loaded and not currently loading
-    if (!_barbersLoaded && !_isLoadingBarbers && _selectedSalon != null && _selectedBarber == null) {
-      // Use Future.microtask instead of addPostFrameCallback to avoid double calls
+    if (!_barbersLoaded &&
+        !_isLoadingBarbers &&
+        _selectedSalon != null &&
+        _selectedBarber == null) {
       Future.microtask(() => _loadAvailableBarbers());
     }
-    
     return Column(
       children: [
         Container(
@@ -1249,7 +1301,10 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                   children: [
                     Text(
                       'Services: ${_selectedServices.length}',
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                     const SizedBox(height: 2),
                     Text(
@@ -1261,7 +1316,10 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
               ),
               TextButton(
                 onPressed: () => setState(() => _currentStep = 2),
-                child: Text('Change', style: TextStyle(color: _primaryColor, fontSize: 14)),
+                child: Text(
+                  'Change',
+                  style: TextStyle(color: _primaryColor, fontSize: 14),
+                ),
               ),
             ],
           ),
@@ -1293,13 +1351,11 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                         },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: _primaryColor,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
                           ),
                         ),
-                        child: const Text('Refresh', style: TextStyle(fontSize: 15)),
+                        child: const Text('Refresh'),
                       ),
                     ],
                   ),
@@ -1339,7 +1395,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                 elevation: 2,
               ),
               child: Text(
-                _selectedBarber == null ? 'Please select a barber' : 'Continue to Person →',
+                _selectedBarber == null
+                    ? 'Please select a barber'
+                    : 'Continue to Person →',
                 style: const TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
@@ -1383,7 +1441,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
               children: [
                 CircleAvatar(
                   radius: 32,
-                  backgroundColor: _primaryColor.withOpacity(0.1),
+                  backgroundColor: _primaryColor.withValues(alpha: 0.1),
                   backgroundImage: barber['avatar_url'] != null
                       ? NetworkImage(barber['avatar_url'])
                       : null,
@@ -1391,7 +1449,11 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                       ? Text(
                           barber['full_name']?.substring(0, 1).toUpperCase() ??
                               'B',
-                          style: TextStyle(fontSize: 28, color: _primaryColor, fontWeight: FontWeight.bold),
+                          style: TextStyle(
+                            fontSize: 28,
+                            color: _primaryColor,
+                            fontWeight: FontWeight.bold,
+                          ),
                         )
                       : null,
                 ),
@@ -1438,15 +1500,24 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                           Icon(Icons.star, size: 16, color: Colors.amber[700]),
                           const SizedBox(width: 4),
                           Text(
-                            (barber['avg_rating'] as num?)?.toStringAsFixed(1) ?? '4.5',
-                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+                            (barber['avg_rating'] as num?)?.toStringAsFixed(
+                                  1,
+                                ) ??
+                                '4.5',
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                            ),
                           ),
                           const SizedBox(width: 12),
                           Icon(Icons.work, size: 16, color: Colors.grey[500]),
                           const SizedBox(width: 4),
                           Text(
                             '${barber['today_appointments'] ?? 0} today',
-                            style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Colors.grey[600],
+                            ),
                           ),
                         ],
                       ),
@@ -1546,21 +1617,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   }
 
   Future<void> _loadAvailableBarbers() async {
-    // Prevent multiple simultaneous loads
-    if (_isLoadingBarbers) {
-      print('Already loading barbers, skipping...');
-      return;
-    }
-    
-    // Prevent reload if already loaded and has data
-    if (_barbersLoaded && _availableBarbers.isNotEmpty) {
-      print('Barbers already loaded, skipping...');
-      return;
-    }
-    
-    print('Loading barbers...');
+    if (_isLoadingBarbers) return;
+    if (_barbersLoaded && _availableBarbers.isNotEmpty) return;
     setState(() => _isLoadingBarbers = true);
-    
     try {
       final user = supabase.auth.currentUser;
       if (user == null) {
@@ -1571,13 +1630,11 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         });
         return;
       }
-      
       final salonBarbers = await supabase
           .from('salon_barbers')
           .select('barber_id')
           .eq('salon_id', _selectedSalon!['id'])
           .eq('status', 'active');
-          
       if (salonBarbers.isEmpty) {
         setState(() {
           _availableBarbers = [];
@@ -1586,19 +1643,15 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         });
         return;
       }
-      
       final List<String> barberIds = salonBarbers
           .map<String>((b) => b['barber_id'].toString())
           .toList();
-          
       final profiles = await supabase
           .from('profiles')
           .select('id, full_name, avatar_url')
           .inFilter('id', barberIds);
-          
       final List<Map<String, dynamic>> barberList = [];
       final dateToCheck = _selectedDate ?? DateTime.now();
-      
       for (var profile in profiles) {
         final barberId = profile['id'];
         final availability = await _checkBarberFullAvailability(
@@ -1606,7 +1659,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           dateToCheck,
         );
         _barberAvailability[barberId] = availability;
-        
         final todayAppointments = await supabase
             .from('appointments')
             .select('id')
@@ -1616,20 +1668,18 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
               DateFormat('yyyy-MM-dd').format(DateTime.now()),
             )
             .inFilter('status', ['confirmed', 'pending']);
-            
         final ratings = await supabase
             .from('reviews')
             .select('overall_rating')
             .eq('barber_id', barberId);
-            
         double avgRating = 4.5;
         if (ratings.isNotEmpty) {
           double total = 0;
-          for (var r in ratings)
+          for (var r in ratings) {
             total += (r['overall_rating'] as num?)?.toDouble() ?? 0;
+          }
           avgRating = total / ratings.length;
         }
-        
         barberList.add({
           'id': barberId,
           'full_name': profile['full_name'] ?? 'Barber',
@@ -1642,23 +1692,17 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           'has_special_break': availability['has_special_break'],
         });
       }
-      
       barberList.sort((a, b) {
         if (a['is_available'] && !b['is_available']) return -1;
         if (!a['is_available'] && b['is_available']) return 1;
         return (b['avg_rating'] as double).compareTo(a['avg_rating'] as double);
       });
-      
       setState(() {
         _availableBarbers = barberList;
         _isLoadingBarbers = false;
         _barbersLoaded = true;
       });
-      
-      print('Loaded ${barberList.length} barbers');
-      
     } catch (e) {
-      print('Error loading barbers: $e');
       setState(() {
         _isLoadingBarbers = false;
         _barbersLoaded = false;
@@ -1685,7 +1729,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                 children: [
                   CircleAvatar(
                     radius: 22,
-                    backgroundColor: _primaryColor.withOpacity(0.1),
+                    backgroundColor: _primaryColor.withValues(alpha: 0.1),
                     child: Text(
                       _selectedBarber?['full_name']
                               ?.substring(0, 1)
@@ -1705,11 +1749,17 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                       children: [
                         Text(
                           _selectedBarber?['full_name'] ?? 'Barber',
-                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                         Text(
                           '${_calculateTotalDuration()} min service',
-                          style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.grey[600],
+                          ),
                         ),
                       ],
                     ),
@@ -1736,7 +1786,10 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                       const SizedBox(width: 8),
                       Text(
                         DateFormat('EEEE, MMM dd, yyyy').format(_selectedDate!),
-                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
                       const Spacer(),
                       TextButton(
@@ -1808,7 +1861,10 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                     style: const TextStyle(fontSize: 16),
                     decoration: InputDecoration(
                       hintText: 'Enter full name',
-                      hintStyle: TextStyle(fontSize: 15, color: Colors.grey[400]),
+                      hintStyle: TextStyle(
+                        fontSize: 15,
+                        color: Colors.grey[400],
+                      ),
                       prefixIcon: Icon(
                         Icons.person_outline,
                         color: _primaryColor,
@@ -1823,7 +1879,10 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                       ),
                       filled: true,
                       fillColor: Colors.white,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 16,
+                      ),
                     ),
                     onChanged: (v) {
                       setState(() {
@@ -1849,7 +1908,10 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                         Expanded(
                           child: Text(
                             _duplicateError!,
-                            style: TextStyle(color: Colors.red.shade700, fontSize: 13),
+                            style: TextStyle(
+                              color: Colors.red.shade700,
+                              fontSize: 13,
+                            ),
                           ),
                         ),
                       ],
@@ -1864,7 +1926,11 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.info_outline, color: Colors.blue.shade700, size: 22),
+                      Icon(
+                        Icons.info_outline,
+                        color: Colors.blue.shade700,
+                        size: 22,
+                      ),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
@@ -1898,6 +1964,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                           _availableSlots = [];
                           _selectedSlot = null;
                           _isLoadingSlots = true;
+                          _slotErrorMessage = null;
                         });
                         await _loadAvailableSlots();
                       }
@@ -1907,7 +1974,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                 backgroundColor: _canProceedToTimeSlot()
                     ? _primaryColor
                     : Colors.grey[400],
-              foregroundColor: Colors.white,
+                foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(14),
@@ -1973,7 +2040,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                 width: 55,
                 height: 55,
                 decoration: BoxDecoration(
-                  color: _primaryColor.withOpacity(0.1),
+                  color: _primaryColor.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(28),
                 ),
                 child: Icon(icon, size: 30, color: _primaryColor),
@@ -2003,12 +2070,16 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                         ),
                         margin: const EdgeInsets.only(top: 8),
                         decoration: BoxDecoration(
-                          color: _primaryColor.withOpacity(0.1),
+                          color: _primaryColor.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(15),
                         ),
                         child: Text(
                           description,
-                          style: TextStyle(fontSize: 12, color: _primaryColor, fontWeight: FontWeight.w500),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: _primaryColor,
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
                       ),
                   ],
@@ -2097,7 +2168,11 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         const SizedBox(width: 8),
         Text(
           TimezoneService.getTimezoneDisplayName(),
-          style: TextStyle(fontSize: 13, color: Colors.grey[700], fontWeight: FontWeight.w500),
+          style: TextStyle(
+            fontSize: 13,
+            color: Colors.grey[700],
+            fontWeight: FontWeight.w500,
+          ),
         ),
         const SizedBox(width: 6),
         Text(
@@ -2110,7 +2185,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
 
   Widget _buildTravelTimeSelector() {
     if (!_showTravelTimeSelector) return const SizedBox.shrink();
-
     return Container(
       margin: const EdgeInsets.all(16),
       padding: const EdgeInsets.all(18),
@@ -2120,7 +2194,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         border: Border.all(color: _primaryColor, width: 2),
         boxShadow: [
           BoxShadow(
-            color: _primaryColor.withOpacity(0.15),
+            color: _primaryColor.withValues(alpha: 0.15),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -2202,7 +2276,10 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                   ),
                   elevation: isSelected ? 2 : 0,
                 ),
-                child: Text('${time} min', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+                child: Text(
+                  '$time min',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                ),
               );
             }).toList(),
           ),
@@ -2222,7 +2299,11 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                     _selectedTravelTime > 0
                         ? '✓ Travel time $_selectedTravelTime min added to your appointment'
                         : 'Select travel time to add to your appointment start time',
-                    style: TextStyle(fontSize: 12, color: Colors.blue.shade700, fontWeight: FontWeight.w500),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.blue.shade700,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                 ),
               ],
@@ -2234,15 +2315,12 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   }
 
   Future<void> _loadAvailableSlots() async {
-    if (_isLoadingSlots) {
-      setState(() => _isLoadingSlots = false);
-    }
-
     setState(() {
       _isLoadingSlots = true;
       _availableSlots = [];
       _selectedSlot = null;
       _showTravelTimeSelector = false;
+      _slotErrorMessage = null;
     });
 
     try {
@@ -2254,6 +2332,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
 
       final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate!);
       final totalDuration = _calculateTotalDuration();
+      final isToday = _selectedDate!.isAtSameMomentAs(
+        DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day),
+      );
 
       final result = await supabase
           .rpc(
@@ -2269,20 +2350,84 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           .timeout(const Duration(seconds: 10));
 
       if (result == null) throw Exception('No response');
-
       final data = result is List && result.isNotEmpty ? result[0] : result;
 
+      final conflictType = data['conflict_type']?.toString() ?? '';
+      final extensionMinutes = data['extension_minutes'] ?? 0;
+
+      // TODAY ONLY: Check overflow for today's date
+      if (isToday && conflictType == 'OVERFLOW') {
+        String message =
+            'No appointments available on ${DateFormat('EEEE, MMM dd').format(_selectedDate!)}.\n\n'
+            'Your requested time would exceed salon closing time by $extensionMinutes minutes.\n\n'
+            'Please select another date or try tomorrow.';
+
+        setState(() {
+          _slotErrorMessage = message;
+          _isLoadingSlots = false;
+        });
+        return;
+      }
+
+      // Check other conflicts
+      if (conflictType == 'SALON_CLOSED') {
+        setState(() {
+          _slotErrorMessage =
+              'Salon is closed on ${DateFormat('EEEE, MMM dd').format(_selectedDate!)}.\n\nPlease select another date.';
+          _isLoadingSlots = false;
+        });
+        return;
+      }
+
+      if (conflictType == 'BARBER_UNAVAILABLE') {
+        setState(() {
+          _slotErrorMessage =
+              '${_selectedBarber!['full_name']} is not working on ${DateFormat('EEEE, MMM dd').format(_selectedDate!)}.\n\nPlease select another barber or date.';
+          _isLoadingSlots = false;
+        });
+        return;
+      }
+
+      if (conflictType == 'NO_SLOTS_REMAINING') {
+        setState(() {
+          _slotErrorMessage =
+              'No appointments available on ${DateFormat('EEEE, MMM dd').format(_selectedDate!)}.\n\nAll time slots are fully booked. Please select another date.';
+          _isLoadingSlots = false;
+        });
+        return;
+      }
+
+      // Travel time selector (only when needed and for today)
+      if (data['needs_travel_selector'] == true &&
+          _selectedTravelTime == 0 &&
+          isToday) {
+        setState(() {
+          _showTravelTimeSelector = true;
+          _isLoadingSlots = false;
+        });
+        return;
+      }
+
+      // Create queue slot
       String utcStart = data['new_start_time']?.toString() ?? '--:--';
       String utcEnd = data['new_end_time']?.toString() ?? '--:--';
-      String localStart = TimezoneService.utcToLocalTime(utcStart, _selectedDate!);
+      String localStart = TimezoneService.utcToLocalTime(
+        utcStart,
+        _selectedDate!,
+      );
       String localEnd = TimezoneService.utcToLocalTime(utcEnd, _selectedDate!);
 
-      final queueNum = data['new_queue_number'] is int ? data['new_queue_number'] : 1;
-      final wait = data['estimated_wait_minutes'] is int ? data['estimated_wait_minutes'] : 0;
-      final extMins = data['extension_minutes'] is int ? data['extension_minutes'] : 0;
+      final queueNum = data['new_queue_number'] is int
+          ? data['new_queue_number']
+          : 1;
+      final wait = data['estimated_wait_minutes'] is int
+          ? data['estimated_wait_minutes']
+          : 0;
+      final extMins = data['extension_minutes'] is int
+          ? data['extension_minutes']
+          : 0;
       final willExtend = data['salon_will_extend'] == true;
       final adjusted = data['adjusted_for']?.toString() ?? '';
-      final needsSelector = data['needs_travel_selector'] == true;
 
       final newSlot = {
         'start_time': localStart,
@@ -2297,34 +2442,28 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         'salon_will_extend': willExtend,
         'extension_minutes': extMins,
         'adjusted_for': adjusted,
-        'needs_travel_selector': needsSelector,
       };
 
       setState(() {
         _availableSlots = [newSlot];
         _selectedSlot = newSlot;
         _isLoadingSlots = false;
-        if (needsSelector && _selectedTravelTime == 0) {
-          _showTravelTimeSelector = true;
-        }
+        _slotErrorMessage = null;
+        _showTravelTimeSelector = false;
       });
     } catch (e) {
       setState(() {
         _isLoadingSlots = false;
+        _slotErrorMessage = 'Failed to load time slots. Please try again.';
         _availableSlots = [];
       });
-
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to load: ${e.toString().replaceFirst('Exception: ', '')}'),
-            backgroundColor: Colors.red,
-            behavior: SnackBarBehavior.floating,
-            action: SnackBarAction(
-              label: 'Retry',
-              textColor: Colors.white,
-              onPressed: () => _loadAvailableSlots(),
+            content: Text(
+              'Error: ${e.toString().replaceFirst('Exception: ', '')}',
             ),
+            backgroundColor: Colors.red,
           ),
         );
       }
@@ -2332,11 +2471,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   }
 
   Widget _buildTimeSlotStep() {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isWeb = screenWidth > 800;
-    
     return Column(
       children: [
+        // Fixed header
         Container(
           padding: const EdgeInsets.all(16),
           color: Colors.white,
@@ -2344,10 +2481,17 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
             children: [
               CircleAvatar(
                 radius: 22,
-                backgroundColor: _primaryColor.withOpacity(0.1),
+                backgroundColor: _primaryColor.withValues(alpha: 0.1),
                 child: Text(
-                  _selectedBarber?['full_name']?.substring(0, 1).toUpperCase() ?? 'B',
-                  style: TextStyle(color: _primaryColor, fontSize: 20, fontWeight: FontWeight.bold),
+                  _selectedBarber?['full_name']
+                          ?.substring(0, 1)
+                          .toUpperCase() ??
+                      'B',
+                  style: TextStyle(
+                    color: _primaryColor,
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
               const SizedBox(width: 12),
@@ -2357,7 +2501,10 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                   children: [
                     Text(
                       _selectedBarber?['full_name'] ?? 'Barber',
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                     Text(
                       '${_calculateTotalDuration()} min service',
@@ -2368,11 +2515,16 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
               ),
               TextButton(
                 onPressed: () => setState(() => _currentStep = 3),
-                child: Text('Change', style: TextStyle(color: _primaryColor, fontSize: 14)),
+                child: Text(
+                  'Change',
+                  style: TextStyle(color: _primaryColor, fontSize: 14),
+                ),
               ),
             ],
           ),
         ),
+
+        // Date row
         if (_selectedDate != null)
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -2383,66 +2535,178 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                 const SizedBox(width: 8),
                 Text(
                   DateFormat('EEEE, MMM dd, yyyy').format(_selectedDate!),
-                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
                 const Spacer(),
                 TextButton(
                   onPressed: () => setState(() => _currentStep = 1),
-                  child: Text('Change', style: TextStyle(color: _primaryColor, fontSize: 14)),
+                  child: Text(
+                    'Change',
+                    style: TextStyle(color: _primaryColor, fontSize: 14),
+                  ),
                 ),
               ],
             ),
           ),
+
+        // Timezone indicator
         _buildTimezoneIndicator(),
+
+        // Scrollable content
         Expanded(
           child: _isLoadingSlots
               ? const Center(child: CircularProgressIndicator())
-              : _availableSlots.isEmpty && !_showTravelTimeSelector
+              : _slotErrorMessage != null
               ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.access_time, size: 64, color: Colors.grey[400]),
-                      const SizedBox(height: 16),
-                      Text('No slots available', style: TextStyle(fontSize: 16, color: Colors.grey[600])),
-                      const SizedBox(height: 20),
-                      ElevatedButton(
-                        onPressed: () => _loadAvailableSlots(),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: _primaryColor,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.event_busy,
+                          size: 64,
+                          color: Colors.orange.shade300,
                         ),
-                        child: const Text('Refresh', style: TextStyle(fontSize: 15)),
-                      ),
-                    ],
+                        const SizedBox(height: 20),
+                        Text(
+                          'No Appointments Available',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.grey[700],
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 24,
+                            vertical: 12,
+                          ),
+                          child: Text(
+                            _slotErrorMessage!,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 15,
+                              color: Colors.grey[600],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            OutlinedButton.icon(
+                              onPressed: () {
+                                setState(() {
+                                  _selectedDate = null;
+                                  _currentStep = 1;
+                                  _slotErrorMessage = null;
+                                });
+                              },
+                              icon: Icon(
+                                Icons.calendar_today,
+                                size: 18,
+                                color: Colors.grey[600],
+                              ),
+                              label: const Text('Change Date'),
+                            ),
+                            const SizedBox(width: 16),
+                            ElevatedButton.icon(
+                              onPressed: () async {
+                                if (_selectedDate == null) return;
+                                final tomorrow = _selectedDate!.add(
+                                  const Duration(days: 1),
+                                );
+                                setState(() {
+                                  _selectedDate = tomorrow;
+                                  _showTravelTimeSelector = false;
+                                  _selectedTravelTime = 0;
+                                  _availableSlots = [];
+                                  _isLoadingSlots = true;
+                                  _slotErrorMessage = null;
+                                });
+                                await _checkDateAvailability(tomorrow);
+                                await _loadAvailableSlots();
+                              },
+                              icon: const Icon(Icons.arrow_forward, size: 18),
+                              label: Text(
+                                'Try ${DateFormat('MMM dd').format(_selectedDate != null ? _selectedDate!.add(const Duration(days: 1)) : DateTime.now())}',
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: _primaryColor,
+                                foregroundColor: Colors.white,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(30),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        if (_selectedBarber != null)
+                          TextButton.icon(
+                            onPressed: () {
+                              setState(() {
+                                _selectedBarber = null;
+                                _currentStep = 3;
+                                _slotErrorMessage = null;
+                              });
+                            },
+                            icon: Icon(
+                              Icons.person,
+                              size: 18,
+                              color: _primaryColor,
+                            ),
+                            label: Text(
+                              'Try Another Barber',
+                              style: TextStyle(color: _primaryColor),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                 )
               : SingleChildScrollView(
                   child: Column(
                     children: [
-                      if (_availableSlots.isNotEmpty) _buildTimeSlotCard(_availableSlots.first),
+                      if (_availableSlots.isNotEmpty)
+                        _buildTimeSlotCard(_availableSlots.first),
                       if (_showTravelTimeSelector) _buildTravelTimeSelector(),
                     ],
                   ),
                 ),
         ),
+
+        // Continue button
         Padding(
           padding: const EdgeInsets.all(16),
           child: SizedBox(
             width: double.infinity,
             child: ElevatedButton(
-              onPressed: (_selectedSlot != null && !_isLoadingSlots && _availableSlots.isNotEmpty)
+              onPressed:
+                  (_selectedSlot != null &&
+                      !_isLoadingSlots &&
+                      _availableSlots.isNotEmpty &&
+                      _slotErrorMessage == null)
                   ? () => setState(() => _currentStep = 6)
                   : null,
               style: ElevatedButton.styleFrom(
-                backgroundColor: (_selectedSlot != null && !_isLoadingSlots && _availableSlots.isNotEmpty)
+                backgroundColor:
+                    (_selectedSlot != null &&
+                        !_isLoadingSlots &&
+                        _availableSlots.isNotEmpty &&
+                        _slotErrorMessage == null)
                     ? _primaryColor
                     : Colors.grey[400],
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
                 elevation: 2,
               ),
               child: const Text(
@@ -2470,7 +2734,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     return Card(
       margin: const EdgeInsets.all(16),
       elevation: isSelected ? 6 : 2,
-      color: isSelected ? _primaryColor.withOpacity(0.08) : Colors.white,
+      color: isSelected ? _primaryColor.withValues(alpha: 0.08) : Colors.white,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(24),
         side: BorderSide(
@@ -2484,6 +2748,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
               Text(
                 'Your Queue Number',
@@ -2495,7 +2760,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                 ),
               ),
               const SizedBox(height: 12),
-              // REMOVED # symbol from queue number
               Text(
                 '$queueNumber',
                 style: TextStyle(
@@ -2506,7 +2770,10 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
               ),
               const SizedBox(height: 16),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 12,
+                ),
                 decoration: BoxDecoration(
                   color: Colors.grey[100],
                   borderRadius: BorderRadius.circular(40),
@@ -2530,14 +2797,21 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
               const SizedBox(height: 16),
               if (waitMinutes > 0 && waitMinutes <= 200)
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.orange.shade50,
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
                     '⏱️ ~ $waitMinutes min wait time',
-                    style: TextStyle(fontSize: 13, color: Colors.orange.shade700, fontWeight: FontWeight.w500),
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Colors.orange.shade700,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                 ),
               if (travelTimeUsed > 0)
@@ -2545,7 +2819,11 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                   padding: const EdgeInsets.only(top: 8),
                   child: Text(
                     '🚗 +$travelTimeUsed min travel time included',
-                    style: TextStyle(fontSize: 13, color: _primaryColor, fontWeight: FontWeight.w500),
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: _primaryColor,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                 ),
               if (salonWillExtend)
@@ -2553,7 +2831,11 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                   padding: const EdgeInsets.only(top: 8),
                   child: Text(
                     '⏰ Salon will close $extensionMinutes min late for you',
-                    style: TextStyle(fontSize: 13, color: Colors.green.shade700, fontWeight: FontWeight.w500),
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Colors.green.shade700,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                 ),
               if (waitMinutes > 200)
@@ -2561,7 +2843,11 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                   padding: const EdgeInsets.only(top: 12),
                   child: Text(
                     '⚠️ Long wait time. Consider another date.',
-                    style: TextStyle(fontSize: 13, color: Colors.red.shade700, fontWeight: FontWeight.w500),
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Colors.red.shade700,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                 ),
               if (needsSelector && travelTimeUsed == 0)
@@ -2579,12 +2865,70 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     );
   }
 
-  // ==================== STEP 7: CONFIRMATION ====================
+  // ==================== STEP 7: CONFIRMATION (FULLY NULL SAFE) ====================
   Widget _buildConfirmationStep() {
+    // NULL SAFETY CHECK - ALL required data must exist
+    if (_selectedSalon == null ||
+        _selectedServices.isEmpty ||
+        _selectedBarber == null ||
+        _selectedSlot == null ||
+        _selectedDate == null) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.error_outline, size: 64, color: Colors.grey[400]),
+            const SizedBox(height: 16),
+            Text(
+              'Missing information. Please go back and complete all steps.',
+              style: TextStyle(color: Colors.grey[600], fontSize: 16),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton(
+              onPressed: () {
+                setState(() {
+                  _currentStep = 0;
+                  _resetBooking();
+                });
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _primaryColor,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: const Text('Start Over'),
+            ),
+          ],
+        ),
+      );
+    }
+
     final user = supabase.auth.currentUser;
-    final customerName = user?.userMetadata?['full_name'] ?? user?.email?.split('@').first ?? 'Customer';
-    final displayName = _isSameAsCustomer ? customerName : _getChildNameForBooking();
-    if (_selectedSlot == null) return const Center(child: CircularProgressIndicator());
+    final customerName =
+        user?.userMetadata?['full_name'] ??
+        user?.email?.split('@').first ??
+        'Customer';
+    final displayName = _isSameAsCustomer
+        ? customerName
+        : _getChildNameForBooking();
+
+    // Safe value extraction
+    final salonName = _selectedSalon!['name'] ?? 'Salon';
+    final salonAddress = _selectedSalon!['address'] ?? '';
+    final startTime = _selectedSlot!['start_time'] ?? '--:--';
+    final endTime = _selectedSlot!['end_time'] ?? '--:--';
+    final queueNumber = _selectedSlot!['queue_number'] ?? '?';
+    final travelTimeUsed = _selectedSlot!['travel_time_used'] ?? 0;
+    final salonWillExtend = _selectedSlot!['salon_will_extend'] ?? false;
+    final extensionMinutes = _selectedSlot!['extension_minutes'] ?? 0;
+    final adjustedFor = _selectedSlot!['adjusted_for']?.toString() ?? '';
+    final barberName = _selectedBarber!['full_name'] ?? 'Barber';
+    final barberRating =
+        (_selectedBarber!['avg_rating'] as num?)?.toStringAsFixed(1) ?? '4.5';
+    final totalDuration = _calculateTotalDuration();
+    final totalPrice = _calculateTotalPrice().toStringAsFixed(2);
 
     return Column(
       children: [
@@ -2596,15 +2940,15 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                 _buildConfirmationTile(
                   Icons.store,
                   'Salon',
-                  _selectedSalon!['name'] ?? '',
-                  _selectedSalon!['address'],
+                  salonName,
+                  salonAddress,
                 ),
                 const SizedBox(height: 12),
                 _buildConfirmationTile(
                   Icons.calendar_today,
                   'Date & Time',
                   DateFormat('EEEE, MMM dd').format(_selectedDate!),
-                  '${_selectedSlot!['start_time']} - ${_selectedSlot!['end_time']} • Queue ${_selectedSlot!['queue_number']}', // Removed #
+                  '$startTime - $endTime • Queue $queueNumber',
                 ),
                 const SizedBox(height: 12),
                 _buildConfirmationTile(
@@ -2617,46 +2961,53 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                 _buildConfirmationTile(
                   Icons.content_cut,
                   'Services (${_selectedServices.length})',
-                  '${_calculateTotalDuration()} min • Rs. ${_calculateTotalPrice().toStringAsFixed(2)}',
+                  '$totalDuration min • Rs. $totalPrice',
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    children: _selectedServices.map((s) => Text('• ${s['name']}', style: const TextStyle(fontSize: 13))).toList(),
+                    children: _selectedServices
+                        .map(
+                          (s) => Text(
+                            '• ${s['name']}',
+                            style: const TextStyle(fontSize: 13),
+                          ),
+                        )
+                        .toList(),
                   ),
                 ),
                 const SizedBox(height: 12),
                 _buildConfirmationTile(
                   Icons.person,
                   'Barber',
-                  _selectedBarber!['full_name'] ?? '',
-                  '⭐ ${(_selectedBarber!['avg_rating'] as num?)?.toStringAsFixed(1) ?? '4.5'} rating',
+                  barberName,
+                  '⭐ $barberRating rating',
                 ),
-                if (_selectedSlot!['travel_time_used'] > 0)
+                if (travelTimeUsed > 0)
                   Padding(
                     padding: const EdgeInsets.only(top: 12),
                     child: _buildConfirmationTile(
                       Icons.directions_car,
                       'Travel Time',
-                      '${_selectedSlot!['travel_time_used']} minutes',
+                      '$travelTimeUsed minutes',
                       '',
                     ),
                   ),
-                if (_selectedSlot!['salon_will_extend'])
+                if (salonWillExtend)
                   Padding(
                     padding: const EdgeInsets.only(top: 12),
                     child: _buildConfirmationTile(
                       Icons.access_time,
                       'Salon Hours',
-                      'Extended by ${_selectedSlot!['extension_minutes']} minutes',
+                      'Extended by $extensionMinutes minutes',
                       'Salon will stay open later',
                     ),
                   ),
-                if (_selectedSlot!['adjusted_for'] != null && _selectedSlot!['adjusted_for'].toString().isNotEmpty)
+                if (adjustedFor.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(top: 12),
                     child: _buildConfirmationTile(
                       Icons.info,
                       'Note',
-                      _getAdjustedForDisplay(_selectedSlot!['adjusted_for']),
+                      _getAdjustedForDisplay(adjustedFor),
                       '',
                     ),
                   ),
@@ -2674,12 +3025,27 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                 backgroundColor: _primaryColor,
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
                 elevation: 3,
               ),
               child: _isBooking
-                  ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                  : const Text('Confirm Booking', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+                  ? const SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Text(
+                      'Confirm Booking',
+                      style: TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
             ),
           ),
         ),
@@ -2688,30 +3054,56 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   }
 
   String _getAdjustedForDisplay(String adjustedFor) {
-    if (adjustedFor.contains('VIP_AFTER')) return 'Time adjusted - After VIP appointment';
-    if (adjustedFor.contains('VIP_PUSHED')) return 'VIP appointment rescheduled after this';
-    if (adjustedFor.contains('BREAK_AFTER')) return 'Time adjusted - After barber break';
-    if (adjustedFor.contains('LEAVE_AFTER')) return 'Time adjusted - After barber leave';
-    if (adjustedFor.contains('SALON_EXTEND')) return 'Salon hours extended for this appointment';
+    if (adjustedFor.contains('VIP_AFTER')) {
+      return 'Time adjusted - After VIP appointment';
+    }
+    if (adjustedFor.contains('VIP_PUSHED')) {
+      return 'VIP appointment rescheduled after this';
+    }
+    if (adjustedFor.contains('BREAK_AFTER')) {
+      return 'Time adjusted - After barber break';
+    }
+    if (adjustedFor.contains('LEAVE_AFTER')) {
+      return 'Time adjusted - After barber leave';
+    }
+    if (adjustedFor.contains('SALON_EXTEND')) {
+      return 'Salon hours extended for this appointment';
+    }
     if (adjustedFor.contains('TRAVEL')) return 'Travel time added';
-    if (adjustedFor.contains('AFTER_EFFECTIVE')) return 'Adjusted due to previous appointment';
+    if (adjustedFor.contains('AFTER_EFFECTIVE')) {
+      return 'Adjusted due to previous appointment';
+    }
     return 'Time adjusted based on availability';
   }
 
-  Widget _buildConfirmationTile(IconData icon, String title, String value, dynamic subtitle) => Container(
+  Widget _buildConfirmationTile(
+    IconData icon,
+    String title,
+    String value,
+    dynamic subtitle,
+  ) => Container(
     width: double.infinity,
     padding: const EdgeInsets.all(16),
     decoration: BoxDecoration(
       color: Colors.white,
       borderRadius: BorderRadius.circular(16),
       border: Border.all(color: Colors.grey[200]!),
-      boxShadow: [BoxShadow(color: Colors.grey.shade100, blurRadius: 4, offset: const Offset(0, 2))],
+      boxShadow: [
+        BoxShadow(
+          color: Colors.grey.shade100,
+          blurRadius: 4,
+          offset: const Offset(0, 2),
+        ),
+      ],
     ),
     child: Row(
       children: [
         Container(
           padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(color: _primaryColor.withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
+          decoration: BoxDecoration(
+            color: _primaryColor.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(12),
+          ),
           child: Icon(icon, size: 22, color: _primaryColor),
         ),
         const SizedBox(width: 14),
@@ -2719,12 +3111,24 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(title, style: TextStyle(fontSize: 13, color: Colors.grey[600])),
+              Text(
+                title,
+                style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+              ),
               const SizedBox(height: 6),
-              Text(value, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+              Text(
+                value,
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
               if (subtitle != null && subtitle is String) ...[
                 const SizedBox(height: 4),
-                Text(subtitle, style: TextStyle(fontSize: 13, color: Colors.grey[600])),
+                Text(
+                  subtitle,
+                  style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+                ),
               ],
               if (subtitle != null && subtitle is Widget) subtitle,
             ],
@@ -2734,14 +3138,12 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     ),
   );
 
-  // ==================== CONFIRM BOOKING ====================
   Future<void> _confirmBooking() async {
     if (!mounted) return;
     setState(() => _isBooking = true);
     try {
       final user = supabase.auth.currentUser;
       if (user == null) throw Exception('Please login');
-
       final result = await supabase.rpc(
         'create_new_appointment_advanced',
         params: {
@@ -2755,22 +3157,22 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           'p_utc_end_time': _selectedSlot!['utc_end_time'],
           'p_child_name': _getChildNameForBooking(),
           'p_travel_time_minutes': _selectedSlot!['travel_time_used'] ?? 0,
-          'p_notes': _selectedServices.length > 1 ? 'Combined: ${_selectedServices.map((s) => s['name']).join(", ")}' : null,
+          'p_notes': _selectedServices.length > 1
+              ? 'Combined: ${_selectedServices.map((s) => s['name']).join(", ")}'
+              : null,
           'p_is_vip': false,
           'p_vip_booking_id': null,
           'p_confirm_overflow': true,
         },
       );
-
       if (!mounted) return;
-
       if (result['success'] == true) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('✅ Booking Confirmed! Queue ${result['queue_number']}'), // Removed #
+            content: Text(
+              '✅ Booking Confirmed! Queue ${result['queue_number']}',
+            ),
             backgroundColor: _secondaryColor,
-            behavior: SnackBarBehavior.floating,
-            duration: const Duration(seconds: 3),
           ),
         );
         Navigator.pop(context, true);
@@ -2781,7 +3183,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed: $e'), backgroundColor: Colors.red, behavior: SnackBarBehavior.floating),
+        SnackBar(content: Text('Failed: $e'), backgroundColor: Colors.red),
       );
     } finally {
       if (mounted) setState(() => _isBooking = false);
@@ -2798,12 +3200,14 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           children: [
             Icon(Icons.warning_amber, color: Colors.orange.shade700, size: 28),
             const SizedBox(width: 12),
-            const Text('Needs Rescheduling', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const Text(
+              'Needs Rescheduling',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
           ],
         ),
         content: Text(
           '${result['message']}\n\nWould you like to move to ${DateFormat('MMM dd, yyyy').format(newDate)} at approximately ${result['estimated_start']}?',
-          style: const TextStyle(fontSize: 15),
         ),
         actions: [
           TextButton(
@@ -2811,7 +3215,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
               Navigator.pop(context);
               _resetBooking();
             },
-            child: const Text('Cancel', style: TextStyle(fontSize: 15)),
+            child: const Text('Cancel'),
           ),
           ElevatedButton(
             onPressed: () async {
@@ -2826,26 +3230,19 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
               });
               await _loadAvailableSlots();
             },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: _primaryColor,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-            child: const Text('Move to Next Day', style: TextStyle(fontSize: 15)),
+            style: ElevatedButton.styleFrom(backgroundColor: _primaryColor),
+            child: const Text('Move to Next Day'),
           ),
         ],
       ),
     );
   }
 
-  // ==================== MAIN BUILD METHOD - FULLY RESPONSIVE ====================
+  // ==================== MAIN BUILD METHOD ====================
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
     final isMobile = screenWidth < 600;
-    final isTablet = screenWidth >= 600 && screenWidth < 800;
-    final isWeb = screenWidth >= 800;
-
-    // Responsive sizes
     final stepSize = isMobile ? 36.0 : 42.0;
     final iconSize = isMobile ? 18.0 : 20.0;
     final stepFontSize = isMobile ? 9.0 : 11.0;
@@ -2858,7 +3255,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         title: Text(
           'Book Appointment',
           style: TextStyle(
-            fontSize: isWeb ? 22 : (isMobile ? 18 : 20),
+            fontSize: isMobile ? 18 : 20,
             fontWeight: FontWeight.w600,
             color: Colors.white,
           ),
@@ -2884,7 +3281,10 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
               onPressed: _resetBooking,
               child: Text(
                 'Reset',
-                style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 14),
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.9),
+                  fontSize: 14,
+                ),
               ),
             ),
         ],
@@ -2892,7 +3292,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            // Step indicators - Horizontal scroll for all devices
             Container(
               color: Colors.white,
               child: SingleChildScrollView(
@@ -2916,7 +3315,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                       Container(
                         width: connectorWidth,
                         height: 2,
-                        color: _currentStep > 0 ? _primaryColor : Colors.grey[300],
+                        color: _currentStep > 0
+                            ? _primaryColor
+                            : Colors.grey[300],
                       ),
                       _buildStepIndicatorResponsive(
                         1,
@@ -2929,7 +3330,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                       Container(
                         width: connectorWidth,
                         height: 2,
-                        color: _currentStep > 1 ? _primaryColor : Colors.grey[300],
+                        color: _currentStep > 1
+                            ? _primaryColor
+                            : Colors.grey[300],
                       ),
                       _buildStepIndicatorResponsive(
                         2,
@@ -2942,7 +3345,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                       Container(
                         width: connectorWidth,
                         height: 2,
-                        color: _currentStep > 2 ? _primaryColor : Colors.grey[300],
+                        color: _currentStep > 2
+                            ? _primaryColor
+                            : Colors.grey[300],
                       ),
                       _buildStepIndicatorResponsive(
                         3,
@@ -2955,7 +3360,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                       Container(
                         width: connectorWidth,
                         height: 2,
-                        color: _currentStep > 3 ? _primaryColor : Colors.grey[300],
+                        color: _currentStep > 3
+                            ? _primaryColor
+                            : Colors.grey[300],
                       ),
                       _buildStepIndicatorResponsive(
                         4,
@@ -2968,7 +3375,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                       Container(
                         width: connectorWidth,
                         height: 2,
-                        color: _currentStep > 4 ? _primaryColor : Colors.grey[300],
+                        color: _currentStep > 4
+                            ? _primaryColor
+                            : Colors.grey[300],
                       ),
                       _buildStepIndicatorResponsive(
                         5,
@@ -2981,7 +3390,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                       Container(
                         width: connectorWidth,
                         height: 2,
-                        color: _currentStep > 5 ? _primaryColor : Colors.grey[300],
+                        color: _currentStep > 5
+                            ? _primaryColor
+                            : Colors.grey[300],
                       ),
                       _buildStepIndicatorResponsive(
                         6,
@@ -2996,7 +3407,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                 ),
               ),
             ),
-            // Main content - takes remaining space without overflow
             Expanded(
               child: IndexedStack(
                 index: _currentStep,
@@ -3017,10 +3427,16 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     );
   }
 
-  Widget _buildStepIndicatorResponsive(int step, String label, IconData icon, double size, double iconSize, double fontSize) {
+  Widget _buildStepIndicatorResponsive(
+    int step,
+    String label,
+    IconData icon,
+    double size,
+    double iconSize,
+    double fontSize,
+  ) {
     final isActive = _currentStep == step;
     final isCompleted = _currentStep > step;
-    
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -3031,17 +3447,30 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
             shape: BoxShape.circle,
             color: isCompleted
                 ? _primaryColor
-                : (isActive ? _primaryColor.withOpacity(0.1) : Colors.grey[200]),
+                : (isActive
+                      ? _primaryColor.withValues(alpha: 0.1)
+                      : Colors.grey[200]),
             border: Border.all(
               color: isActive ? _primaryColor : Colors.grey[300]!,
               width: isActive ? 2 : 1.5,
             ),
-            boxShadow: isActive ? [BoxShadow(color: _primaryColor.withOpacity(0.3), blurRadius: 8)] : null,
+            boxShadow: isActive
+                ? [
+                    BoxShadow(
+                      color: _primaryColor.withValues(alpha: 0.3),
+                      blurRadius: 8,
+                    ),
+                  ]
+                : null,
           ),
           child: Center(
             child: isCompleted
                 ? Icon(Icons.check, size: iconSize, color: Colors.white)
-                : Icon(icon, size: iconSize, color: isActive ? _primaryColor : Colors.grey[500]),
+                : Icon(
+                    icon,
+                    size: iconSize,
+                    color: isActive ? _primaryColor : Colors.grey[500],
+                  ),
           ),
         ),
         if (label.isNotEmpty) ...[
