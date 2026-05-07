@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_application_1/services/notification_service.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../services/timezone_service.dart';
@@ -3139,69 +3138,65 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     ),
   );
 
-Future<void> _confirmBooking() async {
-  if (!mounted) return;
-  setState(() => _isBooking = true);
-  
-  try {
-    final user = supabase.auth.currentUser;
-    if (user == null) throw Exception('Please login');
-    
-    final result = await supabase.rpc(
-      'create_new_appointment_advanced',
-      params: {
-        'p_customer_id': user.id,
-        'p_salon_id': _selectedSalon!['id'],
-        'p_barber_id': _selectedBarber!['id'],
-        'p_service_id': _selectedServices.first['id'],
-        'p_variant_id': _selectedServices.first['variant_id'],
-        'p_appointment_date': DateFormat('yyyy-MM-dd').format(_selectedDate!),
-        'p_utc_start_time': _selectedSlot!['utc_start_time'],
-        'p_utc_end_time': _selectedSlot!['utc_end_time'],
-        'p_child_name': _getChildNameForBooking(),
-        'p_travel_time_minutes': _selectedSlot!['travel_time_used'] ?? 0,
-        'p_notes': _selectedServices.length > 1
-            ? 'Combined: ${_selectedServices.map((s) => s['name']).join(", ")}'
-            : null,
-        'p_is_vip': false,
-        'p_vip_booking_id': null,
-        'p_confirm_overflow': true,
-      },
-    );
-    
+  Future<void> _confirmBooking() async {
     if (!mounted) return;
-    
-    if (result['success'] == true) {
-      // ✅ SEND PUSH NOTIFICATION
-      await NotificationService().sendPushNotification(
-        userId: user.id,
-        title: '✅ Appointment Confirmed',
-        body: 'Your appointment has been confirmed! Queue #${result['queue_number']}',
-        screen: 'booking_details',
-        bookingId: result['appointment_id'].toString(),
-      );
-       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('✅ Booking Confirmed! Queue ${result['queue_number']}'),
-          backgroundColor: _secondaryColor,
-        ),
-      );
-      Navigator.pop(context, true);
-      
-    } else {
-      throw Exception(result['message'] ?? 'Booking failed');
-    }
-    
-  } catch (e) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Failed: $e'), backgroundColor: Colors.red),
-    );
-  } finally {
-    if (mounted) setState(() => _isBooking = false);
-  }
-}
+    setState(() => _isBooking = true);
 
+    try {
+      final user = supabase.auth.currentUser;
+      if (user == null) throw Exception('Please login');
+
+      final result = await supabase.rpc(
+        'create_new_appointment_advanced',
+        params: {
+          'p_customer_id': user.id,
+          'p_salon_id': _selectedSalon!['id'],
+          'p_barber_id': _selectedBarber!['id'],
+          'p_service_id': _selectedServices.first['id'],
+          'p_variant_id': _selectedServices.first['variant_id'],
+          'p_appointment_date': DateFormat('yyyy-MM-dd').format(_selectedDate!),
+          'p_utc_start_time': _selectedSlot!['utc_start_time'],
+          'p_utc_end_time': _selectedSlot!['utc_end_time'],
+          'p_child_name': _getChildNameForBooking(),
+          'p_travel_time_minutes': _selectedSlot!['travel_time_used'] ?? 0,
+          'p_notes': _selectedServices.length > 1
+              ? 'Combined: ${_selectedServices.map((s) => s['name']).join(", ")}'
+              : null,
+          'p_is_vip': false,
+          'p_vip_booking_id': null,
+          'p_confirm_overflow': true,
+        },
+      );
+
+      if (!mounted) return;
+
+      if (result['success'] == true) {
+        // ✅ REMOVE THIS - SQL function already sends push notification!
+        // await NotificationService().sendPushNotification(...);
+
+        // ✅ REMOVE THIS - SQL function already saves to database!
+        // await supabase.from('notifications').insert({...});
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '✅ Booking Confirmed! Queue ${result['queue_number']}',
+            ),
+            backgroundColor: _secondaryColor,
+          ),
+        );
+        Navigator.pop(context, true);
+      } else {
+        throw Exception(result['message'] ?? 'Booking failed');
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed: $e'), backgroundColor: Colors.red),
+      );
+    } finally {
+      if (mounted) setState(() => _isBooking = false);
+    }
+  }
 
   // ==================== MAIN BUILD METHOD ====================
   @override
