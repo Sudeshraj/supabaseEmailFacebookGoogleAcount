@@ -1,5 +1,3 @@
-// lib/screens/customer/my_bookings_screen.dart
-
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/screens/customer/booking_flow_screen.dart';
 import 'package:intl/intl.dart';
@@ -30,7 +28,6 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
   // Colors
   final Color _primaryColor = const Color(0xFFFF6B8B);
   final Color _secondaryColor = const Color(0xFF4CAF50);
-  final Color _textDark = const Color(0xFF333333);
   final Color _bgLight = const Color(0xFFF8F9FA);
 
   // Loading states
@@ -173,8 +170,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
       setState(() {
         _bookings = processedBookings;
       });
-    } catch (e) {
-      print('Error loading bookings: $e');
+    } catch (e) {     
       setState(() {
         _error = 'Failed to load bookings: $e';
       });
@@ -264,8 +260,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
       }
 
       setState(() => _overflowNotifications = notifications);
-    } catch (e) {
-      print('Error loading overflow notifications: $e');
+    } catch (e) {    
       setState(() => _overflowNotifications = []);
     }
   }
@@ -644,7 +639,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
           'p_cancel_reason': 'Cancelled by customer',
         },
       );
-
+  if (!mounted) return;
       if (result['success'] == true) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -663,6 +658,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
         throw Exception(result['message'] ?? 'Cancellation failed');
       }
     } catch (e) {
+        if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Failed to cancel: $e'),
@@ -795,8 +791,9 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
         final bookingIndex = isUpcoming
             ? index - _overflowNotifications.length
             : index;
-        if (bookingIndex < 0 || bookingIndex >= bookings.length)
+        if (bookingIndex < 0 || bookingIndex >= bookings.length) {
           return const SizedBox.shrink();
+        }
         return _buildBookingCard(bookings[bookingIndex], isUpcoming);
       },
     );
@@ -1088,7 +1085,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: _primaryColor.withOpacity(0.05),
+                color: _primaryColor.withValues(alpha:0.05),
                 borderRadius: const BorderRadius.only(
                   topLeft: Radius.circular(16),
                   topRight: Radius.circular(16),
@@ -1100,7 +1097,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                     width: 45,
                     height: 45,
                     decoration: BoxDecoration(
-                      color: _primaryColor.withOpacity(0.1),
+                      color: _primaryColor.withValues(alpha:0.1),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Icon(Icons.store, color: _primaryColor, size: 24),
@@ -1136,9 +1133,9 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                       vertical: 4,
                     ),
                     decoration: BoxDecoration(
-                      color: statusColor.withOpacity(0.1),
+                      color: statusColor.withValues(alpha:0.1),
                       borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: statusColor.withOpacity(0.3)),
+                      border: Border.all(color: statusColor.withValues(alpha:0.3)),
                     ),
                     child: Text(
                       statusText,
@@ -1487,7 +1484,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: _primaryColor.withOpacity(0.1),
+                    color: _primaryColor.withValues(alpha:0.1),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Icon(
@@ -1533,7 +1530,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                 booking['child_name'].toString().isNotEmpty)
               _buildDetailRow('Booked For', booking['child_name']),
             if (booking['queue_number'] != null)
-              _buildDetailRow('Queue Number', '#${booking['queue_number']}'),
+              _buildDetailRow('Queue Number', '${booking['queue_number']}'),
             if (booking['travel_time_minutes'] != null &&
                 booking['travel_time_minutes'] > 0)
               _buildDetailRow(
@@ -1724,7 +1721,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                             rating: selectedRating,
                             review: reviewText,
                           );
-                          if (mounted) Navigator.pop(context);
+                          if (context.mounted) Navigator.pop(context);
                         }
                       },
                 style: ElevatedButton.styleFrom(backgroundColor: _primaryColor),
@@ -1771,7 +1768,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
           .select('id')
           .eq('appointment_id', bookingId)
           .maybeSingle();
-
+  if (!mounted) return;
       if (existingReview != null) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -1791,7 +1788,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
         'comment': review,
         'created_at': DateTime.now().toIso8601String(),
       });
-
+  if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Row(
@@ -1807,7 +1804,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
 
       await _loadData();
     } catch (e) {
-      print('Error submitting review: $e');
+       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Failed to submit review: $e'),
