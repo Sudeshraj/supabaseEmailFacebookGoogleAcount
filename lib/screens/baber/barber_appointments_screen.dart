@@ -19,6 +19,7 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
 
   // Colors
   final Color _primaryColor = const Color(0xFFFF6B8B);
+  final Color _vipColor = const Color(0xFF9C27B0);
   final Color _secondaryColor = const Color(0xFF4CAF50);
   final Color _warningColor = const Color(0xFFFF9800);
   final Color _dangerColor = const Color(0xFFF44336);
@@ -30,7 +31,6 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
 
   bool _isLoading = true;
   String? _error;
-  String? _barberName;
 
   // Tab controller
   late TabController _tabController;
@@ -69,17 +69,28 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
           .maybeSingle();
 
       if (profile != null && mounted) {
-        setState(() {
-          _barberName = profile['full_name'] ?? 'Barber';
-        });
+        setState(() {});
       }
     } catch (e) {
       debugPrint('Error loading barber data: $e');
     }
   }
 
+  String _getDisplayQueueNumber(Map<String, dynamic> appointment) {
+    final isVip = appointment['is_vip'] ?? false;
+    final regularQueueNumber = appointment['regular_queue_number'];
+    final vipQueueNumber = appointment['vip_queue_number'];
+
+    if (isVip && vipQueueNumber != null) {
+      return 'VIP-$vipQueueNumber';
+    } else if (!isVip && regularQueueNumber != null) {
+      return 'Q$regularQueueNumber';
+    }
+    return '';
+  }
+
   // =====================================================
-  // LOAD APPOINTMENTS WITH TIMEZONE SERVICE
+  // LOAD APPOINTMENTS
   // =====================================================
   Future<void> _loadAppointments() async {
     if (!mounted) return;
@@ -101,7 +112,13 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
 
       final appointments = await supabase
           .from('appointments')
-          .select('*')
+          .select('''
+            *,
+            regular_queue_number,
+            vip_queue_number,
+            queue_position,
+            is_vip
+          ''')
           .eq('barber_id', user.id)
           .order('appointment_date', ascending: true);
 
@@ -115,7 +132,7 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
         return;
       }
 
-      // Get all unique customer IDs
+      // Get customer details
       final customerIds = appointments
           .map((a) => a['customer_id'] as String?)
           .where((id) => id != null)
@@ -130,11 +147,11 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
             .inFilter('id', customerIds);
 
         for (var customer in customers) {
-          customersMap[customer['id']] = customer as Map<String, dynamic>;
+          customersMap[customer['id']] = customer;
         }
       }
 
-      // Get all unique service IDs
+      // Get service details
       final serviceIds = appointments
           .map((a) => a['service_id'] as int?)
           .where((id) => id != null)
@@ -153,7 +170,7 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
         }
       }
 
-      // Get all unique salon IDs
+      // Get salon details
       final salonIds = appointments
           .map((a) => a['salon_id'] as int?)
           .where((id) => id != null)
@@ -192,7 +209,6 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
           appointmentDate.day,
         );
 
-        // Convert UTC to Local time
         final utcStart = apt['start_time'] as String;
         final utcEnd = apt['end_time'] as String;
         final localStart = TimezoneService.utcToLocalTime(
@@ -204,6 +220,10 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
           appointmentDate,
         );
 
+        final displayQueue = _getDisplayQueueNumber(apt);
+        final isVip = apt['is_vip'] ?? false;
+        final queuePosition = apt['queue_position'];
+
         final appointmentData = {
           'id': apt['id'],
           'booking_number': apt['booking_number'],
@@ -211,9 +231,13 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
           'start_time': apt['start_time'],
           'end_time': apt['end_time'],
           'status': apt['status'],
-          'is_vip': apt['is_vip'] ?? false,
+          'is_vip': isVip,
           'price': apt['price'] ?? 0.0,
           'queue_number': apt['queue_number'],
+          'regular_queue_number': apt['regular_queue_number'],
+          'vip_queue_number': apt['vip_queue_number'],
+          'queue_position': queuePosition,
+          'display_queue': displayQueue,
           'child_name': apt['child_name'],
           'customer_name': customer?['full_name'] ?? 'Customer',
           'customer_id': apt['customer_id'],
@@ -228,7 +252,6 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
           'time_display': '$localStart - $localEnd',
         };
 
-        // Categorize
         if (apt['status'] == 'cancelled' || apt['status'] == 'no_show') {
           pastList.add(appointmentData);
         } else if (appointmentDateOnly.isAtSameMomentAs(today)) {
@@ -240,16 +263,20 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
         }
       }
 
-      // Sort
-      todayList.sort(
-        (a, b) => a['local_start_time'].compareTo(b['local_start_time']),
-      );
-      upcomingList.sort(
-        (a, b) => a['appointment_date'].compareTo(b['appointment_date']),
-      );
-      pastList.sort(
-        (a, b) => b['appointment_date'].compareTo(a['appointment_date']),
-      );
+      // Sort by queue_position (time order)
+      todayList.sort((a, b) {
+        final aPos = a['queue_position'] ?? 999;
+        final bPos = b['queue_position'] ?? 999;
+        return aPos.compareTo(bPos);
+      });
+      upcomingList.sort((a, b) {
+        final aPos = a['queue_position'] ?? 999;
+        final bPos = b['queue_position'] ?? 999;
+        return aPos.compareTo(bPos);
+      });
+      pastList.sort((a, b) {
+        return b['appointment_date'].compareTo(a['appointment_date']);
+      });
 
       if (mounted) {
         setState(() {
@@ -306,11 +333,28 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
                   ),
                   Row(
                     children: [
-                      Icon(Icons.person, size: 16, color: _primaryColor),
+                      Icon(
+                        appointment['is_vip'] == true
+                            ? Icons.star
+                            : Icons.person,
+                        size: 16,
+                        color: appointment['is_vip'] == true
+                            ? _vipColor
+                            : _primaryColor,
+                      ),
                       const SizedBox(width: 8),
                       Text('Customer: ${appointment['customer_name']}'),
                     ],
                   ),
+                  if (appointment['display_queue'] != null &&
+                      appointment['display_queue'].toString().isNotEmpty)
+                    Row(
+                      children: [
+                        Icon(Icons.queue, size: 16, color: Colors.grey[600]),
+                        const SizedBox(width: 8),
+                        Text('Queue: ${appointment['display_queue']}'),
+                      ],
+                    ),
                 ],
               ),
             ),
@@ -394,18 +438,19 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
   }
 
   // =====================================================
-  // COMPLETE APPOINTMENT
+  // END / COMPLETE APPOINTMENT
   // =====================================================
-  Future<void> _completeAppointment(Map<String, dynamic> appointment) async {
+  Future<void> _endAppointment(Map<String, dynamic> appointment) async {
     if (_isProcessing) return;
 
     final hasOverflow = await _checkForOverflowWarning(appointment['id']);
+    if (!mounted) return;
 
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Complete Appointment?'),
+        title: const Text('End Appointment?'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -431,11 +476,28 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
                   ),
                   Row(
                     children: [
-                      Icon(Icons.person, size: 16, color: _primaryColor),
+                      Icon(
+                        appointment['is_vip'] == true
+                            ? Icons.star
+                            : Icons.person,
+                        size: 16,
+                        color: appointment['is_vip'] == true
+                            ? _vipColor
+                            : _primaryColor,
+                      ),
                       const SizedBox(width: 8),
                       Text('Customer: ${appointment['customer_name']}'),
                     ],
                   ),
+                  if (appointment['display_queue'] != null &&
+                      appointment['display_queue'].toString().isNotEmpty)
+                    Row(
+                      children: [
+                        Icon(Icons.queue, size: 16, color: Colors.grey[600]),
+                        const SizedBox(width: 8),
+                        Text('Queue: ${appointment['display_queue']}'),
+                      ],
+                    ),
                 ],
               ),
             ),
@@ -445,7 +507,7 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
                 child: Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: _warningColor.withOpacity(0.1),
+                    color: _warningColor.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(color: _warningColor),
                   ),
@@ -463,6 +525,11 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
                   ),
                 ),
               ),
+            const SizedBox(height: 8),
+            Text(
+              '⚠️ If you end late, next appointments will be adjusted automatically.',
+              style: TextStyle(fontSize: 11, color: _warningColor),
+            ),
           ],
         ),
         actions: [
@@ -479,7 +546,7 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
                 borderRadius: BorderRadius.circular(10),
               ),
             ),
-            child: const Text('COMPLETE'),
+            child: const Text('END APPOINTMENT'),
           ),
         ],
       ),
@@ -543,9 +610,6 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
     }
   }
 
-  // =====================================================
-  // CHECK FOR OVERFLOW WARNING
-  // =====================================================
   Future<bool> _checkForOverflowWarning(int appointmentId) async {
     try {
       final result = await supabase
@@ -561,9 +625,6 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
     }
   }
 
-  // =====================================================
-  // SHOW OVERFLOW NOTIFICATION DIALOG
-  // =====================================================
   void _showOverflowNotificationDialog(Map<String, dynamic> result) {
     showDialog(
       context: context,
@@ -585,7 +646,7 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: _warningColor.withOpacity(0.1),
+                color: _warningColor.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: const Text(
@@ -606,7 +667,7 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
   }
 
   // =====================================================
-  // CANCEL APPOINTMENT WITH REASON SELECTION
+  // CANCEL APPOINTMENT
   // =====================================================
   Future<void> _cancelAppointment(Map<String, dynamic> appointment) async {
     if (_isProcessing) return;
@@ -651,7 +712,6 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Appointment info
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
@@ -664,7 +724,15 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
                     children: [
                       Row(
                         children: [
-                          Icon(Icons.person, size: 16, color: _primaryColor),
+                          Icon(
+                            appointment['is_vip'] == true
+                                ? Icons.star
+                                : Icons.person,
+                            size: 16,
+                            color: appointment['is_vip'] == true
+                                ? _vipColor
+                                : _primaryColor,
+                          ),
                           const SizedBox(width: 8),
                           Text(
                             appointment['customer_name'],
@@ -711,19 +779,40 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
                             ],
                           ),
                         ),
+                      if (appointment['display_queue'] != null &&
+                          appointment['display_queue'].toString().isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.queue,
+                                size: 14,
+                                color: Colors.grey[600],
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                'Queue: ${appointment['display_queue']}',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: Colors.grey[600],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                     ],
                   ),
                 ),
                 const SizedBox(height: 20),
 
-                // Cancel reason dropdown
                 const Text(
                   'Reason for cancellation',
                   style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
                 ),
                 const SizedBox(height: 8),
                 DropdownButtonFormField<String>(
-                  value: selectedReason,
+                  initialValue: selectedReason,
                   isExpanded: true,
                   decoration: InputDecoration(
                     hintText: 'Select a reason',
@@ -755,7 +844,6 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
                   },
                 ),
 
-                // Other reason text field
                 if (showOtherField) ...[
                   const SizedBox(height: 12),
                   TextField(
@@ -781,7 +869,6 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
                   ),
                 ],
 
-                // Validation error
                 if (validationError != null)
                   Padding(
                     padding: const EdgeInsets.only(top: 12),
@@ -801,7 +888,6 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
 
                 const SizedBox(height: 16),
 
-                // Warning message
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
@@ -845,7 +931,6 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
               ),
               ElevatedButton(
                 onPressed: () {
-                  // Validate
                   if (selectedReason == null) {
                     setStateDialog(() {
                       validationError = 'Please select a reason';
@@ -888,7 +973,6 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
       final user = supabase.auth.currentUser;
       if (user == null) throw Exception('User not found');
 
-      // Build final reason
       String finalReason;
       if (selectedReason == 'Other') {
         finalReason = otherReasonController.text.trim();
@@ -940,10 +1024,11 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
     }
   }
 
-  // =====================================================
-  // SHOW CUSTOMER INFO
-  // =====================================================
   void _showCustomerInfo(Map<String, dynamic> appointment) {
+    final isVip = appointment['is_vip'] ?? false;
+    final displayQueue = appointment['display_queue'] ?? '';
+    final queuePosition = appointment['queue_position'];
+
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
@@ -972,7 +1057,9 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
                 children: [
                   CircleAvatar(
                     radius: 30,
-                    backgroundColor: _primaryColor.withOpacity(0.1),
+                    backgroundColor: isVip
+                        ? _vipColor.withValues(alpha: 0.1)
+                        : _primaryColor.withValues(alpha: 0.1),
                     backgroundImage: appointment['customer_avatar'] != null
                         ? NetworkImage(appointment['customer_avatar'])
                         : null,
@@ -981,7 +1068,7 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
                             (appointment['customer_name'][0]).toUpperCase(),
                             style: TextStyle(
                               fontSize: 24,
-                              color: _primaryColor,
+                              color: isVip ? _vipColor : _primaryColor,
                             ),
                           )
                         : null,
@@ -991,12 +1078,36 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          appointment['customer_name'],
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
+                        Row(
+                          children: [
+                            Text(
+                              appointment['customer_name'],
+                              style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            if (isVip)
+                              Container(
+                                margin: const EdgeInsets.only(left: 8),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: _vipColor,
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: const Text(
+                                  'VIP',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                          ],
                         ),
                         if (appointment['customer_phone'] != null)
                           Text(
@@ -1023,20 +1134,18 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
               if (appointment['child_name'] != null &&
                   appointment['child_name'].toString().isNotEmpty)
                 _buildInfoTile('Booked For', appointment['child_name']),
-              if (appointment['queue_number'] != null)
-                _buildInfoTile(
-                  'Queue Number',
-                  '#${appointment['queue_number']}',
-                ),
+              if (displayQueue.isNotEmpty)
+                _buildInfoTile('Queue Number', displayQueue),
+              if (queuePosition != null)
+                _buildInfoTile('Position', '#$queuePosition'),
               const SizedBox(height: 20),
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
                   onPressed: () => Navigator.pop(context),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: _primaryColor,
-                    foregroundColor:
-                        Colors.white, // ✅ Add this - text color white
+                    backgroundColor: isVip ? _vipColor : _primaryColor,
+                    foregroundColor: Colors.white,
                     textStyle: const TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
@@ -1140,7 +1249,7 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
                       vertical: 8,
                     ),
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.2),
+                      color: Colors.white.withValues(alpha: 0.2),
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Row(
@@ -1259,7 +1368,7 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
           borderRadius: BorderRadius.circular(12),
           boxShadow: [
             BoxShadow(
-              color: Colors.grey.withOpacity(0.1),
+              color: Colors.grey.withValues(alpha: 0.1),
               blurRadius: 4,
               offset: const Offset(0, 2),
             ),
@@ -1322,9 +1431,11 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
   Widget _buildAppointmentCard(Map<String, dynamic> appointment, bool isToday) {
     final status = appointment['status'];
     final isInProgress = status == 'in_progress';
-    final isConfirmed = status == 'confirmed' || status == 'pending';
     final isCompleted = status == 'completed';
     final isCancelled = status == 'cancelled';
+    final isVip = appointment['is_vip'] ?? false;
+    final displayQueue = appointment['display_queue'] ?? '';
+    final queuePosition = appointment['queue_position'];
 
     Color statusColor;
     String statusText;
@@ -1369,7 +1480,9 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
         borderRadius: BorderRadius.circular(12),
         side: isInProgress
             ? BorderSide(color: Colors.blue, width: 2)
-            : BorderSide.none,
+            : (isVip
+                  ? BorderSide(color: _vipColor, width: 1)
+                  : BorderSide.none),
       ),
       child: Container(
         padding: const EdgeInsets.all(12),
@@ -1379,14 +1492,15 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
             // Header
             Row(
               children: [
-                // Time
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 10,
                     vertical: 6,
                   ),
                   decoration: BoxDecoration(
-                    color: _primaryColor.withOpacity(0.1),
+                    color: isVip
+                        ? _vipColor.withValues(alpha: 0.1)
+                        : _primaryColor.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
@@ -1394,55 +1508,74 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
-                      color: _primaryColor,
+                      color: isVip ? _vipColor : _primaryColor,
                     ),
                   ),
                 ),
                 const SizedBox(width: 12),
-                // Status badge
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: statusColor.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(statusIcon, size: 12, color: statusColor),
-                      const SizedBox(width: 4),
-                      Text(
-                        statusText,
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: statusColor,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const Spacer(),
-                // Queue number
-                if (appointment['queue_number'] != null)
+                if (isVip)
                   Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 8,
                       vertical: 4,
                     ),
                     decoration: BoxDecoration(
-                      color: Colors.grey[200],
+                      color: _vipColor,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.star, size: 12, color: Colors.white),
+                        SizedBox(width: 4),
+                        Text(
+                          'VIP',
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                const Spacer(),
+                if (displayQueue.isNotEmpty)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: isVip
+                          ? _vipColor.withValues(alpha: 0.1)
+                          : Colors.grey[200],
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Text(
-                      'Q#${appointment['queue_number']}',
+                      displayQueue,
                       style: TextStyle(
-                        fontSize: 11,
-                        color: Colors.grey[600],
-                        fontWeight: FontWeight.w500,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: isVip ? _vipColor : Colors.grey[700],
+                      ),
+                    ),
+                  ),
+                if (queuePosition != null && queuePosition > 0)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 8),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.grey[300],
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        '#$queuePosition',
+                        style: TextStyle(fontSize: 10, color: Colors.grey[600]),
                       ),
                     ),
                   ),
@@ -1454,14 +1587,19 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
               children: [
                 CircleAvatar(
                   radius: 20,
-                  backgroundColor: _primaryColor.withOpacity(0.1),
+                  backgroundColor: isVip
+                      ? _vipColor.withValues(alpha: 0.1)
+                      : _primaryColor.withValues(alpha: 0.1),
                   backgroundImage: appointment['customer_avatar'] != null
                       ? NetworkImage(appointment['customer_avatar'])
                       : null,
                   child: appointment['customer_avatar'] == null
                       ? Text(
                           (appointment['customer_name'][0]).toUpperCase(),
-                          style: TextStyle(fontSize: 16, color: _primaryColor),
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: isVip ? _vipColor : _primaryColor,
+                          ),
                         )
                       : null,
                 ),
@@ -1486,6 +1624,20 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
                             color: Colors.grey[600],
                           ),
                         ),
+                      Row(
+                        children: [
+                          Icon(statusIcon, size: 12, color: statusColor),
+                          const SizedBox(width: 4),
+                          Text(
+                            statusText,
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: statusColor,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
                     ],
                   ),
                 ),
@@ -1517,16 +1669,19 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w500,
-                    color: _primaryColor,
+                    color: isVip ? _vipColor : _primaryColor,
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 12),
-            // Action buttons
-            if (isToday && isConfirmed && !isCancelled && !isCompleted)
+            // =====================================================
+            // ACTION BUTTONS - UPDATED
+            // =====================================================
+            if (isToday && !isCancelled && !isCompleted)
               Row(
                 children: [
+                  // START button - only if not started
                   if (!isInProgress)
                     Expanded(
                       child: ElevatedButton.icon(
@@ -1545,15 +1700,16 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
                         ),
                       ),
                     ),
-                  if (!isInProgress) const SizedBox(width: 12),
+                  
+                  // END button - only if in progress
                   if (isInProgress)
                     Expanded(
                       child: ElevatedButton.icon(
                         onPressed: _isProcessing
                             ? null
-                            : () => _completeAppointment(appointment),
+                            : () => _endAppointment(appointment),
                         icon: const Icon(Icons.check, size: 18),
-                        label: const Text('COMPLETE'),
+                        label: const Text('END'),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: _secondaryColor,
                           foregroundColor: Colors.white,
@@ -1564,8 +1720,11 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
                         ),
                       ),
                     ),
+                  
                   const SizedBox(width: 12),
-                  if (!isInProgress && !isCompleted)
+                  
+                  // CANCEL button - only if not completed
+                  if (!isInProgress)
                     Expanded(
                       child: OutlinedButton.icon(
                         onPressed: _isProcessing
@@ -1591,7 +1750,7 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
                 child: Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: _secondaryColor.withOpacity(0.1),
+                    color: _secondaryColor.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Row(
@@ -1616,7 +1775,7 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
                 child: Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: _dangerColor.withOpacity(0.1),
+                    color: _dangerColor.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Row(

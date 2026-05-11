@@ -27,7 +27,9 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
 
   // Colors
   final Color _primaryColor = const Color(0xFFFF6B8B);
-  final Color _secondaryColor = const Color(0xFF4CAF50);
+  final Color _vipColor = const Color(0xFF9C27B0);  // VIP purple color
+  final Color _regularColor = const Color(0xFF4CAF50);  // Regular green color
+  final Color _secondaryColor = const Color(0xFF4CAF50);  
   final Color _bgLight = const Color(0xFFF8F9FA);
 
   // Loading states
@@ -59,7 +61,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
   }
 
   // =====================================================
-  // LOAD BOOKINGS (SIMPLIFIED)
+  // LOAD BOOKINGS (UPDATED - WITH QUEUE DISPLAY NUMBERS)
   // =====================================================
   Future<void> _loadBookings() async {
     try {
@@ -153,6 +155,31 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
           statusCategory = 'upcoming';
         }
 
+        // =====================================================
+        // GET DISPLAY QUEUE NUMBER (VIP or Regular)
+        // =====================================================
+        final isVip = booking['is_vip'] ?? false;
+        String displayQueueNumber = '';
+        
+        if (isVip) {
+          final vipNum = booking['vip_queue_number'];
+          if (vipNum != null) {
+            displayQueueNumber = 'VIP-$vipNum';
+          } else if (booking['queue_number'] != null) {
+            displayQueueNumber = 'VIP-${booking['queue_number']}';
+          }
+        } else {
+          final regNum = booking['regular_queue_number'];
+          if (regNum != null) {
+            displayQueueNumber = 'Q$regNum';
+          } else if (booking['queue_number'] != null) {
+            displayQueueNumber = 'Q${booking['queue_number']}';
+          }
+        }
+
+        // Get queue position (time order)
+        final queuePosition = booking['queue_position'];
+
         processedBookings.add({
           ...booking,
           'local_start_time': localStartTime,
@@ -164,6 +191,9 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
           'service_name': service?['name'] ?? 'Service',
           'price': variant?['price'] ?? booking['price'] ?? 0.0,
           'duration': variant?['duration'] ?? 30,
+          'display_queue_number': displayQueueNumber,
+          'queue_position': queuePosition,
+          'is_vip': isVip,
         });
       }
 
@@ -180,14 +210,13 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
   }
 
   // =====================================================
-  // LOAD OVERFLOW NOTIFICATIONS (SIMPLIFIED - NO COMPLEX JOINS)
+  // LOAD OVERFLOW NOTIFICATIONS
   // =====================================================
   Future<void> _loadOverflowNotifications() async {
     try {
       final user = supabase.auth.currentUser;
       if (user == null) return;
 
-      // Simple query without nested joins
       final result = await supabase
           .from('overflow_notifications')
           .select('*')
@@ -198,14 +227,12 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
       final List<Map<String, dynamic>> notifications = [];
 
       for (var notice in result) {
-        // Get appointment details separately
         final apt = await supabase
             .from('appointments')
             .select('*, salons!inner(name, address), services!inner(name)')
             .eq('id', notice['appointment_id'])
             .single();
 
-        // Get barber name separately
         String barberName = 'Barber';
         if (apt['barber_id'] != null) {
           final barber = await supabase
@@ -218,7 +245,6 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
           }
         }
 
-        // Convert times
         final appointmentDate = DateTime.parse(apt['appointment_date']);
         final utcStartTime = apt['start_time'] as String;
         final utcEndTime = apt['end_time'] as String;
@@ -231,6 +257,15 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
           utcEndTime,
           appointmentDate,
         );
+
+        // Get display queue number
+        final isVip = apt['is_vip'] ?? false;
+        String displayQueue = '';
+        if (isVip) {
+          displayQueue = 'VIP-${apt['vip_queue_number'] ?? apt['queue_number']}';
+        } else {
+          displayQueue = 'Q${apt['regular_queue_number'] ?? apt['queue_number']}';
+        }
 
         notifications.add({
           'id': notice['id'],
@@ -247,7 +282,9 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
             'utc_start_time': utcStartTime,
             'utc_end_time': utcEndTime,
             'status': apt['status'],
-            'queue_number': apt['queue_number'],
+            'display_queue_number': displayQueue,
+            'queue_position': apt['queue_position'],
+            'is_vip': isVip,
             'child_name': apt['child_name'],
             'travel_time_minutes': apt['travel_time_minutes'],
             'salon_name': apt['salons']?['name'] ?? 'Salon',
@@ -266,7 +303,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
   }
 
   // =====================================================
-  // OVERFLOW RESPONSE HANDLER (Type 2 Cancel)
+  // OVERFLOW RESPONSE HANDLER
   // =====================================================
   Future<void> _respondToOverflow(int notificationId, String response) async {
     setState(() => _isProcessingOverflow = true);
@@ -520,7 +557,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
   }
 
   // =====================================================
-  // CANCEL BOOKING (Type 1 Cancel - Customer Self Cancel)
+  // CANCEL BOOKING
   // =====================================================
   Future<void> _cancelBooking(Map<String, dynamic> booking) async {
     final hasOverflow = _overflowNotifications.any(
@@ -596,6 +633,36 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                       ),
                     ],
                   ),
+                  if (booking['display_queue_number'] != null &&
+                      booking['display_queue_number'].isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.format_list_numbered,
+                            size: 16,
+                            color: booking['is_vip'] ? _vipColor : _regularColor,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Queue: ${booking['display_queue_number']}',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w500,
+                              color: booking['is_vip'] ? _vipColor : _regularColor,
+                            ),
+                          ),
+                          if (booking['queue_position'] != null)
+                            Text(
+                              ' (Position ${booking['queue_position']})',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[600],
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -639,7 +706,9 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
           'p_cancel_reason': 'Cancelled by customer',
         },
       );
-  if (!mounted) return;
+      
+      if (!mounted) return;
+      
       if (result['success'] == true) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -658,7 +727,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
         throw Exception(result['message'] ?? 'Cancellation failed');
       }
     } catch (e) {
-        if (!mounted) return;
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Failed to cancel: $e'),
@@ -773,7 +842,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                 style: ElevatedButton.styleFrom(backgroundColor: _primaryColor),
                 child: const Text(
                   'BOOK NOW',
-                  style: TextStyle(color: Colors.white), // Explicit white color
+                  style: TextStyle(color: Colors.white),
                 ),
               ),
           ],
@@ -804,6 +873,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
     final excessMinutes = notification['excess_minutes'];
     final estimatedEnd = notification['estimated_end'];
     final salonClose = notification['salon_close'];
+    final isVip = apt['is_vip'] ?? false;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
@@ -923,6 +993,36 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                       ),
                     ],
                   ),
+                  if (apt['display_queue_number'] != null &&
+                      apt['display_queue_number'].isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.format_list_numbered,
+                            size: 16,
+                            color: isVip ? _vipColor : _regularColor,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Queue: ${apt['display_queue_number']}',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w500,
+                              color: isVip ? _vipColor : _regularColor,
+                            ),
+                          ),
+                          if (apt['queue_position'] != null)
+                            Text(
+                              ' (Position ${apt['queue_position']})',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[600],
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
                   const SizedBox(height: 12),
                   Container(
                     padding: const EdgeInsets.all(10),
@@ -997,9 +1097,6 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
   }
 
   Widget _buildBookingCard(Map<String, dynamic> booking, bool isUpcoming) {
-    // =====================================================
-    // DATE COMPARISON - FIXED
-    // =====================================================
     final appointmentDateRaw = DateTime.parse(booking['appointment_date']);
     final appointmentDate = DateTime(
       appointmentDateRaw.year,
@@ -1013,7 +1110,6 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
     final isPastDate = appointmentDate.isBefore(today);
     final isSameDay = appointmentDate.isAtSameMomentAs(today);
 
-    // Check if time has passed for today's appointments
     bool isTimePassed = false;
     if (isSameDay) {
       final endTimeStr = booking['local_end_time'];
@@ -1034,12 +1130,13 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
       }
     }
 
-    final canCancel =
-        isUpcoming &&
+    final canCancel = isUpcoming &&
         !isPastDate &&
         !isTimePassed &&
         booking['status'] != 'cancelled';
     final status = booking['status'];
+    final isVip = booking['is_vip'] ?? false;
+    final queueColor = isVip ? _vipColor : _regularColor;
 
     Color statusColor;
     String statusText;
@@ -1077,6 +1174,9 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),
           color: Colors.white,
+          border: isVip
+              ? Border.all(color: _vipColor.withValues(alpha:0.3), width: 1)
+              : null,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1085,7 +1185,9 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: _primaryColor.withValues(alpha:0.05),
+                color: isVip
+                    ? _vipColor.withValues(alpha:0.05)
+                    : _primaryColor.withValues(alpha:0.05),
                 borderRadius: const BorderRadius.only(
                   topLeft: Radius.circular(16),
                   topRight: Radius.circular(16),
@@ -1097,22 +1199,50 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                     width: 45,
                     height: 45,
                     decoration: BoxDecoration(
-                      color: _primaryColor.withValues(alpha:0.1),
+                      color: isVip
+                          ? _vipColor.withValues(alpha:0.1)
+                          : _primaryColor.withValues(alpha:0.1),
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: Icon(Icons.store, color: _primaryColor, size: 24),
+                    child: isVip
+                        ? Icon(Icons.star, color: _vipColor, size: 24)
+                        : Icon(Icons.store, color: _primaryColor, size: 24),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          booking['salon_name'],
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
+                        Row(
+                          children: [
+                            Text(
+                              booking['salon_name'],
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            if (isVip)
+                              Container(
+                                margin: const EdgeInsets.only(left: 8),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: _vipColor,
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: const Text(
+                                  'VIP',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ),
+                          ],
                         ),
                         if (booking['salon_address'] != null)
                           Text(
@@ -1190,7 +1320,8 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                       ),
                     ],
                   ),
-                  if (booking['queue_number'] != null)
+                  if (booking['display_queue_number'] != null &&
+                      booking['display_queue_number'].isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(top: 8),
                       child: Row(
@@ -1198,17 +1329,25 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                           Icon(
                             Icons.format_list_numbered,
                             size: 16,
-                            color: _primaryColor,
+                            color: queueColor,
                           ),
                           const SizedBox(width: 8),
                           Text(
-                            'Queue ${booking['queue_number']}',
+                            'Queue: ${booking['display_queue_number']}',
                             style: TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.w500,
-                              color: _primaryColor,
+                              color: queueColor,
                             ),
                           ),
+                          if (booking['queue_position'] != null)
+                            Text(
+                              ' (Position ${booking['queue_position']})',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[600],
+                              ),
+                            ),
                         ],
                       ),
                     ),
@@ -1263,7 +1402,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                     children: [
                       Row(
                         children: [
-                          Icon(Icons.timer, size: 16, color: _primaryColor),
+                          Icon(Icons.timer, size: 16, color: queueColor),
                           const SizedBox(width: 4),
                           Text(
                             '${booking['duration']} min',
@@ -1279,7 +1418,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
-                          color: _primaryColor,
+                          color: queueColor,
                         ),
                       ),
                     ],
@@ -1310,9 +1449,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
               ),
             ),
 
-            // =====================================================
-            // BUTTONS SECTION - COMPLETELY REWRITTEN WITH PROPER TEXT COLORS
-            // =====================================================
+            // BUTTONS SECTION
             if (isUpcoming && canCancel)
               Container(
                 padding: const EdgeInsets.all(12),
@@ -1337,7 +1474,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                         onPressed: () => _showBookingDetails(booking),
                         icon: Icon(
                           Icons.info_outline,
-                          color: _primaryColor,
+                          color: isVip ? _vipColor : _primaryColor,
                           size: 22,
                         ),
                         tooltip: 'View Details',
@@ -1347,7 +1484,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                 ),
               ),
 
-            // COMPLETED ACTIONS - FIXED WITH PROPER TEXT COLORS
+            // COMPLETED ACTIONS
             if (!isUpcoming && status == 'completed')
               Container(
                 padding: const EdgeInsets.all(12),
@@ -1372,7 +1509,6 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
     );
   }
 
-  // Helper method for Cancel button with proper text color
   Widget _buildCancelButton(Map<String, dynamic> booking) {
     return OutlinedButton(
       onPressed: _isCancelling ? null : () => _cancelBooking(booking),
@@ -1401,7 +1537,6 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
     );
   }
 
-  // Helper method for Review button with proper text color
   Widget _buildReviewButton(Map<String, dynamic> booking) {
     return OutlinedButton(
       onPressed: () => _showLeaveReviewDialog(booking),
@@ -1428,24 +1563,26 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
     );
   }
 
-  // Helper method for Book Again button with proper text color
   Widget _buildRebookButton(Map<String, dynamic> booking) {
+    final isVip = booking['is_vip'] ?? false;
+    final buttonColor = isVip ? _vipColor : _primaryColor;
+    
     return OutlinedButton(
       onPressed: () => _rebookBooking(booking),
       style: OutlinedButton.styleFrom(
-        side: BorderSide(color: _primaryColor, width: 1.5),
+        side: BorderSide(color: buttonColor, width: 1.5),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         padding: const EdgeInsets.symmetric(vertical: 12),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.refresh, color: _primaryColor, size: 18),
+          Icon(Icons.refresh, color: buttonColor, size: 18),
           const SizedBox(width: 8),
           Text(
             'BOOK AGAIN',
             style: TextStyle(
-              color: _primaryColor,
+              color: buttonColor,
               fontWeight: FontWeight.w600,
               fontSize: 14,
             ),
@@ -1456,6 +1593,9 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
   }
 
   void _showBookingDetails(Map<String, dynamic> booking) {
+    final isVip = booking['is_vip'] ?? false;
+    final detailColor = isVip ? _vipColor : _primaryColor;
+
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
@@ -1484,12 +1624,12 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: _primaryColor.withValues(alpha:0.1),
+                    color: detailColor.withValues(alpha:0.1),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Icon(
                     Icons.receipt_long,
-                    color: _primaryColor,
+                    color: detailColor,
                     size: 28,
                   ),
                 ),
@@ -1529,8 +1669,13 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
             if (booking['child_name'] != null &&
                 booking['child_name'].toString().isNotEmpty)
               _buildDetailRow('Booked For', booking['child_name']),
-            if (booking['queue_number'] != null)
-              _buildDetailRow('Queue Number', '${booking['queue_number']}'),
+            if (booking['display_queue_number'] != null &&
+                booking['display_queue_number'].isNotEmpty)
+              _buildDetailRow('Queue Number', booking['display_queue_number']),
+            if (booking['queue_position'] != null)
+              _buildDetailRow('Queue Position', '#${booking['queue_position']}'),
+            if (booking['is_vip'] == true)
+              _buildDetailRow('Booking Type', 'VIP'),
             if (booking['travel_time_minutes'] != null &&
                 booking['travel_time_minutes'] > 0)
               _buildDetailRow(
@@ -1542,10 +1687,10 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: () => Navigator.pop(context),
-                style: ElevatedButton.styleFrom(backgroundColor: _primaryColor),
+                style: ElevatedButton.styleFrom(backgroundColor: detailColor),
                 child: const Text(
                   'CLOSE',
-                  style: TextStyle(color: Colors.white), // Explicit white color
+                  style: TextStyle(color: Colors.white),
                 ),
               ),
             ),
@@ -1768,7 +1913,9 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
           .select('id')
           .eq('appointment_id', bookingId)
           .maybeSingle();
-  if (!mounted) return;
+      
+      if (!mounted) return;
+      
       if (existingReview != null) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -1788,7 +1935,9 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
         'comment': review,
         'created_at': DateTime.now().toIso8601String(),
       });
-  if (!mounted) return;
+      
+      if (!mounted) return;
+      
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Row(
@@ -1804,7 +1953,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
 
       await _loadData();
     } catch (e) {
-       if (!mounted) return;
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Failed to submit review: $e'),
