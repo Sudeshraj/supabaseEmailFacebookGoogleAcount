@@ -16,7 +16,7 @@ class NotificationService {
   final FirebaseMessaging _firebaseMessaging = FirebaseMessaging.instance;
   final FlutterLocalNotificationsPlugin _localNotifications =
       FlutterLocalNotificationsPlugin();
-  
+
   // Supabase client
   SupabaseClient? _supabaseClient;
   SupabaseClient get supabase {
@@ -26,7 +26,7 @@ class NotificationService {
 
   static final GlobalKey<NavigatorState> navigatorKey =
       GlobalKey<NavigatorState>();
-  
+
   // Web VAPID Key
   static const String _webVapidKey =
       'BFj7Eoc2BRmQQrXHBFvWXjcmeb3seAyHmOpVZEOLpKTpwbelZoo5tqci-o7KR-sr0hgO9yIYDRV1KP88vhV0l6k';
@@ -46,7 +46,7 @@ class NotificationService {
   // ============= MAIN INITIALIZATION =============
   Future<void> init() async {
     print('📱 Initializing notifications for $platformName');
-    
+
     if (isWeb) {
       await _initWebNotifications();
     } else {
@@ -60,24 +60,21 @@ class NotificationService {
   // ============= WEB INIT =============
   Future<void> _initWebNotifications() async {
     print('🌐 Web: Initializing silently...');
-    
+
     try {
-      String? token = await _firebaseMessaging.getToken(
-        vapidKey: _webVapidKey,
-      );
-      
+      String? token = await _firebaseMessaging.getToken(vapidKey: _webVapidKey);
+
       if (token != null) {
         print('✅ Web FCM Token: $token');
         await _saveTokenToSupabase(token);
       }
-      
+
       _firebaseMessaging.onTokenRefresh.listen((newToken) {
         print('🔄 Web FCM Token refreshed: $newToken');
         _saveTokenToSupabase(newToken);
       });
-      
+
       _setupWebMessageListeners();
-      
     } catch (e) {
       print('❌ Web notification init error: $e');
     }
@@ -101,7 +98,9 @@ class NotificationService {
       _handleMessage(message);
     });
 
-    FirebaseMessaging.instance.getInitialMessage().then((RemoteMessage? message) {
+    FirebaseMessaging.instance.getInitialMessage().then((
+      RemoteMessage? message,
+    ) {
       if (message != null) {
         print('📨 Web initial message found');
         _handleMessage(message);
@@ -132,10 +131,7 @@ class NotificationService {
           );
 
       const InitializationSettings initializationSettings =
-          InitializationSettings(
-            android: androidSettings,
-            iOS: iosSettings,
-          );
+          InitializationSettings(android: androidSettings, iOS: iosSettings);
 
       await _localNotifications.initialize(
         settings: initializationSettings,
@@ -150,7 +146,7 @@ class NotificationService {
       if (isAndroid) {
         await _createAndroidNotificationChannel();
       }
-      
+
       print('✅ Local notifications initialized');
     } catch (e) {
       print('❌ Local notifications init error: $e');
@@ -170,10 +166,10 @@ class NotificationService {
 
     await _localNotifications
         .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin
-          >()
+          AndroidFlutterLocalNotificationsPlugin
+        >()
         ?.createNotificationChannel(channel);
-    
+
     print('✅ Android notification channel created');
   }
 
@@ -201,7 +197,7 @@ class NotificationService {
         provisional: true,
       );
       return settings.authorizationStatus == AuthorizationStatus.authorized ||
-             settings.authorizationStatus == AuthorizationStatus.provisional;
+          settings.authorizationStatus == AuthorizationStatus.provisional;
     } catch (e) {
       print('❌ iOS permission error: $e');
       return false;
@@ -236,7 +232,7 @@ class NotificationService {
     }
   }
 
-   /// Save token manually (called from outside)
+  /// Save token manually (called from outside)
   Future<void> saveTokenManually() async {
     print('🔧 Manually saving FCM token...');
     String? token = await getToken();
@@ -283,7 +279,6 @@ class NotificationService {
 
       print('✅ Token saved to Supabase');
       await _clearStoredToken();
-      
     } catch (e) {
       print('❌ Error saving to Supabase: $e');
       await _storeTokenLocally(token);
@@ -320,7 +315,68 @@ class NotificationService {
     }
   }
 
-  // ============= NOTIFICATION SENDING METHODS =============
+  // ============= PUSH NOTIFICATION VIA EDGE FUNCTION =============
+
+  /// Send push notification via Supabase Edge Function
+  Future<void> sendPushNotification({
+    required String userId,
+    required String title,
+    required String body,
+    String screen = 'home',
+    String bookingId = '',
+  }) async {
+    try {
+      // First save to database
+      await supabase.from('notifications').insert({
+        'user_id': userId,
+        'title': title,
+        'body': body,
+        'type': 'appointment_update',
+        'data': {'screen': screen, 'bookingId': bookingId},
+        'created_at': DateTime.now().toIso8601String(),
+      });
+
+      // ✅ FIXED: Use named parameter 'body'
+      final response = await supabase.functions.invoke(
+        'send-notification',
+        body: {
+          'userId': userId,
+          'title': title,
+          'body': body,
+          'screen': screen,
+          'bookingId': bookingId,
+        },
+      );
+
+      print('✅ Push notification sent: ${response.data}');
+    } catch (e) {
+      print('❌ Push notification error: $e');
+    }
+  }
+
+  // ============= NOTIFICATION SENDING METHODS (UPDATED WITH PUSH) =============
+
+  /// Send appointment confirmation notification
+  Future<void> sendAppointmentConfirmed({
+    required String customerId,
+    required String bookingNumber,
+    required int queueNumber,
+    required String appointmentDate,
+    required String appointmentTime,
+    required int appointmentId,
+  }) async {
+    final title = '✅ Appointment Confirmed';
+    final body =
+        'Your appointment #$bookingNumber is confirmed for $appointmentDate at $appointmentTime (Queue #$queueNumber)';
+
+    await sendPushNotification(
+      userId: customerId,
+      title: title,
+      body: body,
+      screen: 'booking_details',
+      bookingId: appointmentId.toString(),
+    );
+  }
 
   /// Send appointment reassigned notification
   Future<void> sendAppointmentReassigned({
@@ -328,20 +384,18 @@ class NotificationService {
     required String newBarberName,
     required String appointmentDate,
     required String appointmentTime,
+    required int appointmentId,
   }) async {
-    final title = 'Appointment Reassigned';
-    final body = 'Your appointment has been reassigned to $newBarberName on $appointmentDate at $appointmentTime.';
-    
-    await sendAppointmentNotification(
-      customerId: customerId,
+    final title = '🔄 Appointment Reassigned';
+    final body =
+        'Your appointment has been reassigned to $newBarberName on $appointmentDate at $appointmentTime.';
+
+    await sendPushNotification(
+      userId: customerId,
       title: title,
       body: body,
-      data: {
-        'type': 'appointment_reassigned',
-        'barber_name': newBarberName,
-        'date': appointmentDate,
-        'time': appointmentTime,
-      },
+      screen: 'booking_details',
+      bookingId: appointmentId.toString(),
     );
   }
 
@@ -350,19 +404,18 @@ class NotificationService {
     required String customerId,
     required String newDate,
     required int queueNumber,
+    required int appointmentId,
   }) async {
-    final title = 'Appointment Moved to Tomorrow';
-    final body = 'Your appointment has been moved to $newDate at 9:00 AM (Queue #$queueNumber).';
-    
-    await sendAppointmentNotification(
-      customerId: customerId,
+    final title = '📅 Appointment Moved';
+    final body =
+        'Your appointment has been moved to $newDate (Queue #$queueNumber).';
+
+    await sendPushNotification(
+      userId: customerId,
       title: title,
       body: body,
-      data: {
-        'type': 'appointment_moved',
-        'new_date': newDate,
-        'queue_number': queueNumber,
-      },
+      screen: 'booking_details',
+      bookingId: appointmentId.toString(),
     );
   }
 
@@ -370,18 +423,17 @@ class NotificationService {
   Future<void> sendAppointmentCancelled({
     required String customerId,
     required String reason,
+    required int appointmentId,
   }) async {
-    final title = 'Appointment Cancelled';
+    final title = '❌ Appointment Cancelled';
     final body = 'Your appointment has been cancelled. Reason: $reason';
-    
-    await sendAppointmentNotification(
-      customerId: customerId,
+
+    await sendPushNotification(
+      userId: customerId,
       title: title,
       body: body,
-      data: {
-        'type': 'appointment_cancelled',
-        'reason': reason,
-      },
+      screen: 'home',
+      bookingId: appointmentId.toString(),
     );
   }
 
@@ -391,20 +443,18 @@ class NotificationService {
     required String eventType,
     required String eventDate,
     required String eventTime,
+    required int vipBookingId,
   }) async {
     final title = '🎉 VIP Booking Approved!';
-    final body = 'Your $eventType booking for $eventDate at $eventTime has been approved.';
-    
-    await sendAppointmentNotification(
-      customerId: customerId,
+    final body =
+        'Your $eventType booking for $eventDate at $eventTime has been approved.';
+
+    await sendPushNotification(
+      userId: customerId,
       title: title,
       body: body,
-      data: {
-        'type': 'vip_approved',
-        'event_type': eventType,
-        'date': eventDate,
-        'time': eventTime,
-      },
+      screen: 'vip_bookings',
+      bookingId: vipBookingId.toString(),
     );
   }
 
@@ -413,19 +463,18 @@ class NotificationService {
     required String customerId,
     required String appointmentDate,
     required String appointmentTime,
+    required int waitingListId,
   }) async {
     final title = '🎯 Appointment Available!';
-    final body = 'A slot has opened up on $appointmentDate at $appointmentTime. Book now!';
-    
-    await sendAppointmentNotification(
-      customerId: customerId,
+    final body =
+        'A slot has opened up on $appointmentDate at $appointmentTime. Book now!';
+
+    await sendPushNotification(
+      userId: customerId,
       title: title,
       body: body,
-      data: {
-        'type': 'waiting_list_available',
-        'date': appointmentDate,
-        'time': appointmentTime,
-      },
+      screen: 'waiting_list',
+      bookingId: waitingListId.toString(),
     );
   }
 
@@ -435,73 +484,34 @@ class NotificationService {
     required String barberName,
     required String leaveDate,
     required String leaveType,
+    required int leaveId,
   }) async {
     final title = '✈️ New Leave Request';
     final body = '$barberName requested $leaveType leave on $leaveDate';
-    
-    await sendAppointmentNotification(
-      customerId: ownerId,
+
+    await sendPushNotification(
+      userId: ownerId,
       title: title,
       body: body,
-      data: {
-        'type': 'leave_request',
-        'barber_name': barberName,
-        'leave_date': leaveDate,
-        'leave_type': leaveType,
-      },
+      screen: 'owner_leaves',
+      bookingId: leaveId.toString(),
     );
   }
 
-  /// Generic method to send appointment notification
+  /// Generic method to send appointment notification (legacy support)
   Future<void> sendAppointmentNotification({
     required String customerId,
     required String title,
     required String body,
     Map<String, dynamic>? data,
   }) async {
-    try {
-      // Save notification to database
-      await supabase.from('notifications').insert({
-        'user_id': customerId,
-        'title': title,
-        'body': body,
-        'type': data?['type'] ?? 'appointment_update',
-        'data': data ?? {},
-        'created_at': DateTime.now().toIso8601String(),
-      });
-
-      // Get customer's FCM token
-      final customer = await supabase
-          .from('profiles')
-          .select('fcm_token, email, full_name')
-          .eq('id', customerId)
-          .maybeSingle();
-
-      if (customer == null) return;
-
-      // TODO: Send push notification via Firebase
-      if (customer['fcm_token'] != null) {
-        // await _sendPushNotification(
-        //   token: customer['fcm_token'],
-        //   title: title,
-        //   body: body,
-        //   data: data,
-        // );
-      }
-
-      // TODO: Send email
-      // if (customer['email'] != null) {
-      //   await _sendEmail(
-      //     to: customer['email'],
-      //     subject: title,
-      //     body: body,
-      //   );
-      // }
-
-      print('📧 Notification sent to ${customer['full_name']}: $title');
-    } catch (e) {
-      print('❌ Error sending notification: $e');
-    }
+    await sendPushNotification(
+      userId: customerId,
+      title: title,
+      body: body,
+      screen: data?['screen'] ?? 'home',
+      bookingId: data?['bookingId']?.toString() ?? '',
+    );
   }
 
   // ============= MESSAGE HANDLING =============
@@ -514,7 +524,9 @@ class NotificationService {
     });
 
     if (!isWeb) {
-      FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+      FirebaseMessaging.onBackgroundMessage(
+        _firebaseMessagingBackgroundHandler,
+      );
     }
 
     FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
@@ -522,7 +534,9 @@ class NotificationService {
       _handleMessage(message);
     });
 
-    FirebaseMessaging.instance.getInitialMessage().then((RemoteMessage? message) {
+    FirebaseMessaging.instance.getInitialMessage().then((
+      RemoteMessage? message,
+    ) {
       if (message != null) {
         print('📬 Initial message');
         _handleMessage(message);
@@ -553,7 +567,9 @@ class NotificationService {
         ),
       );
 
-      int notificationId = DateTime.now().millisecondsSinceEpoch.remainder(100000);
+      int notificationId = DateTime.now().millisecondsSinceEpoch.remainder(
+        100000,
+      );
 
       await _localNotifications.show(
         id: notificationId,
@@ -582,26 +598,28 @@ class NotificationService {
       String type = data['type'] ?? 'home';
       String screen = data['screen'] ?? 'home';
 
-      switch (type) {
-        case 'appointment_reassigned':
-        case 'appointment_moved':
-        case 'appointment_cancelled':
+      switch (screen) {
+        case 'booking_details':
           String bookingId = data['bookingId'] ?? '';
           navigatorKey.currentState?.context.go('/booking-details/$bookingId');
           break;
-          
-        case 'vip_approved':
+
+        case 'vip_bookings':
           navigatorKey.currentState?.context.go('/vip-bookings');
           break;
-          
-        case 'waiting_list_available':
+
+        case 'waiting_list':
           navigatorKey.currentState?.context.go('/waiting-list');
           break;
-          
-        case 'leave_request':
+
+        case 'owner_leaves':
           navigatorKey.currentState?.context.go('/owner/leaves');
           break;
-          
+
+        case 'my_bookings':
+          navigatorKey.currentState?.context.go('/my-bookings');
+          break;
+
         default:
           navigatorKey.currentState?.context.go('/');
           break;
@@ -613,9 +631,10 @@ class NotificationService {
 
   // ============= PUBLIC METHODS =============
   Future<bool> hasPermission() async {
-    NotificationSettings settings = await _firebaseMessaging.getNotificationSettings();
+    NotificationSettings settings = await _firebaseMessaging
+        .getNotificationSettings();
     return settings.authorizationStatus == AuthorizationStatus.authorized ||
-           settings.authorizationStatus == AuthorizationStatus.provisional;
+        settings.authorizationStatus == AuthorizationStatus.provisional;
   }
 
   Future<bool> requestPermission() async {
@@ -630,11 +649,11 @@ class NotificationService {
 
   Future<void> syncPendingToken() async {
     if (!_isSupabaseReady()) return;
-    
+
     try {
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('pending_fcm_token');
-      
+
       if (token != null) {
         print('🔄 Syncing pending token...');
         await _saveTokenToSupabase(token);
@@ -650,7 +669,7 @@ class NotificationService {
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
   print('📨 Background message: ${message.messageId}');
-  
+
   final notificationService = NotificationService();
   if (!notificationService.isWeb) {
     await notificationService._showMobileNotification(message);

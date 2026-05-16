@@ -64,8 +64,9 @@ dependencies:
   intl: ^0.20.2
   path: ^1.9.1
   image_cropper: ^12.1.0
-  flutter_native_timezone: ^2.0.0
+
   timezone: ^0.10.1
+  flutter_native_timezone: ^2.0.0 # Device timezone eka ganna
  
 
 dev_dependencies:
