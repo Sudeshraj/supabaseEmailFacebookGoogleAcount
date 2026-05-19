@@ -124,9 +124,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(
-              'Timezone changed to ${TimezoneService.getTimezoneDisplayName()}',
-            ),
+            content: Text('Timezone changed to ${TimezoneService.getTimezoneDisplayName()}'),
             backgroundColor: _primaryColor,
             duration: const Duration(seconds: 2),
           ),
@@ -204,7 +202,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         margin: const EdgeInsets.only(right: 8),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha:0.2),
+          color: Colors.white.withValues(alpha: 0.2),
           borderRadius: BorderRadius.circular(25),
         ),
         child: Row(
@@ -357,16 +355,13 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                         _selectedBarber != null) {
                       await _loadAvailableSlots();
                     }
-                    
-                    // ScaffoldMessenger.of(context).showSnackBar(
-                    //   SnackBar(
-                    //     content: Text(
-                    //       'Timezone changed to ${TimezoneService.getTimezoneDisplayName()}',
-                    //     ),
-                    //     backgroundColor: _primaryColor,
-                    //     duration: const Duration(seconds: 2),
-                    //   ),
-                    // );
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Timezone changed to ${TimezoneService.getTimezoneDisplayName()}'),
+                        backgroundColor: _primaryColor,
+                        duration: const Duration(seconds: 2),
+                      ),
+                    );
                   }
                 },
                 style: ElevatedButton.styleFrom(
@@ -494,7 +489,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
               width: 60,
               height: 60,
               decoration: BoxDecoration(
-                color: _primaryColor.withValues(alpha:0.1),
+                color: _primaryColor.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(16),
               ),
               child: Center(
@@ -952,9 +947,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
             padding: const EdgeInsets.all(14),
             margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             decoration: BoxDecoration(
-              color: _primaryColor.withValues(alpha:0.08),
+              color: _primaryColor.withValues(alpha: 0.08),
               borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: _primaryColor.withValues(alpha:0.2)),
+              border: Border.all(color: _primaryColor.withValues(alpha: 0.2)),
             ),
             child: Column(
               children: [
@@ -1203,7 +1198,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: isSelected ? _primaryColor.withValues(alpha:0.1) : Colors.white,
+          color: isSelected
+              ? _primaryColor.withValues(alpha: 0.1)
+              : Colors.white,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: isSelected ? _primaryColor : Colors.grey[200]!,
@@ -1478,7 +1475,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
               children: [
                 CircleAvatar(
                   radius: 32,
-                  backgroundColor: _primaryColor.withValues(alpha:0.1),
+                  backgroundColor: _primaryColor.withValues(alpha: 0.1),
                   backgroundImage: barber['avatar_url'] != null
                       ? NetworkImage(barber['avatar_url'])
                       : null,
@@ -1540,7 +1537,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                             (barber['avg_rating'] as num?)?.toStringAsFixed(
                                   1,
                                 ) ??
-                                '4.5',
+                                '0.0',
                             style: const TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w500,
@@ -1766,7 +1763,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                 children: [
                   CircleAvatar(
                     radius: 22,
-                    backgroundColor: _primaryColor.withValues(alpha:0.1),
+                    backgroundColor: _primaryColor.withValues(alpha: 0.1),
                     child: Text(
                       _selectedBarber?['full_name']
                               ?.substring(0, 1)
@@ -2078,7 +2075,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                 width: 55,
                 height: 55,
                 decoration: BoxDecoration(
-                  color: _primaryColor.withValues(alpha:0.1),
+                  color: _primaryColor.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(28),
                 ),
                 child: Icon(icon, size: 30, color: _primaryColor),
@@ -2108,7 +2105,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                         ),
                         margin: const EdgeInsets.only(top: 8),
                         decoration: BoxDecoration(
-                          color: _primaryColor.withValues(alpha:0.1),
+                          color: _primaryColor.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(15),
                         ),
                         child: Text(
@@ -2221,31 +2218,30 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     ),
   );
 
-  // bool _isSlotInPast(DateTime slotStartTime, int durationMinutes) {
-  //   final now = DateTime.now();
-  //   final todayDate = DateTime(now.year, now.month, now.day);
-  //   final slotDate = DateTime(
-  //     slotStartTime.year,
-  //     slotStartTime.month,
-  //     slotStartTime.day,
-  //   );
+  bool _isSlotInPast(DateTime slotStartTime, int durationMinutes) {
+    final now = DateTime.now();
+    final todayDate = DateTime(now.year, now.month, now.day);
+    final slotDate = DateTime(
+      slotStartTime.year,
+      slotStartTime.month,
+      slotStartTime.day,
+    );
 
-  //   if (slotDate.isAtSameMomentAs(todayDate)) {
-  //     // ✅ Check if slot START time is in the past
-  //     return slotStartTime.isBefore(now);
-  //   }
-  //   return false;
-  // }
+    if (slotDate.isAtSameMomentAs(todayDate)) {
+      return slotStartTime.isBefore(now);
+    }
+    return false;
+  }
 
-  // String _formatTimeWithAmPm(DateTime time) {
-  //   try {
-  //     final period = time.hour >= 12 ? 'PM' : 'AM';
-  //     final displayHour = time.hour % 12 == 0 ? 12 : time.hour % 12;
-  //     return '$displayHour:${time.minute.toString().padLeft(2, '0')} $period';
-  //   } catch (e) {
-  //     return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
-  //   }
-  // }
+  String _formatTimeWithAmPm(DateTime time) {
+    try {
+      final period = time.hour >= 12 ? 'PM' : 'AM';
+      final displayHour = time.hour % 12 == 0 ? 12 : time.hour % 12;
+      return '$displayHour:${time.minute.toString().padLeft(2, '0')} $period';
+    } catch (e) {
+      return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+    }
+  }
 
   Future<void> _loadAvailableSlots() async {
     setState(() {
@@ -2268,9 +2264,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate!);
       final totalDuration = _calculateTotalDuration();
 
-      // =====================================================
       // 1. GET BARBER EFFECTIVE SCHEDULE (Returns UTC times)
-      // =====================================================
       final scheduleResult = await supabase.rpc(
         'get_barber_effective_schedule',
         params: {
@@ -2297,139 +2291,56 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       if (leaveType == 'full_day') {
         setState(() {
           _isLoadingSlots = false;
-          _slotErrorMessage =
-              '${_selectedBarber!['full_name']} is on leave on this date.';
+          _slotErrorMessage = '${_selectedBarber!['full_name']} is on leave on this date.';
         });
         return;
       }
 
-      // =====================================================
-      // 2. GET WORK HOURS (Convert UTC to Local)
-      // =====================================================
-      String workStartUTC =
-          effectiveSchedule['work_start']?.toString() ?? '09:00';
+      // 2. GET WORK HOURS (UTC from DB)
+      String workStartUTC = effectiveSchedule['work_start']?.toString() ?? '09:00';
       String workEndUTC = effectiveSchedule['work_end']?.toString() ?? '18:00';
 
       if (workStartUTC.length > 5) workStartUTC = workStartUTC.substring(0, 5);
       if (workEndUTC.length > 5) workEndUTC = workEndUTC.substring(0, 5);
 
-      final localWorkStart = TimezoneService.utcToLocalTime(
-        '$workStartUTC:00',
-        _selectedDate!,
-      );
-      final localWorkEnd = TimezoneService.utcToLocalTime(
-        '$workEndUTC:00',
-        _selectedDate!,
-      );
-
-      final workStartParts = localWorkStart.split(':');
-      final workEndParts = localWorkEnd.split(':');
+      // Parse UTC hours
+      final workStartParts = workStartUTC.split(':');
+      final workEndParts = workEndUTC.split(':');
       int workStartHour = int.parse(workStartParts[0]);
-      int workStartMinute = workStartParts.length > 1
-          ? int.parse(workStartParts[1])
-          : 0;
+      int workStartMinute = workStartParts.length > 1 ? int.parse(workStartParts[1]) : 0;
       int workEndHour = int.parse(workEndParts[0]);
-      int workEndMinute = workEndParts.length > 1
-          ? int.parse(workEndParts[1])
-          : 0;
+      int workEndMinute = workEndParts.length > 1 ? int.parse(workEndParts[1]) : 0;
 
-      // =====================================================
-      // 3. GET BREAKS (Special has priority over Regular)
-      // =====================================================
+      // 3. GET BREAKS (UTC from DB)
       List<Map<String, dynamic>> breakRanges = [];
 
-      // ✅ First check SPECIAL BREAK (one-time)
-      String? specialBreakStartUTC = effectiveSchedule['lunch_break_start']
-          ?.toString();
-      String? specialBreakEndUTC = effectiveSchedule['lunch_break_end']
-          ?.toString();
+      String? breakStartUTC = effectiveSchedule['lunch_break_start']?.toString();
+      String? breakEndUTC = effectiveSchedule['lunch_break_end']?.toString();
       bool hasSpecialBreak = effectiveSchedule['has_special_break'] == true;
 
-      if (hasSpecialBreak &&
-          specialBreakStartUTC != null &&
-          specialBreakEndUTC != null) {
-        if (specialBreakStartUTC.length > 5) {
-          specialBreakStartUTC = specialBreakStartUTC.substring(0, 5);
-        }
-        if (specialBreakEndUTC.length > 5) {
-          specialBreakEndUTC = specialBreakEndUTC.substring(0, 5);
-        }
+      if (breakStartUTC != null && breakEndUTC != null && breakStartUTC.isNotEmpty && breakEndUTC.isNotEmpty) {
+        if (breakStartUTC.length > 5) breakStartUTC = breakStartUTC.substring(0, 5);
+        if (breakEndUTC.length > 5) breakEndUTC = breakEndUTC.substring(0, 5);
 
-        final localBreakStart = TimezoneService.utcToLocalTime(
-          '$specialBreakStartUTC:00',
-          _selectedDate!,
-        );
-        final localBreakEnd = TimezoneService.utcToLocalTime(
-          '$specialBreakEndUTC:00',
-          _selectedDate!,
-        );
-
-        final breakStartParts = localBreakStart.split(':');
-        final breakEndParts = localBreakEnd.split(':');
+        final breakStartParts = breakStartUTC.split(':');
+        final breakEndParts = breakEndUTC.split(':');
 
         breakRanges.add({
           'start_hour': int.parse(breakStartParts[0]),
-          'start_min': breakStartParts.length > 1
-              ? int.parse(breakStartParts[1])
-              : 0,
+          'start_min': breakStartParts.length > 1 ? int.parse(breakStartParts[1]) : 0,
           'end_hour': int.parse(breakEndParts[0]),
           'end_min': breakEndParts.length > 1 ? int.parse(breakEndParts[1]) : 0,
-          'type': 'special',
+          'type': hasSpecialBreak ? 'special' : 'regular',
         });
       }
-      // ✅ If no special break, check REGULAR BREAK
-      else {
-        String? regularBreakStartUTC = effectiveSchedule['lunch_break_start']
-            ?.toString();
-        String? regularBreakEndUTC = effectiveSchedule['lunch_break_end']
-            ?.toString();
 
-        if (regularBreakStartUTC != null &&
-            regularBreakEndUTC != null &&
-            regularBreakStartUTC.isNotEmpty &&
-            regularBreakEndUTC.isNotEmpty) {
-          if (regularBreakStartUTC.length > 5) {
-            regularBreakStartUTC = regularBreakStartUTC.substring(0, 5);
-          }
-          if (regularBreakEndUTC.length > 5) {
-            regularBreakEndUTC = regularBreakEndUTC.substring(0, 5);
-          }
-
-          final localBreakStart = TimezoneService.utcToLocalTime(
-            '$regularBreakStartUTC:00',
-            _selectedDate!,
-          );
-          final localBreakEnd = TimezoneService.utcToLocalTime(
-            '$regularBreakEndUTC:00',
-            _selectedDate!,
-          );
-
-          final breakStartParts = localBreakStart.split(':');
-          final breakEndParts = localBreakEnd.split(':');
-
-          breakRanges.add({
-            'start_hour': int.parse(breakStartParts[0]),
-            'start_min': breakStartParts.length > 1
-                ? int.parse(breakStartParts[1])
-                : 0,
-            'end_hour': int.parse(breakEndParts[0]),
-            'end_min': breakEndParts.length > 1
-                ? int.parse(breakEndParts[1])
-                : 0,
-            'type': 'regular',
-          });
-        }
-      }
-
-      // =====================================================
-      // 4. GET EXISTING APPOINTMENTS (VIP ONLY - NOT REGULAR)
-      // =====================================================
+      // 4. GET EXISTING VIP APPOINTMENTS (VIP ONLY)
       final existingAppointments = await supabase
           .from('appointments')
           .select('id, start_time, end_time, vip_queue_number, is_vip, status')
           .eq('barber_id', _selectedBarber!['id'])
           .eq('appointment_date', dateStr)
-          .eq('is_vip', true) // ✅ VIP ONLY - Regular appointments are ignored
+          .eq('is_vip', true)
           .neq('status', 'cancelled')
           .neq('status', 'no_show')
           .order('start_time', ascending: true);
@@ -2439,22 +2350,11 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         String startTimeUTC = apt['start_time'].toString();
         String endTimeUTC = apt['end_time'].toString();
 
-        if (startTimeUTC.length > 5) {
-          startTimeUTC = startTimeUTC.substring(0, 5);
-        }
+        if (startTimeUTC.length > 5) startTimeUTC = startTimeUTC.substring(0, 5);
         if (endTimeUTC.length > 5) endTimeUTC = endTimeUTC.substring(0, 5);
 
-        final localStart = TimezoneService.utcToLocalTime(
-          '$startTimeUTC:00',
-          _selectedDate!,
-        );
-        final localEnd = TimezoneService.utcToLocalTime(
-          '$endTimeUTC:00',
-          _selectedDate!,
-        );
-
-        final startParts = localStart.split(':');
-        final endParts = localEnd.split(':');
+        final startParts = startTimeUTC.split(':');
+        final endParts = endTimeUTC.split(':');
 
         bookedRanges.add({
           'start_hour': int.parse(startParts[0]),
@@ -2466,50 +2366,11 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         });
       }
 
-      // =====================================================
-      // 5. GET LEAVE INFORMATION (from effective schedule)
-      // =====================================================
-      bool hasHalfDayLeave =
-          (leaveType == 'half_day' || leaveType == 'emergency');
-      String? leaveStartUTC = effectiveSchedule['leave_start']?.toString();
-      String? leaveEndUTC = effectiveSchedule['leave_end']?.toString();
-
-      List<Map<String, dynamic>> leaveRanges = [];
-      if (hasHalfDayLeave && leaveStartUTC != null && leaveEndUTC != null) {
-        if (leaveStartUTC.length > 5) {
-          leaveStartUTC = leaveStartUTC.substring(0, 5);
-        }
-        if (leaveEndUTC.length > 5) leaveEndUTC = leaveEndUTC.substring(0, 5);
-
-        final localLeaveStart = TimezoneService.utcToLocalTime(
-          '$leaveStartUTC:00',
-          _selectedDate!,
-        );
-        final localLeaveEnd = TimezoneService.utcToLocalTime(
-          '$leaveEndUTC:00',
-          _selectedDate!,
-        );
-
-        final leaveStartParts = localLeaveStart.split(':');
-        final leaveEndParts = localLeaveEnd.split(':');
-
-        leaveRanges.add({
-          'start_hour': int.parse(leaveStartParts[0]),
-          'start_min': leaveStartParts.length > 1
-              ? int.parse(leaveStartParts[1])
-              : 0,
-          'end_hour': int.parse(leaveEndParts[0]),
-          'end_min': leaveEndParts.length > 1 ? int.parse(leaveEndParts[1]) : 0,
-        });
-      }
-
-      // =====================================================
-      // 6. GENERATE 30-MINUTE SLOTS
-      // =====================================================
+      // 5. GENERATE SLOTS
       final List<Map<String, dynamic>> slots = [];
       int slotNumber = 1;
 
-      DateTime currentSlotStart = DateTime(
+      DateTime currentSlotStartUTC = DateTime(
         _selectedDate!.year,
         _selectedDate!.month,
         _selectedDate!.day,
@@ -2517,7 +2378,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         workStartMinute,
       );
 
-      final workEndDateTime = DateTime(
+      DateTime workEndDateTimeUTC = DateTime(
         _selectedDate!.year,
         _selectedDate!.month,
         _selectedDate!.day,
@@ -2525,107 +2386,84 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         workEndMinute,
       );
 
-      // Helper function to check if time range overlaps with any range
+      // Handle cross-midnight work hours
+      if (workEndHour < workStartHour || (workEndHour == workStartHour && workEndMinute <= workStartMinute)) {
+        workEndDateTimeUTC = workEndDateTimeUTC.add(const Duration(days: 1));
+      }
+
+      // Helper function to check overlap
       bool isOverlapWithRanges(
-        DateTime start,
-        DateTime end,
+        int startMin,
+        int endMin,
         List<Map<String, dynamic>> ranges,
       ) {
-        final startMin = start.hour * 60 + start.minute;
-        final endMin = end.hour * 60 + end.minute;
-
         for (final range in ranges) {
-          final rangeStartMin =
-              (range['start_hour'] as int) * 60 + (range['start_min'] as int);
-          final rangeEndMin =
-              (range['end_hour'] as int) * 60 + (range['end_min'] as int);
-
-          if (startMin < rangeEndMin && endMin > rangeStartMin) {
+          final rangeStartMin = (range['start_hour'] as int) * 60 + (range['start_min'] as int);
+          int rangeEndMin = (range['end_hour'] as int) * 60 + (range['end_min'] as int);
+          
+          // Handle ranges that cross midnight
+          if (rangeEndMin < rangeStartMin) {
+            rangeEndMin += 24 * 60;
+          }
+          
+          int effectiveEndMin = endMin;
+          if (endMin < startMin) {
+            effectiveEndMin = endMin + 24 * 60;
+          }
+          
+          if (startMin < rangeEndMin && effectiveEndMin > rangeStartMin) {
             return true;
           }
         }
         return false;
       }
 
-      bool isSlotOverlappingWithBookings(DateTime slotStart, DateTime slotEnd) {
-        return isOverlapWithRanges(slotStart, slotEnd, bookedRanges);
-      }
+      while (currentSlotStartUTC.isBefore(workEndDateTimeUTC)) {
+        final slotStartUTC = currentSlotStartUTC;
+        final slotEndUTC = currentSlotStartUTC.add(Duration(minutes: totalDuration));
 
-      bool isSlotOverlappingWithBreak(DateTime slotStart, DateTime slotEnd) {
-        return isOverlapWithRanges(slotStart, slotEnd, breakRanges);
-      }
-
-      bool isSlotOverlappingWithLeave(DateTime slotStart, DateTime slotEnd) {
-        return isOverlapWithRanges(slotStart, slotEnd, leaveRanges);
-      }
-
-      while (currentSlotStart.isBefore(workEndDateTime)) {
-        final slotStart = currentSlotStart;
-        final slotEnd = currentSlotStart.add(Duration(minutes: totalDuration));
-
-        if (slotEnd.isAfter(workEndDateTime)) {
+        if (slotEndUTC.isAfter(workEndDateTimeUTC)) {
           break;
         }
 
-        // ✅ Check all conflicts
-        bool isOverlappingWithBookings = isSlotOverlappingWithBookings(
-          slotStart,
-          slotEnd,
-        );
-        bool isOverlappingWithBreak = isSlotOverlappingWithBreak(
-          slotStart,
-          slotEnd,
-        );
-        bool isOverlappingWithLeave = isSlotOverlappingWithLeave(
-          slotStart,
-          slotEnd,
-        );
-        bool isPast = _isSlotInPast(slotStart, totalDuration);
+        int slotStartMin = slotStartUTC.hour * 60 + slotStartUTC.minute;
+        int slotEndMin = slotEndUTC.hour * 60 + slotEndUTC.minute;
 
-        // ✅ Determine availability
-        bool isAvailable =
-            !isOverlappingWithBookings &&
-            !isPast &&
-            !isOverlappingWithBreak &&
-            !isOverlappingWithLeave;
+        bool isOverlappingWithBookings = isOverlapWithRanges(slotStartMin, slotEndMin, bookedRanges);
+        bool isOverlappingWithBreak = isOverlapWithRanges(slotStartMin, slotEndMin, breakRanges);
+        
+        // Convert to local for past check
+        final localSlotStart = TimezoneService.utcToLocalDateTime(
+          '${slotStartUTC.hour.toString().padLeft(2, '0')}:${slotStartUTC.minute.toString().padLeft(2, '0')}',
+          _selectedDate!,
+        );
+        bool isPast = _isSlotInPast(localSlotStart, totalDuration);
+
+        bool isAvailable = !isOverlappingWithBookings && !isPast && !isOverlappingWithBreak;
 
         String statusText = '';
         int displayVipNumber = 0;
 
         if (isOverlappingWithBookings) {
           statusText = 'Booked';
-          // Find the VIP number of the overlapping booking
           for (final booked in bookedRanges) {
-            final bookedStartMin =
-                (booked['start_hour'] as int) * 60 +
-                (booked['start_min'] as int);
-            final bookedEndMin =
-                (booked['end_hour'] as int) * 60 + (booked['end_min'] as int);
-            final slotStartMin = slotStart.hour * 60 + slotStart.minute;
-            final slotEndMin = slotEnd.hour * 60 + slotEnd.minute;
+            final bookedStartMin = (booked['start_hour'] as int) * 60 + (booked['start_min'] as int);
+            final bookedEndMin = (booked['end_hour'] as int) * 60 + (booked['end_min'] as int);
             if (slotStartMin < bookedEndMin && slotEndMin > bookedStartMin) {
               displayVipNumber = booked['vip_number'];
               break;
             }
           }
         } else if (isOverlappingWithBreak) {
-          statusText =
-              breakRanges.isNotEmpty && breakRanges.first['type'] == 'special'
-              ? 'Special Break'
-              : 'Break';
-        } else if (isOverlappingWithLeave) {
-          statusText = 'Leave';
+          statusText = breakRanges.isNotEmpty && breakRanges.first['type'] == 'special' ? 'Special Break' : 'Break';
         } else if (isPast) {
           statusText = 'Time Passed';
         } else {
-          // Calculate what VIP number this slot will get
-          final slotStartMin = slotStart.hour * 60 + slotStart.minute;
+          // Calculate VIP number based on start time order
           int vipCountBefore = 0;
           for (final booked in bookedRanges) {
             if (booked['is_vip'] == true) {
-              final bookedStartMin =
-                  (booked['start_hour'] as int) * 60 +
-                  (booked['start_min'] as int);
+              final bookedStartMin = (booked['start_hour'] as int) * 60 + (booked['start_min'] as int);
               if (bookedStartMin < slotStartMin) {
                 vipCountBefore++;
               }
@@ -2634,81 +2472,53 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           displayVipNumber = vipCountBefore + 1;
         }
 
-        final displayStartTime = _formatTimeWithAmPm(slotStart);
-        final displayEndTime = _formatTimeWithAmPm(slotEnd);
-
-        final localStartTimeStr =
-            '${slotStart.hour.toString().padLeft(2, '0')}:${slotStart.minute.toString().padLeft(2, '0')}';
-        final localEndTimeStr =
-            '${slotEnd.hour.toString().padLeft(2, '0')}:${slotEnd.minute.toString().padLeft(2, '0')}';
-
-        final utcStartTime = TimezoneService.localToUtcTime(
-          localStartTimeStr,
+        // Convert UTC to Local for DISPLAY
+        final localStartDateTime = TimezoneService.utcToLocalDateTime(
+          '${slotStartUTC.hour.toString().padLeft(2, '0')}:${slotStartUTC.minute.toString().padLeft(2, '0')}',
           _selectedDate!,
         );
-        final utcEndTime = TimezoneService.localToUtcTime(
-          localEndTimeStr,
+        final localEndDateTime = TimezoneService.utcToLocalDateTime(
+          '${slotEndUTC.hour.toString().padLeft(2, '0')}:${slotEndUTC.minute.toString().padLeft(2, '0')}',
           _selectedDate!,
         );
+
+        final displayStartTime = _formatTimeWithAmPm(localStartDateTime);
+        final displayEndTime = _formatTimeWithAmPm(localEndDateTime);
+
+        final utcStartTimeStr = '${slotStartUTC.hour.toString().padLeft(2, '0')}:${slotStartUTC.minute.toString().padLeft(2, '0')}:00';
+        final utcEndTimeStr = '${slotEndUTC.hour.toString().padLeft(2, '0')}:${slotEndUTC.minute.toString().padLeft(2, '0')}:00';
 
         slots.add({
           'start_time_display': displayStartTime,
           'end_time_display': displayEndTime,
-          'start_time': localStartTimeStr,
-          'end_time': localEndTimeStr,
-          'utc_start_time': utcStartTime,
-          'utc_end_time': utcEndTime,
+          'utc_start_time': utcStartTimeStr,
+          'utc_end_time': utcEndTimeStr,
           'slot_number': slotNumber,
           'vip_number': displayVipNumber,
           'is_available': isAvailable,
           'is_past': isPast,
           'is_booked': isOverlappingWithBookings,
           'is_break': isOverlappingWithBreak,
-          'is_leave': isOverlappingWithLeave,
           'status_text': statusText,
           'duration': totalDuration,
         });
 
         slotNumber++;
-        currentSlotStart = currentSlotStart.add(const Duration(minutes: 30));
+        currentSlotStartUTC = currentSlotStartUTC.add(Duration(minutes: totalDuration));
       }
 
       setState(() {
         _allTimeSlots = slots;
         _isLoadingSlots = false;
       });
-    } catch (e) {    
+    } catch (e) {
+      print('Error loading slots: $e');
       setState(() {
         _isLoadingSlots = false;
         _slotErrorMessage = 'Failed to load time slots. Please try again.';
         _allTimeSlots = [];
       });
     }
-  }
-
-  String _formatTimeWithAmPm(DateTime time) {
-    try {
-      final period = time.hour >= 12 ? 'PM' : 'AM';
-      final displayHour = time.hour % 12 == 0 ? 12 : time.hour % 12;
-      return '$displayHour:${time.minute.toString().padLeft(2, '0')} $period';
-    } catch (e) {
-      return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
-    }
-  }
-
-  bool _isSlotInPast(DateTime slotStartTime, int durationMinutes) {
-    final now = DateTime.now();
-    final todayDate = DateTime(now.year, now.month, now.day);
-    final slotDate = DateTime(
-      slotStartTime.year,
-      slotStartTime.month,
-      slotStartTime.day,
-    );
-
-    if (slotDate.isAtSameMomentAs(todayDate)) {
-      return slotStartTime.isBefore(now);
-    }
-    return false;
   }
 
   Future<void> _bookSlot(Map<String, dynamic> slot) async {
@@ -2720,10 +2530,8 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
 
     try {
       final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate!);
-      final selectedStartTime = slot['start_time'];
-      final selectedStartMin =
-          int.parse(selectedStartTime.split(':')[0]) * 60 +
-          int.parse(selectedStartTime.split(':')[1]);
+      final selectedStartTime = slot['utc_start_time'];
+      final selectedStartMin = int.parse(selectedStartTime.split(':')[0]) * 60 + int.parse(selectedStartTime.split(':')[1]);
 
       final existingVIP = await supabase
           .from('appointments')
@@ -2738,12 +2546,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       int vipNumber = 1;
       for (final vip in existingVIP) {
         String vipStartTime = vip['start_time'].toString();
-        if (vipStartTime.length > 5) {
-          vipStartTime = vipStartTime.substring(0, 5);
-        }
+        if (vipStartTime.length > 5) vipStartTime = vipStartTime.substring(0, 5);
         final vipStartParts = vipStartTime.split(':');
-        final vipStartMin =
-            int.parse(vipStartParts[0]) * 60 + int.parse(vipStartParts[1]);
+        final vipStartMin = int.parse(vipStartParts[0]) * 60 + int.parse(vipStartParts[1]);
         if (vipStartMin < selectedStartMin) {
           vipNumber++;
         } else {
@@ -2758,7 +2563,8 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         _showingVipNumber = true;
         _isLoadingSlots = false;
       });
-    } catch (e) {    
+    } catch (e) {
+      print('Error getting VIP number: $e');
       setState(() {
         _isLoadingSlots = false;
         _selectedSlot = slot;
@@ -2786,12 +2592,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
             children: [
               CircleAvatar(
                 radius: 22,
-                backgroundColor: _primaryColor.withValues(alpha:0.1),
+                backgroundColor: _primaryColor.withValues(alpha: 0.1),
                 child: Text(
-                  _selectedBarber?['full_name']
-                          ?.substring(0, 1)
-                          .toUpperCase() ??
-                      'B',
+                  _selectedBarber?['full_name']?.substring(0, 1).toUpperCase() ?? 'B',
                   style: TextStyle(
                     color: _primaryColor,
                     fontSize: 20,
@@ -2979,7 +2782,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                               horizontal: 16,
                             ),
                             elevation: 6,
-                            color: _primaryColor.withValues(alpha:0.08),
+                            color: _primaryColor.withValues(alpha: 0.08),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(24),
                               side: BorderSide(color: _primaryColor, width: 2),
@@ -3078,7 +2881,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                                   side: BorderSide(
                                     color: isSelected && _showingVipNumber
                                         ? _primaryColor
-                                        : _primaryColor.withValues(alpha:0.5),
+                                        : _primaryColor.withValues(alpha: 0.5),
                                     width: 1.5,
                                   ),
                                 ),
@@ -3086,9 +2889,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                                   horizontal: 16,
                                   vertical: 12,
                                 ),
-                                elevation: isSelected && _showingVipNumber
-                                    ? 2
-                                    : 0,
+                                elevation: isSelected && _showingVipNumber ? 2 : 0,
                               ),
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
@@ -3097,8 +2898,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                                     displayTime,
                                     style: TextStyle(
                                       fontSize: 14,
-                                      fontWeight:
-                                          isSelected && _showingVipNumber
+                                      fontWeight: isSelected && _showingVipNumber
                                           ? FontWeight.bold
                                           : FontWeight.w500,
                                     ),
@@ -3111,7 +2911,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                                       fontWeight: FontWeight.w400,
                                       color: isSelected && _showingVipNumber
                                           ? Colors.white70
-                                          : _primaryColor.withValues(alpha:0.7),
+                                          : _primaryColor.withValues(alpha: 0.7),
                                     ),
                                   ),
                                 ],
@@ -3202,8 +3002,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                       ],
 
                       // No available slots message
-                      if (availableSlots.isEmpty &&
-                          unavailableSlots.isNotEmpty) ...[
+                      if (availableSlots.isEmpty && unavailableSlots.isNotEmpty) ...[
                         const SizedBox(height: 24),
                         Container(
                           padding: const EdgeInsets.all(16),
@@ -3484,7 +3283,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         Container(
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
-            color: _primaryColor.withValues(alpha:0.1),
+            color: _primaryColor.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(12),
           ),
           child: Icon(icon, size: 22, color: _primaryColor),
@@ -3617,7 +3416,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
               child: Text(
                 'Reset',
                 style: TextStyle(
-                  color: Colors.white.withValues(alpha:0.9),
+                  color: Colors.white.withValues(alpha: 0.9),
                   fontSize: 14,
                 ),
               ),
@@ -3639,104 +3438,19 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                   ),
                   child: Row(
                     children: [
-                      _buildStepIndicatorResponsive(
-                        0,
-                        showLabels ? 'Salon' : '',
-                        Icons.store,
-                        stepSize,
-                        iconSize,
-                        stepFontSize,
-                      ),
-                      Container(
-                        width: connectorWidth,
-                        height: 2,
-                        color: _currentStep > 0
-                            ? _primaryColor
-                            : Colors.grey[300],
-                      ),
-                      _buildStepIndicatorResponsive(
-                        1,
-                        showLabels ? 'Date' : '',
-                        Icons.calendar_today,
-                        stepSize,
-                        iconSize,
-                        stepFontSize,
-                      ),
-                      Container(
-                        width: connectorWidth,
-                        height: 2,
-                        color: _currentStep > 1
-                            ? _primaryColor
-                            : Colors.grey[300],
-                      ),
-                      _buildStepIndicatorResponsive(
-                        2,
-                        showLabels ? 'Service' : '',
-                        Icons.content_cut,
-                        stepSize,
-                        iconSize,
-                        stepFontSize,
-                      ),
-                      Container(
-                        width: connectorWidth,
-                        height: 2,
-                        color: _currentStep > 2
-                            ? _primaryColor
-                            : Colors.grey[300],
-                      ),
-                      _buildStepIndicatorResponsive(
-                        3,
-                        showLabels ? 'Barber' : '',
-                        Icons.person,
-                        stepSize,
-                        iconSize,
-                        stepFontSize,
-                      ),
-                      Container(
-                        width: connectorWidth,
-                        height: 2,
-                        color: _currentStep > 3
-                            ? _primaryColor
-                            : Colors.grey[300],
-                      ),
-                      _buildStepIndicatorResponsive(
-                        4,
-                        showLabels ? 'Person' : '',
-                        Icons.badge,
-                        stepSize,
-                        iconSize,
-                        stepFontSize,
-                      ),
-                      Container(
-                        width: connectorWidth,
-                        height: 2,
-                        color: _currentStep > 4
-                            ? _primaryColor
-                            : Colors.grey[300],
-                      ),
-                      _buildStepIndicatorResponsive(
-                        5,
-                        showLabels ? 'Time' : '',
-                        Icons.access_time,
-                        stepSize,
-                        iconSize,
-                        stepFontSize,
-                      ),
-                      Container(
-                        width: connectorWidth,
-                        height: 2,
-                        color: _currentStep > 5
-                            ? _primaryColor
-                            : Colors.grey[300],
-                      ),
-                      _buildStepIndicatorResponsive(
-                        6,
-                        showLabels ? 'Confirm' : '',
-                        Icons.check_circle,
-                        stepSize,
-                        iconSize,
-                        stepFontSize,
-                      ),
+                      _buildStepIndicatorResponsive(0, showLabels ? 'Salon' : '', Icons.store, stepSize, iconSize, stepFontSize),
+                      Container(width: connectorWidth, height: 2, color: _currentStep > 0 ? _primaryColor : Colors.grey[300]),
+                      _buildStepIndicatorResponsive(1, showLabels ? 'Date' : '', Icons.calendar_today, stepSize, iconSize, stepFontSize),
+                      Container(width: connectorWidth, height: 2, color: _currentStep > 1 ? _primaryColor : Colors.grey[300]),
+                      _buildStepIndicatorResponsive(2, showLabels ? 'Service' : '', Icons.content_cut, stepSize, iconSize, stepFontSize),
+                      Container(width: connectorWidth, height: 2, color: _currentStep > 2 ? _primaryColor : Colors.grey[300]),
+                      _buildStepIndicatorResponsive(3, showLabels ? 'Barber' : '', Icons.person, stepSize, iconSize, stepFontSize),
+                      Container(width: connectorWidth, height: 2, color: _currentStep > 3 ? _primaryColor : Colors.grey[300]),
+                      _buildStepIndicatorResponsive(4, showLabels ? 'Person' : '', Icons.badge, stepSize, iconSize, stepFontSize),
+                      Container(width: connectorWidth, height: 2, color: _currentStep > 4 ? _primaryColor : Colors.grey[300]),
+                      _buildStepIndicatorResponsive(5, showLabels ? 'Time' : '', Icons.access_time, stepSize, iconSize, stepFontSize),
+                      Container(width: connectorWidth, height: 2, color: _currentStep > 5 ? _primaryColor : Colors.grey[300]),
+                      _buildStepIndicatorResponsive(6, showLabels ? 'Confirm' : '', Icons.check_circle, stepSize, iconSize, stepFontSize),
                     ],
                   ),
                 ),
@@ -3783,7 +3497,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
             color: isCompleted
                 ? _primaryColor
                 : (isActive
-                      ? _primaryColor.withValues(alpha:0.1)
+                      ? _primaryColor.withValues(alpha: 0.1)
                       : Colors.grey[200]),
             border: Border.all(
               color: isActive ? _primaryColor : Colors.grey[300]!,
@@ -3792,7 +3506,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
             boxShadow: isActive
                 ? [
                     BoxShadow(
-                      color: _primaryColor.withValues(alpha:0.3),
+                      color: _primaryColor.withValues(alpha: 0.3),
                       blurRadius: 8,
                     ),
                   ]
