@@ -1,5 +1,6 @@
 // lib/services/timezone_service.dart
 
+import 'package:flutter/foundation.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:flutter_native_timezone/flutter_native_timezone.dart';
@@ -57,27 +58,25 @@ class TimezoneService {
 
       if (cachedTimezone != null && cachedTimezone.isNotEmpty) {
         _currentTimezone = cachedTimezone;
-        await _applyTimezone(_currentTimezone);
-        print('✅ Loaded cached timezone: $_currentTimezone');
+        await _applyTimezone(_currentTimezone);      
         return;
       }
 
       // Auto-detect from device
-      final String deviceTimezone = await FlutterNativeTimezone.getLocalTimezone();
-      print('📍 Device timezone: $deviceTimezone');
+      final String deviceTimezone = await FlutterNativeTimezone.getLocalTimezone();   
 
       if (_isValidTimezone(deviceTimezone)) {
         _currentTimezone = deviceTimezone;
         await _applyTimezone(_currentTimezone);
         await prefs.setString('cached_timezone', _currentTimezone);
-        print('✅ Saved timezone to cache: $_currentTimezone');
+       
       } else {
-        print('⚠️ Timezone $deviceTimezone not supported, using default');
+       
         _currentTimezone = 'Asia/Colombo';
         await _applyTimezone(_currentTimezone);
       }
     } catch (e) {
-      print('❌ Error detecting timezone: $e');
+      debugPrint('❌ Error detecting timezone: $e');
       _currentTimezone = 'Asia/Colombo';
       await _applyTimezone(_currentTimezone);
     }
@@ -89,14 +88,13 @@ class TimezoneService {
       _updateOffsets(timezone);
       _updateCountryInfo(timezone);
     } catch (e) {
-      print('Error applying timezone: $e');
+      debugPrint('Error applying timezone: $e');
     }
   }
 
   static void _updateOffsets(String timezone) {
     try {
       final location = tz.getLocation(timezone);
-      final now = DateTime.now();
       final tzNow = tz.TZDateTime.now(location);
       final offset = tzNow.timeZoneOffset;
       _utcOffsetHours = offset.inHours;
@@ -153,7 +151,7 @@ class TimezoneService {
     await _applyTimezone(timezone);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('cached_timezone', timezone);
-    print('✅ Manually set timezone: $timezone');
+   
   }
 
   static List<Map<String, String>> getTimezonesForCountry(String countryCode) {
@@ -240,7 +238,6 @@ class TimezoneService {
   
   static String localToUtcTime(String localTime, DateTime selectedDate) {
     try {
-      String timeStr = localTime;
       bool is12Hour = localTime.contains('AM') || localTime.contains('PM');
       
       int hour = 0, minute = 0;

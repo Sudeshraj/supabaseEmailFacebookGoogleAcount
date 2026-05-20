@@ -106,11 +106,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   }
 
   // ==================== HELPER FUNCTIONS ====================
-  String _formatTime(dynamic time) {
-    if (time == null) return '09:00';
-    final str = time.toString();
-    return str.length >= 5 ? str.substring(0, 5) : str;
-  }
 
   int _calculateTotalDuration() =>
       _selectedServices.fold(0, (sum, s) => sum + (s['duration'] as int));
@@ -513,7 +508,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                       ),
                       const SizedBox(width: 4),
                       Text(
-                        '${_formatTime(salon['open_time'])} - ${_formatTime(salon['close_time'])}',
+                        _getSalonLocalTime(salon),
                         style: TextStyle(fontSize: 13, color: Colors.grey[600]),
                       ),
                     ],
@@ -527,6 +522,24 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       ),
     ),
   );
+
+  // Helper function to convert UTC to local
+  String _getSalonLocalTime(Map<String, dynamic> salon) {
+    final openTimeUTC = salon['open_time']?.toString() ?? '09:00:00';
+    final closeTimeUTC = salon['close_time']?.toString() ?? '18:00:00';
+
+    // Convert UTC to local time
+    final openLocal = TimezoneService.utcToLocalTime(
+      openTimeUTC,
+      DateTime.now(),
+    );
+    final closeLocal = TimezoneService.utcToLocalTime(
+      closeTimeUTC,
+      DateTime.now(),
+    );
+
+    return '$openLocal - $closeLocal';
+  }
 
   Future<void> _searchSalons(String query) async {
     if (query.isEmpty) {
@@ -1503,7 +1516,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                             (barber['avg_rating'] as num?)?.toStringAsFixed(
                                   1,
                                 ) ??
-                                '4.5',
+                                '0.0',
                             style: const TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w500,
@@ -1672,7 +1685,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
             .from('reviews')
             .select('overall_rating')
             .eq('barber_id', barberId);
-        double avgRating = 4.5;
+        double avgRating = 0.0;
         if (ratings.isNotEmpty) {
           double total = 0;
           for (var r in ratings) {
@@ -2179,9 +2192,35 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           '(${TimezoneService.getUtcOffsetString()})',
           style: TextStyle(fontSize: 11, color: Colors.grey[500]),
         ),
+        // ✅ Add this - Show DST indicator if needed
+        if (_isDST()) ...[
+          const SizedBox(width: 6),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: Colors.amber.shade100,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              'DST',
+              style: TextStyle(
+                fontSize: 9,
+                color: Colors.amber.shade800,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
       ],
     ),
   );
+
+  // Helper function to check DST
+  bool _isDST() {
+    final timezone = TimezoneService.getCurrentTimezone();
+    // DST is typically for US, Europe, etc.
+    return timezone.contains('America/') || timezone.contains('Europe/');
+  }
 
   Widget _buildTravelTimeSelector() {
     if (!_showTravelTimeSelector) return const SizedBox.shrink();
@@ -2926,7 +2965,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     final adjustedFor = _selectedSlot!['adjusted_for']?.toString() ?? '';
     final barberName = _selectedBarber!['full_name'] ?? 'Barber';
     final barberRating =
-        (_selectedBarber!['avg_rating'] as num?)?.toStringAsFixed(1) ?? '4.5';
+        (_selectedBarber!['avg_rating'] as num?)?.toStringAsFixed(1) ?? '0.0';
     final totalDuration = _calculateTotalDuration();
     final totalPrice = _calculateTotalPrice().toStringAsFixed(2);
 
