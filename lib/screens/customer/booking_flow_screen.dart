@@ -1,3 +1,5 @@
+// lib/screens/booking/booking_flow_screen.dart
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -64,6 +66,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   bool _isBooking = false;
   bool _isInitialized = false;
 
+  // Timezone tracking
+  String _lastTimezone = '';
+
   // Colors
   final Color _primaryColor = const Color(0xFFFF6B8B);
   final Color _secondaryColor = const Color(0xFF4CAF50);
@@ -80,13 +85,54 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   @override
   void initState() {
     super.initState();
-    _initializeTimezone();
-    _initializeScreen();
+    _initialize();
   }
 
-  Future<void> _initializeTimezone() async {
+  Future<void> _initialize() async {
     await TimezoneService.initialize();
+    _lastTimezone = TimezoneService.getCurrentTimezone();
+    _initializeScreen();
     if (mounted) setState(() {});
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _checkTimezoneChange();
+  }
+
+  void _checkTimezoneChange() {
+    final currentTimezone = TimezoneService.getCurrentTimezone();
+    if (_lastTimezone != currentTimezone && _lastTimezone.isNotEmpty) {
+      _onTimezoneChanged();
+    }
+    _lastTimezone = currentTimezone;
+  }
+
+  void _onTimezoneChanged() async {
+    if (_currentStep == 5 && _selectedDate != null && _selectedBarber != null) {
+      setState(() {
+        _availableSlots = [];
+        _selectedSlot = null;
+        _showTravelTimeSelector = false;
+        _selectedTravelTime = 0;
+        _slotErrorMessage = null;
+        _isLoadingSlots = true;
+      });
+      await _loadAvailableSlots();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Timezone changed to ${TimezoneService.getTimezoneDisplayName()}',
+            ),
+            backgroundColor: _primaryColor,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _initializeScreen() async {
@@ -221,23 +267,21 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                     child: DropdownButton<String>(
                       value: selectedCountryCode,
                       isExpanded: true,
-                      items: countries
-                          .map(
-                            (country) => DropdownMenuItem(
-                              value: country['code'],
-                              child: Row(
-                                children: [
-                                  Text(
-                                    country['flag']!,
-                                    style: const TextStyle(fontSize: 18),
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Text(country['name']!),
-                                ],
+                      items: countries.map((country) {
+                        return DropdownMenuItem<String>(
+                          value: country['code'],
+                          child: Row(
+                            children: [
+                              Text(
+                                country['flag']!,
+                                style: const TextStyle(fontSize: 18),
                               ),
-                            ),
-                          )
-                          .toList(),
+                              const SizedBox(width: 10),
+                              Text(country['name']!),
+                            ],
+                          ),
+                        );
+                      }).toList(),
                       onChanged: (value) {
                         if (value != null) {
                           setStateDialog(() {
@@ -265,23 +309,21 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                     child: DropdownButton<String>(
                       value: selectedTimezone,
                       isExpanded: true,
-                      items: timezones
-                          .map(
-                            (tz) => DropdownMenuItem(
-                              value: tz['timezone'],
-                              child: Row(
-                                children: [
-                                  Text(tz['name']!),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    '(${tz['offset']})',
-                                    style: const TextStyle(fontSize: 12),
-                                  ),
-                                ],
+                      items: timezones.map((tz) {
+                        return DropdownMenuItem<String>(
+                          value: tz['timezone'],
+                          child: Row(
+                            children: [
+                              Text(tz['name']!),
+                              const SizedBox(width: 8),
+                              Text(
+                                '(${tz['offset']})',
+                                style: const TextStyle(fontSize: 12),
                               ),
-                            ),
-                          )
-                          .toList(),
+                            ],
+                          ),
+                        );
+                      }).toList(),
                       onChanged: (value) =>
                           setStateDialog(() => selectedTimezone = value!),
                     ),
@@ -296,37 +338,35 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
               ),
               ElevatedButton(
                 onPressed: () async {
-                  final currentContext = context;
-                  final currentState = this;
-
                   await TimezoneService.setTimezone(selectedTimezone);
-
-                  if (currentContext.mounted) {
-                    Navigator.pop(currentContext);
-                  }
-
-                  if (currentState.mounted) {
-                    currentState.setState(() {});
-                    if (currentState._selectedSlot != null) {
-                      await currentState._loadAvailableSlots();
+                  if (context.mounted) Navigator.pop(context);
+                  if (mounted) {
+                    setState(() {
+                      _availableSlots = [];
+                      _selectedSlot = null;
+                      _showTravelTimeSelector = false;
+                      _selectedTravelTime = 0;
+                      _slotErrorMessage = null;
+                    });
+                    if (_currentStep == 5 &&
+                        _selectedDate != null &&
+                        _selectedBarber != null) {
+                      await _loadAvailableSlots();
                     }
-
-                    if (currentContext.mounted) {
-                      ScaffoldMessenger.of(currentContext).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            'Timezone changed to ${TimezoneService.getTimezoneDisplayName()}',
-                          ),
-                          backgroundColor: _primaryColor,
-                          behavior: SnackBarBehavior.floating,
-                          duration: const Duration(seconds: 2),
-                        ),
-                      );
-                    }
+                    // ScaffoldMessenger.of(context).showSnackBar(
+                    //   SnackBar(
+                    //     content: Text(
+                    //       'Timezone changed to ${TimezoneService.getTimezoneDisplayName()}',
+                    //     ),
+                    //     backgroundColor: _primaryColor,
+                    //     duration: const Duration(seconds: 2),
+                    //   ),
+                    // );
                   }
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: _primaryColor,
+                  foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
@@ -338,6 +378,45 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         },
       ),
     );
+  }
+
+  // Helper function to convert UTC to local with correct date
+  String _getSalonLocalTime(Map<String, dynamic> salon) {
+    final openTimeUTC = salon['open_time']?.toString() ?? '09:00:00';
+    final closeTimeUTC = salon['close_time']?.toString() ?? '18:00:00';
+
+    // Use selected date if available, otherwise use current date
+    final referenceDate = _selectedDate ?? DateTime.now();
+
+    final openLocal = TimezoneService.utcToLocalTime(
+      openTimeUTC,
+      referenceDate,
+    );
+    final closeLocal = TimezoneService.utcToLocalTime(
+      closeTimeUTC,
+      referenceDate,
+    );
+
+    return '$openLocal - $closeLocal';
+  }
+
+  // Helper function to check DST
+  bool _isDST() {
+    final timezone = TimezoneService.getCurrentTimezone();
+    // Only US and Europe have DST
+    if (!timezone.contains('America/') && !timezone.contains('Europe/')) {
+      return false;
+    }
+
+    final now = DateTime.now();
+    final month = now.month;
+
+    // Northern Hemisphere DST: March to November
+    if (timezone.contains('America/') || timezone.contains('Europe/')) {
+      return month > 3 && month < 11;
+    }
+
+    return false;
   }
 
   // ==================== STEP 1: SALON SEARCH ====================
@@ -522,24 +601,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       ),
     ),
   );
-
-  // Helper function to convert UTC to local
-  String _getSalonLocalTime(Map<String, dynamic> salon) {
-    final openTimeUTC = salon['open_time']?.toString() ?? '09:00:00';
-    final closeTimeUTC = salon['close_time']?.toString() ?? '18:00:00';
-
-    // Convert UTC to local time
-    final openLocal = TimezoneService.utcToLocalTime(
-      openTimeUTC,
-      DateTime.now(),
-    );
-    final closeLocal = TimezoneService.utcToLocalTime(
-      closeTimeUTC,
-      DateTime.now(),
-    );
-
-    return '$openLocal - $closeLocal';
-  }
 
   Future<void> _searchSalons(String query) async {
     if (query.isEmpty) {
@@ -1516,7 +1577,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                             (barber['avg_rating'] as num?)?.toStringAsFixed(
                                   1,
                                 ) ??
-                                '0.0',
+                                'New',
                             style: const TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w500,
@@ -2192,7 +2253,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           '(${TimezoneService.getUtcOffsetString()})',
           style: TextStyle(fontSize: 11, color: Colors.grey[500]),
         ),
-        // ✅ Add this - Show DST indicator if needed
         if (_isDST()) ...[
           const SizedBox(width: 6),
           Container(
@@ -2214,13 +2274,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       ],
     ),
   );
-
-  // Helper function to check DST
-  bool _isDST() {
-    final timezone = TimezoneService.getCurrentTimezone();
-    // DST is typically for US, Europe, etc.
-    return timezone.contains('America/') || timezone.contains('Europe/');
-  }
 
   Widget _buildTravelTimeSelector() {
     if (!_showTravelTimeSelector) return const SizedBox.shrink();
@@ -2395,7 +2448,8 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       final extensionMinutes = data['extension_minutes'] ?? 0;
 
       // TODAY ONLY: Check overflow for today's date
-      if (isToday && conflictType == 'OVERFLOW') {
+      if (isToday &&
+          (conflictType == 'OVERFLOW' || conflictType == 'MOVE_TO_NEXT_DAY')) {
         String message =
             'No appointments available on ${DateFormat('EEEE, MMM dd').format(_selectedDate!)}.\n\n'
             'Your requested time would exceed salon closing time by $extensionMinutes minutes.\n\n'
@@ -2904,9 +2958,8 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     );
   }
 
-  // ==================== STEP 7: CONFIRMATION (FULLY NULL SAFE) ====================
+  // ==================== STEP 7: CONFIRMATION ====================
   Widget _buildConfirmationStep() {
-    // NULL SAFETY CHECK - ALL required data must exist
     if (_selectedSalon == null ||
         _selectedServices.isEmpty ||
         _selectedBarber == null ||
@@ -2953,7 +3006,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         ? customerName
         : _getChildNameForBooking();
 
-    // Safe value extraction
     final salonName = _selectedSalon!['name'] ?? 'Salon';
     final salonAddress = _selectedSalon!['address'] ?? '';
     final startTime = _selectedSlot!['start_time'] ?? '--:--';
@@ -2965,7 +3017,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     final adjustedFor = _selectedSlot!['adjusted_for']?.toString() ?? '';
     final barberName = _selectedBarber!['full_name'] ?? 'Barber';
     final barberRating =
-        (_selectedBarber!['avg_rating'] as num?)?.toStringAsFixed(1) ?? '0.0';
+        (_selectedBarber!['avg_rating'] as num?)?.toStringAsFixed(1) ?? 'New';
     final totalDuration = _calculateTotalDuration();
     final totalPrice = _calculateTotalPrice().toStringAsFixed(2);
 
@@ -3210,12 +3262,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       if (!mounted) return;
 
       if (result['success'] == true) {
-        // ✅ REMOVE THIS - SQL function already sends push notification!
-        // await NotificationService().sendPushNotification(...);
-
-        // ✅ REMOVE THIS - SQL function already saves to database!
-        // await supabase.from('notifications').insert({...});
-
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
