@@ -2986,6 +2986,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: _primaryColor,
+                foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
