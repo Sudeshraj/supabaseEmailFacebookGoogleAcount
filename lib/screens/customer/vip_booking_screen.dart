@@ -1,19 +1,19 @@
-// lib/screens/booking/booking_flow_screen.dart
+// lib/screens/booking/vip_booking_screen.dart
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../services/timezone_service.dart';
 
-class BookingFlowScreen extends StatefulWidget {
+class VIPBookingScreen extends StatefulWidget {
   final Map<String, dynamic>? initialSalon;
-  const BookingFlowScreen({super.key, this.initialSalon});
+  const VIPBookingScreen({super.key, this.initialSalon});
 
   @override
-  State<BookingFlowScreen> createState() => _BookingFlowScreenState();
+  State<VIPBookingScreen> createState() => _VIPBookingScreenState();
 }
 
-class _BookingFlowScreenState extends State<BookingFlowScreen> {
+class _VIPBookingScreenState extends State<VIPBookingScreen> {
   final supabase = Supabase.instance.client;
 
   // Step tracking
@@ -53,14 +53,14 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   bool _isCheckingDuplicate = false;
   String? _duplicateError;
 
-  // Step 6: Time Slot
-  int _selectedTravelTime = 0;
-  bool _showTravelTimeSelector = false;
-  final List<int> _travelTimeOptions = [5, 10, 15, 20, 25, 30, 45, 60];
-  List<Map<String, dynamic>> _availableSlots = [];
+  // Step 6: Time Slot (VIP)
+  List<Map<String, dynamic>> _allTimeSlots = [];
   Map<String, dynamic>? _selectedSlot;
   bool _isLoadingSlots = false;
   String? _slotErrorMessage;
+  bool _showingVipNumber = false;
+  int _generatedVipNumber = 0;
+  String _selectedStartTime = '';
 
   // Step 7: Confirm
   bool _isBooking = false;
@@ -112,12 +112,12 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   void _onTimezoneChanged() async {
     if (_currentStep == 5 && _selectedDate != null && _selectedBarber != null) {
       setState(() {
-        _availableSlots = [];
+        _allTimeSlots = [];
         _selectedSlot = null;
-        _showTravelTimeSelector = false;
-        _selectedTravelTime = 0;
+        _showingVipNumber = false;
+        _generatedVipNumber = 0;
+        _selectedStartTime = '';
         _slotErrorMessage = null;
-        _isLoadingSlots = true;
       });
       await _loadAvailableSlots();
 
@@ -140,7 +140,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       _selectedSalon = widget.initialSalon;
       _currentStep = 1;
       _isInitialized = true;
-      await supabase.rpc('cleanup_old_queues');
     }
   }
 
@@ -151,7 +150,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     super.dispose();
   }
 
-  // ==================== HELPER FUNCTIONS ====================
 
   int _calculateTotalDuration() =>
       _selectedServices.fold(0, (sum, s) => sum + (s['duration'] as int));
@@ -170,15 +168,16 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       _selectedServices = [];
       _selectedBarber = null;
       _selectedSlot = null;
-      _selectedTravelTime = 0;
-      _showTravelTimeSelector = false;
+      _allTimeSlots = [];
+      _showingVipNumber = false;
+      _generatedVipNumber = 0;
+      _selectedStartTime = '';
       _searchController.clear();
       _searchResults = [];
       _isInitialized = false;
       _servicesLoaded = false;
       _barbersLoaded = false;
       _availableBarbers = [];
-      _availableSlots = [];
       _selectedCategoryTab = null;
       _salonServices = [];
       _holidays = {};
@@ -193,7 +192,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     });
   }
 
-  // ==================== TIMEZONE SELECTOR ====================
   Widget _buildTimezoneSelector() {
     return GestureDetector(
       onTap: () => _showTimezonePickerDialog(),
@@ -253,7 +251,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
               children: [
                 const SizedBox(height: 8),
                 const Text(
-                  'Appointments will be shown in your local time',
+                  'VIP appointments will be shown in your local time',
                   style: TextStyle(fontSize: 13),
                 ),
                 const SizedBox(height: 20),
@@ -342,10 +340,11 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                   if (context.mounted) Navigator.pop(context);
                   if (mounted) {
                     setState(() {
-                      _availableSlots = [];
+                      _allTimeSlots = [];
                       _selectedSlot = null;
-                      _showTravelTimeSelector = false;
-                      _selectedTravelTime = 0;
+                      _showingVipNumber = false;
+                      _generatedVipNumber = 0;
+                      _selectedStartTime = '';
                       _slotErrorMessage = null;
                     });
                     if (_currentStep == 5 &&
@@ -353,20 +352,19 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                         _selectedBarber != null) {
                       await _loadAvailableSlots();
                     }
-                    // ScaffoldMessenger.of(context).showSnackBar(
-                    //   SnackBar(
-                    //     content: Text(
-                    //       'Timezone changed to ${TimezoneService.getTimezoneDisplayName()}',
-                    //     ),
-                    //     backgroundColor: _primaryColor,
-                    //     duration: const Duration(seconds: 2),
-                    //   ),
-                    // );
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          'Timezone changed to ${TimezoneService.getTimezoneDisplayName()}',
+                        ),
+                        backgroundColor: _primaryColor,
+                        duration: const Duration(seconds: 2),
+                      ),
+                    );
                   }
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: _primaryColor,
-                  foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
@@ -378,45 +376,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         },
       ),
     );
-  }
-
-  // Helper function to convert UTC to local with correct date
-  String _getSalonLocalTime(Map<String, dynamic> salon) {
-    final openTimeUTC = salon['open_time']?.toString() ?? '09:00:00';
-    final closeTimeUTC = salon['close_time']?.toString() ?? '18:00:00';
-
-    // Use selected date if available, otherwise use current date
-    final referenceDate = _selectedDate ?? DateTime.now();
-
-    final openLocal = TimezoneService.utcToLocalTime(
-      openTimeUTC,
-      referenceDate,
-    );
-    final closeLocal = TimezoneService.utcToLocalTime(
-      closeTimeUTC,
-      referenceDate,
-    );
-
-    return '$openLocal - $closeLocal';
-  }
-
-  // Helper function to check DST
-  bool _isDST() {
-    final timezone = TimezoneService.getCurrentTimezone();
-    // Only US and Europe have DST
-    if (!timezone.contains('America/') && !timezone.contains('Europe/')) {
-      return false;
-    }
-
-    final now = DateTime.now();
-    final month = now.month;
-
-    // Northern Hemisphere DST: March to November
-    if (timezone.contains('America/') || timezone.contains('Europe/')) {
-      return month > 3 && month < 11;
-    }
-
-    return false;
   }
 
   // ==================== STEP 1: SALON SEARCH ====================
@@ -431,7 +390,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           onChanged: _searchSalons,
           style: const TextStyle(fontSize: 16),
           decoration: InputDecoration(
-            hintText: 'Search salon by name...',
+            hintText: 'Search VIP salon by name...',
             hintStyle: TextStyle(fontSize: 15, color: Colors.grey[400]),
             prefixIcon: Icon(Icons.search, color: Colors.grey[400], size: 22),
             suffixIcon: _isSearching
@@ -481,10 +440,10 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.search, size: 80, color: Colors.grey[300]),
+                    Icon(Icons.star, size: 80, color: Colors.grey[300]),
                     const SizedBox(height: 20),
                     Text(
-                      'Search for a salon',
+                      'Search for a VIP salon',
                       style: TextStyle(fontSize: 18, color: Colors.grey[500]),
                     ),
                   ],
@@ -495,10 +454,10 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.store, size: 80, color: Colors.grey[300]),
+                    Icon(Icons.star, size: 80, color: Colors.grey[300]),
                     const SizedBox(height: 20),
                     Text(
-                      'No salons found',
+                      'No VIP salons found',
                       style: TextStyle(fontSize: 18, color: Colors.grey[500]),
                     ),
                   ],
@@ -602,6 +561,24 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     ),
   );
 
+  // Helper function to convert UTC to local
+  String _getSalonLocalTime(Map<String, dynamic> salon) {
+    final openTimeUTC = salon['open_time']?.toString() ?? '09:00:00';
+    final closeTimeUTC = salon['close_time']?.toString() ?? '18:00:00';
+
+    // Convert UTC to local time
+    final openLocal = TimezoneService.utcToLocalTime(
+      openTimeUTC,
+      DateTime.now(),
+    );
+    final closeLocal = TimezoneService.utcToLocalTime(
+      closeTimeUTC,
+      DateTime.now(),
+    );
+
+    return '$openLocal - $closeLocal';
+  }
+
   Future<void> _searchSalons(String query) async {
     if (query.isEmpty) {
       setState(() {
@@ -700,7 +677,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Selected Salon',
+                      'Selected VIP Salon',
                       style: TextStyle(fontSize: 13, color: Colors.grey[600]),
                     ),
                     const SizedBox(height: 4),
@@ -958,7 +935,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Selected Salon',
+                      'Selected VIP Salon',
                       style: TextStyle(fontSize: 13, color: Colors.grey[600]),
                     ),
                     const SizedBox(height: 4),
@@ -1577,7 +1554,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                             (barber['avg_rating'] as num?)?.toStringAsFixed(
                                   1,
                                 ) ??
-                                'New',
+                                '0.0',
                             style: const TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w500,
@@ -1886,12 +1863,12 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'Who is this appointment for?',
+                  'Who is this VIP appointment for?',
                   style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'Select who will receive the service',
+                  'Select who will receive the VIP service',
                   style: TextStyle(fontSize: 14, color: Colors.grey[600]),
                 ),
                 const SizedBox(height: 24),
@@ -1900,7 +1877,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                   icon: Icons.person,
                   title: 'Myself',
                   subtitle: customerName,
-                  description: 'Booking for yourself',
+                  description: 'VIP booking for yourself',
                   onTap: () {
                     setState(() {
                       _isSameAsCustomer = true;
@@ -1921,7 +1898,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                       !_isSameAsCustomer &&
                           _selectedChildName != null &&
                           _selectedChildName!.isNotEmpty
-                      ? 'Will book for: $_selectedChildName'
+                      ? 'Will book VIP for: $_selectedChildName'
                       : null,
                   onTap: () => setState(() {
                     _isSameAsCustomer = false;
@@ -2008,7 +1985,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
-                          'Each person can only have one booking per day.',
+                          'Each person can only have one VIP booking per day.',
                           style: TextStyle(
                             fontSize: 13,
                             color: Colors.blue.shade700,
@@ -2033,10 +2010,11 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                       if (await _validateAndProceed()) {
                         setState(() {
                           _currentStep = 5;
-                          _showTravelTimeSelector = false;
-                          _selectedTravelTime = 0;
-                          _availableSlots = [];
+                          _allTimeSlots = [];
                           _selectedSlot = null;
+                          _showingVipNumber = false;
+                          _generatedVipNumber = 0;
+                          _selectedStartTime = '';
                           _isLoadingSlots = true;
                           _slotErrorMessage = null;
                         });
@@ -2208,7 +2186,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           .not('status', 'in', '("cancelled","no_show")');
       setState(() {
         _duplicateError = existing.isNotEmpty
-            ? '⚠️ You already have a booking for ${childName.isEmpty ? "yourself" : childName} on ${DateFormat('MMM dd').format(_selectedDate!)}.'
+            ? '⚠️ You already have a VIP booking for ${childName.isEmpty ? "yourself" : childName} on ${DateFormat('MMM dd').format(_selectedDate!)}.'
             : null;
       });
     } catch (e) {
@@ -2223,7 +2201,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     return _duplicateError == null;
   }
 
-  // ==================== STEP 6: TIME SLOT SELECTION ====================
+  // ==================== STEP 6: VIP TIME SLOT SELECTION ====================
   Widget _buildTimezoneIndicator() => Container(
     margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
@@ -2253,165 +2231,43 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           '(${TimezoneService.getUtcOffsetString()})',
           style: TextStyle(fontSize: 11, color: Colors.grey[500]),
         ),
-        if (_isDST()) ...[
-          const SizedBox(width: 6),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(
-              color: Colors.amber.shade100,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Text(
-              'DST',
-              style: TextStyle(
-                fontSize: 9,
-                color: Colors.amber.shade800,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-        ],
       ],
     ),
   );
 
-  Widget _buildTravelTimeSelector() {
-    if (!_showTravelTimeSelector) return const SizedBox.shrink();
-    return Container(
-      margin: const EdgeInsets.all(16),
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: _primaryColor, width: 2),
-        boxShadow: [
-          BoxShadow(
-            color: _primaryColor.withValues(alpha: 0.15),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: _primaryColor,
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Icon(
-                  Icons.directions_car,
-                  size: 26,
-                  color: Colors.white,
-                ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Travel Time Required',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 17,
-                      ),
-                    ),
-                    Text(
-                      'Select travel time to adjust your appointment',
-                      style: TextStyle(fontSize: 13, color: Colors.grey[600]),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          const Text(
-            'Select travel time:',
-            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
-          ),
-          const SizedBox(height: 14),
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: _travelTimeOptions.map((time) {
-              final isSelected = _selectedTravelTime == time;
-              return ElevatedButton(
-                onPressed: () async {
-                  setState(() {
-                    _selectedTravelTime = time;
-                    _isLoadingSlots = true;
-                  });
-                  await _loadAvailableSlots();
-                  if (mounted) {
-                    setState(() {
-                      _showTravelTimeSelector = true;
-                    });
-                  }
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: isSelected
-                      ? _primaryColor
-                      : Colors.grey[100],
-                  foregroundColor: isSelected ? Colors.white : Colors.grey[700],
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(25),
-                  ),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 12,
-                  ),
-                  elevation: isSelected ? 2 : 0,
-                ),
-                child: Text(
-                  '$time min',
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
-                ),
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.blue.shade50,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.info_outline, size: 20, color: Colors.blue.shade700),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    _selectedTravelTime > 0
-                        ? '✓ Travel time $_selectedTravelTime min added to your appointment'
-                        : 'Select travel time to add to your appointment start time',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.blue.shade700,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
+  bool _isSlotInPast(DateTime slotStartTime, int durationMinutes) {
+    final now = DateTime.now();
+    final todayDate = DateTime(now.year, now.month, now.day);
+    final slotDate = DateTime(
+      slotStartTime.year,
+      slotStartTime.month,
+      slotStartTime.day,
     );
+
+    if (slotDate.isAtSameMomentAs(todayDate)) {
+      return slotStartTime.isBefore(now);
+    }
+    return false;
+  }
+
+  String _formatTimeWithAmPm(DateTime time) {
+    try {
+      final period = time.hour >= 12 ? 'PM' : 'AM';
+      final displayHour = time.hour % 12 == 0 ? 12 : time.hour % 12;
+      return '$displayHour:${time.minute.toString().padLeft(2, '0')} $period';
+    } catch (e) {
+      return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+    }
   }
 
   Future<void> _loadAvailableSlots() async {
     setState(() {
       _isLoadingSlots = true;
-      _availableSlots = [];
+      _allTimeSlots = [];
       _selectedSlot = null;
-      _showTravelTimeSelector = false;
+      _showingVipNumber = false;
+      _generatedVipNumber = 0;
+      _selectedStartTime = '';
       _slotErrorMessage = null;
     });
 
@@ -2424,149 +2280,375 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
 
       final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate!);
       final totalDuration = _calculateTotalDuration();
-      final isToday = _selectedDate!.isAtSameMomentAs(
-        DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day),
+
+      // 1. GET BARBER EFFECTIVE SCHEDULE (Returns UTC times)
+      final scheduleResult = await supabase.rpc(
+        'get_barber_effective_schedule',
+        params: {
+          'p_barber_id': _selectedBarber!['id'],
+          'p_salon_id': _selectedSalon!['id'],
+          'p_date': dateStr,
+        },
       );
 
-      final result = await supabase
-          .rpc(
-            'calculate_next_queue_start_advanced',
-            params: {
-              'p_barber_id': _selectedBarber!['id'],
-              'p_appointment_date': dateStr,
-              'p_service_duration': totalDuration,
-              'p_travel_time_minutes': _selectedTravelTime,
-              'p_salon_id': _selectedSalon!['id'],
-            },
-          )
-          .timeout(const Duration(seconds: 10));
-
-      if (result == null) throw Exception('No response');
-      final data = result is List && result.isNotEmpty ? result[0] : result;
-
-      final conflictType = data['conflict_type']?.toString() ?? '';
-      final extensionMinutes = data['extension_minutes'] ?? 0;
-
-      // TODAY ONLY: Check overflow for today's date
-      if (isToday &&
-          (conflictType == 'OVERFLOW' || conflictType == 'MOVE_TO_NEXT_DAY')) {
-        String message =
-            'No appointments available on ${DateFormat('EEEE, MMM dd').format(_selectedDate!)}.\n\n'
-            'Your requested time would exceed salon closing time by $extensionMinutes minutes.\n\n'
-            'Please select another date or try tomorrow.';
-
-        setState(() {
-          _slotErrorMessage = message;
-          _isLoadingSlots = false;
-        });
-        return;
+      Map<String, dynamic> effectiveSchedule = {};
+      if (scheduleResult != null) {
+        if (scheduleResult is List && scheduleResult.isNotEmpty) {
+          final firstItem = scheduleResult[0];
+          if (firstItem is Map) {
+            effectiveSchedule = Map<String, dynamic>.from(firstItem);
+          }
+        } else if (scheduleResult is Map) {
+          effectiveSchedule = Map<String, dynamic>.from(scheduleResult);
+        }
       }
 
-      // Check other conflicts
-      if (conflictType == 'SALON_CLOSED') {
+      // Check if barber is on leave
+      final leaveType = effectiveSchedule['leave_type'] as String?;
+      if (leaveType == 'full_day') {
         setState(() {
+          _isLoadingSlots = false;
           _slotErrorMessage =
-              'Salon is closed on ${DateFormat('EEEE, MMM dd').format(_selectedDate!)}.\n\nPlease select another date.';
-          _isLoadingSlots = false;
+              '${_selectedBarber!['full_name']} is on leave on this date.';
         });
         return;
       }
 
-      if (conflictType == 'BARBER_UNAVAILABLE') {
-        setState(() {
-          _slotErrorMessage =
-              '${_selectedBarber!['full_name']} is not working on ${DateFormat('EEEE, MMM dd').format(_selectedDate!)}.\n\nPlease select another barber or date.';
-          _isLoadingSlots = false;
+      // 2. GET WORK HOURS (UTC from DB)
+      String workStartUTC =
+          effectiveSchedule['work_start']?.toString() ?? '09:00';
+      String workEndUTC = effectiveSchedule['work_end']?.toString() ?? '18:00';
+
+      if (workStartUTC.length > 5) workStartUTC = workStartUTC.substring(0, 5);
+      if (workEndUTC.length > 5) workEndUTC = workEndUTC.substring(0, 5);
+
+      // Parse UTC hours
+      final workStartParts = workStartUTC.split(':');
+      final workEndParts = workEndUTC.split(':');
+      int workStartHour = int.parse(workStartParts[0]);
+      int workStartMinute = workStartParts.length > 1
+          ? int.parse(workStartParts[1])
+          : 0;
+      int workEndHour = int.parse(workEndParts[0]);
+      int workEndMinute = workEndParts.length > 1
+          ? int.parse(workEndParts[1])
+          : 0;
+
+      // 3. GET BREAKS (UTC from DB)
+      List<Map<String, dynamic>> breakRanges = [];
+
+      String? breakStartUTC = effectiveSchedule['lunch_break_start']
+          ?.toString();
+      String? breakEndUTC = effectiveSchedule['lunch_break_end']?.toString();
+      bool hasSpecialBreak = effectiveSchedule['has_special_break'] == true;
+
+      if (breakStartUTC != null &&
+          breakEndUTC != null &&
+          breakStartUTC.isNotEmpty &&
+          breakEndUTC.isNotEmpty) {
+        if (breakStartUTC.length > 5) {
+          breakStartUTC = breakStartUTC.substring(0, 5);
+        }
+        if (breakEndUTC.length > 5) breakEndUTC = breakEndUTC.substring(0, 5);
+
+        final breakStartParts = breakStartUTC.split(':');
+        final breakEndParts = breakEndUTC.split(':');
+
+        breakRanges.add({
+          'start_hour': int.parse(breakStartParts[0]),
+          'start_min': breakStartParts.length > 1
+              ? int.parse(breakStartParts[1])
+              : 0,
+          'end_hour': int.parse(breakEndParts[0]),
+          'end_min': breakEndParts.length > 1 ? int.parse(breakEndParts[1]) : 0,
+          'type': hasSpecialBreak ? 'special' : 'regular',
         });
-        return;
       }
 
-      if (conflictType == 'NO_SLOTS_REMAINING') {
-        setState(() {
-          _slotErrorMessage =
-              'No appointments available on ${DateFormat('EEEE, MMM dd').format(_selectedDate!)}.\n\nAll time slots are fully booked. Please select another date.';
-          _isLoadingSlots = false;
+      // 4. GET EXISTING VIP APPOINTMENTS (VIP ONLY)
+      final existingAppointments = await supabase
+          .from('appointments')
+          .select('id, start_time, end_time, vip_queue_number, is_vip, status')
+          .eq('barber_id', _selectedBarber!['id'])
+          .eq('appointment_date', dateStr)
+          .eq('is_vip', true)
+          .neq('status', 'cancelled')
+          .neq('status', 'no_show')
+          .order('start_time', ascending: true);
+
+      List<Map<String, dynamic>> bookedRanges = [];
+      for (final apt in existingAppointments) {
+        String startTimeUTC = apt['start_time'].toString();
+        String endTimeUTC = apt['end_time'].toString();
+
+        if (startTimeUTC.length > 5) {
+          startTimeUTC = startTimeUTC.substring(0, 5);
+        }
+        if (endTimeUTC.length > 5) endTimeUTC = endTimeUTC.substring(0, 5);
+
+        final startParts = startTimeUTC.split(':');
+        final endParts = endTimeUTC.split(':');
+
+        bookedRanges.add({
+          'start_hour': int.parse(startParts[0]),
+          'start_min': startParts.length > 1 ? int.parse(startParts[1]) : 0,
+          'end_hour': int.parse(endParts[0]),
+          'end_min': endParts.length > 1 ? int.parse(endParts[1]) : 0,
+          'vip_number': apt['vip_queue_number'] ?? 0,
+          'is_vip': true,
         });
-        return;
       }
 
-      // Travel time selector (only when needed and for today)
-      if (data['needs_travel_selector'] == true &&
-          _selectedTravelTime == 0 &&
-          isToday) {
-        setState(() {
-          _showTravelTimeSelector = true;
-          _isLoadingSlots = false;
-        });
-        return;
-      }
+      // 5. GENERATE SLOTS
+      final List<Map<String, dynamic>> slots = [];
+      int slotNumber = 1;
 
-      // Create queue slot
-      String utcStart = data['new_start_time']?.toString() ?? '--:--';
-      String utcEnd = data['new_end_time']?.toString() ?? '--:--';
-      String localStart = TimezoneService.utcToLocalTime(
-        utcStart,
-        _selectedDate!,
+      DateTime currentSlotStartUTC = DateTime(
+        _selectedDate!.year,
+        _selectedDate!.month,
+        _selectedDate!.day,
+        workStartHour,
+        workStartMinute,
       );
-      String localEnd = TimezoneService.utcToLocalTime(utcEnd, _selectedDate!);
 
-      final queueNum = data['new_queue_number'] is int
-          ? data['new_queue_number']
-          : 1;
-      final wait = data['estimated_wait_minutes'] is int
-          ? data['estimated_wait_minutes']
-          : 0;
-      final extMins = data['extension_minutes'] is int
-          ? data['extension_minutes']
-          : 0;
-      final willExtend = data['salon_will_extend'] == true;
-      final adjusted = data['adjusted_for']?.toString() ?? '';
+      DateTime workEndDateTimeUTC = DateTime(
+        _selectedDate!.year,
+        _selectedDate!.month,
+        _selectedDate!.day,
+        workEndHour,
+        workEndMinute,
+      );
 
-      final newSlot = {
-        'start_time': localStart,
-        'end_time': localEnd,
-        'utc_start_time': utcStart,
-        'utc_end_time': utcEnd,
-        'queue_number': queueNum,
-        'is_available': true,
-        'duration': totalDuration,
-        'estimated_wait_minutes': wait,
-        'travel_time_used': _selectedTravelTime,
-        'salon_will_extend': willExtend,
-        'extension_minutes': extMins,
-        'adjusted_for': adjusted,
-      };
+      // Handle cross-midnight work hours
+      if (workEndHour < workStartHour ||
+          (workEndHour == workStartHour && workEndMinute <= workStartMinute)) {
+        workEndDateTimeUTC = workEndDateTimeUTC.add(const Duration(days: 1));
+      }
+
+      // Helper function to check overlap
+      bool isOverlapWithRanges(
+        int startMin,
+        int endMin,
+        List<Map<String, dynamic>> ranges,
+      ) {
+        for (final range in ranges) {
+          final rangeStartMin =
+              (range['start_hour'] as int) * 60 + (range['start_min'] as int);
+          int rangeEndMin =
+              (range['end_hour'] as int) * 60 + (range['end_min'] as int);
+
+          // Handle ranges that cross midnight
+          if (rangeEndMin < rangeStartMin) {
+            rangeEndMin += 24 * 60;
+          }
+
+          int effectiveEndMin = endMin;
+          if (endMin < startMin) {
+            effectiveEndMin = endMin + 24 * 60;
+          }
+
+          if (startMin < rangeEndMin && effectiveEndMin > rangeStartMin) {
+            return true;
+          }
+        }
+        return false;
+      }
+
+      while (currentSlotStartUTC.isBefore(workEndDateTimeUTC)) {
+        final slotStartUTC = currentSlotStartUTC;
+        final slotEndUTC = currentSlotStartUTC.add(
+          Duration(minutes: totalDuration),
+        );
+
+        if (slotEndUTC.isAfter(workEndDateTimeUTC)) {
+          break;
+        }
+
+        int slotStartMin = slotStartUTC.hour * 60 + slotStartUTC.minute;
+        int slotEndMin = slotEndUTC.hour * 60 + slotEndUTC.minute;
+
+        bool isOverlappingWithBookings = isOverlapWithRanges(
+          slotStartMin,
+          slotEndMin,
+          bookedRanges,
+        );
+        bool isOverlappingWithBreak = isOverlapWithRanges(
+          slotStartMin,
+          slotEndMin,
+          breakRanges,
+        );
+
+        // Convert to local for past check
+        final localSlotStart = TimezoneService.utcToLocalDateTime(
+          '${slotStartUTC.hour.toString().padLeft(2, '0')}:${slotStartUTC.minute.toString().padLeft(2, '0')}',
+          _selectedDate!,
+        );
+        bool isPast = _isSlotInPast(localSlotStart, totalDuration);
+
+        bool isAvailable =
+            !isOverlappingWithBookings && !isPast && !isOverlappingWithBreak;
+
+        String statusText = '';
+        int displayVipNumber = 0;
+
+        if (isOverlappingWithBookings) {
+          statusText = 'Booked';
+          for (final booked in bookedRanges) {
+            final bookedStartMin =
+                (booked['start_hour'] as int) * 60 +
+                (booked['start_min'] as int);
+            final bookedEndMin =
+                (booked['end_hour'] as int) * 60 + (booked['end_min'] as int);
+            if (slotStartMin < bookedEndMin && slotEndMin > bookedStartMin) {
+              displayVipNumber = booked['vip_number'];
+              break;
+            }
+          }
+        } else if (isOverlappingWithBreak) {
+          statusText =
+              breakRanges.isNotEmpty && breakRanges.first['type'] == 'special'
+              ? 'Special Break'
+              : 'Break';
+        } else if (isPast) {
+          statusText = 'Time Passed';
+        } else {
+          // Calculate VIP number based on start time order
+          int vipCountBefore = 0;
+          for (final booked in bookedRanges) {
+            if (booked['is_vip'] == true) {
+              final bookedStartMin =
+                  (booked['start_hour'] as int) * 60 +
+                  (booked['start_min'] as int);
+              if (bookedStartMin < slotStartMin) {
+                vipCountBefore++;
+              }
+            }
+          }
+          displayVipNumber = vipCountBefore + 1;
+        }
+
+        // Convert UTC to Local for DISPLAY
+        final localStartDateTime = TimezoneService.utcToLocalDateTime(
+          '${slotStartUTC.hour.toString().padLeft(2, '0')}:${slotStartUTC.minute.toString().padLeft(2, '0')}',
+          _selectedDate!,
+        );
+        final localEndDateTime = TimezoneService.utcToLocalDateTime(
+          '${slotEndUTC.hour.toString().padLeft(2, '0')}:${slotEndUTC.minute.toString().padLeft(2, '0')}',
+          _selectedDate!,
+        );
+
+        final displayStartTime = _formatTimeWithAmPm(localStartDateTime);
+        final displayEndTime = _formatTimeWithAmPm(localEndDateTime);
+
+        final utcStartTimeStr =
+            '${slotStartUTC.hour.toString().padLeft(2, '0')}:${slotStartUTC.minute.toString().padLeft(2, '0')}:00';
+        final utcEndTimeStr =
+            '${slotEndUTC.hour.toString().padLeft(2, '0')}:${slotEndUTC.minute.toString().padLeft(2, '0')}:00';
+
+        slots.add({
+          'start_time_display': displayStartTime,
+          'end_time_display': displayEndTime,
+          'utc_start_time': utcStartTimeStr,
+          'utc_end_time': utcEndTimeStr,
+          'slot_number': slotNumber,
+          'vip_number': displayVipNumber,
+          'is_available': isAvailable,
+          'is_past': isPast,
+          'is_booked': isOverlappingWithBookings,
+          'is_break': isOverlappingWithBreak,
+          'status_text': statusText,
+          'duration': totalDuration,
+        });
+
+        slotNumber++;
+        currentSlotStartUTC = currentSlotStartUTC.add(
+          Duration(minutes: totalDuration),
+        );
+      }
 
       setState(() {
-        _availableSlots = [newSlot];
-        _selectedSlot = newSlot;
+        _allTimeSlots = slots;
         _isLoadingSlots = false;
-        _slotErrorMessage = null;
-        _showTravelTimeSelector = false;
       });
     } catch (e) {
+     
       setState(() {
         _isLoadingSlots = false;
         _slotErrorMessage = 'Failed to load time slots. Please try again.';
-        _availableSlots = [];
+        _allTimeSlots = [];
       });
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Error: ${e.toString().replaceFirst('Exception: ', '')}',
-            ),
-            backgroundColor: Colors.red,
-          ),
-        );
+    }
+  }
+
+  Future<void> _bookSlot(Map<String, dynamic> slot) async {
+    if (!slot['is_available']) return;
+
+    setState(() {
+      _isLoadingSlots = true;
+    });
+
+    try {
+      final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate!);
+      final selectedStartTime = slot['utc_start_time'];
+      final selectedStartMin =
+          int.parse(selectedStartTime.split(':')[0]) * 60 +
+          int.parse(selectedStartTime.split(':')[1]);
+
+      final existingVIP = await supabase
+          .from('appointments')
+          .select('start_time, vip_queue_number')
+          .eq('barber_id', _selectedBarber!['id'])
+          .eq('appointment_date', dateStr)
+          .eq('is_vip', true)
+          .neq('status', 'cancelled')
+          .neq('status', 'no_show')
+          .order('start_time', ascending: true);
+
+      int vipNumber = 1;
+      for (final vip in existingVIP) {
+        String vipStartTime = vip['start_time'].toString();
+        if (vipStartTime.length > 5) {
+          vipStartTime = vipStartTime.substring(0, 5);
+        }
+        final vipStartParts = vipStartTime.split(':');
+        final vipStartMin =
+            int.parse(vipStartParts[0]) * 60 + int.parse(vipStartParts[1]);
+        if (vipStartMin < selectedStartMin) {
+          vipNumber++;
+        } else {
+          break;
+        }
       }
+
+      setState(() {
+        _selectedSlot = slot;
+        _selectedStartTime = slot['start_time_display'];
+        _generatedVipNumber = vipNumber;
+        _showingVipNumber = true;
+        _isLoadingSlots = false;
+      });
+    } catch (e) {
+     
+      setState(() {
+        _isLoadingSlots = false;
+        _selectedSlot = slot;
+        _selectedStartTime = slot['start_time_display'];
+        _generatedVipNumber = slot['vip_number'];
+        _showingVipNumber = true;
+      });
     }
   }
 
   Widget _buildTimeSlotStep() {
+    final availableSlots = _allTimeSlots
+        .where((s) => s['is_available'] == true)
+        .toList();
+    final unavailableSlots = _allTimeSlots
+        .where((s) => !s['is_available'])
+        .toList();
+
     return Column(
       children: [
-        // Fixed header
         Container(
           padding: const EdgeInsets.all(16),
           color: Colors.white,
@@ -2617,7 +2699,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           ),
         ),
 
-        // Date row
         if (_selectedDate != null)
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -2645,10 +2726,8 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
             ),
           ),
 
-        // Timezone indicator
         _buildTimezoneIndicator(),
 
-        // Scrollable content
         Expanded(
           child: _isLoadingSlots
               ? const Center(child: CircularProgressIndicator())
@@ -2666,7 +2745,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                         ),
                         const SizedBox(height: 20),
                         Text(
-                          'No Appointments Available',
+                          'No VIP Slots Available',
                           style: TextStyle(
                             fontSize: 20,
                             fontWeight: FontWeight.bold,
@@ -2716,18 +2795,17 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                                 );
                                 setState(() {
                                   _selectedDate = tomorrow;
-                                  _showTravelTimeSelector = false;
-                                  _selectedTravelTime = 0;
-                                  _availableSlots = [];
+                                  _allTimeSlots = [];
                                   _isLoadingSlots = true;
                                   _slotErrorMessage = null;
+                                  _showingVipNumber = false;
                                 });
                                 await _checkDateAvailability(tomorrow);
                                 await _loadAvailableSlots();
                               },
                               icon: const Icon(Icons.arrow_forward, size: 18),
                               label: Text(
-                                'Try ${DateFormat('MMM dd').format(_selectedDate != null ? _selectedDate!.add(const Duration(days: 1)) : DateTime.now())}',
+                                'Try ${DateFormat('MMM dd').format(_selectedDate!.add(const Duration(days: 1)))}',
                               ),
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: _primaryColor,
@@ -2739,60 +2817,340 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                             ),
                           ],
                         ),
-                        const SizedBox(height: 16),
-                        if (_selectedBarber != null)
-                          TextButton.icon(
-                            onPressed: () {
-                              setState(() {
-                                _selectedBarber = null;
-                                _currentStep = 3;
-                                _slotErrorMessage = null;
-                              });
-                            },
-                            icon: Icon(
-                              Icons.person,
-                              size: 18,
-                              color: _primaryColor,
-                            ),
-                            label: Text(
-                              'Try Another Barber',
-                              style: TextStyle(color: _primaryColor),
-                            ),
-                          ),
                       ],
                     ),
                   ),
                 )
               : SingleChildScrollView(
+                  padding: const EdgeInsets.all(16),
                   child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-                      if (_availableSlots.isNotEmpty)
-                        _buildTimeSlotCard(_availableSlots.first),
-                      if (_showTravelTimeSelector) _buildTravelTimeSelector(),
+                      const Text(
+                        'Select VIP Time Slot',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Choose your preferred time',
+                        style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+                      ),
+                      const SizedBox(height: 20),
+
+                      // VIP Number Card
+                      if (_showingVipNumber && _selectedSlot != null) ...[
+                        Center(
+                          child: Card(
+                            margin: const EdgeInsets.symmetric(
+                              vertical: 8,
+                              horizontal: 16,
+                            ),
+                            elevation: 6,
+                            color: _primaryColor.withValues(alpha: 0.08),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(24),
+                              side: BorderSide(color: _primaryColor, width: 2),
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.all(24),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    'Your VIP Number',
+                                    style: TextStyle(
+                                      fontSize: 15,
+                                      color: Colors.grey[600],
+                                      letterSpacing: 1.5,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    'VIP-$_generatedVipNumber',
+                                    style: TextStyle(
+                                      fontSize: 56,
+                                      fontWeight: FontWeight.bold,
+                                      color: _primaryColor,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 16),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 24,
+                                      vertical: 12,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: Colors.grey[100],
+                                      borderRadius: BorderRadius.circular(40),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.access_time,
+                                          size: 22,
+                                          color: _primaryColor,
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Text(
+                                          _selectedStartTime,
+                                          style: TextStyle(
+                                            fontSize: 17,
+                                            fontWeight: FontWeight.w600,
+                                            color: _textDark,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                      ],
+
+                      // Available Slots
+                      if (availableSlots.isNotEmpty) ...[
+                        const Text(
+                          'Available Slots',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Wrap(
+                          alignment: WrapAlignment.center,
+                          spacing: 12,
+                          runSpacing: 12,
+                          children: availableSlots.map((slot) {
+                            final isSelected = _selectedSlot == slot;
+                            final displayTime = slot['start_time_display'];
+                            final willGetVipNumber = slot['vip_number'];
+
+                            return ElevatedButton(
+                              onPressed: () => _bookSlot(slot),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: isSelected && _showingVipNumber
+                                    ? _primaryColor
+                                    : Colors.white,
+                                foregroundColor: isSelected && _showingVipNumber
+                                    ? Colors.white
+                                    : _primaryColor,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(25),
+                                  side: BorderSide(
+                                    color: isSelected && _showingVipNumber
+                                        ? _primaryColor
+                                        : _primaryColor.withValues(alpha: 0.5),
+                                    width: 1.5,
+                                  ),
+                                ),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 12,
+                                ),
+                                elevation: isSelected && _showingVipNumber
+                                    ? 2
+                                    : 0,
+                              ),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    displayTime,
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight:
+                                          isSelected && _showingVipNumber
+                                          ? FontWeight.bold
+                                          : FontWeight.w500,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    'VIP-$willGetVipNumber',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w400,
+                                      color: isSelected && _showingVipNumber
+                                          ? Colors.white70
+                                          : _primaryColor.withValues(
+                                              alpha: 0.7,
+                                            ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      ],
+
+                      // Unavailable Slots
+                      if (unavailableSlots.isNotEmpty) ...[
+                        const SizedBox(height: 24),
+                        const Text(
+                          'Unavailable Slots',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.grey,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Wrap(
+                          alignment: WrapAlignment.center,
+                          spacing: 12,
+                          runSpacing: 12,
+                          children: unavailableSlots.map((slot) {
+                            final displayTime = slot['start_time_display'];
+                            final statusText = slot['status_text'] ?? '';
+                            final isBooked = slot['is_booked'] == true;
+                            final isBreak = slot['is_break'] == true;
+                            final isPast = slot['is_past'] == true;
+
+                            String displayStatus = '';
+                            Color statusColor = Colors.grey[500]!;
+
+                            if (isBooked) {
+                              displayStatus = 'Booked';
+                              statusColor = Colors.red.shade400;
+                            } else if (isBreak) {
+                              displayStatus = 'Break';
+                              statusColor = Colors.orange.shade600;
+                            } else if (isPast) {
+                              displayStatus = 'Time Passed';
+                              statusColor = Colors.grey[500]!;
+                            } else if (statusText.isNotEmpty) {
+                              displayStatus = statusText;
+                              statusColor = Colors.grey[500]!;
+                            }
+
+                            return Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 10,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.grey[100],
+                                borderRadius: BorderRadius.circular(25),
+                                border: Border.all(color: Colors.grey[300]!),
+                              ),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    displayTime,
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: Colors.grey[500],
+                                      decoration: TextDecoration.lineThrough,
+                                    ),
+                                  ),
+                                  if (displayStatus.isNotEmpty)
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 2),
+                                      child: Text(
+                                        displayStatus,
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          color: statusColor,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      ],
+
+                      // No available slots message
+                      if (availableSlots.isEmpty &&
+                          unavailableSlots.isNotEmpty) ...[
+                        const SizedBox(height: 24),
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: Colors.orange.shade50,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Column(
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(
+                                    Icons.info_outline,
+                                    color: Colors.orange.shade700,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Text(
+                                      'No available slots on this date.',
+                                      style: TextStyle(
+                                        color: Colors.orange.shade700,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 16),
+                              ElevatedButton.icon(
+                                onPressed: () async {
+                                  if (_selectedDate == null) return;
+                                  final nextDate = _selectedDate!.add(
+                                    const Duration(days: 1),
+                                  );
+                                  setState(() {
+                                    _selectedDate = nextDate;
+                                    _allTimeSlots = [];
+                                    _isLoadingSlots = true;
+                                    _slotErrorMessage = null;
+                                    _showingVipNumber = false;
+                                    _selectedSlot = null;
+                                  });
+                                  await _checkDateAvailability(nextDate);
+                                  await _loadAvailableSlots();
+                                },
+                                icon: const Icon(Icons.arrow_forward, size: 18),
+                                label: Text(
+                                  'Try Next Day (${DateFormat('MMM dd').format(_selectedDate!.add(const Duration(days: 1)))})',
+                                ),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: _primaryColor,
+                                  foregroundColor: Colors.white,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(30),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
         ),
 
-        // Continue button
         Padding(
           padding: const EdgeInsets.all(16),
           child: SizedBox(
             width: double.infinity,
             child: ElevatedButton(
-              onPressed:
-                  (_selectedSlot != null &&
-                      !_isLoadingSlots &&
-                      _availableSlots.isNotEmpty &&
-                      _slotErrorMessage == null)
+              onPressed: (_selectedSlot != null && _showingVipNumber)
                   ? () => setState(() => _currentStep = 6)
                   : null,
               style: ElevatedButton.styleFrom(
-                backgroundColor:
-                    (_selectedSlot != null &&
-                        !_isLoadingSlots &&
-                        _availableSlots.isNotEmpty &&
-                        _slotErrorMessage == null)
+                backgroundColor: (_selectedSlot != null && _showingVipNumber)
                     ? _primaryColor
                     : Colors.grey[400],
                 foregroundColor: Colors.white,
@@ -2810,151 +3168,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           ),
         ),
       ],
-    );
-  }
-
-  Widget _buildTimeSlotCard(Map<String, dynamic> slot) {
-    final isSelected = _selectedSlot?['start_time'] == slot['start_time'];
-    final queueNumber = slot['queue_number'] ?? 0;
-    final startTime = slot['start_time'];
-    final endTime = slot['end_time'];
-    final waitMinutes = slot['estimated_wait_minutes'] ?? 0;
-    final travelTimeUsed = slot['travel_time_used'] ?? 0;
-    final salonWillExtend = slot['salon_will_extend'] ?? false;
-    final extensionMinutes = slot['extension_minutes'] ?? 0;
-    final needsSelector = slot['needs_travel_selector'] ?? false;
-
-    return Card(
-      margin: const EdgeInsets.all(16),
-      elevation: isSelected ? 6 : 2,
-      color: isSelected ? _primaryColor.withValues(alpha: 0.08) : Colors.white,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(24),
-        side: BorderSide(
-          color: isSelected ? _primaryColor : Colors.grey[200]!,
-          width: isSelected ? 2 : 1,
-        ),
-      ),
-      child: InkWell(
-        onTap: () => setState(() => _selectedSlot = slot),
-        borderRadius: BorderRadius.circular(24),
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'Your Queue Number',
-                style: TextStyle(
-                  fontSize: 15,
-                  color: Colors.grey[600],
-                  letterSpacing: 1.5,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                '$queueNumber',
-                style: TextStyle(
-                  fontSize: 56,
-                  fontWeight: FontWeight.bold,
-                  color: _primaryColor,
-                ),
-              ),
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 24,
-                  vertical: 12,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.grey[100],
-                  borderRadius: BorderRadius.circular(40),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.access_time, size: 22, color: _primaryColor),
-                    const SizedBox(width: 10),
-                    Text(
-                      '$startTime - $endTime',
-                      style: TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w600,
-                        color: _textDark,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-              if (waitMinutes > 0 && waitMinutes <= 200)
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.orange.shade50,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    '⏱️ ~ $waitMinutes min wait time',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: Colors.orange.shade700,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-              if (travelTimeUsed > 0)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text(
-                    '🚗 +$travelTimeUsed min travel time included',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: _primaryColor,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-              if (salonWillExtend)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text(
-                    '⏰ Salon will close $extensionMinutes min late for you',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: Colors.green.shade700,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-              if (waitMinutes > 200)
-                Padding(
-                  padding: const EdgeInsets.only(top: 12),
-                  child: Text(
-                    '⚠️ Long wait time. Consider another date.',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: Colors.red.shade700,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-              if (needsSelector && travelTimeUsed == 0)
-                Padding(
-                  padding: const EdgeInsets.only(top: 12),
-                  child: Text(
-                    '👇 Select travel time below to adjust your slot',
-                    style: TextStyle(fontSize: 13, color: Colors.grey[600]),
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ),
     );
   }
 
@@ -2986,7 +3199,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: _primaryColor,
-                foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
@@ -3008,17 +3220,14 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         : _getChildNameForBooking();
 
     final salonName = _selectedSalon!['name'] ?? 'Salon';
-    final salonAddress = _selectedSalon!['address'] ?? '';
-    final startTime = _selectedSlot!['start_time'] ?? '--:--';
-    final endTime = _selectedSlot!['end_time'] ?? '--:--';
-    final queueNumber = _selectedSlot!['queue_number'] ?? '?';
-    final travelTimeUsed = _selectedSlot!['travel_time_used'] ?? 0;
-    final salonWillExtend = _selectedSlot!['salon_will_extend'] ?? false;
-    final extensionMinutes = _selectedSlot!['extension_minutes'] ?? 0;
-    final adjustedFor = _selectedSlot!['adjusted_for']?.toString() ?? '';
+
+    final startTime = _selectedSlot!['start_time_display'] ?? '--:--';
+    final endTime = _selectedSlot!['end_time_display'] ?? '--:--';
+
+    final vipNumber = _generatedVipNumber;
     final barberName = _selectedBarber!['full_name'] ?? 'Barber';
     final barberRating =
-        (_selectedBarber!['avg_rating'] as num?)?.toStringAsFixed(1) ?? 'New';
+        (_selectedBarber!['avg_rating'] as num?)?.toStringAsFixed(1) ?? '0.0';
     final totalDuration = _calculateTotalDuration();
     final totalPrice = _calculateTotalPrice().toStringAsFixed(2);
 
@@ -3030,17 +3239,24 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
             child: Column(
               children: [
                 _buildConfirmationTile(
+                  Icons.star,
+                  'VIP Booking',
+                  'VIP-$vipNumber',
+                  '',
+                ),
+                const SizedBox(height: 12),
+                _buildConfirmationTile(
                   Icons.store,
                   'Salon',
                   salonName,
-                  salonAddress,
+                  _selectedSalon!['address'] ?? '',
                 ),
                 const SizedBox(height: 12),
                 _buildConfirmationTile(
                   Icons.calendar_today,
                   'Date & Time',
                   DateFormat('EEEE, MMM dd').format(_selectedDate!),
-                  '$startTime - $endTime • Queue $queueNumber',
+                  '$startTime - $endTime',
                 ),
                 const SizedBox(height: 12),
                 _buildConfirmationTile(
@@ -3073,36 +3289,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                   barberName,
                   '⭐ $barberRating rating',
                 ),
-                if (travelTimeUsed > 0)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 12),
-                    child: _buildConfirmationTile(
-                      Icons.directions_car,
-                      'Travel Time',
-                      '$travelTimeUsed minutes',
-                      '',
-                    ),
-                  ),
-                if (salonWillExtend)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 12),
-                    child: _buildConfirmationTile(
-                      Icons.access_time,
-                      'Salon Hours',
-                      'Extended by $extensionMinutes minutes',
-                      'Salon will stay open later',
-                    ),
-                  ),
-                if (adjustedFor.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 12),
-                    child: _buildConfirmationTile(
-                      Icons.info,
-                      'Note',
-                      _getAdjustedForDisplay(adjustedFor),
-                      '',
-                    ),
-                  ),
               ],
             ),
           ),
@@ -3132,7 +3318,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                       ),
                     )
                   : const Text(
-                      'Confirm Booking',
+                      'Confirm VIP Booking',
                       style: TextStyle(
                         fontSize: 17,
                         fontWeight: FontWeight.bold,
@@ -3143,29 +3329,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         ),
       ],
     );
-  }
-
-  String _getAdjustedForDisplay(String adjustedFor) {
-    if (adjustedFor.contains('VIP_AFTER')) {
-      return 'Time adjusted - After VIP appointment';
-    }
-    if (adjustedFor.contains('VIP_PUSHED')) {
-      return 'VIP appointment rescheduled after this';
-    }
-    if (adjustedFor.contains('BREAK_AFTER')) {
-      return 'Time adjusted - After barber break';
-    }
-    if (adjustedFor.contains('LEAVE_AFTER')) {
-      return 'Time adjusted - After barber leave';
-    }
-    if (adjustedFor.contains('SALON_EXTEND')) {
-      return 'Salon hours extended for this appointment';
-    }
-    if (adjustedFor.contains('TRAVEL')) return 'Travel time added';
-    if (adjustedFor.contains('AFTER_EFFECTIVE')) {
-      return 'Adjusted due to previous appointment';
-    }
-    return 'Time adjusted based on availability';
   }
 
   Widget _buildConfirmationTile(
@@ -3238,8 +3401,11 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       final user = supabase.auth.currentUser;
       if (user == null) throw Exception('Please login');
 
+      final utcStartTime = _selectedSlot!['utc_start_time'];
+      final utcEndTime = _selectedSlot!['utc_end_time'];
+
       final result = await supabase.rpc(
-        'create_new_appointment_advanced',
+        'create_vip_booking',
         params: {
           'p_customer_id': user.id,
           'p_salon_id': _selectedSalon!['id'],
@@ -3247,33 +3413,28 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           'p_service_id': _selectedServices.first['id'],
           'p_variant_id': _selectedServices.first['variant_id'],
           'p_appointment_date': DateFormat('yyyy-MM-dd').format(_selectedDate!),
-          'p_utc_start_time': _selectedSlot!['utc_start_time'],
-          'p_utc_end_time': _selectedSlot!['utc_end_time'],
+          'p_utc_start_time': utcStartTime,
+          'p_utc_end_time': utcEndTime,
           'p_child_name': _getChildNameForBooking(),
-          'p_travel_time_minutes': _selectedSlot!['travel_time_used'] ?? 0,
           'p_notes': _selectedServices.length > 1
               ? 'Combined: ${_selectedServices.map((s) => s['name']).join(", ")}'
               : null,
-          'p_is_vip': false,
-          'p_vip_booking_id': null,
-          'p_confirm_overflow': true,
         },
       );
 
       if (!mounted) return;
 
       if (result['success'] == true) {
+        final confirmedVipNumber = result['vip_number'] ?? _generatedVipNumber;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(
-              '✅ Booking Confirmed! Queue ${result['queue_number']}',
-            ),
+            content: Text('✅ VIP Booking Confirmed! VIP-$confirmedVipNumber'),
             backgroundColor: _secondaryColor,
           ),
         );
         Navigator.pop(context, true);
       } else {
-        throw Exception(result['message'] ?? 'Booking failed');
+        throw Exception(result['message'] ?? 'VIP booking failed');
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -3299,7 +3460,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       backgroundColor: _bgLight,
       appBar: AppBar(
         title: Text(
-          'Book Appointment',
+          'VIP Booking',
           style: TextStyle(
             fontSize: isMobile ? 18 : 20,
             fontWeight: FontWeight.w600,

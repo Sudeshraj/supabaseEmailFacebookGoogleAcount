@@ -118,6 +118,9 @@
     <key>NSLocationWhenInUseUsageDescription</key>
     <string>This app needs location access</string>
 
+    <!-- time zone eka device eken ganna permison -->
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>We need your location to detect timezone</string>
 
 
 </dict>
