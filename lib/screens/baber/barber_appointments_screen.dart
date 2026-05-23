@@ -89,6 +89,18 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
     return '';
   }
 
+  String _getDisplayTime(Map<String, dynamic> appointment) {
+    // Priority: estimated_start_time > start_time
+    if (appointment['estimated_start_time'] != null) {
+      final estimatedTime = appointment['estimated_start_time'].toString();
+      if (estimatedTime.length > 5) {
+        return estimatedTime.substring(0, 5);
+      }
+      return estimatedTime;
+    }
+    return appointment['local_start_time'] ?? '';
+  }
+
   // =====================================================
   // LOAD APPOINTMENTS
   // =====================================================
@@ -117,7 +129,9 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
             regular_queue_number,
             vip_queue_number,
             queue_position,
-            is_vip
+            is_vip,
+            estimated_start_time,
+            estimated_end_time
           ''')
           .eq('barber_id', user.id)
           .order('appointment_date', ascending: true);
@@ -211,6 +225,8 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
 
         final utcStart = apt['start_time'] as String;
         final utcEnd = apt['end_time'] as String;
+
+        // Convert UTC to local time for display
         final localStart = TimezoneService.utcToLocalTime(
           utcStart,
           appointmentDate,
@@ -220,9 +236,23 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
           appointmentDate,
         );
 
+        // Format estimated times if exists
+        String estimatedStartDisplay = '';
+        String estimatedEndDisplay = '';
+        if (apt['estimated_start_time'] != null) {
+          final estStart = DateTime.parse(apt['estimated_start_time']);
+          estimatedStartDisplay = DateFormat('HH:mm').format(estStart);
+          if (apt['estimated_end_time'] != null) {
+            final estEnd = DateTime.parse(apt['estimated_end_time']);
+            estimatedEndDisplay = DateFormat('HH:mm').format(estEnd);
+          }
+        }
+
         final displayQueue = _getDisplayQueueNumber(apt);
         final isVip = apt['is_vip'] ?? false;
         final queuePosition = apt['queue_position'];
+        final isStarted = apt['is_started'] ?? false;
+        final isCompleted = apt['is_completed'] ?? false;
 
         final appointmentData = {
           'id': apt['id'],
@@ -247,9 +277,17 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
           'salon_name': salonName,
           'local_start_time': localStart,
           'local_end_time': localEnd,
+          'estimated_start_time': estimatedStartDisplay,
+          'estimated_end_time': estimatedEndDisplay,
+          'is_started': isStarted,
+          'is_completed': isCompleted,
           'date_display': DateFormat('MMM dd, yyyy').format(appointmentDate),
           'day_display': DateFormat('EEEE').format(appointmentDate),
           'time_display': '$localStart - $localEnd',
+          'display_time': _getDisplayTime({
+            'estimated_start_time': apt['estimated_start_time'],
+            'local_start_time': localStart,
+          }),
         };
 
         if (apt['status'] == 'cancelled' || apt['status'] == 'no_show') {
@@ -328,9 +366,37 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
                     children: [
                       Icon(Icons.access_time, size: 16, color: _primaryColor),
                       const SizedBox(width: 8),
-                      Text('Scheduled: ${appointment['local_start_time']}'),
+                      Text(
+                        'Display Time: ${appointment['display_time']}',
+                        style: const TextStyle(fontWeight: FontWeight.w500),
+                      ),
                     ],
                   ),
+                  if (appointment['estimated_start_time'].isNotEmpty &&
+                      appointment['estimated_start_time'] !=
+                          appointment['local_start_time'])
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.schedule,
+                            size: 14,
+                            color: Colors.grey[500],
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Scheduled: ${appointment['local_start_time']}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[600],
+                              decoration: TextDecoration.lineThrough,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  const Divider(),
                   Row(
                     children: [
                       Icon(
@@ -394,12 +460,14 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
       if (user == null) throw Exception('User not found');
 
       final nowUtc = DateTime.now().toUtc();
+      final userTimezone = TimezoneService.getCurrentTimezone();
 
       final result = await supabase.rpc(
         'adjust_on_appointment_start',
         params: {
           'p_appointment_id': appointment['id'],
           'p_actual_start_time': nowUtc.toIso8601String(),
+          'p_country_timezone': userTimezone,
         },
       );
 
@@ -410,6 +478,10 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
               result['start_delay_minutes'] > 0) {
             message =
                 '⚠️ Started ${result['start_delay_minutes']} min late. Next appointments adjusted.';
+          } else if (result['start_delay_minutes'] != null &&
+              result['start_delay_minutes'] < 0) {
+            message =
+                '✅ Started ${result['start_delay_minutes'].abs()} min early.';
           }
 
           ScaffoldMessenger.of(context).showSnackBar(
@@ -419,6 +491,7 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
                   ? _warningColor
                   : _secondaryColor,
               behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 3),
             ),
           );
           await _loadAppointments();
@@ -471,7 +544,7 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
                     children: [
                       Icon(Icons.access_time, size: 16, color: _primaryColor),
                       const SizedBox(width: 8),
-                      Text('Started: ${appointment['local_start_time']}'),
+                      Text('Started: ${appointment['display_time']}'),
                     ],
                   ),
                   Row(
@@ -582,7 +655,8 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(message),
-              backgroundColor: result['delay_minutes'] > 0
+              backgroundColor:
+                  result['delay_minutes'] != null && result['delay_minutes'] > 0
                   ? _warningColor
                   : _secondaryColor,
               behavior: SnackBarBehavior.floating,
@@ -750,7 +824,7 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
                           ),
                           const SizedBox(width: 8),
                           Text(
-                            '${appointment['date_display']} at ${appointment['local_start_time']}',
+                            '${appointment['date_display']} at ${appointment['display_time']}',
                             style: TextStyle(
                               fontSize: 13,
                               color: Colors.grey[600],
@@ -1028,6 +1102,7 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
     final isVip = appointment['is_vip'] ?? false;
     final displayQueue = appointment['display_queue'] ?? '';
     final queuePosition = appointment['queue_position'];
+    final displayTime = appointment['display_time'];
 
     showModalBottomSheet(
       context: context,
@@ -1125,7 +1200,15 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
               const SizedBox(height: 20),
               _buildInfoTile('Service', appointment['service_name']),
               _buildInfoTile('Date', appointment['date_display']),
-              _buildInfoTile('Time', appointment['time_display']),
+              _buildInfoTile('Time', displayTime),
+              if (appointment['estimated_start_time'].isNotEmpty &&
+                  appointment['estimated_start_time'] !=
+                      appointment['local_start_time'])
+                _buildInfoTile(
+                  'Original Time',
+                  appointment['local_start_time'],
+                  subtitle: 'Adjusted due to delay',
+                ),
               _buildInfoTile('Salon', appointment['salon_name']),
               _buildInfoTile(
                 'Price',
@@ -1165,7 +1248,7 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
     );
   }
 
-  Widget _buildInfoTile(String label, String value) {
+  Widget _buildInfoTile(String label, String value, {String? subtitle}) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Row(
@@ -1179,9 +1262,26 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
             ),
           ),
           Expanded(
-            child: Text(
-              value,
-              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  value,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                if (subtitle != null)
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Colors.grey[500],
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+              ],
             ),
           ),
         ],
@@ -1231,8 +1331,17 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
             tooltip: 'Select Date',
           ),
           IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadAppointments,
+            icon: _isLoading
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Icon(Icons.refresh),
+            onPressed: _isLoading ? null : _loadAppointments,
             tooltip: 'Refresh',
           ),
         ],
@@ -1436,6 +1545,10 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
     final isVip = appointment['is_vip'] ?? false;
     final displayQueue = appointment['display_queue'] ?? '';
     final queuePosition = appointment['queue_position'];
+    final displayTime = appointment['display_time'];
+    final hasEstimatedTime =
+        appointment['estimated_start_time'].isNotEmpty &&
+        appointment['estimated_start_time'] != appointment['local_start_time'];
 
     Color statusColor;
     String statusText;
@@ -1503,13 +1616,21 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
                         : _primaryColor.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: Text(
-                    appointment['local_start_time'],
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: isVip ? _vipColor : _primaryColor,
-                    ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (hasEstimatedTime)
+                        Icon(Icons.schedule, size: 12, color: _warningColor),
+                      if (hasEstimatedTime) const SizedBox(width: 4),
+                      Text(
+                        displayTime,
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: isVip ? _vipColor : _primaryColor,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -1581,6 +1702,24 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
                   ),
               ],
             ),
+            if (hasEstimatedTime && isToday)
+              Padding(
+                padding: const EdgeInsets.only(top: 4, left: 8),
+                child: Row(
+                  children: [
+                    Icon(Icons.access_time, size: 12, color: Colors.grey[500]),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Scheduled: ${appointment['local_start_time']}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.grey[500],
+                        decoration: TextDecoration.lineThrough,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             const SizedBox(height: 12),
             // Customer info
             Row(
@@ -1675,9 +1814,7 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
               ],
             ),
             const SizedBox(height: 12),
-            // =====================================================
-            // ACTION BUTTONS - UPDATED
-            // =====================================================
+            // Action buttons
             if (isToday && !isCancelled && !isCompleted)
               Row(
                 children: [
@@ -1700,7 +1837,7 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
                         ),
                       ),
                     ),
-                  
+
                   // END button - only if in progress
                   if (isInProgress)
                     Expanded(
@@ -1720,10 +1857,10 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
                         ),
                       ),
                     ),
-                  
+
                   const SizedBox(width: 12),
-                  
-                  // CANCEL button - only if not completed
+
+                  // CANCEL button - only if not started
                   if (!isInProgress)
                     Expanded(
                       child: OutlinedButton.icon(

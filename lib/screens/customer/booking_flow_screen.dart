@@ -3266,7 +3266,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              '✅ Booking Confirmed! Queue ${result['queue_number']}',
+              '✅ Booking Confirmed! Queue ${result['display_queue'] ?? result['regular_queue_number']}',
             ),
             backgroundColor: _secondaryColor,
           ),
@@ -3276,6 +3276,12 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         throw Exception(result['message'] ?? 'Booking failed');
       }
     } catch (e) {
+      setState(() {
+        _isBooking = false;
+        _slotErrorMessage =
+            'Booking failed: ${e.toString().replaceFirst('Exception: ', '')}';
+        _currentStep = 5;
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed: $e'), backgroundColor: Colors.red),
       );
