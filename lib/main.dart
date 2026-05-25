@@ -13,10 +13,13 @@ import 'package:flutter_application_1/screens/authantication/command/reset_passw
 import 'package:flutter_application_1/screens/authantication/command/reset_password_form.dart';
 import 'package:flutter_application_1/screens/authantication/command/reset_password_request.dart';
 import 'package:flutter_application_1/screens/authantication/command/role_selector_screen.dart';
+import 'package:flutter_application_1/screens/baber/barber_appointments_screen.dart';
 import 'package:flutter_application_1/screens/customer/booking_flow_screen.dart';
 import 'package:flutter_application_1/screens/customer/booking_screen.dart';
+import 'package:flutter_application_1/screens/customer/my_bookings_screen.dart';
 import 'package:flutter_application_1/screens/customer/salon_profile_screen.dart';
 import 'package:flutter_application_1/screens/customer/vip_booking_request_screen.dart';
+import 'package:flutter_application_1/screens/customer/vip_booking_screen.dart';
 import 'package:flutter_application_1/screens/owner/add_age_categories.dart';
 import 'package:flutter_application_1/screens/owner/add_barber_screen.dart';
 import 'package:flutter_application_1/screens/owner/add_barber_service_screen.dart';
@@ -33,6 +36,8 @@ import 'package:flutter_application_1/screens/owner/salon_holidays_screen.dart';
 import 'package:flutter_application_1/screens/owner/service_management.dart';
 import 'package:flutter_application_1/screens/owner/vip_booking_requests_screen.dart';
 import 'package:flutter_application_1/services/notification_service.dart';
+import 'package:flutter_application_1/services/timezone_service.dart';
+import 'package:flutter_application_1/utils/timezone_helper.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -161,6 +166,9 @@ Future<void> main() async {
     // ========== PHASE 7: APP STATE ==========
     appState = AppState();
     await appState.initializeApp();
+
+    // Initialize timezone 
+     await TimezoneService.initialize(); 
 
     // ========== PHASE 8: AUTH LISTENER ==========
     _setupAuthStateListener();
@@ -311,7 +319,9 @@ GoRouter _createRouter() {
       debugPrint('📊 AppState roles: ${appState.roles}');
       debugPrint('📊 AppState currentRole: ${appState.currentRole}');
 
-      // 🔥 NEVER redirect auth callbacks
+      // ============================================
+      // 1. NEVER REDIRECT - Auth callbacks
+      // ============================================
       if (path == '/auth/callback' ||
           queryParams.containsKey('code') ||
           queryParams.containsKey('access_token')) {
@@ -319,18 +329,25 @@ GoRouter _createRouter() {
         return null;
       }
 
-      // AppState loading නම්, කිසිම redirect එකක් එපා
+      // ============================================
+      // 2. APPSTATE LOADING - Wait
+      // ============================================
       if (appState.loading) {
         debugPrint('⏳ AppState loading - no redirect');
         return null;
       }
 
-      // Clear data screen is always accessible
+      // ============================================
+      // 3. ALWAYS ACCESSIBLE ROUTES
+      // ============================================
       if (path == '/clear-data') {
         debugPrint('✅ Clear data screen - allowing access');
         return null;
       }
 
+      // ============================================
+      // 4. PUBLIC ROUTES
+      // ============================================
       final publicRoutes = [
         '/',
         '/login',
@@ -353,41 +370,36 @@ GoRouter _createRouter() {
         '/role-selector',
       ];
 
-      // ====================================================
-      // ROLE SELECTOR ROUTE
-      // ====================================================
+      // Role selector route
       if (path == '/role-selector') {
         if (!appState.loggedIn) {
+          debugPrint('❌ Not logged in → /login');
           return '/login';
         }
+        debugPrint('✅ Role selector - allowing access');
         return null;
       }
 
-      // ====================================================
-      // PUBLIC ROUTES
-      // ====================================================
+      // Handle public routes
       if (publicRoutes.contains(path)) {
+        // SPLASH SCREEN LOGIC
         if (path == '/') {
-          // SPLASH SCREEN LOGIC
           if (appState.loggedIn) {
             // User logged in
             if (!appState.emailVerified) {
               debugPrint('📧 Email not verified → /verify-email');
               return '/verify-email';
             }
-
             if (!appState.profileCompleted) {
               debugPrint('📝 Profile not completed → /reg');
               return '/reg';
             }
-
-            // Check roles
             if (appState.roles.isEmpty) {
               debugPrint('⚠️ No roles found → /reg');
               return '/reg';
             }
 
-            // 🔥 FIX: Check if current role is valid
+            // Has current role
             if (appState.currentRole != null) {
               final targetRoute = '/${appState.currentRole}';
               debugPrint(
@@ -396,13 +408,13 @@ GoRouter _createRouter() {
               return targetRoute;
             }
 
-            // No current role but has multiple roles
+            // Multiple roles
             if (appState.roles.length > 1) {
               debugPrint('🔄 Multiple roles, no current role → /role-selector');
               return '/role-selector';
             }
 
-            // Single role - direct redirect
+            // Single role
             if (appState.roles.length == 1) {
               final role = appState.roles.first;
               debugPrint('✅ Single role: $role → /$role');
@@ -422,75 +434,213 @@ GoRouter _createRouter() {
           }
         }
 
-        // 🔥 SPECIAL HANDLING FOR /reg
+        // Registration route
         if (path == '/reg') {
           if (!appState.loggedIn) {
-            debugPrint('⚠️ /reg requires login → redirecting to /login');
+            debugPrint('⚠️ /reg requires login → /login');
             return '/login';
           }
           debugPrint('✅ Allowing access to /reg');
           return null;
         }
 
+        // Other public routes
+        debugPrint('✅ Public route: $path');
         return null;
       }
 
-      // ====================================================
-      // PROTECTED ROUTES
-      // ====================================================
+      // ============================================
+      // 5. PROTECTED ROUTES - Login Required
+      // ============================================
       if (!appState.loggedIn) {
         final hasProfile = await SessionManager.hasProfile();
         if (hasProfile && path != '/continue') {
+          debugPrint('❌ Not logged in but has profile → /continue');
           return '/continue';
         }
+        debugPrint('❌ Not logged in → /login');
         return '/login';
       }
 
-      if (appState.loggedIn) {
-        if (!appState.emailVerified && path != '/verify-email') {
-          return '/verify-email';
-        }
-        if (!appState.profileCompleted && path != '/reg') {
+      // Email verification check
+      if (!appState.emailVerified && path != '/verify-email') {
+        debugPrint('❌ Email not verified → /verify-email');
+        return '/verify-email';
+      }
+
+      // Profile completion check
+      if (!appState.profileCompleted && path != '/reg') {
+        debugPrint('❌ Profile not completed → /reg');
+        return '/reg';
+      }
+
+      // Role selection check
+      if (appState.currentRole == null && appState.roles.isNotEmpty) {
+        debugPrint('⚠️ No current role but has roles → /role-selector');
+        return '/role-selector';
+      }
+
+      // ============================================
+      // 6. CUSTOMER ROUTES - FIXED
+      // ============================================
+      final customerRoutes = [
+        '/customer',
+        '/customer/my-bookings',
+        '/customer/booking-flow',
+        '/customer/book',
+        '/customer/vip-booking',
+        '/customer/salon-profile',
+      ];
+
+      final isCustomerRoute = customerRoutes.any(
+        (route) => path.startsWith('/customer'),
+      );
+
+      if (isCustomerRoute) {
+        debugPrint('🛍️ Customer route accessed: $path');
+
+        // Must be logged in (already checked above)
+        // Must have customer role
+        if (appState.currentRole != 'customer' &&
+            !appState.roles.contains('customer')) {
+          debugPrint('❌ Not a customer role, redirecting...');
+          if (appState.currentRole != null) {
+            return '/${appState.currentRole}';
+          }
+          if (appState.roles.isNotEmpty) {
+            return '/role-selector';
+          }
           return '/reg';
         }
 
-        // 🔥 FIX: If no current role but has roles, go to role selector
-        if (appState.currentRole == null && appState.roles.isNotEmpty) {
-          debugPrint('⚠️ No current role but has roles → /role-selector');
+        // If current role is not customer but has customer role, go to role selector
+        if (appState.currentRole != 'customer' &&
+            appState.roles.contains('customer')) {
+          debugPrint(
+            '⚠️ Current role ${appState.currentRole} but has customer role → /role-selector',
+          );
           return '/role-selector';
         }
 
-        // 🔥 FIX: Role-specific dashboard access
-        final roleToPath = {
-          'owner': '/owner',
-          'barber': '/barber',
-          'customer': '/customer',
-        };
+        debugPrint('✅ Customer route access granted: $path');
+        return null;
+      }
 
-        // Check if current path matches any dashboard
-        for (var entry in roleToPath.entries) {
-          if (path == entry.value) {
-            // Already on correct dashboard
-            if (appState.currentRole == entry.key) {
-              debugPrint('✅ Already on correct dashboard: $path');
-              return null;
-            } else {
-              // Wrong dashboard - redirect to correct one
-              final correctPath =
-                  '/${appState.currentRole ?? appState.roles.first}';
-              debugPrint('⚠️ Wrong dashboard - redirecting to $correctPath');
-              return correctPath;
-            }
+      // ============================================
+      // 7. OWNER ROUTES
+      // ============================================
+      final ownerRoutes = [
+        '/owner',
+        '/owner/add-barber',
+        '/owner/services/add',
+        '/owner/services',
+        '/owner/barber-schedule',
+        '/owner/barber-leaves',
+        '/owner/barbers',
+        '/owner/edit-barber-services',
+        '/owner/vip-requests',
+        '/owner/genders/add',
+        '/owner/age-categories/add',
+        '/owner/salon/holidays',
+        '/owner/salon/create',
+        '/owner/salon/edit',
+        '/owner/categories/add',
+        '/owner/salon/:salonId/barber/:barberId/add-service',
+      ];
+
+      final isOwnerRoute = ownerRoutes.any(
+        (route) => path.startsWith('/owner'),
+      );
+
+      if (isOwnerRoute) {
+        debugPrint('👑 Owner route accessed: $path');
+
+        if (appState.currentRole != 'owner' &&
+            !appState.roles.contains('owner')) {
+          debugPrint('❌ Not an owner role, redirecting...');
+          if (appState.currentRole != null) {
+            return '/${appState.currentRole}';
           }
+          if (appState.roles.isNotEmpty) {
+            return '/role-selector';
+          }
+          return '/reg';
         }
 
-        // 🔥 FIX: Special case for customer dashboard
-        if (path == '/customer' && appState.currentRole == null) {
-          // Customer dashboard is default
-          return null;
+        if (appState.currentRole != 'owner' &&
+            appState.roles.contains('owner')) {
+          debugPrint(
+            '⚠️ Current role ${appState.currentRole} but has owner role → /role-selector',
+          );
+          return '/role-selector';
+        }
+
+        debugPrint('✅ Owner route access granted: $path');
+        return null;
+      }
+
+      // ============================================
+      // 8. BARBER ROUTES
+      // ============================================
+      final barberRoutes = ['/barber'];
+      final isBarberRoute = barberRoutes.any(
+        (route) => path.startsWith('/barber'),
+      );
+
+      if (isBarberRoute) {
+        debugPrint('💇 Barber route accessed: $path');
+
+        if (appState.currentRole != 'barber' &&
+            !appState.roles.contains('barber')) {
+          debugPrint('❌ Not a barber role, redirecting...');
+          if (appState.currentRole != null) {
+            return '/${appState.currentRole}';
+          }
+          if (appState.roles.isNotEmpty) {
+            return '/role-selector';
+          }
+          return '/reg';
+        }
+
+        if (appState.currentRole != 'barber' &&
+            appState.roles.contains('barber')) {
+          debugPrint(
+            '⚠️ Current role ${appState.currentRole} but has barber role → /role-selector',
+          );
+          return '/role-selector';
+        }
+
+        debugPrint('✅ Barber route access granted: $path');
+        return null;
+      }
+
+      // ============================================
+      // 9. DASHBOARD REDIRECTS
+      // ============================================
+      final roleToPath = {
+        'owner': '/owner',
+        'barber': '/barber',
+        'customer': '/customer',
+      };
+
+      for (var entry in roleToPath.entries) {
+        if (path == entry.value) {
+          if (appState.currentRole == entry.key) {
+            debugPrint('✅ Already on correct dashboard: $path');
+            return null;
+          } else {
+            final correctPath =
+                '/${appState.currentRole ?? appState.roles.first}';
+            debugPrint('⚠️ Wrong dashboard - redirecting to $correctPath');
+            return correctPath;
+          }
         }
       }
 
+      // ============================================
+      // 10. DEFAULT - Allow access
+      // ============================================
+      debugPrint('✅ Allowing access to: $path');
       return null;
     },
     routes: [
@@ -890,8 +1040,12 @@ GoRouter _createRouter() {
       ),
       GoRoute(
         path: '/customer/vip-booking',
-        builder: (context, state) => const VIPBookingRequestScreen(),
+        builder: (context, state) => const VIPBookingScreen(),
       ),
+      // GoRoute(
+      //   path: '/customer/vip-booking',
+      //   builder: (context, state) => const VIPBookingRequestScreen(),
+      // ),
       GoRoute(
         path: '/customer/salon-profile',
         name: 'salon-profile',
@@ -899,6 +1053,20 @@ GoRouter _createRouter() {
           final salon = state.extra as Map<String, dynamic>;
           return SalonProfileScreen(salon: salon);
         },
+      ),
+      GoRoute(
+        path: '/customer/my-bookings',
+        name: 'my-bookings',
+        builder: (context, state) => const MyBookingsScreen(),
+      ),
+
+      // ============================================
+      // BABER ROUTES
+      // ============================================
+      GoRoute(
+        path: '/barber/appointments',
+        name: 'barber-appointments',
+        builder: (context, state) => const BarberAppointmentsScreen(),
       ),
     ],
   );
