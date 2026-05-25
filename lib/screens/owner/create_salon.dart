@@ -1598,8 +1598,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
       padding: const EdgeInsets.only(bottom: 8),
       child: Autocomplete<String>(
         optionsBuilder: (TextEditingValue textEditingValue) {
-          if (textEditingValue.text.isEmpty)
+          if (textEditingValue.text.isEmpty) {
             return const Iterable<String>.empty();
+          }
           return suggestions.where(
             (option) => option.toLowerCase().contains(
               textEditingValue.text.toLowerCase(),
@@ -1612,11 +1613,13 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
         },
         fieldViewBuilder:
             (context, textController, focusNode, onFieldSubmitted) {
-              if (textController.text != controller.text)
+              if (textController.text != controller.text) {
                 textController.text = controller.text;
+              }
               controller.addListener(() {
-                if (textController.text != controller.text)
+                if (textController.text != controller.text) {
                   textController.text = controller.text;
+                }
               });
 
               return TextFormField(
