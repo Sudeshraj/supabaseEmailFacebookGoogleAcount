@@ -166,7 +166,7 @@ class _SideMenuState extends State<SideMenu> {
   }
 
   // ============================================================
-  // 🔥 SWITCH PROFILE
+  // 🔥 SWITCH PROFILE - FIXED VERSION
   // ============================================================
   Future<void> _switchProfile(Map<String, dynamic> profile) async {
     if (!mounted) return;
@@ -210,8 +210,10 @@ class _SideMenuState extends State<SideMenu> {
       
       if (email == null) throw Exception('No email found');
       
+      // Save the new role
       await SessionManager.updateUserRole(profile['role']);
       
+      // Update user metadata in Supabase
       if (currentUser != null) {
         final currentMetadata = currentUser.userMetadata ?? {};
         await supabase.auth.updateUser(
@@ -224,10 +226,41 @@ class _SideMenuState extends State<SideMenu> {
         );
       }
       
+      // Refresh app state
+      await appState.refreshState();
+      
       if (!mounted) return;
       
-      Navigator.pop(context);
+      // Close the drawer properly
+      Navigator.of(context).pop();
       
+      // Wait for drawer to close
+      await Future.delayed(const Duration(milliseconds: 300));
+      
+      if (!mounted) return;
+      
+      // Determine target route
+      String targetRoute;
+      switch (profile['role']) {
+        case 'owner':
+          targetRoute = '/owner';
+          break;
+        case 'barber':
+          targetRoute = '/barber';
+          break;
+        case 'customer':
+          targetRoute = '/customer';
+          break;
+        default:
+          targetRoute = '/';
+      }
+      
+      // Navigate using router
+      router.go(targetRoute);
+      
+      if (!mounted) return;
+      
+      // Show success message
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Switched to ${_getRoleDisplayName(profile['role'])} profile'),
@@ -235,18 +268,12 @@ class _SideMenuState extends State<SideMenu> {
           duration: const Duration(seconds: 2),
         ),
       );
-      
-      await appState.refreshState();
-      
-      if (!mounted) return;
-      
-      _navigateToDashboard(profile['role']);
     } catch (e) {
       debugPrint('❌ Error switching profile: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error switching profile: $e'),
+            content: Text('Error switching profile: ${e.toString()}'),
             backgroundColor: Colors.red,
           ),
         );
@@ -256,7 +283,7 @@ class _SideMenuState extends State<SideMenu> {
   }
 
   // ============================================================
-  // 🔥 CREATE NEW PROFILE
+  // 🔥 CREATE NEW PROFILE - FIXED VERSION
   // ============================================================
   Future<void> _createNewProfile() async {
     if (!mounted) return;
@@ -279,6 +306,13 @@ class _SideMenuState extends State<SideMenu> {
       }
       return;
     }
+    
+    // Close drawer first
+    Navigator.of(context).pop();
+    
+    await Future.delayed(const Duration(milliseconds: 200));
+    
+    if (!mounted) return;
     
     final selectedRole = await showDialog<String>(
       context: context,
@@ -316,16 +350,9 @@ class _SideMenuState extends State<SideMenu> {
     if (selectedRole == null || !mounted) return;
 
     debugPrint('🔄 Selected role for new profile: $selectedRole');
-
-    Navigator.pop(context);
     
-    await Future.delayed(const Duration(milliseconds: 100));
-    
-    if (!mounted) return;
-
-    debugPrint('➡️ Navigating to registration flow for role: $selectedRole');
-    
-    context.push('/reg?role=$selectedRole&new=true');
+    // Navigate to registration flow
+    router.go('/reg?role=$selectedRole&new=true');
   }
 
   // ============================================================
@@ -422,30 +449,9 @@ class _SideMenuState extends State<SideMenu> {
     );
   }
 
-  void _navigateToDashboard(String role) {
-    if (!mounted) return;
-    
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      
-      switch (role) {
-        case 'owner':
-          context.go('/owner');
-          break;
-        case 'barber':
-          context.go('/barber');
-          break;
-        case 'customer':
-          context.go('/customer');
-          break;
-        default:
-          context.go('/');
-      }
-    });
-  }
 
   // ============================================================
-  // 🔥 UPDATED PROFILE HEADER - FIXED OVERFLOW
+  // 🔥 PROFILE HEADER - FIXED OVERFLOW
   // ============================================================
   Widget _buildProfileHeader() {
     final hasMultipleProfiles = _availableProfiles.length > 1;
@@ -1067,7 +1073,7 @@ class _SideMenuState extends State<SideMenu> {
 
   void _navigateToScreen(BuildContext context, String route) {
     try {
-      context.push(route);
+      router.push(route);
     } catch (e) {
       debugPrint('Navigation error: $e');
     }
@@ -1076,16 +1082,19 @@ class _SideMenuState extends State<SideMenu> {
   void _navigateToSettings(BuildContext context) {
     try {
       switch (widget.userRole) {
-        case 'owner': context.push('/owner/settings'); break;
-        case 'barber': context.push('/barber/settings'); break;
-        case 'customer': context.push('/customer/settings'); break;
-        default: context.push('/settings');
+        case 'owner': router.push('/owner/settings'); break;
+        case 'barber': router.push('/barber/settings'); break;
+        case 'customer': router.push('/customer/settings'); break;
+        default: router.push('/settings');
       }
     } catch (e) {
       debugPrint('Settings navigation error: $e');
     }
   }
 
+  // ============================================================
+  // 🔥 LOGOUT - FIXED VERSION
+  // ============================================================
   Future<void> _logout(BuildContext context) async {
     showLogoutConfirmation(
       context,
