@@ -1,6 +1,9 @@
+// screens/owner/add_service_screen.dart
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../../services/timezone_service.dart';
 
 class AddServiceScreen extends StatefulWidget {
   final int salonId;
@@ -58,6 +61,9 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   String? _durationError;
   String? _serviceNameError;
 
+  // Timezone
+  String _deviceTimezone = '';
+
   // Icon suggestions
   final List<Map<String, dynamic>> _iconSuggestions = [
     {'icon': Icons.content_cut, 'name': 'content_cut', 'label': 'Hair Cut', 'color': 0xFFFF6B8B},
@@ -79,7 +85,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   @override
   void initState() {
     super.initState();
-    _loadData();
+    _initializeWithTimezone();
     _selectedIcon = _iconSuggestions.first['name'];
     
     if (widget.isEditing && widget.serviceId != null) {
@@ -99,6 +105,36 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     _variantPriceController.dispose();
     _variantDurationController.dispose();
     super.dispose();
+  }
+
+  // ============================================
+  // TIMEZONE INITIALIZATION (Background only)
+  // ============================================
+  
+  Future<void> _initializeWithTimezone() async {
+    await TimezoneService.initialize();
+    
+    final prefs = await SharedPreferences.getInstance();
+    final cachedTimezone = prefs.getString('cached_timezone');
+    
+    if (cachedTimezone != null && cachedTimezone.isNotEmpty) {
+      _deviceTimezone = cachedTimezone;
+      debugPrint('✅ Using cached timezone: $_deviceTimezone');
+    } else {
+      _deviceTimezone = TimezoneService.getCurrentTimezone();
+      await prefs.setString('cached_timezone', _deviceTimezone);
+      debugPrint('✅ Saved device timezone to cache: $_deviceTimezone');
+    }
+    
+    await _loadData();
+  }
+
+  // ============================================
+  // UTC CONVERSION FUNCTIONS
+  // ============================================
+  
+  String _getCurrentUtcTimestamp() {
+    return DateTime.now().toUtc().toIso8601String();
   }
 
   // ============================================
@@ -264,7 +300,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       
       final serviceResponse = await supabase
           .from('services')
-          .select('id, name, description, icon_name, category_id')
+          .select('id, name, description, icon_name, category_id, created_at, updated_at')
           .eq('id', widget.serviceId!)
           .single();
       
@@ -277,7 +313,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       
       final variantsResponse = await supabase
           .from('service_variants')
-          .select('id, price, duration, salon_gender_id, salon_age_category_id')
+          .select('id, price, duration, salon_gender_id, salon_age_category_id, created_at, updated_at')
           .eq('service_id', widget.serviceId!)
           .eq('is_active', true);
       
@@ -442,7 +478,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   }
 
   // ============================================
-  // CREATE/UPDATE SERVICE
+  // CREATE/UPDATE SERVICE WITH UTC TIMESTAMPS
   // ============================================
   
   Future<void> _createAndAddService() async {
@@ -475,13 +511,14 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         if (widget.isEditing && widget.serviceId != null) {
           serviceId = widget.serviceId!;
           
+          // ✅ Update with UTC timestamp
           final updateData = {
             'name': _serviceNameController.text.trim(),
             'description': _serviceDescriptionController.text.trim().isNotEmpty 
                 ? _serviceDescriptionController.text.trim() : null,
             'category_id': _selectedCategoryId,
             'icon_name': _selectedIcon,
-            'updated_at': DateTime.now().toIso8601String(),
+            'updated_at': _getCurrentUtcTimestamp(), // ✅ UTC
           };
           
           await supabase
@@ -513,6 +550,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
             return;
           }
           
+          // ✅ Create with UTC timestamps
           final serviceData = {
             'salon_id': widget.salonId,
             'name': _serviceNameController.text.trim(),
@@ -522,6 +560,8 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
             'icon_name': _selectedIcon,
             'is_active': true,
             'created_by': supabase.auth.currentUser?.id,
+            'created_at': _getCurrentUtcTimestamp(), // ✅ UTC
+            'updated_at': _getCurrentUtcTimestamp(), // ✅ UTC
           };
 
           final serviceResponse = await supabase
@@ -549,6 +589,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       // Create variants if any
       if (_variants.isNotEmpty) {
         for (var variant in _variants) {
+          // ✅ Create variant with UTC timestamps
           final variantData = {
             'service_id': serviceId,
             'salon_gender_id': variant['gender_id'],
@@ -556,6 +597,8 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
             'price': variant['price'],
             'duration': variant['duration'],
             'is_active': true,
+            'created_at': _getCurrentUtcTimestamp(), // ✅ UTC
+            'updated_at': _getCurrentUtcTimestamp(), // ✅ UTC
           };
           
           final variantResponse = await supabase
@@ -577,6 +620,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                 .maybeSingle();
             
             if (existingBarberService == null) {
+              // ✅ Create barber service with UTC timestamps
               await supabase
                   .from('barber_services')
                   .insert({
@@ -584,7 +628,8 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                     'service_id': serviceId,
                     'variant_id': variantId,
                     'custom_price': variant['price'],
-                    // 'status': 'active',
+                    'created_at': _getCurrentUtcTimestamp(), // ✅ UTC
+                    'updated_at': _getCurrentUtcTimestamp(), // ✅ UTC
                   });
               debugPrint('✅ Added to barber services');
             }
@@ -600,10 +645,12 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
             .maybeSingle();
         
         if (existingBarberService == null) {
+          // ✅ Create barber service with UTC timestamps
           final Map<String, dynamic> barberServiceData = {
             'salon_barber_id': widget.salonBarberId!,
             'service_id': serviceId,
-            // 'status': 'active',
+            'created_at': _getCurrentUtcTimestamp(), // ✅ UTC
+            'updated_at': _getCurrentUtcTimestamp(), // ✅ UTC
           };
           
           await supabase
@@ -670,7 +717,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   }
 
   // ============================================
-  // UI BUILDERS
+  // UI BUILDERS (NO CHANGES - SAME AS ORIGINAL)
   // ============================================
   
   Widget _buildHeader() {
