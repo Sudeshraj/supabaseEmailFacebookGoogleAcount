@@ -3,7 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../utils/ip_helper.dart';
+import '../../services/timezone_service.dart';
 
 class AddBarberScreen extends StatefulWidget {
   final bool refresh;
@@ -51,6 +53,10 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   // ==================== CATEGORY TAB STATE ====================
   String? _selectedCategoryTab;
 
+  // ==================== TIMEZONE ====================
+  String _deviceTimezone = '';
+  bool _isTimezoneLoaded = false;
+
   // ==================== TIMERS ====================
   Timer? _debounceTimer;
 
@@ -96,8 +102,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   void initState() {
     super.initState();
     debugPrint('📍 AddBarberScreen initState');
-    _loadInitialData();
-    _loadIpAddress();
+    _initializeAllData();
     _searchController.addListener(_onSearchChanged);
 
     if (widget.refresh) {
@@ -129,6 +134,87 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   void didPopNext() {
     debugPrint('📍 AddBarberScreen came to foreground - refreshing data');
     _refreshData();
+  }
+
+  // ==================== INITIALIZE ALL DATA ====================
+  Future<void> _initializeAllData() async {
+    debugPrint('🔄 Initializing all data...');
+    
+    try {
+      // Load timezone first
+      await TimezoneService.initialize();
+      
+      final prefs = await SharedPreferences.getInstance();
+      final cachedTimezone = prefs.getString('cached_timezone');
+      
+      if (cachedTimezone != null && cachedTimezone.isNotEmpty) {
+        _deviceTimezone = cachedTimezone;
+        debugPrint('✅ Using cached timezone: $_deviceTimezone');
+      } else {
+        _deviceTimezone = TimezoneService.getCurrentTimezone();
+        await prefs.setString('cached_timezone', _deviceTimezone);
+        debugPrint('✅ Saved device timezone to cache: $_deviceTimezone');
+      }
+      
+      if (mounted) {
+        setState(() {
+          _isTimezoneLoaded = true;
+        });
+      }
+      
+      // Load IP address
+      await _loadIpAddress();
+      
+      // Load salons (this will also load services)
+      await _loadOwnerSalons();
+      
+    } catch (e) {
+      debugPrint('❌ Error in initialization: $e');
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _isLoadingServices = false;
+          _isTimezoneLoaded = true;
+        });
+        _showSnackBar('Error initializing: ${e.toString()}', Colors.red);
+      }
+    }
+  }
+
+  // ==================== UTC TO LOCAL CONVERSION ====================
+  String _utcToLocalTimeString(String utcTimeStr) {
+    try {
+      final parts = utcTimeStr.split(':');
+      final utcHour = int.parse(parts[0]);
+      final utcMinute = int.parse(parts[1]);
+      
+      final now = DateTime.now();
+      final utcDateTime = DateTime.utc(now.year, now.month, now.day, utcHour, utcMinute);
+      final localDateTime = utcDateTime.toLocal();
+      
+      return '${localDateTime.hour.toString().padLeft(2, '0')}:${localDateTime.minute.toString().padLeft(2, '0')}:00';
+    } catch (e) {
+      debugPrint('❌ Error converting UTC to local: $e');
+      return utcTimeStr;
+    }
+  }
+
+  // ==================== LOCAL TO UTC CONVERSION ====================
+  String _localTimeToUtcString(String localTimeStr) {
+    try {
+      final parts = localTimeStr.split(':');
+      final localHour = int.parse(parts[0]);
+      final localMinute = int.parse(parts[1]);
+      
+      final now = DateTime.now();
+      final localDateTime = DateTime(now.year, now.month, now.day, localHour, localMinute);
+      final utcDateTime = localDateTime.toUtc();
+      
+      return '${utcDateTime.hour.toString().padLeft(2, '0')}:${utcDateTime.minute.toString().padLeft(2, '0')}:00';
+    } catch (e) {
+      debugPrint('❌ Error converting local to UTC: $e');
+      return localTimeStr;
+    }
   }
 
   // ==================== IP ADDRESS LOADING ====================
@@ -179,20 +265,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   }
 
   // ==================== LOAD DATA METHODS ====================
-  Future<void> _loadInitialData() async {
-    debugPrint('📥 Loading initial data...');
-    if (mounted) setState(() => _isLoading = true);
-
-    try {
-      await Future.wait([_loadOwnerSalons()]);
-    } catch (e) {
-      debugPrint('❌ Error loading initial data: $e');
-      if (mounted) _showSnackBar('Error loading data: $e', Colors.red);
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
-  }
-
   Future<void> _refreshData() async {
     debugPrint('🔄 Refreshing data...');
     if (!mounted) return;
@@ -219,11 +291,23 @@ class _AddBarberScreenState extends State<AddBarberScreen>
 
     try {
       final userId = supabase.auth.currentUser?.id;
-      if (userId == null) return;
+      if (userId == null) {
+        if (mounted) {
+          setState(() {
+            _ownerSalons = [];
+            _isLoadingSalons = false;
+            _isLoading = false;
+            _isLoadingServices = false;
+          });
+        }
+        return;
+      }
 
+      debugPrint('📡 Fetching salons for user: $userId');
+      
       final response = await supabase
           .from('salons')
-          .select('id, name, address, logo_url, is_active')
+          .select('id, name, address, logo_url, is_active, open_time, close_time')
           .eq('owner_id', userId)
           .eq('is_active', true)
           .order('name');
@@ -233,19 +317,35 @@ class _AddBarberScreenState extends State<AddBarberScreen>
       if (mounted) {
         setState(() {
           _ownerSalons = List<Map<String, dynamic>>.from(response);
-          if (_ownerSalons.length == 1) {
-            _selectedSalonId = _ownerSalons[0]['id'].toString();
-            _selectedSalonDetails = _ownerSalons[0];
-            _loadSalonSpecificData();
-          }
           _isLoadingSalons = false;
         });
+        
+        // Load salon specific data if salons exist
+        if (_ownerSalons.isNotEmpty) {
+          // Select first salon by default
+          _selectedSalonId = _ownerSalons[0]['id'].toString();
+          _selectedSalonDetails = _ownerSalons[0];
+          
+          // Load services for the selected salon
+          await _loadSalonSpecificData();
+        } else {
+          // No salons found, stop loading
+          setState(() {
+            _isLoading = false;
+            _isLoadingServices = false;
+          });
+        }
       }
     } catch (e) {
       debugPrint('❌ Error loading salons: $e');
       if (mounted) {
-        setState(() => _isLoadingSalons = false);
-        _showSnackBar('Error loading salons: $e', Colors.red);
+        setState(() {
+          _ownerSalons = [];
+          _isLoadingSalons = false;
+          _isLoading = false;
+          _isLoadingServices = false;
+        });
+        _showSnackBar('Error loading salons: ${e.toString()}', Colors.red);
       }
     }
   }
@@ -417,8 +517,19 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   // ============================================================
 
   Future<void> _loadSalonSpecificData() async {
-    if (_selectedSalonId == null) return;
+    if (_selectedSalonId == null) {
+      if (mounted) {
+        setState(() {
+          _isLoadingSalonData = false;
+          _isLoadingServices = false;
+          _isLoading = false;
+        });
+      }
+      return;
+    }
 
+    debugPrint('📡 Loading salon specific data for salon: $_selectedSalonId');
+    
     if (mounted) setState(() => _isLoadingSalonData = true);
 
     try {
@@ -426,9 +537,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
 
       final categoriesResponse = await supabase
           .from('salon_categories')
-          .select(
-            'id, display_name, description, icon_name, color, display_order, is_active',
-          )
+          .select('id, display_name, description, icon_name, color, display_order, is_active')
           .eq('salon_id', salonIdInt)
           .eq('is_active', true)
           .order('display_order');
@@ -442,9 +551,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
 
       final ageCategoriesResponse = await supabase
           .from('salon_age_categories')
-          .select(
-            'id, display_name, min_age, max_age, display_order, is_active',
-          )
+          .select('id, display_name, min_age, max_age, display_order, is_active')
           .eq('salon_id', salonIdInt)
           .eq('is_active', true)
           .order('display_order');
@@ -461,9 +568,9 @@ class _AddBarberScreenState extends State<AddBarberScreen>
 
       await _loadServicesWithVariants();
 
-      _searchController.clear();
       if (mounted) {
         setState(() {
+          _searchController.clear();
           _searchResults = [];
           _selectedBarberId = null;
           _isSearching = false;
@@ -472,7 +579,14 @@ class _AddBarberScreenState extends State<AddBarberScreen>
       }
     } catch (e) {
       debugPrint('❌ Error loading salon data: $e');
-      if (mounted) setState(() => _isLoadingSalonData = false);
+      if (mounted) {
+        setState(() {
+          _isLoadingSalonData = false;
+          _isLoadingServices = false;
+          _isLoading = false;
+        });
+        _showSnackBar('Error loading salon data: ${e.toString()}', Colors.red);
+      }
     }
   }
 
@@ -482,7 +596,12 @@ class _AddBarberScreenState extends State<AddBarberScreen>
 
   Future<void> _loadServicesWithVariants() async {
     if (_selectedSalonId == null) {
-      if (mounted) setState(() => _isLoadingServices = false);
+      if (mounted) {
+        setState(() {
+          _isLoadingServices = false;
+          _isLoading = false;
+        });
+      }
       return;
     }
 
@@ -647,6 +766,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
         setState(() {
           _services = processedServices;
           _isLoadingServices = false;
+          _isLoading = false;
 
           _expandedServices.clear();
           for (var service in processedServices) {
@@ -664,8 +784,12 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     } catch (e) {
       debugPrint('❌ Error loading services: $e');
       if (mounted) {
-        setState(() => _isLoadingServices = false);
-        _showSnackBar('Error loading services: $e', Colors.red);
+        setState(() {
+          _isLoadingServices = false;
+          _isLoading = false;
+          _services = [];
+        });
+        _showSnackBar('Error loading services: ${e.toString()}', Colors.red);
       }
     }
   }
@@ -882,491 +1006,535 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     return widgets;
   }
 
-// ==================== ADD BARBER ====================
-Future<void> _addBarber() async {
-  if (_selectedBarberId == null) {
-    if (mounted) _showSnackBar('Please select a barber', Colors.red);
-    return;
-  }
-  if (_selectedSalonId == null) {
-    if (mounted) _showSnackBar('Please select a salon', Colors.red);
-    return;
-  }
-  if (_totalSelectedItems == 0) {
-    if (mounted) {
-      _showSnackBar('Please select at least one service', Colors.red);
+  // ==================== ADD BARBER WITH TIMEZONE ====================
+  Future<void> _addBarber() async {
+    if (_selectedBarberId == null) {
+      if (mounted) _showSnackBar('Please select a barber', Colors.red);
+      return;
     }
-    return;
-  }
-
-  final alreadyExists = await _isBarberAlreadyInSalon(
-    _selectedBarberId!,
-    int.parse(_selectedSalonId!),
-  );
-
-  if (alreadyExists) {
-    if (mounted) {
-      _showSnackBar(
-        'This barber is already added to the salon',
-        Colors.orange,
-      );
+    if (_selectedSalonId == null) {
+      if (mounted) _showSnackBar('Please select a salon', Colors.red);
+      return;
     }
-    return;
-  }
-  if (!mounted) return;
-  final confirm = await showDialog<bool>(
-    context: context,
-    barrierDismissible: false,
-    builder: (dialogContext) => AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      title: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: const BoxDecoration(
-              color: Color(0xFFFF6B8B),
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(
-              Icons.person_add,
-              color: Colors.white,
-              size: 24,
-            ),
-          ),
-          const SizedBox(width: 12),
-          const Text(
-            'Confirm Add Barber',
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-          ),
-        ],
-      ),
-      content: SizedBox(
-        width: _isWeb ? 450 : null,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
+    if (_totalSelectedItems == 0) {
+      if (mounted) {
+        _showSnackBar('Please select at least one service', Colors.red);
+      }
+      return;
+    }
+
+    final alreadyExists = await _isBarberAlreadyInSalon(
+      _selectedBarberId!,
+      int.parse(_selectedSalonId!),
+    );
+
+    if (alreadyExists) {
+      if (mounted) {
+        _showSnackBar(
+          'This barber is already added to the salon',
+          Colors.orange,
+        );
+      }
+      return;
+    }
+    if (!mounted) return;
+    
+    final confirm = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
           children: [
             Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFF6B8B).withValues(alpha: 0.05),
-                borderRadius: BorderRadius.circular(12),
+              padding: const EdgeInsets.all(8),
+              decoration: const BoxDecoration(
+                color: Color(0xFFFF6B8B),
+                shape: BoxShape.circle,
               ),
-              child: Row(
-                children: [
-                  const Icon(
-                    Icons.person,
-                    color: Color(0xFFFF6B8B),
-                    size: 20,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      'Add ${_getBarberName()} to ${_selectedSalonDetails?['name'] ?? 'salon'}?',
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                ],
+              child: const Icon(
+                Icons.person_add,
+                color: Colors.white,
+                size: 24,
               ),
             ),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.green.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.schedule, color: Colors.green, size: 20),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Auto Schedule',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13,
-                          ),
-                        ),
-                        Text(
-                          'All days (Mon-Sun) will be set as working days with salon hours',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: Colors.grey[700],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.orange.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.restaurant, color: Colors.orange, size: 20),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Lunch Break',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13,
-                          ),
-                        ),
-                        Text(
-                          'Lunch break will be set from 12:00 PM to 1:00 PM',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: Colors.grey[700],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 20),
+            const SizedBox(width: 12),
             const Text(
-              'Selected Services:',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-            ),
-            const SizedBox(height: 12),
-            Container(
-              constraints: const BoxConstraints(maxHeight: 300),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: _buildSelectedServicesList(),
-                ),
-              ),
+              'Confirm Add Barber',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             ),
           ],
         ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(dialogContext, false),
-          child: const Text(
-            'Cancel',
-            style: TextStyle(fontSize: 14, color: Colors.grey),
+        content: SizedBox(
+          width: _isWeb ? 450 : null,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFF6B8B).withValues(alpha: 0.05),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.person,
+                      color: Color(0xFFFF6B8B),
+                      size: 20,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'Add ${_getBarberName()} to ${_selectedSalonDetails?['name'] ?? 'salon'}?',
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.green.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.schedule, color: Colors.green, size: 20),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Auto Schedule',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                            ),
+                          ),
+                          Text(
+                            'All days (Mon-Sun) will be set as working days with salon hours',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.grey[700],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.restaurant, color: Colors.orange, size: 20),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Lunch Break',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                            ),
+                          ),
+                          Text(
+                            'Lunch break will be set from 12:00 PM to 1:00 PM',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.grey[700],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.blue.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.access_time, color: Colors.blue, size: 20),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Timezone',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                            ),
+                          ),
+                          Text(
+                            'Business hours saved in UTC. Current timezone: ${TimezoneService.getTimezoneDisplayName()}',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.grey[700],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              const Text(
+                'Selected Services:',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                constraints: const BoxConstraints(maxHeight: 300),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: _buildSelectedServicesList(),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
-        ElevatedButton(
-          onPressed: () => Navigator.pop(dialogContext, true),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFFFF6B8B),
-            foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(fontSize: 14, color: Colors.grey),
             ),
           ),
-          child: const Text(
-            'Confirm Add',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFFF6B8B),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            child: const Text(
+              'Confirm Add',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
           ),
-        ),
-      ],
-    ),
-  );
+        ],
+      ),
+    );
 
-  if (confirm != true) return;
+    if (confirm != true) return;
 
-  if (mounted) setState(() => _isLoading = true);
+    if (mounted) setState(() => _isLoading = true);
 
-  try {
-    final salonIdInt = int.parse(_selectedSalonId!);
+    try {
+      final salonIdInt = int.parse(_selectedSalonId!);
 
-    final salonResponse = await supabase
-        .from('salons')
-        .select('open_time, close_time')
-        .eq('id', salonIdInt)
-        .single();
-
-    final openTime = salonResponse['open_time'] as String? ?? '09:00:00';
-    final closeTime = salonResponse['close_time'] as String? ?? '18:00:00';
-
-    final List<int> weekDays = [1, 2, 3, 4, 5, 6, 7];
-    final Map<int, String> dayNames = {
-      1: 'Monday',
-      2: 'Tuesday',
-      3: 'Wednesday',
-      4: 'Thursday',
-      5: 'Friday',
-      6: 'Saturday',
-      7: 'Sunday',
-    };
-
-    final salonBarberResponse = await supabase
-        .from('salon_barbers')
-        .select('id')
-        .eq('salon_id', salonIdInt)
-        .eq('barber_id', _selectedBarberId!)
-        .maybeSingle();
-
-    int salonBarberId;
-
-    if (salonBarberResponse == null) {
-      final newSalonBarber = await supabase
-          .from('salon_barbers')
-          .insert({
-            'salon_id': salonIdInt,
-            'barber_id': _selectedBarberId!,
-            'status': 'active',
-          })
-          .select('id')
+      final salonResponse = await supabase
+          .from('salons')
+          .select('open_time, close_time')
+          .eq('id', salonIdInt)
           .single();
-      salonBarberId = newSalonBarber['id'];
-    } else {
-      salonBarberId = salonBarberResponse['id'];
-      await supabase
+
+      String openTimeUtc = salonResponse['open_time'] as String? ?? '09:00:00';
+      String closeTimeUtc = salonResponse['close_time'] as String? ?? '18:00:00';
+      
+      String openTimeLocal = _utcToLocalTimeString(openTimeUtc);
+      String closeTimeLocal = _utcToLocalTimeString(closeTimeUtc);
+      
+      debugPrint('⏰ Salon hours - UTC: $openTimeUtc - $closeTimeUtc');
+      debugPrint('⏰ Salon hours - Local: $openTimeLocal - $closeTimeLocal');
+      debugPrint('🌍 Timezone: $_deviceTimezone');
+
+      final List<int> weekDays = [1, 2, 3, 4, 5, 6, 7];
+      final Map<int, String> dayNames = {
+        1: 'Monday',
+        2: 'Tuesday',
+        3: 'Wednesday',
+        4: 'Thursday',
+        5: 'Friday',
+        6: 'Saturday',
+        7: 'Sunday',
+      };
+
+      final salonBarberResponse = await supabase
           .from('salon_barbers')
-          .update({'status': 'active'})
-          .eq('id', salonBarberId);
-    }
-
-    // ==================== CREATE WORK SCHEDULES ====================
-    int createdCount = 0, updatedCount = 0, errorCount = 0;
-    List<String> errorDays = [];
-
-    for (int dayOfWeek in weekDays) {
-      try {
-        final existingSchedule = await supabase
-            .from('barber_schedules')
-            .select('id')
-            .eq('barber_id', _selectedBarberId!)
-            .eq('salon_id', salonIdInt)
-            .eq('day_of_week', dayOfWeek)
-            .maybeSingle();
-
-        if (existingSchedule == null) {
-          await supabase.from('barber_schedules').insert({
-            'barber_id': _selectedBarberId!,
-            'salon_id': salonIdInt,
-            'day_of_week': dayOfWeek,
-            'start_time': openTime,
-            'end_time': closeTime,
-            'is_working': true,
-          });
-          createdCount++;
-        } else {
-          await supabase
-              .from('barber_schedules')
-              .update({
-                'is_working': true,
-                'start_time': openTime,
-                'end_time': closeTime,
-              })
-              .eq('id', existingSchedule['id']);
-          updatedCount++;
-        }
-      } catch (e) {
-        errorCount++;
-        errorDays.add(dayNames[dayOfWeek] ?? 'Day $dayOfWeek');
-      }
-    }
-
-    // ==================== CREATE LUNCH BREAKS ====================
-    // Lunch break: 12:00 to 13:00 for all days (Monday to Sunday)
-    int lunchBreakCreatedCount = 0;
-    int lunchBreakUpdatedCount = 0;
-    List<String> lunchBreakErrorDays = [];
-
-    for (int dayOfWeek in weekDays) {
-      try {
-        // Check if lunch break already exists for this day
-        final existingBreak = await supabase
-            .from('barber_breaks')
-            .select('id')
-            .eq('barber_id', _selectedBarberId!)
-            .eq('salon_id', salonIdInt)
-            .eq('day_of_week', dayOfWeek)
-            .eq('break_type', 'lunch')
-            .maybeSingle();
-
-        if (existingBreak == null) {
-          // Insert new lunch break
-          await supabase.from('barber_breaks').insert({
-            'barber_id': _selectedBarberId!,
-            'salon_id': salonIdInt,
-            'day_of_week': dayOfWeek,
-            'start_time': '12:00:00',
-            'end_time': '13:00:00',
-            'break_type': 'lunch',
-          });
-          lunchBreakCreatedCount++;
-        } else {
-          // Update existing lunch break
-          await supabase
-              .from('barber_breaks')
-              .update({
-                'start_time': '12:00:00',
-                'end_time': '13:00:00',
-                'updated_at': DateTime.now().toIso8601String(),
-              })
-              .eq('id', existingBreak['id']);
-          lunchBreakUpdatedCount++;
-        }
-      } catch (e) {
-        lunchBreakErrorDays.add(dayNames[dayOfWeek] ?? 'Day $dayOfWeek');
-        debugPrint('❌ Error creating lunch break for ${dayNames[dayOfWeek]}: $e');
-      }
-    }
-
-    // ==================== ENSURE BARBER ROLE ====================
-    final userRoleCheck = await supabase
-        .from('user_roles')
-        .select()
-        .eq('user_id', _selectedBarberId!);
-    if (userRoleCheck.isEmpty) {
-      final roleResponse = await supabase
-          .from('roles')
           .select('id')
-          .eq('name', 'barber')
+          .eq('salon_id', salonIdInt)
+          .eq('barber_id', _selectedBarberId!)
           .maybeSingle();
-      if (roleResponse != null) {
-        await supabase.from('user_roles').insert({
-          'user_id': _selectedBarberId!,
-          'role_id': roleResponse['id'],
-        });
-      }
-    }
 
-    // ==================== ADD SELECTED SERVICES ====================
-    final selectedServicesList = [];
-    int servicesAddedCount = 0, variantsAddedCount = 0;
+      int salonBarberId;
 
-    for (var entry in _selectedItems.entries) {
-      final serviceId = int.parse(entry.key);
-      final variantIds = entry.value;
-
-      Map<String, dynamic>? service;
-      for (var s in _services) {
-        if (s['id'] == entry.key) {
-          service = s;
-          break;
-        }
-      }
-      if (service == null) continue;
-
-      if (variantIds.isEmpty) {
-        selectedServicesList.add({
-          'service_id': serviceId,
-          'service_name': service['name'] ?? 'Unknown',
-          'type': 'full_service',
-        });
-        final existing = await supabase
-            .from('barber_services')
-            .select()
-            .eq('salon_barber_id', salonBarberId)
-            .eq('service_id', serviceId)
-            .filter('variant_id', 'is', null);
-        if (existing.isEmpty) {
-          await supabase.from('barber_services').insert({
-            'salon_barber_id': salonBarberId,
-            'service_id': serviceId,
-            'variant_id': null,
-          });
-          servicesAddedCount++;
-        }
+      if (salonBarberResponse == null) {
+        final newSalonBarber = await supabase
+            .from('salon_barbers')
+            .insert({
+              'salon_id': salonIdInt,
+              'barber_id': _selectedBarberId!,
+              'status': 'active',
+            })
+            .select('id')
+            .single();
+        salonBarberId = newSalonBarber['id'];
       } else {
-        for (var variantId in variantIds) {
-          final variant = _findVariantById(entry.key, variantId);
+        salonBarberId = salonBarberResponse['id'];
+        await supabase
+            .from('salon_barbers')
+            .update({'status': 'active'})
+            .eq('id', salonBarberId);
+      }
+
+      int createdCount = 0, updatedCount = 0, errorCount = 0;
+      List<String> errorDays = [];
+
+      for (int dayOfWeek in weekDays) {
+        try {
+          final existingSchedule = await supabase
+              .from('barber_schedules')
+              .select('id')
+              .eq('barber_id', _selectedBarberId!)
+              .eq('salon_id', salonIdInt)
+              .eq('day_of_week', dayOfWeek)
+              .maybeSingle();
+
+          if (existingSchedule == null) {
+            await supabase.from('barber_schedules').insert({
+              'barber_id': _selectedBarberId!,
+              'salon_id': salonIdInt,
+              'day_of_week': dayOfWeek,
+              'start_time': openTimeUtc,
+              'end_time': closeTimeUtc,
+              'is_working': true,
+            });
+            createdCount++;
+          } else {
+            await supabase
+                .from('barber_schedules')
+                .update({
+                  'is_working': true,
+                  'start_time': openTimeUtc,
+                  'end_time': closeTimeUtc,
+                })
+                .eq('id', existingSchedule['id']);
+            updatedCount++;
+          }
+        } catch (e) {
+          errorCount++;
+          errorDays.add(dayNames[dayOfWeek] ?? 'Day $dayOfWeek');
+        }
+      }
+
+      final lunchStartLocal = '12:00:00';
+      final lunchEndLocal = '13:00:00';
+      final lunchStartUtc = _localTimeToUtcString(lunchStartLocal);
+      final lunchEndUtc = _localTimeToUtcString(lunchEndLocal);
+      
+      debugPrint('🍽️ Lunch break - Local: $lunchStartLocal - $lunchEndLocal');
+      debugPrint('🍽️ Lunch break - UTC: $lunchStartUtc - $lunchEndUtc');
+
+      int lunchBreakCreatedCount = 0;
+      int lunchBreakUpdatedCount = 0;
+      List<String> lunchBreakErrorDays = [];
+
+      for (int dayOfWeek in weekDays) {
+        try {
+          final existingBreak = await supabase
+              .from('barber_breaks')
+              .select('id')
+              .eq('barber_id', _selectedBarberId!)
+              .eq('salon_id', salonIdInt)
+              .eq('day_of_week', dayOfWeek)
+              .eq('break_type', 'lunch')
+              .maybeSingle();
+
+          if (existingBreak == null) {
+            await supabase.from('barber_breaks').insert({
+              'barber_id': _selectedBarberId!,
+              'salon_id': salonIdInt,
+              'day_of_week': dayOfWeek,
+              'start_time': lunchStartUtc,
+              'end_time': lunchEndUtc,
+              'break_type': 'lunch',
+            });
+            lunchBreakCreatedCount++;
+          } else {
+            await supabase
+                .from('barber_breaks')
+                .update({
+                  'start_time': lunchStartUtc,
+                  'end_time': lunchEndUtc,
+                  'updated_at': DateTime.now().toIso8601String(),
+                })
+                .eq('id', existingBreak['id']);
+            lunchBreakUpdatedCount++;
+          }
+        } catch (e) {
+          lunchBreakErrorDays.add(dayNames[dayOfWeek] ?? 'Day $dayOfWeek');
+          debugPrint('❌ Error creating lunch break for ${dayNames[dayOfWeek]}: $e');
+        }
+      }
+
+      final userRoleCheck = await supabase
+          .from('user_roles')
+          .select()
+          .eq('user_id', _selectedBarberId!);
+      if (userRoleCheck.isEmpty) {
+        final roleResponse = await supabase
+            .from('roles')
+            .select('id')
+            .eq('name', 'barber')
+            .maybeSingle();
+        if (roleResponse != null) {
+          await supabase.from('user_roles').insert({
+            'user_id': _selectedBarberId!,
+            'role_id': roleResponse['id'],
+          });
+        }
+      }
+
+      final selectedServicesList = [];
+      int servicesAddedCount = 0, variantsAddedCount = 0;
+
+      for (var entry in _selectedItems.entries) {
+        final serviceId = int.parse(entry.key);
+        final variantIds = entry.value;
+
+        Map<String, dynamic>? service;
+        for (var s in _services) {
+          if (s['id'] == entry.key) {
+            service = s;
+            break;
+          }
+        }
+        if (service == null) continue;
+
+        if (variantIds.isEmpty) {
           selectedServicesList.add({
             'service_id': serviceId,
             'service_name': service['name'] ?? 'Unknown',
-            'variant_id': variantId,
-            'variant_details': variant != null
-                ? (variant['display_text'] ?? 'Variant')
-                : 'Variant',
-            'type': 'variant',
+            'type': 'full_service',
           });
           final existing = await supabase
               .from('barber_services')
               .select()
               .eq('salon_barber_id', salonBarberId)
-              .eq('variant_id', variantId);
+              .eq('service_id', serviceId)
+              .filter('variant_id', 'is', null);
           if (existing.isEmpty) {
             await supabase.from('barber_services').insert({
               'salon_barber_id': salonBarberId,
               'service_id': serviceId,
-              'variant_id': variantId,
+              'variant_id': null,
             });
-            variantsAddedCount++;
+            servicesAddedCount++;
+          }
+        } else {
+          for (var variantId in variantIds) {
+            final variant = _findVariantById(entry.key, variantId);
+            selectedServicesList.add({
+              'service_id': serviceId,
+              'service_name': service['name'] ?? 'Unknown',
+              'variant_id': variantId,
+              'variant_details': variant != null
+                  ? (variant['display_text'] ?? 'Variant')
+                  : 'Variant',
+              'type': 'variant',
+            });
+            final existing = await supabase
+                .from('barber_services')
+                .select()
+                .eq('salon_barber_id', salonBarberId)
+                .eq('variant_id', variantId);
+            if (existing.isEmpty) {
+              await supabase.from('barber_services').insert({
+                'salon_barber_id': salonBarberId,
+                'service_id': serviceId,
+                'variant_id': variantId,
+              });
+              variantsAddedCount++;
+            }
           }
         }
       }
-    }
 
-    // ==================== LOG ACTIVITY ====================
-    await _logOwnerActivity(
-      actionType: 'add_barber',
-      targetType: 'barber',
-      targetId: _selectedBarberId,
-      details: {
-        'barber_name': _getBarberName(),
-        'barber_id': _selectedBarberId,
-        'salon_id': salonIdInt,
-        'salon_name': _selectedSalonDetails?['name'],
-        'selected_services_count': _totalSelectedItems,
-        'selected_services': selectedServicesList,
-        'schedules_created': createdCount,
-        'schedules_updated': updatedCount,
-        'lunch_breaks_created': lunchBreakCreatedCount,
-        'lunch_breaks_updated': lunchBreakUpdatedCount,
-        'services_added': servicesAddedCount,
-        'variants_added': variantsAddedCount,
-      },
-    );
+      await _logOwnerActivity(
+        actionType: 'add_barber',
+        targetType: 'barber',
+        targetId: _selectedBarberId,
+        details: {
+          'barber_name': _getBarberName(),
+          'barber_id': _selectedBarberId,
+          'salon_id': salonIdInt,
+          'salon_name': _selectedSalonDetails?['name'],
+          'selected_services_count': _totalSelectedItems,
+          'selected_services': selectedServicesList,
+          'timezone': _deviceTimezone,
+          'schedules_created': createdCount,
+          'schedules_updated': updatedCount,
+          'lunch_breaks_created': lunchBreakCreatedCount,
+          'lunch_breaks_updated': lunchBreakUpdatedCount,
+          'services_added': servicesAddedCount,
+          'variants_added': variantsAddedCount,
+        },
+      );
 
-    if (mounted) {
-      String message = 
-          'Barber added successfully!\n'
-          '• $createdCount schedules created\n'
-          '• $lunchBreakCreatedCount lunch breaks added (12:00-13:00)\n'
-          '• $servicesAddedCount services, $variantsAddedCount variants added';
-      
-      if (lunchBreakErrorDays.isNotEmpty) {
-        message += '\n⚠️ Lunch break failed for: ${lunchBreakErrorDays.join(', ')}';
+      if (mounted) {
+        String message = 
+            'Barber added successfully!\n'
+            '• $createdCount schedules created\n'
+            '• $lunchBreakCreatedCount lunch breaks added (12:00-13:00 local time)\n'
+            '• $servicesAddedCount services, $variantsAddedCount variants added\n'
+            '• Timezone: ${TimezoneService.getTimezoneDisplayName()}';
+        
+        if (lunchBreakErrorDays.isNotEmpty) {
+          message += '\n⚠️ Lunch break failed for: ${lunchBreakErrorDays.join(', ')}';
+        }
+        
+        _showSnackBar(message, errorCount > 0 || lunchBreakErrorDays.isNotEmpty ? Colors.orange : Colors.green);
+
+        setState(() {
+          _selectedBarberId = null;
+          _selectedItems.clear();
+          _expandedServices.clear();
+          _searchController.clear();
+          _searchResults = [];
+          _isSearching = false;
+          _selectedCategoryTab = null;
+        });
       }
-      
-      _showSnackBar(message, errorCount > 0 || lunchBreakErrorDays.isNotEmpty ? Colors.orange : Colors.green);
-
-      setState(() {
-        _selectedBarberId = null;
-        _selectedItems.clear();
-        _expandedServices.clear();
-        _searchController.clear();
-        _searchResults = [];
-        _isSearching = false;
-        _selectedCategoryTab = null;
-      });
+    } catch (e) {
+      debugPrint('❌ Error adding barber: $e');
+      if (mounted) _showSnackBar('Error: ${e.toString()}', Colors.red);
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
-  } catch (e) {
-    debugPrint('❌ Error adding barber: $e');
-    if (mounted) _showSnackBar('Error: ${e.toString()}', Colors.red);
-  } finally {
-    if (mounted) setState(() => _isLoading = false);
   }
-}
 
   void _showSnackBar(String message, Color color) {
     if (!mounted) return;
@@ -1376,7 +1544,7 @@ Future<void> _addBarber() async {
         backgroundColor: color,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        duration: const Duration(seconds: 3),
+        duration: const Duration(seconds: 4),
       ),
     );
   }
@@ -1403,10 +1571,6 @@ Future<void> _addBarber() async {
       ),
     );
   }
-
-  // ============================================================
-  // UPDATED SERVICE CARD WITH ALTERNATING COLORS
-  // ============================================================
 
   Widget _buildServiceCard(Map<String, dynamic> service, int index) {
     final serviceId = service['id'] as String;
@@ -1754,7 +1918,7 @@ Future<void> _addBarber() async {
   }
 
   Widget _buildServicesSection() {
-    if (_services.isEmpty) {
+    if (_services.isEmpty && !_isLoadingServices) {
       return Card(
         elevation: _isWeb ? 4 : 2,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -1784,6 +1948,21 @@ Future<void> _addBarber() async {
                   color: Colors.grey[500],
                 ),
               ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (_services.isEmpty && _isLoadingServices) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(32),
+          child: Column(
+            children: [
+              CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+              SizedBox(height: 16),
+              Text('Loading services...'),
             ],
           ),
         ),
@@ -1957,8 +2136,21 @@ Future<void> _addBarber() async {
               ],
             ),
             const SizedBox(height: 16),
-            if (_ownerSalons.isEmpty)
+            if (_ownerSalons.isEmpty && !_isLoadingSalons)
               _buildNoSalonWarning()
+            else if (_ownerSalons.isEmpty && _isLoadingSalons)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(32),
+                  child: Column(
+                    children: [
+                      CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+                      SizedBox(height: 12),
+                      Text('Loading salons...'),
+                    ],
+                  ),
+                ),
+              )
             else
               ListView.separated(
                 shrinkWrap: true,
@@ -2473,11 +2665,14 @@ Future<void> _addBarber() async {
     super.build(context);
     final screenWidth = MediaQuery.of(context).size.width;
     final isWeb = screenWidth > 800;
-    final isLoading =
-        _isLoading ||
+    
+    final isLoading = _isLoading ||
         _isLoadingServices ||
         _isLoadingSalons ||
-        _isLoadingSalonData;
+        _isLoadingSalonData ||
+        !_isTimezoneLoaded;
+
+    debugPrint('🔍 Build state - isLoading: $_isLoading, isLoadingServices: $_isLoadingServices, isLoadingSalons: $_isLoadingSalons, isLoadingSalonData: $_isLoadingSalonData, isTimezoneLoaded: $_isTimezoneLoaded, ownerSalons length: ${_ownerSalons.length}');
 
     return Scaffold(
       appBar: AppBar(
@@ -2546,13 +2741,27 @@ Future<void> _addBarber() async {
         ],
       ),
       body: isLoading
-          ? const Center(
+          ? Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  CircularProgressIndicator(color: Color(0xFFFF6B8B)),
-                  SizedBox(height: 16),
-                  Text('Loading...', style: TextStyle(color: Colors.grey)),
+                  const CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+                  const SizedBox(height: 16),
+                  Text(
+                    _isTimezoneLoaded ? 'Loading salons...' : 'Loading timezone...',
+                    style: const TextStyle(color: Colors.grey),
+                  ),
+                  const SizedBox(height: 8),
+                  if (_isLoadingSalons && _ownerSalons.isEmpty)
+                    const Text(
+                      'Checking your salons...',
+                      style: TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
+                  if (_isLoadingServices && _services.isEmpty)
+                    const Text(
+                      'Loading services...',
+                      style: TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
                 ],
               ),
             )
