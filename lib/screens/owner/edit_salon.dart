@@ -461,7 +461,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   bool _isDeleting = false;
 
   final _formKey = GlobalKey<FormState>();
-  bool get _isWeb => MediaQuery.of(context).size.width > 800;
 
   final supabase = Supabase.instance.client;
   final picker = ImagePicker();
