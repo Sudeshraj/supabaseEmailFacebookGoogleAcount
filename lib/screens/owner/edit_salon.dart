@@ -1,3 +1,5 @@
+// lib/screens/owner/edit_salon_screen.dart
+
 import 'dart:io' show File;
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -5,10 +7,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as path;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:image_cropper/image_cropper.dart';
+import '../../services/timezone_service.dart';
 
-// ==================== ENHANCED TIME PICKER (Same as CreateSalonScreen) ====================
+// ==================== ENHANCED TIME PICKER ====================
 class EnhancedTimePicker extends StatefulWidget {
   final TimeOfDay? initialTime;
   final ValueChanged<TimeOfDay> onTimeSelected;
@@ -109,7 +113,6 @@ class _EnhancedTimePickerState extends State<EnhancedTimePicker> {
             const Text('Select Time', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 20),
             
-            // Time Display
             Container(
               padding: const EdgeInsets.symmetric(vertical: 16),
               decoration: BoxDecoration(
@@ -148,7 +151,6 @@ class _EnhancedTimePickerState extends State<EnhancedTimePicker> {
             ),
             const SizedBox(height: 20),
             
-            // Pickers Row
             Row(
               children: [
                 _buildScrollPicker(
@@ -176,7 +178,6 @@ class _EnhancedTimePickerState extends State<EnhancedTimePicker> {
             
             const SizedBox(height: 24),
             
-            // Buttons
             Row(
               children: [
                 Expanded(
@@ -271,7 +272,7 @@ class _EnhancedTimePickerState extends State<EnhancedTimePicker> {
   }
 }
 
-// ==================== TIME PICKER FIELD (Same as CreateSalonScreen) ====================
+// ==================== TIME PICKER FIELD ====================
 class TimePickerField extends StatefulWidget {
   final String label;
   final TimeOfDay? initialTime;
@@ -447,9 +448,13 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   bool _isUploadingLogo = false;
   bool _isUploadingCover = false;
 
-  // Business hours - UPDATED to use TimePickerField
+  // Business hours
   TimeOfDay? _openTime;
   TimeOfDay? _closeTime;
+
+  // ✅ Timezone tracking (FIXED)
+  String _deviceTimezone = '';
+  bool _isTimezoneLoaded = false;
 
   bool _isLoading = true;
   bool _isSaving = false;
@@ -464,7 +469,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   @override
   void initState() {
     super.initState();
-    _loadAllData();
+    _initializeWithTimezone();
   }
 
   @override
@@ -486,7 +491,78 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   }
 
   // ============================================
-  // LOAD ALL DATA
+  // TIMEZONE INITIALIZATION (FIXED)
+  // ============================================
+  
+  Future<void> _initializeWithTimezone() async {
+    // First ensure TimezoneService is initialized
+    await TimezoneService.initialize();
+
+    // Get cached timezone from SharedPreferences
+    final prefs = await SharedPreferences.getInstance();
+    final cachedTimezone = prefs.getString('cached_timezone');
+
+    if (cachedTimezone != null && cachedTimezone.isNotEmpty) {
+      // Use cached timezone
+      _deviceTimezone = cachedTimezone;
+      debugPrint('✅ Using cached timezone: $_deviceTimezone');
+    } else {
+      // Get current timezone from service (auto-detected)
+      _deviceTimezone = TimezoneService.getCurrentTimezone();
+      // Save to cache for next time
+      await prefs.setString('cached_timezone', _deviceTimezone);
+      debugPrint('✅ Saved device timezone to cache: $_deviceTimezone');
+    }
+
+    setState(() {
+      _isTimezoneLoaded = true;
+    });
+
+    // Load all data after timezone is set
+    await _loadAllData();
+  }
+
+  // ============================================
+  // UTC TO LOCAL CONVERSION (FIXED)
+  // ============================================
+  
+  TimeOfDay _utcToLocalTime(String utcTimeStr) {
+    // Parse UTC time (format: "HH:MM:SS")
+    final parts = utcTimeStr.split(':');
+    final utcHour = int.parse(parts[0]);
+    final utcMinute = int.parse(parts[1]);
+    
+    // Create UTC DateTime
+    final now = DateTime.now();
+    final utcDateTime = DateTime.utc(now.year, now.month, now.day, utcHour, utcMinute);
+    
+    // Convert to local DateTime
+    final localDateTime = utcDateTime.toLocal();
+    
+    debugPrint('🔄 UTC to Local: $utcTimeStr UTC → ${localDateTime.hour}:${localDateTime.minute} Local (Timezone: $_deviceTimezone)');
+    
+    return TimeOfDay(hour: localDateTime.hour, minute: localDateTime.minute);
+  }
+  
+  String _localTimeToUtc(TimeOfDay localTime) {
+    final now = DateTime.now();
+    final localDateTime = DateTime(
+      now.year,
+      now.month,
+      now.day,
+      localTime.hour,
+      localTime.minute,
+    );
+    final utcDateTime = localDateTime.toUtc();
+    final utcTimeStr = '${utcDateTime.hour.toString().padLeft(2, '0')}:${utcDateTime.minute.toString().padLeft(2, '0')}:00';
+    
+    debugPrint('🔄 Local to UTC: ${localTime.format(context)} Local → $utcTimeStr UTC (Timezone: $_deviceTimezone)');
+    
+    return utcTimeStr;
+  }
+
+  // ============================================
+  // LOAD ALL DATA (FIXED - loads after timezone)
   // ============================================
   
   Future<void> _loadAllData() async {
@@ -524,24 +600,17 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       _currentLogoUrl = response['logo_url'];
       _currentCoverUrl = response['cover_url'];
 
+      // ✅ Convert UTC times from database to local time for display
       if (response['open_time'] != null) {
-        final openTimeStr = response['open_time'] as String;
-        final openParts = openTimeStr.split(':');
-        _openTime = TimeOfDay(
-          hour: int.parse(openParts[0]),
-          minute: int.parse(openParts[1]),
-        );
+        final openTimeUtc = response['open_time'] as String;
+        _openTime = _utcToLocalTime(openTimeUtc);
       } else {
         _openTime = const TimeOfDay(hour: 9, minute: 0);
       }
 
       if (response['close_time'] != null) {
-        final closeTimeStr = response['close_time'] as String;
-        final closeParts = closeTimeStr.split(':');
-        _closeTime = TimeOfDay(
-          hour: int.parse(closeParts[0]),
-          minute: int.parse(closeParts[1]),
-        );
+        final closeTimeUtc = response['close_time'] as String;
+        _closeTime = _utcToLocalTime(closeTimeUtc);
       } else {
         _closeTime = const TimeOfDay(hour: 18, minute: 0);
       }
@@ -1127,6 +1196,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       final logoUrl = await _uploadLogo();
       final coverUrl = await _uploadCover();
 
+      // Convert local times to UTC for saving
+      final openTimeUtc = _localTimeToUtc(_openTime!);
+      final closeTimeUtc = _localTimeToUtc(_closeTime!);
+
       // Update salon basic info
       final updateData = {
         'name': _nameController.text.trim(),
@@ -1136,8 +1209,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         'description': _descriptionController.text.trim().isEmpty ? null : _descriptionController.text.trim(),
         'logo_url': logoUrl,
         'cover_url': coverUrl,
-        'open_time': _formatTimeOfDay(_openTime!),
-        'close_time': _formatTimeOfDay(_closeTime!),
+        'open_time': openTimeUtc,
+        'close_time': closeTimeUtc,
         'updated_at': DateTime.now().toIso8601String(),
       };
 
@@ -1192,7 +1265,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       await showCustomAlert(
         context: context,
         title: "✅ Salon Updated!",
-        message: "${_nameController.text.trim()} has been updated successfully.",
+        message: "${_nameController.text.trim()} has been updated successfully.\n\n"
+            "⏰ Business hours saved in UTC.\n"
+            "🌍 Timezone: ${TimezoneService.getTimezoneDisplayName()}",
         isError: false,
       );
 
@@ -1291,6 +1366,32 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         if (mounted) setState(() => _isDeleting = false);
       }
     }
+  }
+
+  // ============================================
+  // TIMEZONE INFO CARD
+  // ============================================
+  
+  Widget _buildTimezoneInfoCard() {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          children: [
+            const Icon(Icons.access_time, size: 16, color: Colors.grey),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                '🌍 Current Timezone: ${TimezoneService.getTimezoneDisplayName()} (${TimezoneService.getUtcOffsetString()})',
+                style: const TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   // ============================================
@@ -2278,7 +2379,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   }
 
   // ============================================
-  // BUSINESS HOURS CARD WITH ENHANCED TIME PICKER
+  // BUSINESS HOURS CARD
   // ============================================
   
   Widget _buildBusinessHoursCard() {
@@ -2324,8 +2425,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       ),
     );
   }
-
-  String _formatTimeOfDay(TimeOfDay time) => '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}:00';
   
   void _showSnackBar(String msg, Color color) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -2337,6 +2436,28 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
     final isDesktop = screenWidth > 800;
+    
+    // ✅ Add timezone loading check
+    if (!_isTimezoneLoaded) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('Edit Salon'),
+          backgroundColor: const Color(0xFFFF6B8B),
+          foregroundColor: Colors.white,
+          elevation: 0,
+        ),
+        body: const Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              SizedBox(width: 40, height: 40, child: CircularProgressIndicator()),
+              SizedBox(height: 16),
+              Text('Loading timezone...'),
+            ],
+          ),
+        ),
+      );
+    }
     
     return Scaffold(
       appBar: AppBar(
@@ -2371,6 +2492,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                             offset: const Offset(16, -40),
                             child: Align(alignment: Alignment.topLeft, child: _buildLogoSeparate()),
                           ),
+                          const SizedBox(height: 16),
+                          
+                          // ✅ Timezone Info Card
+                          _buildTimezoneInfoCard(),
                           const SizedBox(height: 16),
                           
                           // Basic Info Card
@@ -2415,17 +2540,17 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                           ),
                           const SizedBox(height: 16),
                           
-                          // Business Hours Card with Enhanced Time Picker
+                          // Business Hours Card
                           _buildBusinessHoursCard(),
                           const SizedBox(height: 16),
                           
-                          // Service Categories Section (Split View)
+                          // Service Categories Section
                           _buildServiceCategorySection(),
                           
-                          // Age Categories Section (Split View)
+                          // Age Categories Section
                           _buildAgeCategorySection(),
                           
-                          // Genders Section (Chips)
+                          // Genders Section
                           _buildGenderSelection(),
                           
                           const SizedBox(height: 24),

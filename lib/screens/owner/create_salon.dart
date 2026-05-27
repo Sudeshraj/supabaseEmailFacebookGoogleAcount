@@ -495,6 +495,10 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
   // ✅ Timezone tracking
   String _deviceTimezone = '';
   bool _isTimezoneLoaded = false;
+  
+  // ✅ Added for better error handling
+  bool _isLoadingGlobalData = false;
+  bool _hasErrorLoadingData = false;
 
   bool _isLoading = false;
 
@@ -518,21 +522,16 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
 
   // ✅ Initialize with timezone from SharedPreferences
   Future<void> _initializeWithTimezone() async {
-    // First ensure TimezoneService is initialized
     await TimezoneService.initialize();
 
-    // Get cached timezone from SharedPreferences
     final prefs = await SharedPreferences.getInstance();
     final cachedTimezone = prefs.getString('cached_timezone');
 
     if (cachedTimezone != null && cachedTimezone.isNotEmpty) {
-      // Use cached timezone
       _deviceTimezone = cachedTimezone;
       debugPrint('✅ Using cached timezone: $_deviceTimezone');
     } else {
-      // Get current timezone from service (auto-detected)
       _deviceTimezone = TimezoneService.getCurrentTimezone();
-      // Save to cache for next time
       await prefs.setString('cached_timezone', _deviceTimezone);
       debugPrint('✅ Saved device timezone to cache: $_deviceTimezone');
     }
@@ -541,7 +540,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
       _isTimezoneLoaded = true;
     });
 
-    // Load global data after timezone is set
     await _loadGlobalData();
   }
 
@@ -563,19 +561,27 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     super.dispose();
   }
 
+  // ✅ Improved with better error handling
   Future<void> _loadGlobalData() async {
+    setState(() {
+      _isLoadingGlobalData = true;
+      _hasErrorLoadingData = false;
+    });
+
     try {
       final genders = await supabase
           .from('genders')
           .select('id, display_name, display_order')
           .eq('is_active', true)
-          .order('display_order');
+          .order('display_order')
+          .timeout(const Duration(seconds: 15));
 
       final ageCategories = await supabase
           .from('age_categories')
           .select('id, display_name, min_age, max_age, display_order')
           .eq('is_active', true)
-          .order('display_order');
+          .order('display_order')
+          .timeout(const Duration(seconds: 15));
 
       final categories = await supabase
           .from('categories')
@@ -583,15 +589,29 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
             'id, display_name, description, icon_name, color, display_order',
           )
           .eq('is_active', true)
-          .order('display_order');
+          .order('display_order')
+          .timeout(const Duration(seconds: 15));
 
       setState(() {
         _globalGenders = List<Map<String, dynamic>>.from(genders);
         _globalAgeCategories = List<Map<String, dynamic>>.from(ageCategories);
         _globalCategories = List<Map<String, dynamic>>.from(categories);
+        _hasErrorLoadingData = false;
       });
     } catch (e) {
       debugPrint('Error loading data: $e');
+      setState(() {
+        _hasErrorLoadingData = true;
+      });
+      if (mounted) {
+        _showSnackBar('Failed to load data. Please check your internet connection.', Colors.red);
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoadingGlobalData = false;
+        });
+      }
     }
   }
 
@@ -746,8 +766,18 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
   // ============================================
 
   Widget _buildGenderSelection() {
-    if (_globalGenders.isEmpty) {
+    if (_isLoadingGlobalData) {
       return _buildLoadingCard('Genders', Icons.people, Colors.blue);
+    }
+    
+    if (_hasErrorLoadingData && _globalGenders.isEmpty) {
+      return _buildErrorCard('Genders', Icons.people, Colors.blue, () {
+        _loadGlobalData();
+      });
+    }
+    
+    if (_globalGenders.isEmpty) {
+      return const SizedBox.shrink();
     }
 
     return Card(
@@ -852,6 +882,58 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                   ),
                 ),
               ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ============================================
+  // ERROR CARD WIDGET (New but keeping design consistent)
+  // ============================================
+  
+  Widget _buildErrorCard(String title, IconData icon, Color color, VoidCallback onRetry) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(icon, color: color),
+                ),
+                const SizedBox(width: 12),
+                Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                const Spacer(),
+                const Icon(Icons.error_outline, color: Colors.red),
+              ],
+            ),
+            const SizedBox(height: 12),
+            const Text('Failed to load data', style: TextStyle(color: Colors.red)),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: onRetry,
+                icon: const Icon(Icons.refresh, size: 18),
+                label: const Text('Retry'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: color,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+            ),
           ],
         ),
       ),
@@ -1313,6 +1395,16 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
   // ============================================
 
   Widget _buildAgeCategorySection() {
+    if (_isLoadingGlobalData) {
+      return _buildLoadingCard('Age Categories', Icons.calendar_today, Colors.green);
+    }
+    
+    if (_hasErrorLoadingData && _globalAgeCategories.isEmpty) {
+      return _buildErrorCard('Age Categories', Icons.calendar_today, Colors.green, () {
+        _loadGlobalData();
+      });
+    }
+    
     return _buildSplitViewSection(
       title: 'Age Categories',
       icon: Icons.calendar_today,
@@ -1374,6 +1466,16 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
   // ============================================
 
   Widget _buildServiceCategorySection() {
+    if (_isLoadingGlobalData) {
+      return _buildLoadingCard('Main Services', Icons.category, Colors.orange);
+    }
+    
+    if (_hasErrorLoadingData && _globalCategories.isEmpty) {
+      return _buildErrorCard('Main Services', Icons.category, Colors.orange, () {
+        _loadGlobalData();
+      });
+    }
+    
     return _buildSplitViewSection(
       title: 'Main Services',
       icon: Icons.category,
@@ -2327,15 +2429,16 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
   }
 
   // ============================================
-  // UTC CONVERSION FUNCTIONS
+  // UTC CONVERSION FUNCTIONS (FIXED with fixed date to avoid DST issues)
   // ============================================
 
   String _formatTimeOfDayToUtc(TimeOfDay time) {
-    final now = DateTime.now();
+    // Use a fixed date to avoid DST issues
+    final baseDate = DateTime.utc(2024, 1, 1);
     final localDateTime = DateTime(
-      now.year,
-      now.month,
-      now.day,
+      baseDate.year,
+      baseDate.month,
+      baseDate.day,
       time.hour,
       time.minute,
     );
@@ -2431,7 +2534,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
             : _descriptionController.text.trim(),
         'logo_url': logoUrl,
         'cover_url': coverUrl,
-        // ✅ Save as UTC
         'open_time': _formatTimeOfDayToUtc(_openTime!),
         'close_time': _formatTimeOfDayToUtc(_closeTime!),
         'extra_data': extraData,
