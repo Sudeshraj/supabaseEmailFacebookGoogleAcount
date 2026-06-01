@@ -399,6 +399,13 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   bool _isEmailValid = true;
 
   // ============================================
+  // AGE VALIDATION FLAGS (NEW)
+  // ============================================
+  bool _isMinAgeValid = true;
+  bool _isMaxAgeValid = true;
+  bool _isAgeRangeValid = true;
+
+  // ============================================
   // GENDER SECTION - MULTI-SELECT CHIPS ONLY
   // ============================================
   List<Map<String, dynamic>> _globalGenders = [];
@@ -452,9 +459,11 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   TimeOfDay? _openTime;
   TimeOfDay? _closeTime;
 
-  // ✅ Timezone tracking (FIXED)
+  // Timezone tracking
   String _deviceTimezone = '';
   bool _isTimezoneLoaded = false;
+  bool _isLoadingGlobalData = false;
+  bool _hasErrorLoadingData = false;
 
   bool _isLoading = true;
   bool _isSaving = false;
@@ -468,6 +477,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   @override
   void initState() {
     super.initState();
+    _ageCategoryMinAgeController.text = '0';
+    _ageCategoryMaxAgeController.text = '100';
     _initializeWithTimezone();
   }
 
@@ -490,25 +501,20 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   }
 
   // ============================================
-  // TIMEZONE INITIALIZATION (FIXED)
+  // TIMEZONE INITIALIZATION
   // ============================================
   
   Future<void> _initializeWithTimezone() async {
-    // First ensure TimezoneService is initialized
     await TimezoneService.initialize();
 
-    // Get cached timezone from SharedPreferences
     final prefs = await SharedPreferences.getInstance();
     final cachedTimezone = prefs.getString('cached_timezone');
 
     if (cachedTimezone != null && cachedTimezone.isNotEmpty) {
-      // Use cached timezone
       _deviceTimezone = cachedTimezone;
       debugPrint('✅ Using cached timezone: $_deviceTimezone');
     } else {
-      // Get current timezone from service (auto-detected)
       _deviceTimezone = TimezoneService.getCurrentTimezone();
-      // Save to cache for next time
       await prefs.setString('cached_timezone', _deviceTimezone);
       debugPrint('✅ Saved device timezone to cache: $_deviceTimezone');
     }
@@ -517,28 +523,23 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       _isTimezoneLoaded = true;
     });
 
-    // Load all data after timezone is set
     await _loadAllData();
   }
 
   // ============================================
-  // UTC TO LOCAL CONVERSION (FIXED)
+  // UTC TO LOCAL CONVERSION
   // ============================================
   
   TimeOfDay _utcToLocalTime(String utcTimeStr) {
-    // Parse UTC time (format: "HH:MM:SS")
     final parts = utcTimeStr.split(':');
     final utcHour = int.parse(parts[0]);
     final utcMinute = int.parse(parts[1]);
     
-    // Create UTC DateTime
     final now = DateTime.now();
     final utcDateTime = DateTime.utc(now.year, now.month, now.day, utcHour, utcMinute);
-    
-    // Convert to local DateTime
     final localDateTime = utcDateTime.toLocal();
     
-    debugPrint('🔄 UTC to Local: $utcTimeStr UTC → ${localDateTime.hour}:${localDateTime.minute} Local (Timezone: $_deviceTimezone)');
+    debugPrint('🔄 UTC to Local: $utcTimeStr UTC → ${localDateTime.hour}:${localDateTime.minute} Local');
     
     return TimeOfDay(hour: localDateTime.hour, minute: localDateTime.minute);
   }
@@ -553,19 +554,20 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       localTime.minute,
     );
     final utcDateTime = localDateTime.toUtc();
-    final utcTimeStr = '${utcDateTime.hour.toString().padLeft(2, '0')}:${utcDateTime.minute.toString().padLeft(2, '0')}:00';
     
-    debugPrint('🔄 Local to UTC: ${localTime.format(context)} Local → $utcTimeStr UTC (Timezone: $_deviceTimezone)');
-    
-    return utcTimeStr;
+    return '${utcDateTime.hour.toString().padLeft(2, '0')}:${utcDateTime.minute.toString().padLeft(2, '0')}:00';
   }
 
   // ============================================
-  // LOAD ALL DATA (FIXED - loads after timezone)
+  // LOAD ALL DATA
   // ============================================
   
   Future<void> _loadAllData() async {
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _isLoadingGlobalData = true;
+      _hasErrorLoadingData = false;
+    });
     
     try {
       await _loadGlobalData();
@@ -573,12 +575,56 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       await _loadSalonSelections();
     } catch (e) {
       debugPrint('Error loading data: $e');
+      setState(() {
+        _hasErrorLoadingData = true;
+      });
       if (mounted) {
-        _showSnackBar('Error loading data', Colors.red);
-        Navigator.pop(context);
+        _showSnackBar('Error loading data. Please check your connection.', Colors.red);
       }
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _isLoadingGlobalData = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _loadGlobalData() async {
+    try {
+      final genders = await supabase
+          .from('genders')
+          .select('id, display_name, display_order')
+          .eq('is_active', true)
+          .order('display_order')
+          .timeout(const Duration(seconds: 15));
+          
+      final ageCategories = await supabase
+          .from('age_categories')
+          .select('id, display_name, min_age, max_age, display_order')
+          .eq('is_active', true)
+          .order('display_order')
+          .timeout(const Duration(seconds: 15));
+          
+      final categories = await supabase
+          .from('categories')
+          .select('id, display_name, description, icon_name, color, display_order')
+          .eq('is_active', true)
+          .order('display_order')
+          .timeout(const Duration(seconds: 15));
+          
+      setState(() {
+        _globalGenders = List<Map<String, dynamic>>.from(genders);
+        _globalAgeCategories = List<Map<String, dynamic>>.from(ageCategories);
+        _globalCategories = List<Map<String, dynamic>>.from(categories);
+        _hasErrorLoadingData = false;
+      });
+      
+      debugPrint('✅ Global data loaded');
+    } catch (e) {
+      debugPrint('Error loading global data: $e');
+      rethrow;
     }
   }
 
@@ -599,7 +645,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       _currentLogoUrl = response['logo_url'];
       _currentCoverUrl = response['cover_url'];
 
-      // ✅ Convert UTC times from database to local time for display
       if (response['open_time'] != null) {
         final openTimeUtc = response['open_time'] as String;
         _openTime = _utcToLocalTime(openTimeUtc);
@@ -617,39 +662,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       debugPrint('✅ Salon data loaded');
     } catch (e) {
       debugPrint('Error loading salon: $e');
-      rethrow;
-    }
-  }
-
-  Future<void> _loadGlobalData() async {
-    try {
-      final genders = await supabase
-          .from('genders')
-          .select('id, display_name, display_order')
-          .eq('is_active', true)
-          .order('display_order');
-          
-      final ageCategories = await supabase
-          .from('age_categories')
-          .select('id, display_name, min_age, max_age, display_order')
-          .eq('is_active', true)
-          .order('display_order');
-          
-      final categories = await supabase
-          .from('categories')
-          .select('id, display_name, description, icon_name, color, display_order')
-          .eq('is_active', true)
-          .order('display_order');
-          
-      setState(() {
-        _globalGenders = List<Map<String, dynamic>>.from(genders);
-        _globalAgeCategories = List<Map<String, dynamic>>.from(ageCategories);
-        _globalCategories = List<Map<String, dynamic>>.from(categories);
-      });
-      
-      debugPrint('✅ Global data loaded');
-    } catch (e) {
-      debugPrint('Error loading global data: $e');
       rethrow;
     }
   }
@@ -758,6 +770,42 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   }
 
   // ============================================
+  // AGE VALIDATION FUNCTIONS (NEW)
+  // ============================================
+  
+  void _validateAgeFields() {
+    setState(() {
+      // Validate Min Age
+      final minAgeStr = _ageCategoryMinAgeController.text.trim();
+      if (minAgeStr.isEmpty) {
+        _isMinAgeValid = true;
+      } else {
+        final minAge = int.tryParse(minAgeStr);
+        _isMinAgeValid = minAge != null && minAge >= 0 && minAge <= 150;
+      }
+
+      // Validate Max Age
+      final maxAgeStr = _ageCategoryMaxAgeController.text.trim();
+      if (maxAgeStr.isEmpty) {
+        _isMaxAgeValid = true;
+      } else {
+        final maxAge = int.tryParse(maxAgeStr);
+        _isMaxAgeValid = maxAge != null && maxAge >= 0 && maxAge <= 150;
+      }
+
+      // Validate Min <= Max
+      final minAge = int.tryParse(_ageCategoryMinAgeController.text.trim());
+      final maxAge = int.tryParse(_ageCategoryMaxAgeController.text.trim());
+      
+      if (minAge != null && maxAge != null) {
+        _isAgeRangeValid = minAge <= maxAge;
+      } else {
+        _isAgeRangeValid = true;
+      }
+    });
+  }
+
+  // ============================================
   // AGE CATEGORY FUNCTIONS
   // ============================================
   
@@ -766,20 +814,33 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       _ageCategoryDisplayNameController.text = selected['display_name']?.toString() ?? '';
       _ageCategoryMinAgeController.text = (selected['min_age'] ?? 0).toString();
       _ageCategoryMaxAgeController.text = (selected['max_age'] ?? 100).toString();
+      _validateAgeFields();
     });
   }
 
   void _addAgeCategory() {
+    _validateAgeFields();
+    
     final displayName = _ageCategoryDisplayNameController.text.trim();
-    final minAge = int.tryParse(_ageCategoryMinAgeController.text.trim());
-    final maxAge = int.tryParse(_ageCategoryMaxAgeController.text.trim());
+    final minAgeStr = _ageCategoryMinAgeController.text.trim();
+    final maxAgeStr = _ageCategoryMaxAgeController.text.trim();
+    final minAge = int.tryParse(minAgeStr);
+    final maxAge = int.tryParse(maxAgeStr);
     
     if (displayName.isEmpty) {
       _showSnackBar('Age category display name is required', Colors.orange);
       return;
     }
+    if (minAgeStr.isEmpty || maxAgeStr.isEmpty) {
+      _showSnackBar('Both min age and max age are required', Colors.orange);
+      return;
+    }
     if (minAge == null || maxAge == null) {
       _showSnackBar('Valid age range is required', Colors.orange);
+      return;
+    }
+    if (minAge < 0 || minAge > 150 || maxAge < 0 || maxAge > 150) {
+      _showSnackBar('Age must be between 0 and 150', Colors.orange);
       return;
     }
     if (minAge > maxAge) {
@@ -802,6 +863,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       _ageCategoryDisplayNameController.clear();
       _ageCategoryMinAgeController.text = '0';
       _ageCategoryMaxAgeController.text = '100';
+      _isMinAgeValid = true;
+      _isMaxAgeValid = true;
+      _isAgeRangeValid = true;
     });
     _showSnackBar('Age category added', Colors.green);
   }
@@ -863,6 +927,49 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     for (int i = 0; i < _addedServiceCategories.length; i++) {
       _addedServiceCategories[i]['display_order'] = i;
     }
+  }
+
+  // ============================================
+  // AGE TEXT FIELD WITH VALIDATION (NEW)
+  // ============================================
+  
+  Widget _buildAgeTextField({
+    required TextEditingController controller,
+    required String label,
+    required String hint,
+    required IconData icon,
+    required TextInputType keyboardType,
+    required bool isValid,
+    required VoidCallback onChanged,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: TextFormField(
+        controller: controller,
+        keyboardType: keyboardType,
+        onChanged: (value) => onChanged(),
+        decoration: InputDecoration(
+          labelText: label,
+          hintText: hint,
+          prefixIcon: Icon(icon, color: Colors.grey),
+          errorText: !isValid && controller.text.isNotEmpty ? 'Enter a valid number (0-150)' : null,
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: Color(0xFFFF6B8B), width: 2),
+          ),
+          errorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: Colors.red, width: 1),
+          ),
+          focusedErrorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: Colors.red, width: 2),
+          ),
+        ),
+      ),
+    );
   }
 
   // ============================================
@@ -1150,7 +1257,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   Future<void> _updateSalon() async {
     if (!_formKey.currentState!.validate()) return;
 
-    // Validate phone and email
     final phone = _phoneController.text.trim();
     if (phone.isNotEmpty) {
       final cleaned = phone.replaceAll(RegExp(r'[^0-9]'), '');
@@ -1169,7 +1275,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       }
     }
 
-    // Validate selections and additions
     if (_selectedGenderIds.isEmpty) {
       _showSnackBar('Please select at least one gender', Colors.orange);
       return;
@@ -1191,15 +1296,12 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     setState(() => _isSaving = true);
 
     try {
-      // Upload images
       final logoUrl = await _uploadLogo();
       final coverUrl = await _uploadCover();
 
-      // Convert local times to UTC for saving
       final openTimeUtc = _localTimeToUtc(_openTime!);
       final closeTimeUtc = _localTimeToUtc(_closeTime!);
 
-      // Update salon basic info
       final updateData = {
         'name': _nameController.text.trim(),
         'address': _addressController.text.trim().isEmpty ? null : _addressController.text.trim(),
@@ -1368,7 +1470,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   }
 
   // ============================================
-  // TIMEZONE INFO CARD
+  // WIDGETS
   // ============================================
   
   Widget _buildTimezoneInfoCard() {
@@ -1387,6 +1489,81 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 style: const TextStyle(fontSize: 12, color: Colors.grey),
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildErrorCard(String title, IconData icon, Color color, VoidCallback onRetry) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(icon, color: color),
+                ),
+                const SizedBox(width: 12),
+                Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                const Spacer(),
+                const Icon(Icons.error_outline, color: Colors.red),
+              ],
+            ),
+            const SizedBox(height: 12),
+            const Text('Failed to load data', style: TextStyle(color: Colors.red)),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: onRetry,
+                icon: const Icon(Icons.refresh, size: 18),
+                label: const Text('Retry'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: color,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLoadingCard(String title, IconData icon, Color color) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: color),
+            ),
+            const SizedBox(width: 12),
+            Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            const Spacer(),
+            const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
           ],
         ),
       ),
@@ -1748,8 +1925,18 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   // ============================================
   
   Widget _buildGenderSelection() {
-    if (_globalGenders.isEmpty) {
+    if (_isLoadingGlobalData) {
       return _buildLoadingCard('Genders', Icons.people, Colors.blue);
+    }
+    
+    if (_hasErrorLoadingData && _globalGenders.isEmpty) {
+      return _buildErrorCard('Genders', Icons.people, Colors.blue, () {
+        _loadAllData();
+      });
+    }
+    
+    if (_globalGenders.isEmpty) {
+      return const SizedBox.shrink();
     }
     
     return Card(
@@ -1847,10 +2034,20 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   }
 
   // ============================================
-  // AGE CATEGORY SECTION - SPLIT VIEW
+  // AGE CATEGORY SECTION - SPLIT VIEW (UPDATED WITH VALIDATION)
   // ============================================
   
   Widget _buildAgeCategorySection() {
+    if (_isLoadingGlobalData) {
+      return _buildLoadingCard('Age Categories', Icons.calendar_today, Colors.green);
+    }
+    
+    if (_hasErrorLoadingData && _globalAgeCategories.isEmpty) {
+      return _buildErrorCard('Age Categories', Icons.calendar_today, Colors.green, () {
+        _loadAllData();
+      });
+    }
+    
     return _buildSplitViewSection(
       title: 'Age Categories',
       icon: Icons.calendar_today,
@@ -1878,26 +2075,44 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
           Row(
             children: [
               Expanded(
-                child: _buildTextField(
+                child: _buildAgeTextField(
                   controller: _ageCategoryMinAgeController,
                   label: 'Min Age',
                   hint: '0',
                   icon: Icons.numbers,
                   keyboardType: TextInputType.number,
+                  isValid: _isMinAgeValid,
+                  onChanged: _validateAgeFields,
                 ),
               ),
               const SizedBox(width: 8),
               Expanded(
-                child: _buildTextField(
+                child: _buildAgeTextField(
                   controller: _ageCategoryMaxAgeController,
                   label: 'Max Age',
                   hint: '100',
                   icon: Icons.numbers,
                   keyboardType: TextInputType.number,
+                  isValid: _isMaxAgeValid,
+                  onChanged: _validateAgeFields,
                 ),
               ),
             ],
           ),
+          if (!_isAgeRangeValid)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Row(
+                children: [
+                  const Icon(Icons.error_outline, size: 14, color: Colors.red),
+                  const SizedBox(width: 4),
+                  const Text(
+                    'Min age cannot be greater than max age',
+                    style: TextStyle(fontSize: 12, color: Colors.red),
+                  ),
+                ],
+              ),
+            ),
         ],
       ),
       onAdd: _addAgeCategory,
@@ -1909,6 +2124,16 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   // ============================================
   
   Widget _buildServiceCategorySection() {
+    if (_isLoadingGlobalData) {
+      return _buildLoadingCard('Main Services', Icons.category, Colors.orange);
+    }
+    
+    if (_hasErrorLoadingData && _globalCategories.isEmpty) {
+      return _buildErrorCard('Main Services', Icons.category, Colors.orange, () {
+        _loadAllData();
+      });
+    }
+    
     return _buildSplitViewSection(
       title: 'Main Services',
       icon: Icons.category,
@@ -1947,33 +2172,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         ],
       ),
       onAdd: _addServiceCategory,
-    );
-  }
-
-  Widget _buildLoadingCard(String title, IconData icon, Color color) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 16),
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(icon, color: color),
-            ),
-            const SizedBox(width: 12),
-            Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            const Spacer(),
-            const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
-          ],
-        ),
-      ),
     );
   }
 
@@ -2172,7 +2370,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     );
   }
 
-  // Image section widgets
+  // ============================================
+  // IMAGE SECTION WIDGETS
+  // ============================================
+  
   Widget _buildCoverSection() {
     final screenWidth = MediaQuery.of(context).size.width;
     final isDesktop = screenWidth > 800;
@@ -2436,7 +2637,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     final screenWidth = MediaQuery.of(context).size.width;
     final isDesktop = screenWidth > 800;
     
-    // ✅ Add timezone loading check
     if (!_isTimezoneLoaded) {
       return Scaffold(
         appBar: AppBar(
@@ -2493,7 +2693,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                           ),
                           const SizedBox(height: 16),
                           
-                          // ✅ Timezone Info Card
                           _buildTimezoneInfoCard(),
                           const SizedBox(height: 16),
                           
@@ -2539,17 +2738,11 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                           ),
                           const SizedBox(height: 16),
                           
-                          // Business Hours Card
                           _buildBusinessHoursCard(),
                           const SizedBox(height: 16),
                           
-                          // Service Categories Section
                           _buildServiceCategorySection(),
-                          
-                          // Age Categories Section
                           _buildAgeCategorySection(),
-                          
-                          // Genders Section
                           _buildGenderSelection(),
                           
                           const SizedBox(height: 24),

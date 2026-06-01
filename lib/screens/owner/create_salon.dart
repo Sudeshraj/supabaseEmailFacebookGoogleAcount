@@ -1,4 +1,3 @@
-// lib/screens/owner/create_salon_screen.dart
 
 import 'dart:io' show Platform, File;
 import 'dart:typed_data';
@@ -412,6 +411,7 @@ class _TimePickerFieldState extends State<_TimePickerField> {
   }
 }
 
+// ==================== MAIN SCREEN ====================
 class CreateSalonScreen extends StatefulWidget {
   const CreateSalonScreen({super.key});
 
@@ -431,15 +431,16 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
   bool _isPhoneValid = true;
   bool _isEmailValid = true;
 
-  // ============================================
-  // GENDER SECTION - MULTI-SELECT CHIPS ONLY
-  // ============================================
+  // Age validation flags
+  bool _isMinAgeValid = true;
+  bool _isMaxAgeValid = true;
+  bool _isAgeRangeValid = true;
+
+  // Genders
   List<Map<String, dynamic>> _globalGenders = [];
   final List<int> _selectedGenderIds = [];
 
-  // ============================================
-  // AGE CATEGORY SECTION - ADD WITH SUGGESTIONS
-  // ============================================
+  // Age Categories
   final List<Map<String, dynamic>> _addedAgeCategories = [];
   final TextEditingController _ageCategoryDisplayNameController =
       TextEditingController();
@@ -447,31 +448,21 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
       TextEditingController();
   final TextEditingController _ageCategoryMaxAgeController =
       TextEditingController();
-
   List<Map<String, dynamic>> _globalAgeCategories = [];
 
-  // ============================================
-  // SERVICE CATEGORY SECTION - ADD WITH SUGGESTIONS
-  // ============================================
+  // Service Categories
   final List<Map<String, dynamic>> _addedServiceCategories = [];
   final TextEditingController _serviceCategoryDisplayNameController =
       TextEditingController();
   final TextEditingController _serviceCategoryDescriptionController =
       TextEditingController();
-
   String _selectedIcon = 'content_cut';
   Color _selectedColor = const Color(0xFFFF6B8B);
-
   List<Map<String, dynamic>> _globalCategories = [];
 
-  // Icon list for selection
   final List<Map<String, dynamic>> _iconList = [
     {'name': 'face', 'icon': Icons.face, 'label': 'Face'},
-    {
-      'name': 'face_retouching_natural',
-      'icon': Icons.face_retouching_natural,
-      'label': 'Beard',
-    },
+    {'name': 'face_retouching_natural', 'icon': Icons.face_retouching_natural, 'label': 'Beard'},
     {'name': 'spa', 'icon': Icons.spa, 'label': 'Spa'},
     {'name': 'handshake', 'icon': Icons.handshake, 'label': 'Nails'},
     {'name': 'palette', 'icon': Icons.palette, 'label': 'Makeup'},
@@ -492,14 +483,11 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
   TimeOfDay? _openTime;
   TimeOfDay? _closeTime;
 
-  // ✅ Timezone tracking
+  // Timezone
   String _deviceTimezone = '';
   bool _isTimezoneLoaded = false;
-  
-  // ✅ Added for better error handling
   bool _isLoadingGlobalData = false;
   bool _hasErrorLoadingData = false;
-
   bool _isLoading = false;
 
   final _formKey = GlobalKey<FormState>();
@@ -513,27 +501,21 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     super.initState();
     _openTime = const TimeOfDay(hour: 9, minute: 0);
     _closeTime = const TimeOfDay(hour: 18, minute: 0);
-
     _ageCategoryMinAgeController.text = '0';
     _ageCategoryMaxAgeController.text = '100';
-
     _initializeWithTimezone();
   }
 
-  // ✅ Initialize with timezone from SharedPreferences
   Future<void> _initializeWithTimezone() async {
     await TimezoneService.initialize();
-
     final prefs = await SharedPreferences.getInstance();
     final cachedTimezone = prefs.getString('cached_timezone');
 
     if (cachedTimezone != null && cachedTimezone.isNotEmpty) {
-      _deviceTimezone = cachedTimezone;
-      debugPrint('✅ Using cached timezone: $_deviceTimezone');
+      _deviceTimezone = cachedTimezone;     
     } else {
       _deviceTimezone = TimezoneService.getCurrentTimezone();
-      await prefs.setString('cached_timezone', _deviceTimezone);
-      debugPrint('✅ Saved device timezone to cache: $_deviceTimezone');
+      await prefs.setString('cached_timezone', _deviceTimezone);     
     }
 
     setState(() {
@@ -550,18 +532,14 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     _phoneController.dispose();
     _emailController.dispose();
     _descriptionController.dispose();
-
     _ageCategoryDisplayNameController.dispose();
     _ageCategoryMinAgeController.dispose();
     _ageCategoryMaxAgeController.dispose();
-
     _serviceCategoryDisplayNameController.dispose();
     _serviceCategoryDescriptionController.dispose();
-
     super.dispose();
   }
 
-  // ✅ Improved with better error handling
   Future<void> _loadGlobalData() async {
     setState(() {
       _isLoadingGlobalData = true;
@@ -585,9 +563,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
 
       final categories = await supabase
           .from('categories')
-          .select(
-            'id, display_name, description, icon_name, color, display_order',
-          )
+          .select('id, display_name, description, icon_name, color, display_order')
           .eq('is_active', true)
           .order('display_order')
           .timeout(const Duration(seconds: 15));
@@ -598,8 +574,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
         _globalCategories = List<Map<String, dynamic>>.from(categories);
         _hasErrorLoadingData = false;
       });
-    } catch (e) {
-      debugPrint('Error loading data: $e');
+    } catch (e) {     
       setState(() {
         _hasErrorLoadingData = true;
       });
@@ -615,19 +590,14 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     }
   }
 
-  // ============================================
-  // VALIDATION FUNCTIONS
-  // ============================================
-
+  // ==================== VALIDATION ====================
   void _validatePhone(String value) {
     setState(() {
       if (value.isEmpty) {
         _isPhoneValid = true;
       } else {
         final cleaned = value.replaceAll(RegExp(r'[^0-9]'), '');
-        if (cleaned.length >= 9 &&
-            cleaned.length <= 10 &&
-            cleaned.startsWith('0')) {
+        if (cleaned.length >= 9 && cleaned.length <= 10 && cleaned.startsWith('0')) {
           _isPhoneValid = true;
         } else {
           _isPhoneValid = false;
@@ -641,45 +611,85 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
       if (value.isEmpty) {
         _isEmailValid = true;
       } else {
-        final emailRegex = RegExp(
-          r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
-        );
+        final emailRegex = RegExp(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$');
         _isEmailValid = emailRegex.hasMatch(value);
       }
     });
   }
 
-  // ============================================
-  // AGE CATEGORY FUNCTIONS
-  // ============================================
+  void _validateAgeFields() {
+    setState(() {
+      final minAgeStr = _ageCategoryMinAgeController.text.trim();
+      if (minAgeStr.isEmpty) {
+        _isMinAgeValid = true;
+      } else {
+        final minAge = int.tryParse(minAgeStr);
+        _isMinAgeValid = minAge != null && minAge >= 0 && minAge <= 150;
+      }
 
+      final maxAgeStr = _ageCategoryMaxAgeController.text.trim();
+      if (maxAgeStr.isEmpty) {
+        _isMaxAgeValid = true;
+      } else {
+        final maxAge = int.tryParse(maxAgeStr);
+        _isMaxAgeValid = maxAge != null && maxAge >= 0 && maxAge <= 150;
+      }
+
+      final minAge = int.tryParse(_ageCategoryMinAgeController.text.trim());
+      final maxAge = int.tryParse(_ageCategoryMaxAgeController.text.trim());
+      
+      if (minAge != null && maxAge != null) {
+        _isAgeRangeValid = minAge <= maxAge;
+      } else {
+        _isAgeRangeValid = true;
+      }
+    });
+  }
+
+  // ==================== AGE CATEGORY ====================
   void _autoFillAgeCategory(Map<String, dynamic> selected) {
     setState(() {
-      _ageCategoryDisplayNameController.text =
-          selected['display_name']?.toString() ?? '';
+      _ageCategoryDisplayNameController.text = selected['display_name']?.toString() ?? '';
       _ageCategoryMinAgeController.text = (selected['min_age'] ?? 0).toString();
-      _ageCategoryMaxAgeController.text = (selected['max_age'] ?? 100)
-          .toString();
+      _ageCategoryMaxAgeController.text = (selected['max_age'] ?? 100).toString();
+      _validateAgeFields();
     });
   }
 
   void _addAgeCategory() {
+    _validateAgeFields();
+    
     final displayName = _ageCategoryDisplayNameController.text.trim();
-    final minAge = int.tryParse(_ageCategoryMinAgeController.text.trim());
-    final maxAge = int.tryParse(_ageCategoryMaxAgeController.text.trim());
+    final minAgeStr = _ageCategoryMinAgeController.text.trim();
+    final maxAgeStr = _ageCategoryMaxAgeController.text.trim();
+    final minAge = int.tryParse(minAgeStr);
+    final maxAge = int.tryParse(maxAgeStr);
 
     if (displayName.isEmpty) {
       _showSnackBar('Age category display name is required', Colors.orange);
       return;
     }
-    if (minAge == null || maxAge == null) {
-      _showSnackBar('Valid age range is required', Colors.orange);
+    
+    if (minAgeStr.isEmpty || maxAgeStr.isEmpty) {
+      _showSnackBar('Both min age and max age are required', Colors.orange);
       return;
     }
+    
+    if (minAge == null || maxAge == null) {
+      _showSnackBar('Please enter valid numbers for age range', Colors.orange);
+      return;
+    }
+    
+    if (minAge < 0 || minAge > 150 || maxAge < 0 || maxAge > 150) {
+      _showSnackBar('Age must be between 0 and 150', Colors.orange);
+      return;
+    }
+    
     if (minAge > maxAge) {
       _showSnackBar('Min age cannot be greater than max age', Colors.orange);
       return;
     }
+    
     if (_addedAgeCategories.any((a) => a['display_name'] == displayName)) {
       _showSnackBar('This age category is already added', Colors.orange);
       return;
@@ -696,6 +706,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
       _ageCategoryDisplayNameController.clear();
       _ageCategoryMinAgeController.text = '0';
       _ageCategoryMaxAgeController.text = '100';
+      _isMinAgeValid = true;
+      _isMaxAgeValid = true;
+      _isAgeRangeValid = true;
     });
     _showSnackBar('Age category added', Colors.green);
   }
@@ -707,16 +720,11 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     }
   }
 
-  // ============================================
-  // SERVICE CATEGORY FUNCTIONS
-  // ============================================
-
+  // ==================== SERVICE CATEGORY ====================
   void _autoFillServiceCategory(Map<String, dynamic> selected) {
     setState(() {
-      _serviceCategoryDisplayNameController.text =
-          selected['display_name']?.toString() ?? '';
-      _serviceCategoryDescriptionController.text =
-          selected['description']?.toString() ?? '';
+      _serviceCategoryDisplayNameController.text = selected['display_name']?.toString() ?? '';
+      _serviceCategoryDescriptionController.text = selected['description']?.toString() ?? '';
       _selectedIcon = selected['icon_name']?.toString() ?? 'content_cut';
 
       String colorStr = selected['color']?.toString() ?? '#FF6B8B';
@@ -751,7 +759,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
       _serviceCategoryDisplayNameController.clear();
       _serviceCategoryDescriptionController.clear();
     });
-    _showSnackBar('Service category added', Colors.green);
+   
   }
 
   void _removeServiceCategory(int index) {
@@ -761,10 +769,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     }
   }
 
-  // ============================================
-  // GENDER SECTION - MULTI-SELECT CHIPS
-  // ============================================
-
+  // ==================== WIDGETS ====================
   Widget _buildGenderSelection() {
     if (_isLoadingGlobalData) {
       return _buildLoadingCard('Genders', Icons.people, Colors.blue);
@@ -808,10 +813,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                 if (_selectedGenderIds.isNotEmpty)
                   TextButton(
                     onPressed: () => setState(() => _selectedGenderIds.clear()),
-                    child: const Text(
-                      'Clear All',
-                      style: TextStyle(color: Colors.red),
-                    ),
+                    child: const Text('Clear All', style: TextStyle(color: Colors.red)),
                   ),
               ],
             ),
@@ -848,14 +850,10 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                   checkmarkColor: Colors.blue,
                   labelStyle: TextStyle(
                     color: isSelected ? Colors.blue : Colors.grey[700],
-                    fontWeight: isSelected
-                        ? FontWeight.w500
-                        : FontWeight.normal,
+                    fontWeight: isSelected ? FontWeight.w500 : FontWeight.normal,
                   ),
                   shape: StadiumBorder(
-                    side: BorderSide(
-                      color: isSelected ? Colors.blue : Colors.grey[300]!,
-                    ),
+                    side: BorderSide(color: isSelected ? Colors.blue : Colors.grey[300]!),
                   ),
                 );
               }).toList(),
@@ -864,21 +862,14 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
               Padding(
                 padding: const EdgeInsets.only(top: 12),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 6,
-                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(
                     color: Colors.blue.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
                     '${_selectedGenderIds.length} gender${_selectedGenderIds.length > 1 ? 's' : ''} selected',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: Colors.blue,
-                      fontWeight: FontWeight.w500,
-                    ),
+                    style: const TextStyle(fontSize: 12, color: Colors.blue, fontWeight: FontWeight.w500),
                   ),
                 ),
               ),
@@ -888,10 +879,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     );
   }
 
-  // ============================================
-  // ERROR CARD WIDGET (New but keeping design consistent)
-  // ============================================
-  
   Widget _buildErrorCard(String title, IconData icon, Color color, VoidCallback onRetry) {
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
@@ -940,9 +927,71 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     );
   }
 
-  // ============================================
-  // SPLIT VIEW SECTION
-  // ============================================
+  Widget _buildLoadingCard(String title, IconData icon, Color color) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: color),
+            ),
+            const SizedBox(width: 12),
+            Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            const Spacer(),
+            const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAgeTextField({
+    required TextEditingController controller,
+    required String label,
+    required String hint,
+    required IconData icon,
+    required TextInputType keyboardType,
+    required bool isValid,
+    required VoidCallback onChanged,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: TextFormField(
+        controller: controller,
+        keyboardType: keyboardType,
+        onChanged: (value) => onChanged(),
+        decoration: InputDecoration(
+          labelText: label,
+          hintText: hint,
+          prefixIcon: Icon(icon, color: Colors.grey),
+          errorText: !isValid && controller.text.isNotEmpty ? 'Enter a valid number (0-150)' : null,
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: Color(0xFFFF6B8B), width: 2),
+          ),
+          errorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: Colors.red, width: 1),
+          ),
+          focusedErrorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: Colors.red, width: 2),
+          ),
+        ),
+      ),
+    );
+  }
 
   Widget _buildSplitViewSection({
     required String title,
@@ -977,31 +1026,15 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                   child: Icon(icon, color: color),
                 ),
                 const SizedBox(width: 12),
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
+                Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                 const Spacer(),
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
-                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
                     color: color.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(20),
                   ),
-                  child: Text(
-                    '${addedItems.length} items',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: color,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
+                  child: Text('${addedItems.length} items', style: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.w500)),
                 ),
               ],
             ),
@@ -1025,20 +1058,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                         children: [
                           Row(
                             children: [
-                              const Icon(
-                                Icons.add_circle_outline,
-                                size: 20,
-                                color: Colors.green,
-                              ),
+                              const Icon(Icons.add_circle_outline, size: 20, color: Colors.green),
                               const SizedBox(width: 8),
-                              Text(
-                                'Add New $title',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                  color: color,
-                                ),
-                              ),
+                              Text('Add New $title', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: color)),
                             ],
                           ),
                           const SizedBox(height: 12),
@@ -1053,12 +1075,8 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: color,
                                 foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 10,
-                                ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
+                                padding: const EdgeInsets.symmetric(vertical: 10),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                               ),
                             ),
                           ),
@@ -1067,7 +1085,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                     ),
                   ),
                   const SizedBox(width: 16),
-
                   Expanded(
                     flex: 1,
                     child: Container(
@@ -1082,39 +1099,15 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                         children: [
                           Row(
                             children: [
-                              const Icon(
-                                Icons.list,
-                                size: 20,
-                                color: Colors.blue,
-                              ),
+                              const Icon(Icons.list, size: 20, color: Colors.blue),
                               const SizedBox(width: 8),
-                              Text(
-                                'Added $title',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                  color: color,
-                                ),
-                              ),
+                              Text('Added $title', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: color)),
                               const Spacer(),
                               if (addedItems.isNotEmpty)
                                 TextButton(
-                                  onPressed: () {
-                                    setState(() {
-                                      addedItems.clear();
-                                    });
-                                  },
-                                  style: TextButton.styleFrom(
-                                    padding: EdgeInsets.zero,
-                                    minimumSize: Size.zero,
-                                  ),
-                                  child: const Text(
-                                    'Clear All',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.red,
-                                    ),
-                                  ),
+                                  onPressed: () => setState(() => addedItems.clear()),
+                                  style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: Size.zero),
+                                  child: const Text('Clear All', style: TextStyle(fontSize: 12, color: Colors.red)),
                                 ),
                             ],
                           ),
@@ -1122,33 +1115,14 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                           if (addedItems.isEmpty)
                             Container(
                               padding: const EdgeInsets.all(24),
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(8),
-                              ),
+                              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8)),
                               child: Center(
                                 child: Column(
                                   children: [
-                                    Icon(
-                                      Icons.inbox,
-                                      size: 40,
-                                      color: Colors.grey[400],
-                                    ),
+                                    Icon(Icons.inbox, size: 40, color: Colors.grey[400]),
                                     const SizedBox(height: 8),
-                                    Text(
-                                      'No $title added yet',
-                                      style: TextStyle(
-                                        color: Colors.grey[500],
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                    Text(
-                                      'Use the form on the left to add',
-                                      style: TextStyle(
-                                        color: Colors.grey[400],
-                                        fontSize: 10,
-                                      ),
-                                    ),
+                                    Text('No $title added yet', style: TextStyle(color: Colors.grey[500], fontSize: 12)),
+                                    Text('Use the form on the left to add', style: TextStyle(color: Colors.grey[400], fontSize: 10)),
                                   ],
                                 ),
                               ),
@@ -1158,36 +1132,17 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                               shrinkWrap: true,
                               physics: const NeverScrollableScrollPhysics(),
                               itemCount: addedItems.length,
-                              separatorBuilder: (context, index) =>
-                                  const Divider(height: 1),
+                              separatorBuilder: (context, index) => const Divider(height: 1),
                               itemBuilder: (context, index) {
                                 final item = addedItems[index];
                                 return ListTile(
                                   leading: CircleAvatar(
-                                    backgroundColor: color.withValues(
-                                      alpha: 0.1,
-                                    ),
-                                    child: Text(
-                                      '${index + 1}',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: color,
-                                      ),
-                                    ),
+                                    backgroundColor: color.withValues(alpha: 0.1),
+                                    child: Text('${index + 1}', style: TextStyle(fontSize: 12, color: color)),
                                   ),
-                                  title: Text(
-                                    itemDisplayName(item),
-                                    style: const TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
+                                  title: Text(itemDisplayName(item), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
                                   trailing: IconButton(
-                                    icon: const Icon(
-                                      Icons.delete_outline,
-                                      size: 20,
-                                      color: Colors.red,
-                                    ),
+                                    icon: const Icon(Icons.delete_outline, size: 20, color: Colors.red),
                                     onPressed: () => onRemove(index),
                                   ),
                                   dense: true,
@@ -1216,20 +1171,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                       children: [
                         Row(
                           children: [
-                            const Icon(
-                              Icons.add_circle_outline,
-                              size: 20,
-                              color: Colors.green,
-                            ),
+                            const Icon(Icons.add_circle_outline, size: 20, color: Colors.green),
                             const SizedBox(width: 8),
-                            Text(
-                              'Add New $title',
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: color,
-                              ),
-                            ),
+                            Text('Add New $title', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: color)),
                           ],
                         ),
                         const SizedBox(height: 12),
@@ -1245,9 +1189,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                               backgroundColor: color,
                               foregroundColor: Colors.white,
                               padding: const EdgeInsets.symmetric(vertical: 10),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
-                              ),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                             ),
                           ),
                         ),
@@ -1255,7 +1197,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                     ),
                   ),
                   const SizedBox(height: 16),
-
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
@@ -1268,39 +1209,15 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                       children: [
                         Row(
                           children: [
-                            const Icon(
-                              Icons.list,
-                              size: 20,
-                              color: Colors.blue,
-                            ),
+                            const Icon(Icons.list, size: 20, color: Colors.blue),
                             const SizedBox(width: 8),
-                            Text(
-                              'Added $title',
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: color,
-                              ),
-                            ),
+                            Text('Added $title', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: color)),
                             const Spacer(),
                             if (addedItems.isNotEmpty)
                               TextButton(
-                                onPressed: () {
-                                  setState(() {
-                                    addedItems.clear();
-                                  });
-                                },
-                                style: TextButton.styleFrom(
-                                  padding: EdgeInsets.zero,
-                                  minimumSize: Size.zero,
-                                ),
-                                child: const Text(
-                                  'Clear All',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.red,
-                                  ),
-                                ),
+                                onPressed: () => setState(() => addedItems.clear()),
+                                style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: Size.zero),
+                                child: const Text('Clear All', style: TextStyle(fontSize: 12, color: Colors.red)),
                               ),
                           ],
                         ),
@@ -1308,33 +1225,14 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                         if (addedItems.isEmpty)
                           Container(
                             padding: const EdgeInsets.all(24),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(8),
-                            ),
+                            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8)),
                             child: Center(
                               child: Column(
                                 children: [
-                                  Icon(
-                                    Icons.inbox,
-                                    size: 40,
-                                    color: Colors.grey[400],
-                                  ),
+                                  Icon(Icons.inbox, size: 40, color: Colors.grey[400]),
                                   const SizedBox(height: 8),
-                                  Text(
-                                    'No $title added yet',
-                                    style: TextStyle(
-                                      color: Colors.grey[500],
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                  Text(
-                                    'Tap + button to add',
-                                    style: TextStyle(
-                                      color: Colors.grey[400],
-                                      fontSize: 10,
-                                    ),
-                                  ),
+                                  Text('No $title added yet', style: TextStyle(color: Colors.grey[500], fontSize: 12)),
+                                  Text('Tap + button to add', style: TextStyle(color: Colors.grey[400], fontSize: 10)),
                                 ],
                               ),
                             ),
@@ -1344,34 +1242,17 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                             shrinkWrap: true,
                             physics: const NeverScrollableScrollPhysics(),
                             itemCount: addedItems.length,
-                            separatorBuilder: (context, index) =>
-                                const Divider(height: 1),
+                            separatorBuilder: (context, index) => const Divider(height: 1),
                             itemBuilder: (context, index) {
                               final item = addedItems[index];
                               return ListTile(
                                 leading: CircleAvatar(
                                   backgroundColor: color.withValues(alpha: 0.1),
-                                  child: Text(
-                                    '${index + 1}',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: color,
-                                    ),
-                                  ),
+                                  child: Text('${index + 1}', style: TextStyle(fontSize: 12, color: color)),
                                 ),
-                                title: Text(
-                                  itemDisplayName(item),
-                                  style: const TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
+                                title: Text(itemDisplayName(item), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
                                 trailing: IconButton(
-                                  icon: const Icon(
-                                    Icons.delete_outline,
-                                    size: 20,
-                                    color: Colors.red,
-                                  ),
+                                  icon: const Icon(Icons.delete_outline, size: 20, color: Colors.red),
                                   onPressed: () => onRemove(index),
                                 ),
                                 dense: true,
@@ -1390,10 +1271,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     );
   }
 
-  // ============================================
-  // AGE CATEGORY SECTION - SPLIT VIEW
-  // ============================================
-
   Widget _buildAgeCategorySection() {
     if (_isLoadingGlobalData) {
       return _buildLoadingCard('Age Categories', Icons.calendar_today, Colors.green);
@@ -1411,8 +1288,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
       color: Colors.green,
       addedItems: _addedAgeCategories,
       onRemove: _removeAgeCategory,
-      itemDisplayName: (item) =>
-          '${item['display_name']} (${item['min_age']}-${item['max_age']})',
+      itemDisplayName: (item) => '${item['display_name']} (${item['min_age']}-${item['max_age']})',
       formFields: Column(
         children: [
           _buildSuggestionField(
@@ -1420,9 +1296,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
             label: 'Display Name *',
             hint: 'e.g., Child, Teen, Adult, Senior',
             icon: Icons.visibility,
-            suggestions: _globalAgeCategories
-                .map((a) => a['display_name'] as String)
-                .toList(),
+            suggestions: _globalAgeCategories.map((a) => a['display_name'] as String).toList(),
             onSelected: (String value) {
               final selected = _globalAgeCategories.firstWhere(
                 (a) => a['display_name'] == value,
@@ -1435,35 +1309,46 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
           Row(
             children: [
               Expanded(
-                child: _buildTextField(
+                child: _buildAgeTextField(
                   controller: _ageCategoryMinAgeController,
                   label: 'Min Age',
                   hint: '0',
                   icon: Icons.numbers,
                   keyboardType: TextInputType.number,
+                  isValid: _isMinAgeValid,
+                  onChanged: _validateAgeFields,
                 ),
               ),
               const SizedBox(width: 8),
               Expanded(
-                child: _buildTextField(
+                child: _buildAgeTextField(
                   controller: _ageCategoryMaxAgeController,
                   label: 'Max Age',
                   hint: '100',
                   icon: Icons.numbers,
                   keyboardType: TextInputType.number,
+                  isValid: _isMaxAgeValid,
+                  onChanged: _validateAgeFields,
                 ),
               ),
             ],
           ),
+          if (!_isAgeRangeValid)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Row(
+                children: [
+                  const Icon(Icons.error_outline, size: 14, color: Colors.red),
+                  const SizedBox(width: 4),
+                  const Text('Min age cannot be greater than max age', style: TextStyle(fontSize: 12, color: Colors.red)),
+                ],
+              ),
+            ),
         ],
       ),
       onAdd: _addAgeCategory,
     );
   }
-
-  // ============================================
-  // SERVICE CATEGORY SECTION - SPLIT VIEW
-  // ============================================
 
   Widget _buildServiceCategorySection() {
     if (_isLoadingGlobalData) {
@@ -1490,9 +1375,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
             label: 'Service Name *',
             hint: 'e.g., Hair, Skin, Nails, Grooming',
             icon: Icons.category,
-            suggestions: _globalCategories
-                .map((c) => c['display_name'] as String)
-                .toList(),
+            suggestions: _globalCategories.map((c) => c['display_name'] as String).toList(),
             onSelected: (String value) {
               final selected = _globalCategories.firstWhere(
                 (c) => c['display_name'] == value,
@@ -1519,52 +1402,11 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     );
   }
 
-  // ============================================
-  // COMMON WIDGETS
-  // ============================================
-
-  Widget _buildLoadingCard(String title, IconData icon, Color color) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 16),
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(icon, color: color),
-            ),
-            const SizedBox(width: 12),
-            Text(
-              title,
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
-            const Spacer(),
-            const SizedBox(
-              width: 20,
-              height: 20,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _buildIconSelector() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'Icon',
-          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-        ),
+        const Text('Icon', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
         const SizedBox(height: 8),
         SizedBox(
           height: 70,
@@ -1576,46 +1418,24 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
               final isSelected = _selectedIcon == iconItem['name'];
 
               return GestureDetector(
-                onTap: () =>
-                    setState(() => _selectedIcon = iconItem['name'] as String),
+                onTap: () => setState(() => _selectedIcon = iconItem['name'] as String),
                 child: Container(
                   width: 60,
                   margin: const EdgeInsets.only(right: 8),
                   decoration: BoxDecoration(
-                    color: isSelected
-                        ? const Color(0xFFFF6B8B).withValues(alpha: 0.1)
-                        : Colors.grey[100],
+                    color: isSelected ? const Color(0xFFFF6B8B).withValues(alpha: 0.1) : Colors.grey[100],
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
-                      color: isSelected
-                          ? const Color(0xFFFF6B8B)
-                          : Colors.grey[300]!,
+                      color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[300]!,
                       width: isSelected ? 1.5 : 1,
                     ),
                   ),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(
-                        iconItem['icon'] as IconData,
-                        size: 24,
-                        color: isSelected
-                            ? const Color(0xFFFF6B8B)
-                            : Colors.grey[600],
-                      ),
+                      Icon(iconItem['icon'] as IconData, size: 24, color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[600]),
                       const SizedBox(height: 4),
-                      Text(
-                        iconItem['label'] as String,
-                        style: TextStyle(
-                          fontSize: 9,
-                          color: isSelected
-                              ? const Color(0xFFFF6B8B)
-                              : Colors.grey[600],
-                        ),
-                        textAlign: TextAlign.center,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
+                      Text(iconItem['label'] as String, style: TextStyle(fontSize: 9, color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[600]), textAlign: TextAlign.center, maxLines: 1, overflow: TextOverflow.ellipsis),
                     ],
                   ),
                 ),
@@ -1629,24 +1449,15 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
 
   Widget _buildColorPicker() {
     final List<Color> colorOptions = [
-      const Color(0xFFFF6B8B),
-      const Color(0xFF4CAF50),
-      const Color(0xFF2196F3),
-      const Color(0xFFFF9800),
-      const Color(0xFF9C27B0),
-      const Color(0xFFF44336),
-      const Color(0xFF00BCD4),
-      const Color(0xFF795548),
-      const Color(0xFF607D8B),
+      const Color(0xFFFF6B8B), const Color(0xFF4CAF50), const Color(0xFF2196F3),
+      const Color(0xFFFF9800), const Color(0xFF9C27B0), const Color(0xFFF44336),
+      const Color(0xFF00BCD4), const Color(0xFF795548), const Color(0xFF607D8B),
     ];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'Color',
-          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-        ),
+        const Text('Color', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
         const SizedBox(height: 8),
         Wrap(
           spacing: 8,
@@ -1661,23 +1472,10 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                 decoration: BoxDecoration(
                   color: color,
                   shape: BoxShape.circle,
-                  border: isSelected
-                      ? Border.all(color: Colors.white, width: 2)
-                      : null,
-                  boxShadow: isSelected
-                      ? [
-                          BoxShadow(
-                            color: color.withValues(alpha: 0.5),
-                            blurRadius: 4,
-                          ),
-                        ]
-                      : null,
+                  border: isSelected ? Border.all(color: Colors.white, width: 2) : null,
+                  boxShadow: isSelected ? [BoxShadow(color: color.withValues(alpha: 0.5), blurRadius: 4)] : null,
                 ),
-                child: isSelected
-                    ? const Center(
-                        child: Icon(Icons.check, color: Colors.white, size: 14),
-                      )
-                    : null,
+                child: isSelected ? const Center(child: Icon(Icons.check, color: Colors.white, size: 14)) : null,
               ),
             );
           }).toList(),
@@ -1700,61 +1498,38 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
       padding: const EdgeInsets.only(bottom: 8),
       child: Autocomplete<String>(
         optionsBuilder: (TextEditingValue textEditingValue) {
-          if (textEditingValue.text.isEmpty) {
-            return const Iterable<String>.empty();
-          }
-          return suggestions.where(
-            (option) => option.toLowerCase().contains(
-              textEditingValue.text.toLowerCase(),
-            ),
-          );
+          if (textEditingValue.text.isEmpty) return const Iterable<String>.empty();
+          return suggestions.where((option) => option.toLowerCase().contains(textEditingValue.text.toLowerCase()));
         },
         onSelected: (String selection) {
           onSelected(selection);
           controller.text = selection;
         },
-        fieldViewBuilder:
-            (context, textController, focusNode, onFieldSubmitted) {
-              if (textController.text != controller.text) {
-                textController.text = controller.text;
-              }
-              controller.addListener(() {
-                if (textController.text != controller.text) {
-                  textController.text = controller.text;
-                }
-              });
-
-              return TextFormField(
-                controller: textController,
-                focusNode: focusNode,
-                keyboardType: keyboardType,
-                maxLines: maxLines,
-                decoration: InputDecoration(
-                  labelText: label,
-                  hintText: hint,
-                  prefixIcon: Icon(icon, color: Colors.grey),
-                  suffixIcon: const Icon(
-                    Icons.arrow_drop_down,
-                    color: Colors.grey,
-                  ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 10,
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(
-                      color: Color(0xFFFF6B8B),
-                      width: 2,
-                    ),
-                  ),
-                ),
-                onChanged: (value) => controller.text = value,
-              );
-            },
+        fieldViewBuilder: (context, textController, focusNode, onFieldSubmitted) {
+          if (textController.text != controller.text) textController.text = controller.text;
+          controller.addListener(() {
+            if (textController.text != controller.text) textController.text = controller.text;
+          });
+          return TextFormField(
+            controller: textController,
+            focusNode: focusNode,
+            keyboardType: keyboardType,
+            maxLines: maxLines,
+            decoration: InputDecoration(
+              labelText: label,
+              hintText: hint,
+              prefixIcon: Icon(icon, color: Colors.grey),
+              suffixIcon: const Icon(Icons.arrow_drop_down, color: Colors.grey),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: const BorderSide(color: Color(0xFFFF6B8B), width: 2),
+              ),
+            ),
+            onChanged: (value) => controller.text = value,
+          );
+        },
       ),
     );
   }
@@ -1789,10 +1564,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
               ? 'Enter valid email address'
               : null,
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 12,
-            vertical: 10,
-          ),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
             borderSide: const BorderSide(color: Color(0xFFFF6B8B), width: 2),
@@ -1810,10 +1582,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     );
   }
 
-  // ============================================
-  // IMAGE SECTION
-  // ============================================
-
+  // ==================== IMAGE SECTION ====================
   Widget _buildCoverSection() {
     final screenWidth = MediaQuery.of(context).size.width;
     final isDesktop = screenWidth > 800;
@@ -1846,16 +1615,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(
-                            Icons.add_photo_alternate,
-                            size: isDesktop ? 48 : 36,
-                            color: Colors.grey[400],
-                          ),
+                          Icon(Icons.add_photo_alternate, size: isDesktop ? 48 : 36, color: Colors.grey[400]),
                           const SizedBox(height: 8),
-                          Text(
-                            'Tap to add cover photo',
-                            style: TextStyle(color: Colors.grey[600]),
-                          ),
+                          Text('Tap to add cover photo', style: TextStyle(color: Colors.grey[600])),
                         ],
                       ),
                     )
@@ -1869,23 +1631,14 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
               child: GestureDetector(
                 onTap: () => _showCoverSourceDialog(),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.6),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.6), borderRadius: BorderRadius.circular(20)),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       const Icon(Icons.edit, size: 14, color: Colors.white),
                       const SizedBox(width: 4),
-                      Text(
-                        'Edit',
-                        style: TextStyle(color: Colors.white, fontSize: 12),
-                      ),
+                      Text('Edit', style: TextStyle(color: Colors.white, fontSize: 12)),
                     ],
                   ),
                 ),
@@ -1910,13 +1663,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
           decoration: BoxDecoration(
             color: Colors.white,
             shape: BoxShape.circle,
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.2),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
-              ),
-            ],
+            boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 8, offset: const Offset(0, 2))],
             image: (_logoFile != null || _logoWebBytes != null)
                 ? DecorationImage(
                     image: kIsWeb && _logoWebBytes != null
@@ -1928,50 +1675,26 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
           ),
           child: (_logoFile == null && _logoWebBytes == null)
               ? Container(
-                  decoration: BoxDecoration(
-                    color: Colors.grey[300],
-                    shape: BoxShape.circle,
-                  ),
+                  decoration: BoxDecoration(color: Colors.grey[300], shape: BoxShape.circle),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(
-                        Icons.add_a_photo,
-                        size: isDesktop ? 30 : 24,
-                        color: Colors.grey[600],
-                      ),
+                      Icon(Icons.add_a_photo, size: isDesktop ? 30 : 24, color: Colors.grey[600]),
                       SizedBox(height: isDesktop ? 4 : 2),
-                      Text(
-                        'Add Logo',
-                        style: TextStyle(
-                          fontSize: isDesktop ? 10 : 8,
-                          color: Colors.grey[600],
-                        ),
-                      ),
+                      Text('Add Logo', style: TextStyle(fontSize: isDesktop ? 10 : 8, color: Colors.grey[600])),
                     ],
                   ),
                 )
               : Stack(
                   children: [
-                    const CircleAvatar(
-                      backgroundColor: Colors.transparent,
-                      radius: 50,
-                    ),
+                    const CircleAvatar(backgroundColor: Colors.transparent, radius: 50),
                     Positioned(
                       bottom: 0,
                       right: 0,
                       child: Container(
                         padding: const EdgeInsets.all(4),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFFF6B8B),
-                          shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 2),
-                        ),
-                        child: const Icon(
-                          Icons.edit,
-                          size: 14,
-                          color: Colors.white,
-                        ),
+                        decoration: BoxDecoration(color: const Color(0xFFFF6B8B), shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2)),
+                        child: const Icon(Icons.edit, size: 14, color: Colors.white),
                       ),
                     ),
                   ],
@@ -1984,51 +1707,28 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
   void _showLogoSourceDialog() {
     showModalBottomSheet(
       context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (context) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text(
-                'Add Logo',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-            ),
+            const Padding(padding: EdgeInsets.all(16), child: Text('Add Logo', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
             const Divider(),
             ListTile(
-              leading: const Icon(
-                Icons.photo_library,
-                color: Color(0xFFFF6B8B),
-              ),
+              leading: const Icon(Icons.photo_library, color: Color(0xFFFF6B8B)),
               title: const Text('Choose from Gallery'),
-              onTap: () {
-                Navigator.pop(context);
-                _pickLogo();
-              },
+              onTap: () { Navigator.pop(context); _pickLogo(); },
             ),
             ListTile(
               leading: const Icon(Icons.camera_alt, color: Color(0xFFFF6B8B)),
               title: const Text('Take a Photo'),
-              onTap: () {
-                Navigator.pop(context);
-                _takeLogoPhoto();
-              },
+              onTap: () { Navigator.pop(context); _takeLogoPhoto(); },
             ),
             if (_logoFile != null || _logoWebBytes != null)
               ListTile(
                 leading: const Icon(Icons.delete, color: Colors.red),
-                title: const Text(
-                  'Remove Logo',
-                  style: TextStyle(color: Colors.red),
-                ),
-                onTap: () {
-                  Navigator.pop(context);
-                  _removeLogo();
-                },
+                title: const Text('Remove Logo', style: TextStyle(color: Colors.red)),
+                onTap: () { Navigator.pop(context); _removeLogo(); },
               ),
             const SizedBox(height: 12),
           ],
@@ -2040,51 +1740,28 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
   void _showCoverSourceDialog() {
     showModalBottomSheet(
       context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (context) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text(
-                'Add Cover Photo',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-            ),
+            const Padding(padding: EdgeInsets.all(16), child: Text('Add Cover Photo', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
             const Divider(),
             ListTile(
-              leading: const Icon(
-                Icons.photo_library,
-                color: Color(0xFFFF6B8B),
-              ),
+              leading: const Icon(Icons.photo_library, color: Color(0xFFFF6B8B)),
               title: const Text('Choose from Gallery'),
-              onTap: () {
-                Navigator.pop(context);
-                _pickCover();
-              },
+              onTap: () { Navigator.pop(context); _pickCover(); },
             ),
             ListTile(
               leading: const Icon(Icons.camera_alt, color: Color(0xFFFF6B8B)),
               title: const Text('Take a Photo'),
-              onTap: () {
-                Navigator.pop(context);
-                _takeCoverPhoto();
-              },
+              onTap: () { Navigator.pop(context); _takeCoverPhoto(); },
             ),
             if (_coverFile != null || _coverWebBytes != null)
               ListTile(
                 leading: const Icon(Icons.delete, color: Colors.red),
-                title: const Text(
-                  'Remove Cover',
-                  style: TextStyle(color: Colors.red),
-                ),
-                onTap: () {
-                  Navigator.pop(context);
-                  _removeCover();
-                },
+                title: const Text('Remove Cover', style: TextStyle(color: Colors.red)),
+                onTap: () { Navigator.pop(context); _removeCover(); },
               ),
             const SizedBox(height: 12),
           ],
@@ -2093,215 +1770,113 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     );
   }
 
-  // ============================================
-  // IMAGE PICKER FUNCTIONS
-  // ============================================
-
   Future<void> _pickLogo() async {
     try {
-      final XFile? pickedFile = await picker.pickImage(
-        source: ImageSource.gallery,
-        maxWidth: 800,
-        maxHeight: 800,
-        imageQuality: 85,
-      );
-
+      final XFile? pickedFile = await picker.pickImage(source: ImageSource.gallery, maxWidth: 800, maxHeight: 800, imageQuality: 85);
       if (pickedFile != null) {
         if (kIsWeb) {
           final bytes = await pickedFile.readAsBytes();
-          setState(() {
-            _logoWebBytes = bytes;
-            _logoFile = null;
-          });
+          setState(() { _logoWebBytes = bytes; _logoFile = null; });
           _showSnackBar('Logo selected', Colors.green);
         } else {
           final croppedFile = await ImageCropper().cropImage(
             sourcePath: pickedFile.path,
             aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
             uiSettings: [
-              AndroidUiSettings(
-                toolbarTitle: 'Crop Logo',
-                toolbarColor: const Color(0xFFFF6B8B),
-                toolbarWidgetColor: Colors.white,
-                initAspectRatio: CropAspectRatioPreset.square,
-                lockAspectRatio: true,
-              ),
+              AndroidUiSettings(toolbarTitle: 'Crop Logo', toolbarColor: const Color(0xFFFF6B8B), toolbarWidgetColor: Colors.white, initAspectRatio: CropAspectRatioPreset.square, lockAspectRatio: true),
               IOSUiSettings(title: 'Crop Logo', aspectRatioLockEnabled: true),
             ],
           );
-
           if (croppedFile != null) {
-            setState(() {
-              _logoFile = File(croppedFile.path);
-              _logoWebBytes = null;
-            });
+            setState(() { _logoFile = File(croppedFile.path); _logoWebBytes = null; });
             _showSnackBar('Logo cropped', Colors.green);
           }
         }
       }
-    } catch (e) {
-      debugPrint('Error picking logo: $e');
-      _showSnackBar('Error picking logo', Colors.red);
-    }
+    } catch (e) { _showSnackBar('Error picking logo', Colors.red); }
   }
 
   Future<void> _takeLogoPhoto() async {
     try {
-      final XFile? pickedFile = await picker.pickImage(
-        source: ImageSource.camera,
-        maxWidth: 800,
-        maxHeight: 800,
-        imageQuality: 85,
-      );
-
+      final XFile? pickedFile = await picker.pickImage(source: ImageSource.camera, maxWidth: 800, maxHeight: 800, imageQuality: 85);
       if (pickedFile != null) {
         if (kIsWeb) {
           final bytes = await pickedFile.readAsBytes();
-          setState(() {
-            _logoWebBytes = bytes;
-            _logoFile = null;
-          });
+          setState(() { _logoWebBytes = bytes; _logoFile = null; });
           _showSnackBar('Logo captured', Colors.green);
         } else {
           final croppedFile = await ImageCropper().cropImage(
             sourcePath: pickedFile.path,
             aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
             uiSettings: [
-              AndroidUiSettings(
-                toolbarTitle: 'Crop Logo',
-                toolbarColor: const Color(0xFFFF6B8B),
-                toolbarWidgetColor: Colors.white,
-                lockAspectRatio: true,
-              ),
+              AndroidUiSettings(toolbarTitle: 'Crop Logo', toolbarColor: const Color(0xFFFF6B8B), toolbarWidgetColor: Colors.white, lockAspectRatio: true),
               IOSUiSettings(title: 'Crop Logo', aspectRatioLockEnabled: true),
             ],
           );
-
           if (croppedFile != null) {
-            setState(() {
-              _logoFile = File(croppedFile.path);
-              _logoWebBytes = null;
-            });
+            setState(() { _logoFile = File(croppedFile.path); _logoWebBytes = null; });
             _showSnackBar('Logo captured and cropped', Colors.green);
           }
         }
       }
-    } catch (e) {
-      debugPrint('Error: $e');
-      _showSnackBar('Error taking photo', Colors.red);
-    }
+    } catch (e) { _showSnackBar('Error taking photo', Colors.red); }
   }
 
-  void _removeLogo() {
-    setState(() {
-      _logoFile = null;
-      _logoWebBytes = null;
-    });
-    _showSnackBar('Logo removed', Colors.red);
-  }
+  void _removeLogo() { setState(() { _logoFile = null; _logoWebBytes = null; }); _showSnackBar('Logo removed', Colors.red); }
 
   Future<void> _pickCover() async {
     try {
-      final XFile? pickedFile = await picker.pickImage(
-        source: ImageSource.gallery,
-        maxWidth: 1920,
-        maxHeight: 1080,
-        imageQuality: 85,
-      );
-
+      final XFile? pickedFile = await picker.pickImage(source: ImageSource.gallery, maxWidth: 1920, maxHeight: 1080, imageQuality: 85);
       if (pickedFile != null) {
         if (kIsWeb) {
           final bytes = await pickedFile.readAsBytes();
-          setState(() {
-            _coverWebBytes = bytes;
-            _coverFile = null;
-          });
+          setState(() { _coverWebBytes = bytes; _coverFile = null; });
           _showSnackBar('Cover selected', Colors.green);
         } else {
           final croppedFile = await ImageCropper().cropImage(
             sourcePath: pickedFile.path,
             aspectRatio: const CropAspectRatio(ratioX: 16, ratioY: 9),
             uiSettings: [
-              AndroidUiSettings(
-                toolbarTitle: 'Crop Cover',
-                toolbarColor: const Color(0xFFFF6B8B),
-                toolbarWidgetColor: Colors.white,
-                initAspectRatio: CropAspectRatioPreset.ratio16x9,
-                lockAspectRatio: true,
-              ),
+              AndroidUiSettings(toolbarTitle: 'Crop Cover', toolbarColor: const Color(0xFFFF6B8B), toolbarWidgetColor: Colors.white, initAspectRatio: CropAspectRatioPreset.ratio16x9, lockAspectRatio: true),
               IOSUiSettings(title: 'Crop Cover', aspectRatioLockEnabled: true),
             ],
           );
-
           if (croppedFile != null) {
-            setState(() {
-              _coverFile = File(croppedFile.path);
-              _coverWebBytes = null;
-            });
+            setState(() { _coverFile = File(croppedFile.path); _coverWebBytes = null; });
             _showSnackBar('Cover cropped', Colors.green);
           }
         }
       }
-    } catch (e) {
-      debugPrint('Error picking cover: $e');
-      _showSnackBar('Error picking cover', Colors.red);
-    }
+    } catch (e) { _showSnackBar('Error picking cover', Colors.red); }
   }
 
   Future<void> _takeCoverPhoto() async {
     try {
-      final XFile? pickedFile = await picker.pickImage(
-        source: ImageSource.camera,
-        maxWidth: 1920,
-        maxHeight: 1080,
-        imageQuality: 85,
-      );
-
+      final XFile? pickedFile = await picker.pickImage(source: ImageSource.camera, maxWidth: 1920, maxHeight: 1080, imageQuality: 85);
       if (pickedFile != null) {
         if (kIsWeb) {
           final bytes = await pickedFile.readAsBytes();
-          setState(() {
-            _coverWebBytes = bytes;
-            _coverFile = null;
-          });
+          setState(() { _coverWebBytes = bytes; _coverFile = null; });
           _showSnackBar('Cover captured', Colors.green);
         } else {
           final croppedFile = await ImageCropper().cropImage(
             sourcePath: pickedFile.path,
             aspectRatio: const CropAspectRatio(ratioX: 16, ratioY: 9),
             uiSettings: [
-              AndroidUiSettings(
-                toolbarTitle: 'Crop Cover',
-                toolbarColor: const Color(0xFFFF6B8B),
-                toolbarWidgetColor: Colors.white,
-                lockAspectRatio: true,
-              ),
+              AndroidUiSettings(toolbarTitle: 'Crop Cover', toolbarColor: const Color(0xFFFF6B8B), toolbarWidgetColor: Colors.white, lockAspectRatio: true),
               IOSUiSettings(title: 'Crop Cover', aspectRatioLockEnabled: true),
             ],
           );
-
           if (croppedFile != null) {
-            setState(() {
-              _coverFile = File(croppedFile.path);
-              _coverWebBytes = null;
-            });
+            setState(() { _coverFile = File(croppedFile.path); _coverWebBytes = null; });
             _showSnackBar('Cover captured and cropped', Colors.green);
           }
         }
       }
-    } catch (e) {
-      debugPrint('Error: $e');
-      _showSnackBar('Error taking photo', Colors.red);
-    }
+    } catch (e) { _showSnackBar('Error taking photo', Colors.red); }
   }
 
-  void _removeCover() {
-    setState(() {
-      _coverFile = null;
-      _coverWebBytes = null;
-    });
-    _showSnackBar('Cover removed', Colors.red);
-  }
+  void _removeCover() { setState(() { _coverFile = null; _coverWebBytes = null; }); _showSnackBar('Cover removed', Colors.red); }
 
   Future<String?> _uploadLogo() async {
     if (_logoFile == null && _logoWebBytes == null) return null;
@@ -2313,25 +1888,17 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
       if (kIsWeb && _logoWebBytes != null) {
         fileName = 'logo_${DateTime.now().millisecondsSinceEpoch}.png';
         final filePath = 'salons/$userId/$fileName';
-        await supabase.storage
-            .from('salon-images')
-            .uploadBinary(filePath, _logoWebBytes!);
+        await supabase.storage.from('salon-images').uploadBinary(filePath, _logoWebBytes!);
         return supabase.storage.from('salon-images').getPublicUrl(filePath);
       } else if (_logoFile != null) {
         final fileExt = path.extension(_logoFile!.path);
         fileName = 'logo_${DateTime.now().millisecondsSinceEpoch}$fileExt';
         final filePath = 'salons/$userId/$fileName';
-        await supabase.storage
-            .from('salon-images')
-            .upload(filePath, _logoFile!);
+        await supabase.storage.from('salon-images').upload(filePath, _logoFile!);
         return supabase.storage.from('salon-images').getPublicUrl(filePath);
       }
       return null;
-    } catch (e) {
-      return null;
-    } finally {
-      if (mounted) setState(() => _isUploadingLogo = false);
-    }
+    } catch (e) { return null; } finally { if (mounted) setState(() => _isUploadingLogo = false); }
   }
 
   Future<String?> _uploadCover() async {
@@ -2344,31 +1911,20 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
       if (kIsWeb && _coverWebBytes != null) {
         fileName = 'cover_${DateTime.now().millisecondsSinceEpoch}.png';
         final filePath = 'salons/$userId/$fileName';
-        await supabase.storage
-            .from('salon-images')
-            .uploadBinary(filePath, _coverWebBytes!);
+        await supabase.storage.from('salon-images').uploadBinary(filePath, _coverWebBytes!);
         return supabase.storage.from('salon-images').getPublicUrl(filePath);
       } else if (_coverFile != null) {
         final fileExt = path.extension(_coverFile!.path);
         fileName = 'cover_${DateTime.now().millisecondsSinceEpoch}$fileExt';
         final filePath = 'salons/$userId/$fileName';
-        await supabase.storage
-            .from('salon-images')
-            .upload(filePath, _coverFile!);
+        await supabase.storage.from('salon-images').upload(filePath, _coverFile!);
         return supabase.storage.from('salon-images').getPublicUrl(filePath);
       }
       return null;
-    } catch (e) {
-      return null;
-    } finally {
-      if (mounted) setState(() => _isUploadingCover = false);
-    }
+    } catch (e) { return null; } finally { if (mounted) setState(() => _isUploadingCover = false); }
   }
 
-  // ============================================
-  // BUSINESS HOURS SECTION WITH ENHANCED TIME PICKER
-  // ============================================
-
+  // ==================== BUSINESS HOURS ====================
   Widget _buildBusinessHoursCard() {
     return Card(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -2377,10 +1933,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Business Hours',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
+            const Text('Business Hours', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 16),
             Row(
               children: [
@@ -2389,9 +1942,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                     label: 'Open Time',
                     initialTime: _openTime,
                     isRequired: true,
-                    onTimeSelected: (time) {
-                      setState(() => _openTime = time);
-                    },
+                    onTimeSelected: (time) => setState(() => _openTime = time),
                   ),
                 ),
                 const SizedBox(width: 16),
@@ -2400,9 +1951,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                     label: 'Close Time',
                     initialTime: _closeTime,
                     isRequired: true,
-                    onTimeSelected: (time) {
-                      setState(() => _closeTime = time);
-                    },
+                    onTimeSelected: (time) => setState(() => _closeTime = time),
                   ),
                 ),
               ],
@@ -2413,7 +1962,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     );
   }
 
-  // ✅ Show timezone info card
   Widget _buildTimezoneInfoCard() {
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
@@ -2428,38 +1976,21 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     );
   }
 
-  // ============================================
-  // UTC CONVERSION FUNCTIONS (FIXED with fixed date to avoid DST issues)
-  // ============================================
-
   String _formatTimeOfDayToUtc(TimeOfDay time) {
-    // Use a fixed date to avoid DST issues
     final baseDate = DateTime.utc(2024, 1, 1);
-    final localDateTime = DateTime(
-      baseDate.year,
-      baseDate.month,
-      baseDate.day,
-      time.hour,
-      time.minute,
-    );
+    final localDateTime = DateTime(baseDate.year, baseDate.month, baseDate.day, time.hour, time.minute);
     final utcDateTime = localDateTime.toUtc();
     return '${utcDateTime.hour.toString().padLeft(2, '0')}:${utcDateTime.minute.toString().padLeft(2, '0')}:00';
   }
 
-  // ============================================
-  // CREATE SALON
-  // ============================================
-
+  // ==================== CREATE SALON ====================
   Future<void> _createSalon() async {
     if (!_formKey.currentState!.validate()) return;
 
-    // Validate phone and email
     final phone = _phoneController.text.trim();
     if (phone.isNotEmpty) {
       final cleaned = phone.replaceAll(RegExp(r'[^0-9]'), '');
-      if (cleaned.length < 9 ||
-          cleaned.length > 10 ||
-          !cleaned.startsWith('0')) {
+      if (cleaned.length < 9 || cleaned.length > 10 || !cleaned.startsWith('0')) {
         _showSnackBar('Please enter a valid phone number', Colors.orange);
         return;
       }
@@ -2467,16 +1998,13 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
 
     final email = _emailController.text.trim();
     if (email.isNotEmpty) {
-      final emailRegex = RegExp(
-        r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
-      );
+      final emailRegex = RegExp(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$');
       if (!emailRegex.hasMatch(email)) {
         _showSnackBar('Please enter a valid email address', Colors.orange);
         return;
       }
     }
 
-    // Validate selections and additions
     if (_selectedGenderIds.isEmpty) {
       _showSnackBar('Please select at least one gender', Colors.orange);
       return;
@@ -2499,17 +2027,11 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     setState(() => _isLoading = true);
 
     try {
-      String? logoUrl = (_logoFile != null || _logoWebBytes != null)
-          ? await _uploadLogo()
-          : null;
-      String? coverUrl = (_coverFile != null || _coverWebBytes != null)
-          ? await _uploadCover()
-          : null;
+      String? logoUrl = (_logoFile != null || _logoWebBytes != null) ? await _uploadLogo() : null;
+      String? coverUrl = (_coverFile != null || _coverWebBytes != null) ? await _uploadCover() : null;
 
       final prefs = await SharedPreferences.getInstance();
-      final deviceTimezone =
-          prefs.getString('cached_timezone') ??
-          TimezoneService.getCurrentTimezone();
+      final deviceTimezone = prefs.getString('cached_timezone') ?? TimezoneService.getCurrentTimezone();
 
       final extraData = {
         'created_from': _isWeb ? 'web' : 'mobile',
@@ -2519,19 +2041,11 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
 
       final salonData = {
         'name': _nameController.text.trim(),
-        'address': _addressController.text.trim().isEmpty
-            ? null
-            : _addressController.text.trim(),
-        'phone': _phoneController.text.trim().isEmpty
-            ? null
-            : _phoneController.text.trim(),
-        'email': _emailController.text.trim().isEmpty
-            ? null
-            : _emailController.text.trim(),
+        'address': _addressController.text.trim().isEmpty ? null : _addressController.text.trim(),
+        'phone': _phoneController.text.trim().isEmpty ? null : _phoneController.text.trim(),
+        'email': _emailController.text.trim().isEmpty ? null : _emailController.text.trim(),
         'owner_id': userId,
-        'description': _descriptionController.text.trim().isEmpty
-            ? null
-            : _descriptionController.text.trim(),
+        'description': _descriptionController.text.trim().isEmpty ? null : _descriptionController.text.trim(),
         'logo_url': logoUrl,
         'cover_url': coverUrl,
         'open_time': _formatTimeOfDayToUtc(_openTime!),
@@ -2540,18 +2054,12 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
         'is_active': true,
       };
 
-      final response = await supabase
-          .from('salons')
-          .insert(salonData)
-          .select('id, name')
-          .single();
+      final response = await supabase.from('salons').insert(salonData).select('id, name').single();
       final salonId = response['id'] as int;
 
-      // Save genders
       for (int i = 0; i < _selectedGenderIds.length; i++) {
         final genderId = _selectedGenderIds[i];
         final gender = _globalGenders.firstWhere((g) => g['id'] == genderId);
-
         await supabase.from('salon_genders').insert({
           'salon_id': salonId,
           'display_name': gender['display_name'],
@@ -2560,7 +2068,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
         });
       }
 
-      // Save age categories
       for (var ageCat in _addedAgeCategories) {
         await supabase.from('salon_age_categories').insert({
           'salon_id': salonId,
@@ -2572,7 +2079,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
         });
       }
 
-      // Save service categories
       for (var serviceCat in _addedServiceCategories) {
         await supabase.from('salon_categories').insert({
           'salon_id': salonId,
@@ -2608,22 +2114,11 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     }
   }
 
-  String _getPlatformName() => kIsWeb
-      ? 'web'
-      : Platform.isIOS
-      ? 'ios'
-      : Platform.isAndroid
-      ? 'android'
-      : 'mobile';
+  String _getPlatformName() => kIsWeb ? 'web' : Platform.isIOS ? 'ios' : Platform.isAndroid ? 'android' : 'mobile';
 
   void _showSnackBar(String msg, Color color) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(msg),
-        backgroundColor: color,
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 2),
-      ),
+      SnackBar(content: Text(msg), backgroundColor: color, behavior: SnackBarBehavior.floating, duration: const Duration(seconds: 2)),
     );
   }
 
@@ -2641,18 +2136,11 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
           elevation: 0,
         ),
         body: const Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              SizedBox(
-                width: 40,
-                height: 40,
-                child: CircularProgressIndicator(),
-              ),
-              SizedBox(height: 16),
-              Text('Loading timezone...'),
-            ],
-          ),
+          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+            SizedBox(width: 40, height: 40, child: CircularProgressIndicator()),
+            SizedBox(height: 16),
+            Text('Loading timezone...'),
+          ]),
         ),
       );
     }
@@ -2669,9 +2157,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
         color: Colors.grey[50],
         child: Center(
           child: Container(
-            constraints: BoxConstraints(
-              maxWidth: isDesktop ? 1200 : double.infinity,
-            ),
+            constraints: BoxConstraints(maxWidth: isDesktop ? 1200 : double.infinity),
             child: SingleChildScrollView(
               padding: EdgeInsets.all(isDesktop ? 32 : 16),
               child: Form(
@@ -2681,182 +2167,85 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                     _buildCoverSection(),
                     Transform.translate(
                       offset: const Offset(16, -40),
-                      child: Align(
-                        alignment: Alignment.topLeft,
-                        child: _buildLogoSeparate(),
-                      ),
+                      child: Align(alignment: Alignment.topLeft, child: _buildLogoSeparate()),
                     ),
                     const SizedBox(height: 16),
-
-                    // ✅ Timezone Info Card
                     _buildTimezoneInfoCard(),
                     const SizedBox(height: 16),
 
-                    // Basic Info Card
+                    // Basic Information
                     Card(
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                       child: Padding(
                         padding: const EdgeInsets.all(16),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text(
-                              'Basic Information',
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
+                            const Text('Basic Information', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                             const SizedBox(height: 16),
-                            _buildTextField(
-                              controller: _nameController,
-                              label: 'Salon Name *',
-                              hint: 'Enter salon name',
-                              icon: Icons.store,
-                            ),
+                            _buildTextField(controller: _nameController, label: 'Salon Name *', hint: 'Enter salon name', icon: Icons.store),
                             const SizedBox(height: 12),
-                            _buildTextField(
-                              controller: _addressController,
-                              label: 'Address',
-                              hint: 'Enter address',
-                              icon: Icons.location_on,
-                              maxLines: 2,
-                            ),
+                            _buildTextField(controller: _addressController, label: 'Address', hint: 'Enter address', icon: Icons.location_on, maxLines: 2),
                             const SizedBox(height: 12),
-                            _buildTextField(
-                              controller: _descriptionController,
-                              label: 'Description',
-                              hint: 'Tell about your salon',
-                              icon: Icons.description,
-                              maxLines: 3,
-                            ),
+                            _buildTextField(controller: _descriptionController, label: 'Description', hint: 'Tell about your salon', icon: Icons.description, maxLines: 3),
                           ],
                         ),
                       ),
                     ),
                     const SizedBox(height: 16),
 
-                    // Contact Info Card
+                    // Contact Information
                     Card(
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                       child: Padding(
                         padding: const EdgeInsets.all(16),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text(
-                              'Contact Information',
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
+                            const Text('Contact Information', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                             const SizedBox(height: 16),
-                            _buildTextField(
-                              controller: _phoneController,
-                              label: 'Phone Number',
-                              hint: 'Enter phone number (e.g., 0771234567)',
-                              icon: Icons.phone,
-                              keyboardType: TextInputType.phone,
-                              isPhone: true,
-                            ),
+                            _buildTextField(controller: _phoneController, label: 'Phone Number', hint: 'Enter phone number (e.g., 0771234567)', icon: Icons.phone, keyboardType: TextInputType.phone, isPhone: true),
                             const SizedBox(height: 12),
-                            _buildTextField(
-                              controller: _emailController,
-                              label: 'Email Address',
-                              hint:
-                                  'Enter email address (e.g., salon@example.com)',
-                              icon: Icons.email,
-                              keyboardType: TextInputType.emailAddress,
-                              isEmail: true,
-                            ),
+                            _buildTextField(controller: _emailController, label: 'Email Address', hint: 'Enter email address (e.g., salon@example.com)', icon: Icons.email, keyboardType: TextInputType.emailAddress, isEmail: true),
                             const SizedBox(height: 8),
-                            Text(
-                              'Phone and email are optional but recommended',
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: Colors.grey[500],
-                              ),
-                            ),
+                            Text('Phone and email are optional but recommended', style: TextStyle(fontSize: 11, color: Colors.grey[500])),
                           ],
                         ),
                       ),
                     ),
                     const SizedBox(height: 16),
 
-                    // Business Hours Card
                     _buildBusinessHoursCard(),
                     const SizedBox(height: 16),
 
-                    // Service Categories Section
                     _buildServiceCategorySection(),
-
-                    // Age Categories Section
                     _buildAgeCategorySection(),
-
-                    // Genders Section
                     _buildGenderSelection(),
 
                     const SizedBox(height: 24),
 
-                    // Create Button
                     SizedBox(
                       width: double.infinity,
                       height: 54,
                       child: ElevatedButton(
-                        onPressed:
-                            (_isLoading ||
-                                _isUploadingLogo ||
-                                _isUploadingCover)
-                            ? null
-                            : _createSalon,
+                        onPressed: (_isLoading || _isUploadingLogo || _isUploadingCover) ? null : _createSalon,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFFFF6B8B),
                           foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                           elevation: 0,
                         ),
-                        child:
-                            _isLoading || _isUploadingLogo || _isUploadingCover
-                            ? Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const SizedBox(
-                                    height: 24,
-                                    width: 24,
-                                    child: CircularProgressIndicator(
-                                      color: Colors.white,
-                                      strokeWidth: 2,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Text(
-                                    _isUploadingLogo || _isUploadingCover
-                                        ? 'Uploading...'
-                                        : 'Creating...',
-                                  ),
-                                ],
-                              )
-                            : const Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.add_business, size: 20),
-                                  SizedBox(width: 8),
-                                  Text(
-                                    'Create Salon',
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ],
-                              ),
+                        child: (_isLoading || _isUploadingLogo || _isUploadingCover)
+                            ? Row(mainAxisSize: MainAxisSize.min, children: [
+                                const SizedBox(height: 24, width: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)),
+                                const SizedBox(width: 12),
+                                Text(_isUploadingLogo || _isUploadingCover ? 'Uploading...' : 'Creating...'),
+                              ])
+                            : const Row(mainAxisSize: MainAxisSize.min, children: [
+                                Icon(Icons.add_business, size: 20),
+                                SizedBox(width: 8),
+                                Text('Create Salon', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                              ]),
                       ),
                     ),
                   ],
