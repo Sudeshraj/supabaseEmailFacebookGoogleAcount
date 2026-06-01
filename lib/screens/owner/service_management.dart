@@ -220,7 +220,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
   // ADD VARIANT DIALOG
   // ============================================
 
-  void _showAddVariantDialog(Map<String, dynamic> service) async {
+  void _showAddVariantDialog(Map<String, dynamic> service) {
     int? selectedGenderId;
     int? selectedAgeCategoryId;
     final priceController = TextEditingController();
@@ -254,7 +254,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
       }
     }
 
-    await showDialog(
+    showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) {
@@ -565,6 +565,16 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                       'duration': duration,
                       'is_active': true,
                     });
+
+                    // Close dialog first
+                    if (mounted) Navigator.pop(context);
+
+                    // Reload services
+                    await _loadServices();
+
+                    if (mounted) {
+                      _showSnackBar('Option added successfully!', Colors.green);
+                    }
                   } catch (e) {
                     if (mounted) {
                       _showSnackBar('Error adding option: $e', Colors.red);
@@ -806,6 +816,19 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                           'updated_at': DateTime.now().toIso8601String(),
                         })
                         .eq('id', variant['id']);
+
+                    // Close dialog first
+                    if (mounted) Navigator.pop(context);
+
+                    // Reload services
+                    await _loadServices();
+
+                    if (mounted) {
+                      _showSnackBar(
+                        'Option updated successfully!',
+                        Colors.green,
+                      );
+                    }
                   } catch (e) {
                     if (mounted) {
                       _showSnackBar('Error updating option: $e', Colors.red);
@@ -1037,6 +1060,11 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
               ),
               ElevatedButton(
                 onPressed: () async {
+                  if (nameController.text.trim().isEmpty) {
+                    _showSnackBar('Please enter service name', Colors.orange);
+                    return;
+                  }
+
                   setState(() => _isProcessing = true);
 
                   try {
@@ -1052,6 +1080,19 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                           'updated_at': DateTime.now().toIso8601String(),
                         })
                         .eq('id', service['id']);
+
+                    // Close dialog first
+                    if (mounted) Navigator.pop(context);
+
+                    // Reload services
+                    await _loadServices();
+
+                    if (mounted) {
+                      _showSnackBar(
+                        'Service updated successfully!',
+                        Colors.green,
+                      );
+                    }
                   } catch (e) {
                     if (mounted) {
                       _showSnackBar('Error updating service: $e', Colors.red);
@@ -1250,10 +1291,6 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
             gradient: const LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              // colors: [
-              //   Color(0xFFFF6B8B),
-              //   Color(0xFFFF9E6B),
-              // ],
               colors: [
                 Color.fromARGB(255, 248, 174, 190),
                 Color.fromARGB(255, 245, 164, 211),
@@ -1269,28 +1306,21 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                   color: Colors.white.withValues(alpha: 0.2),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(
-                  Icons.add,
-                  size: 40, // Reduced from 48 to 40
-                  color: Colors.white,
-                ),
+                child: const Icon(Icons.add, size: 40, color: Colors.white),
               ),
-              const SizedBox(height: 12), // Reduced from 16 to 12
+              const SizedBox(height: 12),
               const Text(
                 'Add New Service',
                 style: TextStyle(
-                  fontSize: 15, // Reduced from 16 to 15
+                  fontSize: 15,
                   fontWeight: FontWeight.w600,
                   color: Colors.white,
                 ),
               ),
-              const SizedBox(height: 4), // Reduced from 8 to 4
+              const SizedBox(height: 4),
               Text(
                 'Create a new service\nfor your salon',
-                style: TextStyle(
-                  fontSize: 11, // Reduced from 12 to 11
-                  color: Colors.white70,
-                ),
+                style: TextStyle(fontSize: 11, color: Colors.white70),
                 textAlign: TextAlign.center,
               ),
             ],
@@ -1329,7 +1359,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
               },
         borderRadius: BorderRadius.circular(16),
         child: Container(
-          padding: const EdgeInsets.all(16), // Reduced from 24 to 16
+          padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(16),
             gradient: const LinearGradient(
@@ -1344,18 +1374,14 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
           child: Row(
             children: [
               Container(
-                padding: const EdgeInsets.all(10), // Reduced from 12 to 10
+                padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.2),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(
-                  Icons.add,
-                  size: 28, // Reduced from 32 to 28
-                  color: Colors.white,
-                ),
+                child: const Icon(Icons.add, size: 28, color: Colors.white),
               ),
-              const SizedBox(width: 12), // Reduced from 16 to 12
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1363,25 +1389,17 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                     const Text(
                       'Add New Service',
                       style: TextStyle(
-                        fontSize: 15, // Reduced from 16 to 15
+                        fontSize: 15,
                         fontWeight: FontWeight.w600,
                         color: Colors.white,
                       ),
                     ),
-                    // const SizedBox(height: 2), // Reduced from 4 to 2
-                    // Text(
-                    //   'Create a new service for your salon',
-                    //   style: TextStyle(
-                    //     fontSize: 11, // Reduced from 12 to 11
-                    //     color: Colors.white70,
-                    //   ),
-                    // ),
                   ],
                 ),
               ),
               const Icon(
                 Icons.arrow_forward_ios,
-                size: 14, // Reduced from 16 to 14
+                size: 14,
                 color: Colors.white70,
               ),
             ],
@@ -1392,7 +1410,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
   }
 
   // ============================================
-  // SERVICE CARD (WEB) - WITH ALTERNATING COLORS
+  // SERVICE CARD (WEB)
   // ============================================
 
   Widget _buildServiceCardWeb(Map<String, dynamic> service, int index) {
@@ -1693,7 +1711,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
   }
 
   // ============================================
-  // SERVICE CARD (MOBILE) - WITH ALTERNATING COLORS
+  // SERVICE CARD (MOBILE)
   // ============================================
 
   Widget _buildServiceCardMobile(Map<String, dynamic> service, int index) {
