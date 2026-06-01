@@ -256,7 +256,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
 
     showDialog(
       context: context,
-      builder: (context) => StatefulBuilder(
+      builder: (dialogContext) => StatefulBuilder(
         builder: (context, setDialogState) {
           return AlertDialog(
             shape: RoundedRectangleBorder(
@@ -508,7 +508,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
             ),
             actions: [
               TextButton(
-                onPressed: () => Navigator.pop(context),
+                onPressed: () => Navigator.pop(dialogContext),
                 child: const Text('Cancel', style: TextStyle(fontSize: 14)),
               ),
               ElevatedButton(
@@ -554,6 +554,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                     return;
                   }
 
+                  if (!mounted) return;
                   setState(() => _isProcessing = true);
 
                   try {
@@ -566,8 +567,10 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                       'is_active': true,
                     });
 
-                    // Close dialog first
-                    if (mounted) Navigator.pop(context);
+                    // Close dialog using dialogContext
+                    if (dialogContext.mounted) {
+                      Navigator.pop(dialogContext);
+                    }
 
                     // Reload services
                     await _loadServices();
@@ -647,7 +650,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
 
     showDialog(
       context: context,
-      builder: (context) => StatefulBuilder(
+      builder: (dialogContext) => StatefulBuilder(
         builder: (context, setDialogState) {
           return AlertDialog(
             shape: RoundedRectangleBorder(
@@ -782,7 +785,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
             ),
             actions: [
               TextButton(
-                onPressed: () => Navigator.pop(context),
+                onPressed: () => Navigator.pop(dialogContext),
                 child: const Text('Cancel'),
               ),
               ElevatedButton(
@@ -805,6 +808,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                     return;
                   }
 
+                  if (!mounted) return;
                   setState(() => _isProcessing = true);
 
                   try {
@@ -817,8 +821,10 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                         })
                         .eq('id', variant['id']);
 
-                    // Close dialog first
-                    if (mounted) Navigator.pop(context);
+                    // Close dialog using dialogContext
+                    if (dialogContext.mounted) {
+                      Navigator.pop(dialogContext);
+                    }
 
                     // Reload services
                     await _loadServices();
@@ -864,9 +870,11 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
     Map<String, dynamic> service,
     Map<String, dynamic> variant,
   ) async {
+    if (!mounted) return;
+
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Row(
           children: [
@@ -922,11 +930,11 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () => Navigator.pop(dialogContext, false),
             child: const Text('Cancel'),
           ),
           ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
+            onPressed: () => Navigator.pop(dialogContext, true),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.red,
               foregroundColor: Colors.white,
@@ -940,7 +948,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
       ),
     );
 
-    if (confirmed == true) {
+    if (confirmed == true && mounted) {
       setState(() => _isProcessing = true);
 
       try {
@@ -978,7 +986,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
 
     await showDialog(
       context: context,
-      builder: (context) => StatefulBuilder(
+      builder: (dialogContext) => StatefulBuilder(
         builder: (context, setDialogState) {
           return AlertDialog(
             shape: RoundedRectangleBorder(
@@ -1055,7 +1063,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
             ),
             actions: [
               TextButton(
-                onPressed: () => Navigator.pop(context),
+                onPressed: () => Navigator.pop(dialogContext),
                 child: const Text('Cancel'),
               ),
               ElevatedButton(
@@ -1065,6 +1073,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                     return;
                   }
 
+                  if (!mounted) return;
                   setState(() => _isProcessing = true);
 
                   try {
@@ -1081,8 +1090,10 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                         })
                         .eq('id', service['id']);
 
-                    // Close dialog first
-                    if (mounted) Navigator.pop(context);
+                    // Close dialog using dialogContext
+                    if (dialogContext.mounted) {
+                      Navigator.pop(dialogContext);
+                    }
 
                     // Reload services
                     await _loadServices();
@@ -1119,9 +1130,11 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
 
   // Delete Service
   Future<void> _deleteService(Map<String, dynamic> service) async {
+    if (!mounted) return;
+
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Row(
           children: [
@@ -1188,11 +1201,11 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () => Navigator.pop(dialogContext, false),
             child: const Text('Cancel'),
           ),
           ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
+            onPressed: () => Navigator.pop(dialogContext, true),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.red,
               foregroundColor: Colors.white,
@@ -1206,7 +1219,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
       ),
     );
 
-    if (confirmed == true) {
+    if (confirmed == true && mounted) {
       setState(() => _isProcessing = true);
 
       try {
@@ -1229,6 +1242,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
   }
 
   void _showSnackBar(String message, Color color) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
@@ -1273,6 +1287,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
         onTap: _isProcessing
             ? null
             : () async {
+                if (!mounted) return;
                 final result = await Navigator.push(
                   context,
                   MaterialPageRoute(
@@ -1280,7 +1295,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                         AddServiceScreen(salonId: widget.salonId),
                   ),
                 );
-                if (result == true) {
+                if (result == true && mounted) {
                   await _loadServices();
                 }
               },
@@ -1346,6 +1361,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
         onTap: _isProcessing
             ? null
             : () async {
+                if (!mounted) return;
                 final result = await Navigator.push(
                   context,
                   MaterialPageRoute(
@@ -1353,7 +1369,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                         AddServiceScreen(salonId: widget.salonId),
                   ),
                 );
-                if (result == true) {
+                if (result == true && mounted) {
                   await _loadServices();
                 }
               },
@@ -1987,6 +2003,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
               onPressed: _isProcessing
                   ? null
                   : () async {
+                      if (!mounted) return;
                       final result = await Navigator.push(
                         context,
                         MaterialPageRoute(
@@ -1994,7 +2011,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                               AddServiceScreen(salonId: widget.salonId),
                         ),
                       );
-                      if (result == true) {
+                      if (result == true && mounted) {
                         await _loadServices();
                       }
                     },
@@ -2054,6 +2071,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
               onPressed: _isProcessing
                   ? null
                   : () async {
+                      if (!mounted) return;
                       final result = await Navigator.push(
                         context,
                         MaterialPageRoute(
@@ -2061,7 +2079,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                               AddServiceScreen(salonId: widget.salonId),
                         ),
                       );
-                      if (result == true) {
+                      if (result == true && mounted) {
                         await _loadServices();
                       }
                     },
@@ -2146,6 +2164,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
             onPressed: _isProcessing
                 ? null
                 : () async {
+                    if (!mounted) return;
                     final result = await Navigator.push(
                       context,
                       MaterialPageRoute(
@@ -2153,7 +2172,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                             AddServiceScreen(salonId: widget.salonId),
                       ),
                     );
-                    if (result == true) {
+                    if (result == true && mounted) {
                       await _loadServices();
                     }
                   },
