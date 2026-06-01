@@ -30,7 +30,6 @@ import 'package:flutter_application_1/screens/owner/barber_leaves_screen.dart';
 import 'package:flutter_application_1/screens/owner/barber_list_screen.dart';
 import 'package:flutter_application_1/screens/owner/barber_schedule_screen.dart';
 import 'package:flutter_application_1/screens/owner/create_salon.dart';
-import 'package:flutter_application_1/screens/owner/edit_barber_services_screen.dart';
 import 'package:flutter_application_1/screens/owner/edit_salon.dart';
 import 'package:flutter_application_1/screens/owner/salon_holidays_screen.dart';
 import 'package:flutter_application_1/screens/owner/service_management.dart';
@@ -860,7 +859,7 @@ GoRouter _createRouter() {
         },
       ),
 
-      // Service Management
+      // Service Management Edite service list eka meken karanne
       GoRoute(
         path: '/owner/services',
         builder: (context, state) {
@@ -969,17 +968,7 @@ GoRouter _createRouter() {
           final salonId = state.uri.queryParameters['salonId'];
           return BarberListScreen(salonId: salonId);
         },
-      ),
-
-      // Edit Barber Services
-      GoRoute(
-        path: '/owner/edit-barber-services',
-        builder: (context, state) {
-          final barberId = state.uri.queryParameters['barberId']!;
-          final salonId = state.uri.queryParameters['salonId']!;
-          return EditBarberServicesScreen(barberId: barberId, salonId: salonId);
-        },
-      ),
+      ),     
 
       // VIP Booking Requests
       GoRoute(
