@@ -1,9 +1,10 @@
 // screens/owner/salon_holidays_screen.dart
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../alertBox/show_custom_alert.dart';
+import '../../services/timezone_service.dart';
 
 class SalonHolidaysScreen extends StatefulWidget {
   final int salonId;
@@ -28,13 +29,76 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
   final Set<int> _selectedForDelete = {};
   bool _isSelectMode = false;
 
+  // Timezone
+  String _deviceTimezone = '';
+  bool _isTimezoneLoaded = false;
+
   @override
   void initState() {
     super.initState();
-    _loadHolidays();
+    _initializeWithTimezone();
   }
 
+  // Helper to check if current platform is web
+  bool get _isWeb => MediaQuery.of(context).size.width > 800;
+
+  // ==================== TIMEZONE INITIALIZATION ====================
+  Future<void> _initializeWithTimezone() async {
+    await TimezoneService.initialize();
+
+    final prefs = await SharedPreferences.getInstance();
+    final cachedTimezone = prefs.getString('cached_timezone');
+
+    if (cachedTimezone != null && cachedTimezone.isNotEmpty) {
+      _deviceTimezone = cachedTimezone;
+      debugPrint('✅ Using cached timezone: $_deviceTimezone');
+    } else {
+      _deviceTimezone = TimezoneService.getCurrentTimezone();
+      await prefs.setString('cached_timezone', _deviceTimezone);
+      debugPrint('✅ Saved device timezone to cache: $_deviceTimezone');
+    }
+
+    setState(() {
+      _isTimezoneLoaded = true;
+    });
+
+    await _loadHolidays();
+  }
+
+  // ==================== UTC TO LOCAL DATE CONVERSION ====================
+  DateTime _utcToLocalDate(String utcDateStr) {
+    final utcDateTime = DateTime.parse(utcDateStr);
+    final utcDate = DateTime.utc(utcDateTime.year, utcDateTime.month, utcDateTime.day);
+    final localDateTime = utcDate.toLocal();
+    return localDateTime;
+  }
+
+  // ==================== DISPLAY DATE FORMATTING ====================
+  String _formatDateForDisplay(String utcDateStr) {
+    try {
+      final localDate = _utcToLocalDate(utcDateStr);
+      return DateFormat('EEEE, MMM d, yyyy').format(localDate);
+    } catch (e) {
+      return utcDateStr;
+    }
+  }
+
+  // ==================== CHECK IF HOLIDAY IS PAST ====================
+  bool _isPastHoliday(String utcDateStr) {
+    try {
+      final localDate = _utcToLocalDate(utcDateStr);
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      return localDate.isBefore(today);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // ==================== LOAD HOLIDAYS ====================
   Future<void> _loadHolidays() async {
+    if (!_isTimezoneLoaded) return;
+    
     setState(() => _isLoading = true);
     
     try {
@@ -48,6 +112,8 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
         _holidays = List<Map<String, dynamic>>.from(response);
         _isLoading = false;
       });
+      
+      debugPrint('✅ Loaded ${_holidays.length} holidays');
     } catch (e) {
       debugPrint('❌ Error loading holidays: $e');
       setState(() => _isLoading = false);
@@ -57,10 +123,14 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
     }
   }
 
+  // ==================== ADD HOLIDAY ====================
   Future<void> _addHoliday() async {
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
-      builder: (context) => _AddEditHolidayDialog(salonId: widget.salonId),
+      builder: (context) => _AddEditHolidayDialog(
+        salonId: widget.salonId,
+        deviceTimezone: _deviceTimezone,
+      ),
     );
 
     if (result != null && result['success'] == true) {
@@ -69,12 +139,14 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
     }
   }
 
+  // ==================== EDIT HOLIDAY ====================
   Future<void> _editHoliday(Map<String, dynamic> holiday) async {
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (context) => _AddEditHolidayDialog(
         salonId: widget.salonId,
         holidayToEdit: holiday,
+        deviceTimezone: _deviceTimezone,
       ),
     );
 
@@ -84,6 +156,7 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
     }
   }
 
+  // ==================== DELETE SELECTED HOLIDAYS ====================
   Future<void> _deleteSelectedHolidays() async {
     if (_selectedForDelete.isEmpty) return;
 
@@ -121,6 +194,32 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
     }
   }
 
+  // ==================== DELETE SINGLE HOLIDAY ====================
+  Future<void> _deleteHoliday(Map<String, dynamic> holiday) async {
+    final confirm = await showCustomAlert(
+      context: context,
+      title: "Delete Holiday",
+      message: "Are you sure you want to delete '${holiday['name']}'?",
+      isError: true,
+      showCancelButton: true,
+    );
+
+    if (confirm == true) {
+      try {
+        await supabase
+            .from('salon_holidays')
+            .delete()
+            .eq('id', holiday['id']);
+        
+        _loadHolidays();
+        _showSnackBar('Holiday deleted successfully', Colors.green);
+      } catch (e) {
+        _showSnackBar('Error deleting holiday', Colors.red);
+      }
+    }
+  }
+
+  // ==================== SELECTION METHODS ====================
   void _toggleSelectMode() {
     setState(() {
       _isSelectMode = !_isSelectMode;
@@ -159,51 +258,31 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
     );
   }
 
-  String _formatDate(String dateStr) {
-    try {
-      final date = DateTime.parse(dateStr);
-      return DateFormat('EEEE, MMM d, yyyy').format(date);
-    } catch (e) {
-      return dateStr;
-    }
-  }
-
-  bool _isPastHoliday(String dateStr) {
-    try {
-      final date = DateTime.parse(dateStr);
-      return date.isBefore(DateTime.now());
-    } catch (e) {
-      return false;
-    }
-  }
-
-  Future<void> _deleteHoliday(Map<String, dynamic> holiday) async {
-    final confirm = await showCustomAlert(
-      context: context,
-      title: "Delete Holiday",
-      message: "Are you sure you want to delete '${holiday['name']}'?",
-      isError: true,
-      showCancelButton: true,
-    );
-
-    if (confirm == true) {
-      try {
-        await supabase
-            .from('salon_holidays')
-            .delete()
-            .eq('id', holiday['id']);
-        
-        _loadHolidays();
-        _showSnackBar('Holiday deleted successfully', Colors.green);
-      } catch (e) {
-        _showSnackBar('Error deleting holiday', Colors.red);
-      }
-    }
-  }
-
+  // ==================== UI BUILDERS ====================
   @override
   Widget build(BuildContext context) {
-    final isWeb = MediaQuery.of(context).size.width > 800;
+    final isWeb = _isWeb;
+
+    if (!_isTimezoneLoaded) {
+      return Scaffold(
+        appBar: AppBar(
+          title: Text('Holidays - ${widget.salonName}'),
+          backgroundColor: const Color(0xFFFF6B8B),
+          foregroundColor: Colors.white,
+          elevation: 0,
+        ),
+        body: const Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              SizedBox(width: 40, height: 40, child: CircularProgressIndicator()),
+              SizedBox(height: 16),
+              Text('Loading timezone...'),
+            ],
+          ),
+        ),
+      );
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -298,13 +377,34 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
     );
   }
 
-  Widget _buildWebView() {
+  Widget _buildWebView() { 
     return Column(
       children: [
+        // Timezone Info Card
+        Container(
+          margin: const EdgeInsets.all(16),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: Colors.blue[50],
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.blue[200]!),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.access_time, size: 20, color: Colors.blue),
+              const SizedBox(width: 12),
+              Text(
+                '🌍 Timezone: ${TimezoneService.getTimezoneDisplayName()} (${TimezoneService.getUtcOffsetString()})',
+                style: const TextStyle(fontSize: 13, color: Colors.blueGrey),
+              ),
+            ],
+          ),
+        ),
+
         // Stats Row
         Container(
           padding: const EdgeInsets.all(16),
-          margin: const EdgeInsets.all(16),
+          margin: const EdgeInsets.symmetric(horizontal: 16),
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(12),
@@ -327,7 +427,7 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
         
         // Table Header
         Container(
-          margin: const EdgeInsets.symmetric(horizontal: 16),
+          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
             color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
@@ -417,7 +517,7 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
                     Expanded(
                       flex: 2,
                       child: Text(
-                        _formatDate(holiday['holiday_date']),
+                        _formatDateForDisplay(holiday['holiday_date']),
                         style: TextStyle(
                           color: isPast ? Colors.grey[600] : Colors.black,
                           decoration: isPast ? TextDecoration.lineThrough : null,
@@ -482,105 +582,179 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
     );
   }
 
+  // ==================== FIXED MOBILE VIEW - NO OVERFLOW ====================
   Widget _buildMobileView() {
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: _holidays.length,
-      itemBuilder: (context, index) {
-        final holiday = _holidays[index];
-        final isPast = _isPastHoliday(holiday['holiday_date']);
-        
-        return Card(
-          margin: const EdgeInsets.only(bottom: 12),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
+    final upcomingCount = _holidays.where((h) => !_isPastHoliday(h['holiday_date'])).length;
+    final pastCount = _holidays.where((h) => _isPastHoliday(h['holiday_date'])).length;
+
+    return Column(
+      children: [
+        // Timezone Info Card
+        Container(
+          margin: const EdgeInsets.all(12),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: Colors.blue[50],
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: Colors.blue[200]!),
           ),
-          child: Column(
+          child: Row(
             children: [
-              ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: isPast 
-                      ? Colors.grey[300] 
-                      : const Color(0xFFFF6B8B).withValues(alpha: 0.1),
-                  child: Icon(
-                    holiday['is_recurring'] == true ? Icons.repeat : Icons.event,
-                    color: isPast ? Colors.grey : const Color(0xFFFF6B8B),
-                  ),
-                ),
-                title: Text(
-                  holiday['name'],
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    decoration: isPast ? TextDecoration.lineThrough : null,
-                    color: isPast ? Colors.grey[600] : Colors.black,
-                  ),
-                ),
-                subtitle: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const SizedBox(height: 4),
-                    Text(
-                      _formatDate(holiday['holiday_date']),
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: isPast ? Colors.grey[500] : Colors.grey[700],
-                      ),
-                    ),
-                    if (holiday['description'] != null && holiday['description'].toString().isNotEmpty) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        holiday['description'],
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: isPast ? Colors.grey[500] : Colors.grey[600],
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.edit, color: Colors.blue, size: 20),
-                      onPressed: () => _editHoliday(holiday),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.delete, color: Colors.red, size: 20),
-                      onPressed: () => _deleteHoliday(holiday),
-                    ),
-                  ],
+              const Icon(Icons.access_time, size: 16, color: Colors.blue),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Timezone: ${TimezoneService.getTimezoneDisplayName()}',
+                  style: const TextStyle(fontSize: 11, color: Colors.blueGrey),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
-              if (_isSelectMode)
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.grey[50],
-                    borderRadius: const BorderRadius.only(
-                      bottomLeft: Radius.circular(12),
-                      bottomRight: Radius.circular(12),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Checkbox(
-                        value: _selectedForDelete.contains(holiday['id']),
-                        onChanged: (_) => _toggleSelection(holiday['id']),
-                        activeColor: const Color(0xFFFF6B8B),
-                      ),
-                      const Text('Select for deletion'),
-                    ],
-                  ),
-                ),
             ],
           ),
-        );
-      },
+        ),
+
+        // Stats Row
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Row(
+            children: [
+              _buildMobileStatCard('Total', _holidays.length.toString(), Icons.event, const Color(0xFFFF6B8B)),
+              const SizedBox(width: 8),
+              _buildMobileStatCard('Upcoming', upcomingCount.toString(), Icons.upcoming, Colors.green),
+              const SizedBox(width: 8),
+              _buildMobileStatCard('Past', pastCount.toString(), Icons.history, Colors.grey),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 8),
+
+        // Holidays List - Takes remaining space
+        Expanded(
+          child: ListView.builder(
+            padding: const EdgeInsets.all(12),
+            itemCount: _holidays.length,
+            itemBuilder: (context, index) {
+              final holiday = _holidays[index];
+              final isPast = _isPastHoliday(holiday['holiday_date']);
+              final isSelected = _selectedForDelete.contains(holiday['id']);
+              
+              return Card(
+                margin: const EdgeInsets.only(bottom: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                color: isSelected ? Colors.red.withValues(alpha: 0.05) : null,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    ListTile(
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      leading: CircleAvatar(
+                        backgroundColor: isPast 
+                            ? Colors.grey[300] 
+                            : const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                        child: Icon(
+                          holiday['is_recurring'] == true ? Icons.repeat : Icons.event,
+                          color: isPast ? Colors.grey : const Color(0xFFFF6B8B),
+                          size: 20,
+                        ),
+                      ),
+                      title: Text(
+                        holiday['name'],
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 15,
+                          decoration: isPast ? TextDecoration.lineThrough : null,
+                          color: isPast ? Colors.grey[600] : Colors.black,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const SizedBox(height: 4),
+                          Text(
+                            _formatDateForDisplay(holiday['holiday_date']),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: isPast ? Colors.grey[500] : Colors.grey[700],
+                            ),
+                          ),
+                          if (holiday['description'] != null && holiday['description'].toString().isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              holiday['description'],
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: isPast ? Colors.grey[500] : Colors.grey[600],
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ],
+                      ),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.edit, color: Colors.blue, size: 20),
+                            onPressed: () => _editHoliday(holiday),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                          ),
+                          const SizedBox(width: 4),
+                          IconButton(
+                            icon: const Icon(Icons.delete, color: Colors.red, size: 20),
+                            onPressed: () => _deleteHoliday(holiday),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                          ),
+                        ],
+                      ),
+                    ),
+                    // Selection mode checkbox at bottom
+                    if (_isSelectMode)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.grey[50],
+                          borderRadius: const BorderRadius.only(
+                            bottomLeft: Radius.circular(12),
+                            bottomRight: Radius.circular(12),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Checkbox(
+                              value: isSelected,
+                              onChanged: (_) => _toggleSelection(holiday['id']),
+                              activeColor: const Color(0xFFFF6B8B),
+                              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            const Text(
+                              'Select for deletion',
+                              style: TextStyle(fontSize: 12),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 
   Widget _buildStatCard(String title, String value, IconData icon, Color color) {
+    final isWeb = _isWeb;
+    
     return Expanded(
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 8),
@@ -591,19 +765,49 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
         ),
         child: Column(
           children: [
-            Icon(icon, color: color, size: 24),
+            Icon(icon, color: color, size: isWeb ? 24 : 20),
             const SizedBox(height: 4),
             Text(
               value,
               style: TextStyle(
-                fontSize: 20,
+                fontSize: isWeb ? 20 : 16,
                 fontWeight: FontWeight.bold,
                 color: color,
               ),
             ),
             Text(
               title,
-              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+              style: TextStyle(fontSize: isWeb ? 12 : 10, color: Colors.grey[600]),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMobileStatCard(String title, String value, IconData icon, Color color) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: color, size: 18),
+            const SizedBox(height: 4),
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: color,
+              ),
+            ),
+            Text(
+              title,
+              style: TextStyle(fontSize: 10, color: Colors.grey[600]),
             ),
           ],
         ),
@@ -617,10 +821,12 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
 class _AddEditHolidayDialog extends StatefulWidget {
   final int salonId;
   final Map<String, dynamic>? holidayToEdit;
+  final String deviceTimezone;
 
   const _AddEditHolidayDialog({
     required this.salonId,
     this.holidayToEdit,
+    required this.deviceTimezone,
   });
 
   @override
@@ -630,14 +836,17 @@ class _AddEditHolidayDialog extends StatefulWidget {
 class _AddEditHolidayDialogState extends State<_AddEditHolidayDialog> {
   final supabase = Supabase.instance.client;
   
-  DateTime? _selectedDate;
+  DateTime? _selectedLocalDate;
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _descriptionController = TextEditingController();
   bool _isRecurring = false;
   bool _isLoading = false;
   String? _errorMessage;
   bool _isEditMode = false;
-  int _editId = 0;  // FIXED: Changed from int? to int with default value 0
+  int _editId = 0;
+
+  // Helper for responsive design
+  bool get _isWeb => MediaQuery.of(context).size.width > 800;
 
   @override
   void initState() {
@@ -648,18 +857,26 @@ class _AddEditHolidayDialogState extends State<_AddEditHolidayDialog> {
     }
   }
 
+  DateTime _utcToLocalDate(String utcDateStr) {
+    final utcDateTime = DateTime.parse(utcDateStr);
+    final utcDate = DateTime.utc(utcDateTime.year, utcDateTime.month, utcDateTime.day);
+    return utcDate.toLocal();
+  }
+
   void _loadHolidayData() {
     final holiday = widget.holidayToEdit!;
-    _editId = holiday['id'] as int;  // FIXED: Cast to int
-    _selectedDate = DateTime.parse(holiday['holiday_date']);
+    _editId = holiday['id'] as int;
+    _selectedLocalDate = _utcToLocalDate(holiday['holiday_date']);
     _nameController.text = holiday['name'] ?? '';
     _descriptionController.text = holiday['description'] ?? '';
     _isRecurring = holiday['is_recurring'] ?? false;
+    
+    debugPrint('📅 Loading holiday - UTC: ${holiday['holiday_date']} → Local: ${DateFormat('yyyy-MM-dd').format(_selectedLocalDate!)}');
   }
 
   @override
   Widget build(BuildContext context) {
-    final isWeb = MediaQuery.of(context).size.width > 800;
+    final isWeb = _isWeb;
 
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -667,6 +884,7 @@ class _AddEditHolidayDialogState extends State<_AddEditHolidayDialog> {
         width: isWeb ? 500 : double.infinity,
         constraints: BoxConstraints(
           maxWidth: isWeb ? 500 : MediaQuery.of(context).size.width * 0.95,
+          maxHeight: MediaQuery.of(context).size.height * 0.9,
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -698,174 +916,200 @@ class _AddEditHolidayDialogState extends State<_AddEditHolidayDialog> {
                 ],
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (_errorMessage != null) ...[
+            Flexible(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Timezone info
                     Container(
-                      padding: const EdgeInsets.all(12),
+                      padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
-                        color: Colors.red.shade50,
+                        color: Colors.blue[50],
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.red.shade200),
                       ),
                       child: Row(
                         children: [
-                          Icon(
-                            Icons.error_outline,
-                            color: Colors.red.shade700,
-                            size: 20,
-                          ),
+                          const Icon(Icons.access_time, size: 16, color: Colors.blue),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              _errorMessage!,
-                              style: TextStyle(
-                                color: Colors.red.shade700,
-                                fontSize: 13,
-                              ),
+                              'Timezone: ${TimezoneService.getTimezoneDisplayName()}',
+                              style: const TextStyle(fontSize: 11, color: Colors.blueGrey),
                             ),
                           ),
                         ],
                       ),
                     ),
                     const SizedBox(height: 16),
-                  ],
 
-                  const Text(
-                    'Holiday Name *',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  TextFormField(
-                    controller: _nameController,
-                    decoration: InputDecoration(
-                      hintText: 'e.g., New Year, Poya Day, Special Holiday',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-
-                  const Text(
-                    'Date *',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  GestureDetector(
-                    onTap: () async {
-                      final date = await showDatePicker(
-                        context: context,
-                        initialDate: _selectedDate ?? DateTime.now(),
-                        firstDate: DateTime(2020),
-                        lastDate: DateTime(2030),
-                      );
-                      if (date != null) {
-                        setState(() {
-                          _selectedDate = date;
-                          _errorMessage = null;
-                        });
-                      }
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 12,
-                      ),
-                      decoration: BoxDecoration(
-                        border: Border.all(color: Colors.grey[300]!),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.calendar_today, size: 16),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              _selectedDate != null
-                                  ? DateFormat('EEEE, MMM d, yyyy').format(_selectedDate!)
-                                  : 'Select date',
-                              style: TextStyle(
-                                color: _selectedDate != null
-                                    ? Colors.black
-                                    : Colors.grey[500],
+                    if (_errorMessage != null) ...[
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.red.shade50,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.red.shade200),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.error_outline,
+                              color: Colors.red.shade700,
+                              size: 20,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                _errorMessage!,
+                                style: TextStyle(
+                                  color: Colors.red.shade700,
+                                  fontSize: 13,
+                                ),
                               ),
                             ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-
-                  const Text(
-                    'Description',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  TextFormField(
-                    controller: _descriptionController,
-                    maxLines: 3,
-                    decoration: InputDecoration(
-                      hintText: 'Optional description',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-
-                  Row(
-                    children: [
-                      Checkbox(
-                        value: _isRecurring,
-                        onChanged: (value) {
-                          setState(() {
-                            _isRecurring = value ?? false;
-                          });
-                        },
-                        activeColor: const Color(0xFFFF6B8B),
-                      ),
-                      const Text('Recurring (repeats every year)'),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(context),
-                        child: const Text('Cancel'),
-                      ),
-                      const SizedBox(width: 12),
-                      ElevatedButton(
-                        onPressed: _saveHoliday,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFFF6B8B),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 24,
-                            vertical: 12,
-                          ),
+                          ],
                         ),
-                        child: _isLoading
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                  color: Colors.white,
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : Text(_isEditMode ? 'Update' : 'Save'),
                       ),
+                      const SizedBox(height: 16),
                     ],
-                  ),
-                ],
+
+                    const Text(
+                      'Holiday Name *',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    TextFormField(
+                      controller: _nameController,
+                      decoration: InputDecoration(
+                        hintText: 'e.g., New Year, Poya Day, Special Holiday',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    const Text(
+                      'Date *',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    GestureDetector(
+                      onTap: () async {
+                        final date = await showDatePicker(
+                          context: context,
+                          initialDate: _selectedLocalDate ?? DateTime.now(),
+                          firstDate: DateTime(2020),
+                          lastDate: DateTime(2030),
+                        );
+                        if (date != null) {
+                          setState(() {
+                            _selectedLocalDate = date;
+                            _errorMessage = null;
+                          });
+                        }
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 12,
+                        ),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.grey[300]!),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.calendar_today, size: 16),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                _selectedLocalDate != null
+                                    ? DateFormat('EEEE, MMM d, yyyy').format(_selectedLocalDate!)
+                                    : 'Select date',
+                                style: TextStyle(
+                                  color: _selectedLocalDate != null
+                                      ? Colors.black
+                                      : Colors.grey[500],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    const Text(
+                      'Description',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    TextFormField(
+                      controller: _descriptionController,
+                      maxLines: 3,
+                      decoration: InputDecoration(
+                        hintText: 'Optional description',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    Row(
+                      children: [
+                        Checkbox(
+                          value: _isRecurring,
+                          onChanged: (value) {
+                            setState(() {
+                              _isRecurring = value ?? false;
+                            });
+                          },
+                          activeColor: const Color(0xFFFF6B8B),
+                        ),
+                        const Text('Recurring (repeats every year)'),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text('Cancel'),
+                        ),
+                        const SizedBox(width: 12),
+                        ElevatedButton(
+                          onPressed: _saveHoliday,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFFFF6B8B),
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 24,
+                              vertical: 12,
+                            ),
+                          ),
+                          child: _isLoading
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    color: Colors.white,
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : Text(_isEditMode ? 'Update' : 'Save'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
           ],
@@ -882,7 +1126,7 @@ class _AddEditHolidayDialogState extends State<_AddEditHolidayDialog> {
       return;
     }
 
-    if (_selectedDate == null) {
+    if (_selectedLocalDate == null) {
       setState(() {
         _errorMessage = 'Please select a date';
       });
@@ -895,12 +1139,18 @@ class _AddEditHolidayDialogState extends State<_AddEditHolidayDialog> {
     });
 
     try {
-      final dateStr =
-          '${_selectedDate!.year.toString().padLeft(4, '0')}-${_selectedDate!.month.toString().padLeft(2, '0')}-${_selectedDate!.day.toString().padLeft(2, '0')}';
+      final utcDateTime = DateTime.utc(
+        _selectedLocalDate!.year,
+        _selectedLocalDate!.month,
+        _selectedLocalDate!.day,
+      );
+      final utcDateStr = '${utcDateTime.year.toString().padLeft(4, '0')}-${utcDateTime.month.toString().padLeft(2, '0')}-${utcDateTime.day.toString().padLeft(2, '0')}';
+      
+      debugPrint('📅 Saving holiday - Local: ${DateFormat('yyyy-MM-dd').format(_selectedLocalDate!)} → UTC: $utcDateStr');
 
       final holidayData = {
         'salon_id': widget.salonId,
-        'holiday_date': dateStr,
+        'holiday_date': utcDateStr,
         'name': _nameController.text.trim(),
         'description': _descriptionController.text.trim().isEmpty
             ? null
@@ -909,18 +1159,16 @@ class _AddEditHolidayDialogState extends State<_AddEditHolidayDialog> {
       };
 
       if (_isEditMode) {
-        // FIXED: Use _editId directly (now int, not int?)
         await supabase
             .from('salon_holidays')
             .update(holidayData)
             .eq('id', _editId);
       } else {
-        // Check for duplicate
         final existing = await supabase
             .from('salon_holidays')
             .select()
             .eq('salon_id', widget.salonId)
-            .eq('holiday_date', dateStr)
+            .eq('holiday_date', utcDateStr)
             .maybeSingle();
 
         if (existing != null) {
