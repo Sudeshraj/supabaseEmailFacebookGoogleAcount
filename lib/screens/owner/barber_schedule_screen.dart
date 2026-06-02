@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../../services/timezone_service.dart';
 
 class BarberScheduleScreen extends StatefulWidget {
   final String? salonId;
@@ -29,6 +31,10 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   // Salon default times
   TimeOfDay? _salonOpenTime;
   TimeOfDay? _salonCloseTime;
+  
+  // Timezone
+  String _deviceTimezone = '';
+  bool _isTimezoneLoaded = false;
 
   // Days of week mapping
   final Map<int, String> _dayNames = {
@@ -51,7 +57,78 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   @override
   void initState() {
     super.initState();
-    _loadData();
+    _initializeWithTimezone();
+  }
+
+  // ==================== TIMEZONE INITIALIZATION ====================
+  Future<void> _initializeWithTimezone() async {
+    await TimezoneService.initialize();
+
+    final prefs = await SharedPreferences.getInstance();
+    final cachedTimezone = prefs.getString('cached_timezone');
+
+    if (cachedTimezone != null && cachedTimezone.isNotEmpty) {
+      _deviceTimezone = cachedTimezone;
+      debugPrint('✅ Using cached timezone: $_deviceTimezone');
+    } else {
+      _deviceTimezone = TimezoneService.getCurrentTimezone();
+      await prefs.setString('cached_timezone', _deviceTimezone);
+      debugPrint('✅ Saved device timezone to cache: $_deviceTimezone');
+    }
+
+    setState(() {
+      _isTimezoneLoaded = true;
+    });
+
+    await _loadData();
+  }
+
+  // ==================== UTC TO LOCAL CONVERSION ====================
+  String _utcToLocalTimeString(String utcTimeStr) {
+    if (utcTimeStr.isEmpty) return '09:00:00';
+    try {
+      final parts = utcTimeStr.split(':');
+      final utcHour = int.parse(parts[0]);
+      final utcMinute = int.parse(parts[1]);
+      
+      final now = DateTime.now();
+      final utcDateTime = DateTime.utc(now.year, now.month, now.day, utcHour, utcMinute);
+      final localDateTime = utcDateTime.toLocal();
+      
+      final localHour = localDateTime.hour;
+      final localMinute = localDateTime.minute;
+      
+      debugPrint('🔄 UTC to Local: $utcTimeStr UTC → ${localHour.toString().padLeft(2, '0')}:${localMinute.toString().padLeft(2, '0')} Local');
+      
+      return '${localHour.toString().padLeft(2, '0')}:${localMinute.toString().padLeft(2, '0')}:00';
+    } catch (e) {
+      debugPrint('❌ Error converting UTC to local: $e');
+      return utcTimeStr;
+    }
+  }
+
+  // ==================== LOCAL TO UTC CONVERSION ====================
+  String _localTimeToUtcString(String localTimeStr) {
+    if (localTimeStr.isEmpty) return '09:00:00';
+    try {
+      final parts = localTimeStr.split(':');
+      final localHour = int.parse(parts[0]);
+      final localMinute = int.parse(parts[1]);
+      
+      final now = DateTime.now();
+      final localDateTime = DateTime(now.year, now.month, now.day, localHour, localMinute);
+      final utcDateTime = localDateTime.toUtc();
+      
+      final utcHour = utcDateTime.hour;
+      final utcMinute = utcDateTime.minute;
+      
+      debugPrint('🔄 Local to UTC: $localTimeStr Local → ${utcHour.toString().padLeft(2, '0')}:${utcMinute.toString().padLeft(2, '0')} UTC');
+      
+      return '${utcHour.toString().padLeft(2, '0')}:${utcMinute.toString().padLeft(2, '0')}:00';
+    } catch (e) {
+      debugPrint('❌ Error converting local to UTC: $e');
+      return localTimeStr;
+    }
   }
 
   Future<void> _loadSalonTimes() async {
@@ -68,7 +145,8 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
       if (salonResponse != null) {
         final openTimeStr = salonResponse['open_time'] as String?;
         if (openTimeStr != null) {
-          final parts = openTimeStr.split(':');
+          final localOpenTime = _utcToLocalTimeString(openTimeStr);
+          final parts = localOpenTime.split(':');
           _salonOpenTime = TimeOfDay(
             hour: int.parse(parts[0]),
             minute: int.parse(parts[1]),
@@ -77,7 +155,8 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
 
         final closeTimeStr = salonResponse['close_time'] as String?;
         if (closeTimeStr != null) {
-          final parts = closeTimeStr.split(':');
+          final localCloseTime = _utcToLocalTimeString(closeTimeStr);
+          final parts = localCloseTime.split(':');
           _salonCloseTime = TimeOfDay(
             hour: int.parse(parts[0]),
             minute: int.parse(parts[1]),
@@ -317,6 +396,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
         existingSchedules: _groupedSchedules[barberId] ?? [],
         defaultOpenTime: _salonOpenTime,
         defaultCloseTime: _salonCloseTime,
+        timezone: _deviceTimezone,
       ),
     );
 
@@ -345,6 +425,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
         breakTypes: _breakTypes,
         defaultOpenTime: _salonOpenTime,
         defaultCloseTime: _salonCloseTime,
+        timezone: _deviceTimezone,
       ),
     );
 
@@ -370,6 +451,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
         schedule: schedule,
         defaultOpenTime: _salonOpenTime,
         defaultCloseTime: _salonCloseTime,
+        timezone: _deviceTimezone,
       ),
     );
 
@@ -396,6 +478,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
         breakTypes: _breakTypes,
         defaultOpenTime: _salonOpenTime,
         defaultCloseTime: _salonCloseTime,
+        timezone: _deviceTimezone,
       ),
     );
 
@@ -555,6 +638,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
         salonId: widget.salonId!,
         defaultOpenTime: _salonOpenTime,
         defaultCloseTime: _salonCloseTime,
+        timezone: _deviceTimezone,
       ),
     );
 
@@ -582,6 +666,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
         breakTypes: _breakTypes,
         defaultOpenTime: _salonOpenTime,
         defaultCloseTime: _salonCloseTime,
+        timezone: _deviceTimezone,
       ),
     );
 
@@ -607,6 +692,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
         schedule: schedule,
         defaultOpenTime: _salonOpenTime,
         defaultCloseTime: _salonCloseTime,
+        timezone: _deviceTimezone,
       ),
     );
 
@@ -633,6 +719,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
         breakTypes: _breakTypes,
         defaultOpenTime: _salonOpenTime,
         defaultCloseTime: _salonCloseTime,
+        timezone: _deviceTimezone,
       ),
     );
 
@@ -745,7 +832,8 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   String _formatTime(String? time) {
     if (time == null) return '--:--';
     try {
-      final parts = time.split(':');
+      final localTime = _utcToLocalTimeString(time);
+      final parts = localTime.split(':');
       final hour = int.parse(parts[0]);
       final minute = int.parse(parts[1]);
       final period = hour >= 12 ? 'PM' : 'AM';
@@ -761,6 +849,26 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     final screenWidth = MediaQuery.of(context).size.width;
     final bool isWeb = screenWidth > 800;
     final double padding = isWeb ? 24.0 : 0.0;
+
+    if (!_isTimezoneLoaded) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('Barber Schedules'),
+          backgroundColor: const Color(0xFFFF6B8B),
+          foregroundColor: Colors.white,
+        ),
+        body: const Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              SizedBox(width: 40, height: 40, child: CircularProgressIndicator()),
+              SizedBox(height: 16),
+              Text('Loading timezone...'),
+            ],
+          ),
+        ),
+      );
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -915,7 +1023,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: isWeb
           ? _buildWebBarberCard(barber, schedules, breaks, specialSchedules, specialBreaks)
-          : _buildMobileBarberCard(barber), // Only pass barber for mobile
+          : _buildMobileBarberCard(barber),
     );
   }
 
@@ -1366,7 +1474,6 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
       child: InkWell(
         onTap: () {
-          // Navigate to barber details or show schedule
           _showBarberScheduleDialog(barber);
         },
         child: Container(
@@ -1422,6 +1529,11 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   }
 
   void _showBarberScheduleDialog(Map<String, dynamic> barber) {
+    final schedules = _groupedSchedules[barber['id']] ?? [];
+    final breaks = _groupedBreaks[barber['id']] ?? [];
+    final specialSchedules = _groupedSpecialSchedules[barber['id']] ?? [];
+    final specialBreaks = _groupedSpecialBreaks[barber['id']] ?? [];
+    
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -1431,11 +1543,6 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
         minChildSize: 0.5,
         maxChildSize: 0.95,
         builder: (context, scrollController) {
-          final schedules = _groupedSchedules[barber['id']] ?? [];
-          final breaks = _groupedBreaks[barber['id']] ?? [];
-          final specialSchedules = _groupedSpecialSchedules[barber['id']] ?? [];
-          final specialBreaks = _groupedSpecialBreaks[barber['id']] ?? [];
-          
           return Container(
             decoration: const BoxDecoration(
               color: Colors.white,
@@ -1571,12 +1678,14 @@ class _AddSpecialScheduleDialog extends StatefulWidget {
   final String salonId;
   final TimeOfDay? defaultOpenTime;
   final TimeOfDay? defaultCloseTime;
+  final String timezone;
 
   const _AddSpecialScheduleDialog({
     required this.barberId,
     required this.salonId,
     this.defaultOpenTime,
     this.defaultCloseTime,
+    required this.timezone,
   });
 
   @override
@@ -1592,6 +1701,22 @@ class _AddSpecialScheduleDialogState extends State<_AddSpecialScheduleDialog> {
   bool _isWorking = true;
   final TextEditingController _reasonController = TextEditingController();
   bool _isLoading = false;
+
+  String _localTimeToUtcString(String localTimeStr) {
+    try {
+      final parts = localTimeStr.split(':');
+      final localHour = int.parse(parts[0]);
+      final localMinute = int.parse(parts[1]);
+      
+      final now = DateTime.now();
+      final localDateTime = DateTime(now.year, now.month, now.day, localHour, localMinute);
+      final utcDateTime = localDateTime.toUtc();
+      
+      return '${utcDateTime.hour.toString().padLeft(2, '0')}:${utcDateTime.minute.toString().padLeft(2, '0')}:00';
+    } catch (e) {
+      return localTimeStr;
+    }
+  }
 
   @override
   void initState() {
@@ -1761,15 +1886,17 @@ class _AddSpecialScheduleDialogState extends State<_AddSpecialScheduleDialog> {
 
     try {
       final salonIdInt = int.parse(widget.salonId);
-      final startTimeString = '${_startTime!.hour.toString().padLeft(2, '0')}:${_startTime!.minute.toString().padLeft(2, '0')}:00';
-      final endTimeString = '${_endTime!.hour.toString().padLeft(2, '0')}:${_endTime!.minute.toString().padLeft(2, '0')}:00';
+      final localStartTime = '${_startTime!.hour.toString().padLeft(2, '0')}:${_startTime!.minute.toString().padLeft(2, '0')}:00';
+      final localEndTime = '${_endTime!.hour.toString().padLeft(2, '0')}:${_endTime!.minute.toString().padLeft(2, '0')}:00';
+      final utcStartTime = _localTimeToUtcString(localStartTime);
+      final utcEndTime = _localTimeToUtcString(localEndTime);
 
       await supabase.from('barber_special_schedules').insert({
         'barber_id': widget.barberId,
         'salon_id': salonIdInt,
         'schedule_date': _selectedDate!.toIso8601String().split('T').first,
-        'start_time': startTimeString,
-        'end_time': endTimeString,
+        'start_time': utcStartTime,
+        'end_time': utcEndTime,
         'is_working': _isWorking,
         'reason': _reasonController.text.isNotEmpty ? _reasonController.text : null,
       });
@@ -1794,6 +1921,7 @@ class _AddSpecialBreakDialog extends StatefulWidget {
   final List<Map<String, dynamic>> breakTypes;
   final TimeOfDay? defaultOpenTime;
   final TimeOfDay? defaultCloseTime;
+  final String timezone;
 
   const _AddSpecialBreakDialog({
     required this.barberId,
@@ -1801,6 +1929,7 @@ class _AddSpecialBreakDialog extends StatefulWidget {
     required this.breakTypes,
     this.defaultOpenTime,
     this.defaultCloseTime,
+    required this.timezone,
   });
 
   @override
@@ -1815,6 +1944,22 @@ class _AddSpecialBreakDialogState extends State<_AddSpecialBreakDialog> {
   TimeOfDay? _endTime;
   String _selectedBreakType = 'lunch';
   bool _isLoading = false;
+
+  String _localTimeToUtcString(String localTimeStr) {
+    try {
+      final parts = localTimeStr.split(':');
+      final localHour = int.parse(parts[0]);
+      final localMinute = int.parse(parts[1]);
+      
+      final now = DateTime.now();
+      final localDateTime = DateTime(now.year, now.month, now.day, localHour, localMinute);
+      final utcDateTime = localDateTime.toUtc();
+      
+      return '${utcDateTime.hour.toString().padLeft(2, '0')}:${utcDateTime.minute.toString().padLeft(2, '0')}:00';
+    } catch (e) {
+      return localTimeStr;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1965,15 +2110,17 @@ class _AddSpecialBreakDialogState extends State<_AddSpecialBreakDialog> {
 
     try {
       final salonIdInt = int.parse(widget.salonId);
-      final startTimeString = '${_startTime!.hour.toString().padLeft(2, '0')}:${_startTime!.minute.toString().padLeft(2, '0')}:00';
-      final endTimeString = '${_endTime!.hour.toString().padLeft(2, '0')}:${_endTime!.minute.toString().padLeft(2, '0')}:00';
+      final localStartTime = '${_startTime!.hour.toString().padLeft(2, '0')}:${_startTime!.minute.toString().padLeft(2, '0')}:00';
+      final localEndTime = '${_endTime!.hour.toString().padLeft(2, '0')}:${_endTime!.minute.toString().padLeft(2, '0')}:00';
+      final utcStartTime = _localTimeToUtcString(localStartTime);
+      final utcEndTime = _localTimeToUtcString(localEndTime);
 
       await supabase.from('barber_special_breaks').insert({
         'barber_id': widget.barberId,
         'salon_id': salonIdInt,
         'break_date': _selectedDate!.toIso8601String().split('T').first,
-        'start_time': startTimeString,
-        'end_time': endTimeString,
+        'start_time': utcStartTime,
+        'end_time': utcEndTime,
         'break_type': _selectedBreakType,
       });
 
@@ -1995,11 +2142,13 @@ class _EditSpecialScheduleDialog extends StatefulWidget {
   final Map<String, dynamic> schedule;
   final TimeOfDay? defaultOpenTime;
   final TimeOfDay? defaultCloseTime;
+  final String timezone;
 
   const _EditSpecialScheduleDialog({
     required this.schedule,
     this.defaultOpenTime,
     this.defaultCloseTime,
+    required this.timezone,
   });
 
   @override
@@ -2014,15 +2163,52 @@ class _EditSpecialScheduleDialogState extends State<_EditSpecialScheduleDialog> 
   bool _isLoading = false;
   final supabase = Supabase.instance.client;
 
+  String _utcToLocalTimeString(String utcTimeStr) {
+    try {
+      final parts = utcTimeStr.split(':');
+      final utcHour = int.parse(parts[0]);
+      final utcMinute = int.parse(parts[1]);
+      
+      final now = DateTime.now();
+      final utcDateTime = DateTime.utc(now.year, now.month, now.day, utcHour, utcMinute);
+      final localDateTime = utcDateTime.toLocal();
+      
+      return '${localDateTime.hour.toString().padLeft(2, '0')}:${localDateTime.minute.toString().padLeft(2, '0')}:00';
+    } catch (e) {
+      return utcTimeStr;
+    }
+  }
+
+  String _localTimeToUtcString(String localTimeStr) {
+    try {
+      final parts = localTimeStr.split(':');
+      final localHour = int.parse(parts[0]);
+      final localMinute = int.parse(parts[1]);
+      
+      final now = DateTime.now();
+      final localDateTime = DateTime(now.year, now.month, now.day, localHour, localMinute);
+      final utcDateTime = localDateTime.toUtc();
+      
+      return '${utcDateTime.hour.toString().padLeft(2, '0')}:${utcDateTime.minute.toString().padLeft(2, '0')}:00';
+    } catch (e) {
+      return localTimeStr;
+    }
+  }
+
   @override
   void initState() {
     super.initState();
-    final startParts = (widget.schedule['start_time'] as String).split(':');
+    final startUtc = widget.schedule['start_time'] as String;
+    final endUtc = widget.schedule['end_time'] as String;
+    final startLocal = _utcToLocalTimeString(startUtc);
+    final endLocal = _utcToLocalTimeString(endUtc);
+    
+    final startParts = startLocal.split(':');
     _startTime = TimeOfDay(
       hour: int.parse(startParts[0]),
       minute: int.parse(startParts[1]),
     );
-    final endParts = (widget.schedule['end_time'] as String).split(':');
+    final endParts = endLocal.split(':');
     _endTime = TimeOfDay(
       hour: int.parse(endParts[0]),
       minute: int.parse(endParts[1]),
@@ -2144,14 +2330,16 @@ class _EditSpecialScheduleDialogState extends State<_EditSpecialScheduleDialog> 
     setState(() => _isLoading = true);
 
     try {
-      final startTimeString = '${_startTime.hour.toString().padLeft(2, '0')}:${_startTime.minute.toString().padLeft(2, '0')}:00';
-      final endTimeString = '${_endTime.hour.toString().padLeft(2, '0')}:${_endTime.minute.toString().padLeft(2, '0')}:00';
+      final localStartTime = '${_startTime.hour.toString().padLeft(2, '0')}:${_startTime.minute.toString().padLeft(2, '0')}:00';
+      final localEndTime = '${_endTime.hour.toString().padLeft(2, '0')}:${_endTime.minute.toString().padLeft(2, '0')}:00';
+      final utcStartTime = _localTimeToUtcString(localStartTime);
+      final utcEndTime = _localTimeToUtcString(localEndTime);
 
       await supabase
           .from('barber_special_schedules')
           .update({
-            'start_time': startTimeString,
-            'end_time': endTimeString,
+            'start_time': utcStartTime,
+            'end_time': utcEndTime,
             'is_working': _isWorking,
             'reason': _reasonController.text.isNotEmpty ? _reasonController.text : null,
           })
@@ -2176,12 +2364,14 @@ class _EditSpecialBreakDialog extends StatefulWidget {
   final List<Map<String, dynamic>> breakTypes;
   final TimeOfDay? defaultOpenTime;
   final TimeOfDay? defaultCloseTime;
+  final String timezone;
 
   const _EditSpecialBreakDialog({
     required this.breakItem,
     required this.breakTypes,
     this.defaultOpenTime,
     this.defaultCloseTime,
+    required this.timezone,
   });
 
   @override
@@ -2195,15 +2385,52 @@ class _EditSpecialBreakDialogState extends State<_EditSpecialBreakDialog> {
   bool _isLoading = false;
   final supabase = Supabase.instance.client;
 
+  String _utcToLocalTimeString(String utcTimeStr) {
+    try {
+      final parts = utcTimeStr.split(':');
+      final utcHour = int.parse(parts[0]);
+      final utcMinute = int.parse(parts[1]);
+      
+      final now = DateTime.now();
+      final utcDateTime = DateTime.utc(now.year, now.month, now.day, utcHour, utcMinute);
+      final localDateTime = utcDateTime.toLocal();
+      
+      return '${localDateTime.hour.toString().padLeft(2, '0')}:${localDateTime.minute.toString().padLeft(2, '0')}:00';
+    } catch (e) {
+      return utcTimeStr;
+    }
+  }
+
+  String _localTimeToUtcString(String localTimeStr) {
+    try {
+      final parts = localTimeStr.split(':');
+      final localHour = int.parse(parts[0]);
+      final localMinute = int.parse(parts[1]);
+      
+      final now = DateTime.now();
+      final localDateTime = DateTime(now.year, now.month, now.day, localHour, localMinute);
+      final utcDateTime = localDateTime.toUtc();
+      
+      return '${utcDateTime.hour.toString().padLeft(2, '0')}:${utcDateTime.minute.toString().padLeft(2, '0')}:00';
+    } catch (e) {
+      return localTimeStr;
+    }
+  }
+
   @override
   void initState() {
     super.initState();
-    final startParts = (widget.breakItem['start_time'] as String).split(':');
+    final startUtc = widget.breakItem['start_time'] as String;
+    final endUtc = widget.breakItem['end_time'] as String;
+    final startLocal = _utcToLocalTimeString(startUtc);
+    final endLocal = _utcToLocalTimeString(endUtc);
+    
+    final startParts = startLocal.split(':');
     _startTime = TimeOfDay(
       hour: int.parse(startParts[0]),
       minute: int.parse(startParts[1]),
     );
-    final endParts = (widget.breakItem['end_time'] as String).split(':');
+    final endParts = endLocal.split(':');
     _endTime = TimeOfDay(
       hour: int.parse(endParts[0]),
       minute: int.parse(endParts[1]),
@@ -2319,14 +2546,16 @@ class _EditSpecialBreakDialogState extends State<_EditSpecialBreakDialog> {
     setState(() => _isLoading = true);
 
     try {
-      final startTimeString = '${_startTime.hour.toString().padLeft(2, '0')}:${_startTime.minute.toString().padLeft(2, '0')}:00';
-      final endTimeString = '${_endTime.hour.toString().padLeft(2, '0')}:${_endTime.minute.toString().padLeft(2, '0')}:00';
+      final localStartTime = '${_startTime.hour.toString().padLeft(2, '0')}:${_startTime.minute.toString().padLeft(2, '0')}:00';
+      final localEndTime = '${_endTime.hour.toString().padLeft(2, '0')}:${_endTime.minute.toString().padLeft(2, '0')}:00';
+      final utcStartTime = _localTimeToUtcString(localStartTime);
+      final utcEndTime = _localTimeToUtcString(localEndTime);
 
       await supabase
           .from('barber_special_breaks')
           .update({
-            'start_time': startTimeString,
-            'end_time': endTimeString,
+            'start_time': utcStartTime,
+            'end_time': utcEndTime,
             'break_type': _selectedBreakType,
           })
           .eq('id', widget.breakItem['id']);
@@ -2352,6 +2581,7 @@ class _AddBreakDialog extends StatefulWidget {
   final List<Map<String, dynamic>> breakTypes;
   final TimeOfDay? defaultOpenTime;
   final TimeOfDay? defaultCloseTime;
+  final String timezone;
 
   const _AddBreakDialog({
     required this.barberId,
@@ -2360,6 +2590,7 @@ class _AddBreakDialog extends StatefulWidget {
     required this.breakTypes,
     this.defaultOpenTime,
     this.defaultCloseTime,
+    required this.timezone,
   });
 
   @override
@@ -2384,6 +2615,22 @@ class _AddBreakDialogState extends State<_AddBreakDialog> {
     {'id': 6, 'name': 'Saturday'},
     {'id': 7, 'name': 'Sunday'},
   ];
+
+  String _localTimeToUtcString(String localTimeStr) {
+    try {
+      final parts = localTimeStr.split(':');
+      final localHour = int.parse(parts[0]);
+      final localMinute = int.parse(parts[1]);
+      
+      final now = DateTime.now();
+      final localDateTime = DateTime(now.year, now.month, now.day, localHour, localMinute);
+      final utcDateTime = localDateTime.toUtc();
+      
+      return '${utcDateTime.hour.toString().padLeft(2, '0')}:${utcDateTime.minute.toString().padLeft(2, '0')}:00';
+    } catch (e) {
+      return localTimeStr;
+    }
+  }
 
   List<int> get _availableDays {
     final existingDays = widget.existingBreaks
@@ -2542,24 +2789,10 @@ class _AddBreakDialogState extends State<_AddBreakDialog> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFFFF6B8B),
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 20,
-                        vertical: 12,
-                      ),
                     ),
                     child: _isLoading
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                              color: Colors.white,
-                              strokeWidth: 2,
-                            ),
-                          )
-                        : const Text(
-                            'Add Break',
-                            style: TextStyle(fontWeight: FontWeight.bold),
-                          ),
+                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Text('Add Break'),
                   ),
                 ],
               ),
@@ -2575,17 +2808,17 @@ class _AddBreakDialogState extends State<_AddBreakDialog> {
 
     try {
       final salonIdInt = int.parse(widget.salonId);
-      final startTimeString =
-          '${_startTime!.hour.toString().padLeft(2, '0')}:${_startTime!.minute.toString().padLeft(2, '0')}:00';
-      final endTimeString =
-          '${_endTime!.hour.toString().padLeft(2, '0')}:${_endTime!.minute.toString().padLeft(2, '0')}:00';
+      final localStartTime = '${_startTime!.hour.toString().padLeft(2, '0')}:${_startTime!.minute.toString().padLeft(2, '0')}:00';
+      final localEndTime = '${_endTime!.hour.toString().padLeft(2, '0')}:${_endTime!.minute.toString().padLeft(2, '0')}:00';
+      final utcStartTime = _localTimeToUtcString(localStartTime);
+      final utcEndTime = _localTimeToUtcString(localEndTime);
 
       await supabase.from('barber_breaks').insert({
         'barber_id': widget.barberId,
         'salon_id': salonIdInt,
         'day_of_week': _selectedDay,
-        'start_time': startTimeString,
-        'end_time': endTimeString,
+        'start_time': utcStartTime,
+        'end_time': utcEndTime,
         'break_type': _selectedBreakType,
       });
 
@@ -2608,12 +2841,14 @@ class _EditBreakDialog extends StatefulWidget {
   final List<Map<String, dynamic>> breakTypes;
   final TimeOfDay? defaultOpenTime;
   final TimeOfDay? defaultCloseTime;
+  final String timezone;
 
   const _EditBreakDialog({
     required this.breakItem,
     required this.breakTypes,
     this.defaultOpenTime,
     this.defaultCloseTime,
+    required this.timezone,
   });
 
   @override
@@ -2637,15 +2872,52 @@ class _EditBreakDialogState extends State<_EditBreakDialog> {
     7: 'Sunday',
   };
 
+  String _utcToLocalTimeString(String utcTimeStr) {
+    try {
+      final parts = utcTimeStr.split(':');
+      final utcHour = int.parse(parts[0]);
+      final utcMinute = int.parse(parts[1]);
+      
+      final now = DateTime.now();
+      final utcDateTime = DateTime.utc(now.year, now.month, now.day, utcHour, utcMinute);
+      final localDateTime = utcDateTime.toLocal();
+      
+      return '${localDateTime.hour.toString().padLeft(2, '0')}:${localDateTime.minute.toString().padLeft(2, '0')}:00';
+    } catch (e) {
+      return utcTimeStr;
+    }
+  }
+
+  String _localTimeToUtcString(String localTimeStr) {
+    try {
+      final parts = localTimeStr.split(':');
+      final localHour = int.parse(parts[0]);
+      final localMinute = int.parse(parts[1]);
+      
+      final now = DateTime.now();
+      final localDateTime = DateTime(now.year, now.month, now.day, localHour, localMinute);
+      final utcDateTime = localDateTime.toUtc();
+      
+      return '${utcDateTime.hour.toString().padLeft(2, '0')}:${utcDateTime.minute.toString().padLeft(2, '0')}:00';
+    } catch (e) {
+      return localTimeStr;
+    }
+  }
+
   @override
   void initState() {
     super.initState();
-    final startParts = (widget.breakItem['start_time'] as String).split(':');
+    final startUtc = widget.breakItem['start_time'] as String;
+    final endUtc = widget.breakItem['end_time'] as String;
+    final startLocal = _utcToLocalTimeString(startUtc);
+    final endLocal = _utcToLocalTimeString(endUtc);
+    
+    final startParts = startLocal.split(':');
     _startTime = TimeOfDay(
       hour: int.parse(startParts[0]),
       minute: int.parse(startParts[1]),
     );
-    final endParts = (widget.breakItem['end_time'] as String).split(':');
+    final endParts = endLocal.split(':');
     _endTime = TimeOfDay(
       hour: int.parse(endParts[0]),
       minute: int.parse(endParts[1]),
@@ -2674,10 +2946,7 @@ class _EditBreakDialogState extends State<_EditBreakDialog> {
             children: [
               Text(
                 'Edit Break - $dayName',
-                style: const TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 20),
 
@@ -2746,24 +3015,10 @@ class _EditBreakDialogState extends State<_EditBreakDialog> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFFFF6B8B),
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 20,
-                        vertical: 12,
-                      ),
                     ),
                     child: _isLoading
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                              color: Colors.white,
-                              strokeWidth: 2,
-                            ),
-                          )
-                        : const Text(
-                            'Update Break',
-                            style: TextStyle(fontWeight: FontWeight.bold),
-                          ),
+                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Text('Update Break'),
                   ),
                 ],
               ),
@@ -2778,16 +3033,16 @@ class _EditBreakDialogState extends State<_EditBreakDialog> {
     setState(() => _isLoading = true);
 
     try {
-      final startTimeString =
-          '${_startTime.hour.toString().padLeft(2, '0')}:${_startTime.minute.toString().padLeft(2, '0')}:00';
-      final endTimeString =
-          '${_endTime.hour.toString().padLeft(2, '0')}:${_endTime.minute.toString().padLeft(2, '0')}:00';
+      final localStartTime = '${_startTime.hour.toString().padLeft(2, '0')}:${_startTime.minute.toString().padLeft(2, '0')}:00';
+      final localEndTime = '${_endTime.hour.toString().padLeft(2, '0')}:${_endTime.minute.toString().padLeft(2, '0')}:00';
+      final utcStartTime = _localTimeToUtcString(localStartTime);
+      final utcEndTime = _localTimeToUtcString(localEndTime);
 
       await supabase
           .from('barber_breaks')
           .update({
-            'start_time': startTimeString,
-            'end_time': endTimeString,
+            'start_time': utcStartTime,
+            'end_time': utcEndTime,
             'break_type': _selectedBreakType,
           })
           .eq('id', widget.breakItem['id']);
@@ -2795,6 +3050,514 @@ class _EditBreakDialogState extends State<_EditBreakDialog> {
       if (mounted) Navigator.pop(context, {'success': true});
     } catch (e) {
       debugPrint('Error updating break: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+}
+
+// ==================== ADD SCHEDULE DIALOG ====================
+class _AddScheduleDialog extends StatefulWidget {
+  final String barberId;
+  final String salonId;
+  final List<Map<String, dynamic>> existingSchedules;
+  final TimeOfDay? defaultOpenTime;
+  final TimeOfDay? defaultCloseTime;
+  final String timezone;
+
+  const _AddScheduleDialog({
+    required this.barberId,
+    required this.salonId,
+    required this.existingSchedules,
+    this.defaultOpenTime,
+    this.defaultCloseTime,
+    required this.timezone,
+  });
+
+  @override
+  State<_AddScheduleDialog> createState() => _AddScheduleDialogState();
+}
+
+class _AddScheduleDialogState extends State<_AddScheduleDialog> {
+  final supabase = Supabase.instance.client;
+
+  int? _selectedDay;
+  TimeOfDay? _startTime;
+  TimeOfDay? _endTime;
+  bool _isWorking = true;
+  bool _isLoading = false;
+
+  final List<Map<String, dynamic>> _days = const [
+    {'id': 1, 'name': 'Monday'},
+    {'id': 2, 'name': 'Tuesday'},
+    {'id': 3, 'name': 'Wednesday'},
+    {'id': 4, 'name': 'Thursday'},
+    {'id': 5, 'name': 'Friday'},
+    {'id': 6, 'name': 'Saturday'},
+    {'id': 7, 'name': 'Sunday'},
+  ];
+
+  String _localTimeToUtcString(String localTimeStr) {
+    try {
+      final parts = localTimeStr.split(':');
+      final localHour = int.parse(parts[0]);
+      final localMinute = int.parse(parts[1]);
+      
+      final now = DateTime.now();
+      final localDateTime = DateTime(now.year, now.month, now.day, localHour, localMinute);
+      final utcDateTime = localDateTime.toUtc();
+      
+      return '${utcDateTime.hour.toString().padLeft(2, '0')}:${utcDateTime.minute.toString().padLeft(2, '0')}:00';
+    } catch (e) {
+      return localTimeStr;
+    }
+  }
+
+  List<int> get _availableDays {
+    final existingDays = widget.existingSchedules
+        .where((s) => s['day_of_week'] != null)
+        .map((s) => s['day_of_week'] as int)
+        .toSet();
+    return _days
+        .where((d) => !existingDays.contains(d['id']))
+        .map((d) => d['id'] as int)
+        .toList();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _startTime = widget.defaultOpenTime;
+    _endTime = widget.defaultCloseTime;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isWeb = screenWidth > 800;
+
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Container(
+        width: isWeb ? 500 : screenWidth * 0.9,
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.8,
+        ),
+        padding: EdgeInsets.all(isWeb ? 24 : 16),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Add Schedule',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 20),
+
+              const Text(
+                'Select Day',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: _days.map((day) {
+                  final isSelected = _selectedDay == day['id'];
+                  final isAvailable = _availableDays.contains(day['id']);
+                  return FilterChip(
+                    label: Text(day['name']),
+                    selected: isSelected,
+                    onSelected: isAvailable
+                        ? (selected) => setState(() => _selectedDay = day['id'])
+                        : null,
+                    backgroundColor: Colors.grey[100],
+                    selectedColor: const Color(0xFFFF6B8B).withValues(alpha: 0.2),
+                    checkmarkColor: const Color(0xFFFF6B8B),
+                    avatar: isAvailable ? null : const Icon(Icons.lock, size: 16),
+                  );
+                }).toList(),
+              ),
+
+              if (_availableDays.isEmpty && _selectedDay == null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    'All days already have schedules!',
+                    style: TextStyle(color: Colors.orange[700], fontSize: 12),
+                  ),
+                ),
+
+              const SizedBox(height: 16),
+
+              Row(
+                children: [
+                  Expanded(
+                    child: _TimePickerField(
+                      label: 'Start Time',
+                      initialTime: _startTime,
+                      isRequired: true,
+                      onTimeSelected: (time) => setState(() => _startTime = time),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _TimePickerField(
+                      label: 'End Time',
+                      initialTime: _endTime,
+                      isRequired: true,
+                      onTimeSelected: (time) => setState(() => _endTime = time),
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 16),
+
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: _isWorking ? Colors.green.withValues(alpha: 0.1) : Colors.red.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: _isWorking ? Colors.green.withValues(alpha: 0.3) : Colors.red.withValues(alpha: 0.3),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(_isWorking ? Icons.check_circle : Icons.cancel, color: _isWorking ? Colors.green : Colors.red),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Working Day',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: _isWorking ? Colors.green : Colors.red,
+                            ),
+                          ),
+                          Text(
+                            _isWorking
+                                ? 'This day will be available for bookings'
+                                : 'This day will be marked as day off',
+                            style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Switch(
+                      value: _isWorking,
+                      onChanged: (value) => setState(() => _isWorking = value),
+                      activeThumbColor: Colors.green,
+                      inactiveThumbColor: Colors.red,
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 24),
+
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 12),
+                  ElevatedButton(
+                    onPressed:
+                        _selectedDay != null &&
+                            _startTime != null &&
+                            _endTime != null &&
+                            !_isLoading
+                        ? _saveSchedule
+                        : null,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFFF6B8B),
+                      foregroundColor: Colors.white,
+                    ),
+                    child: _isLoading
+                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Text('Add Schedule'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _saveSchedule() async {
+    setState(() => _isLoading = true);
+
+    try {
+      final salonIdInt = int.parse(widget.salonId);
+      final localStartTime = '${_startTime!.hour.toString().padLeft(2, '0')}:${_startTime!.minute.toString().padLeft(2, '0')}:00';
+      final localEndTime = '${_endTime!.hour.toString().padLeft(2, '0')}:${_endTime!.minute.toString().padLeft(2, '0')}:00';
+      final utcStartTime = _localTimeToUtcString(localStartTime);
+      final utcEndTime = _localTimeToUtcString(localEndTime);
+
+      await supabase.from('barber_schedules').insert({
+        'barber_id': widget.barberId,
+        'salon_id': salonIdInt,
+        'day_of_week': _selectedDay,
+        'start_time': utcStartTime,
+        'end_time': utcEndTime,
+        'is_working': _isWorking,
+      });
+
+      if (mounted) Navigator.pop(context, {'success': true});
+    } catch (e) {
+      debugPrint('Error saving schedule: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+}
+
+// ==================== EDIT SCHEDULE DIALOG ====================
+class _EditScheduleDialog extends StatefulWidget {
+  final Map<String, dynamic> schedule;
+  final TimeOfDay? defaultOpenTime;
+  final TimeOfDay? defaultCloseTime;
+  final String timezone;
+
+  const _EditScheduleDialog({
+    required this.schedule,
+    this.defaultOpenTime,
+    this.defaultCloseTime,
+    required this.timezone,
+  });
+
+  @override
+  State<_EditScheduleDialog> createState() => _EditScheduleDialogState();
+}
+
+class _EditScheduleDialogState extends State<_EditScheduleDialog> {
+  late TimeOfDay _startTime;
+  late TimeOfDay _endTime;
+  late bool _isWorking;
+  bool _isLoading = false;
+  final supabase = Supabase.instance.client;
+
+  String _utcToLocalTimeString(String utcTimeStr) {
+    try {
+      final parts = utcTimeStr.split(':');
+      final utcHour = int.parse(parts[0]);
+      final utcMinute = int.parse(parts[1]);
+      
+      final now = DateTime.now();
+      final utcDateTime = DateTime.utc(now.year, now.month, now.day, utcHour, utcMinute);
+      final localDateTime = utcDateTime.toLocal();
+      
+      return '${localDateTime.hour.toString().padLeft(2, '0')}:${localDateTime.minute.toString().padLeft(2, '0')}:00';
+    } catch (e) {
+      return utcTimeStr;
+    }
+  }
+
+  String _localTimeToUtcString(String localTimeStr) {
+    try {
+      final parts = localTimeStr.split(':');
+      final localHour = int.parse(parts[0]);
+      final localMinute = int.parse(parts[1]);
+      
+      final now = DateTime.now();
+      final localDateTime = DateTime(now.year, now.month, now.day, localHour, localMinute);
+      final utcDateTime = localDateTime.toUtc();
+      
+      return '${utcDateTime.hour.toString().padLeft(2, '0')}:${utcDateTime.minute.toString().padLeft(2, '0')}:00';
+    } catch (e) {
+      return localTimeStr;
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    final startUtc = widget.schedule['start_time'] as String;
+    final endUtc = widget.schedule['end_time'] as String;
+    final startLocal = _utcToLocalTimeString(startUtc);
+    final endLocal = _utcToLocalTimeString(endUtc);
+    
+    final startParts = startLocal.split(':');
+    _startTime = TimeOfDay(
+      hour: int.parse(startParts[0]),
+      minute: int.parse(startParts[1]),
+    );
+    final endParts = endLocal.split(':');
+    _endTime = TimeOfDay(
+      hour: int.parse(endParts[0]),
+      minute: int.parse(endParts[1]),
+    );
+    _isWorking = widget.schedule['is_working'] ?? true;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isWeb = screenWidth > 800;
+    final dayNames = {
+      1: 'Monday',
+      2: 'Tuesday',
+      3: 'Wednesday',
+      4: 'Thursday',
+      5: 'Friday',
+      6: 'Saturday',
+      7: 'Sunday',
+    };
+    final dayName = dayNames[widget.schedule['day_of_week']] ?? 'Unknown';
+
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Container(
+        width: isWeb ? 500 : screenWidth * 0.9,
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.8,
+        ),
+        padding: EdgeInsets.all(isWeb ? 24 : 16),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Edit Schedule - $dayName',
+                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 20),
+
+              Row(
+                children: [
+                  Expanded(
+                    child: _TimePickerField(
+                      label: 'Start Time',
+                      initialTime: _startTime,
+                      isRequired: true,
+                      onTimeSelected: (time) => setState(() => _startTime = time),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _TimePickerField(
+                      label: 'End Time',
+                      initialTime: _endTime,
+                      isRequired: true,
+                      onTimeSelected: (time) => setState(() => _endTime = time),
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 16),
+
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: _isWorking ? Colors.green.withValues(alpha: 0.1) : Colors.red.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: _isWorking ? Colors.green.withValues(alpha: 0.3) : Colors.red.withValues(alpha: 0.3),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(_isWorking ? Icons.check_circle : Icons.cancel, color: _isWorking ? Colors.green : Colors.red),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Working Day',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: _isWorking ? Colors.green : Colors.red,
+                            ),
+                          ),
+                          Text(
+                            _isWorking
+                                ? 'This day will be available for bookings'
+                                : 'This day will be marked as day off',
+                            style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Switch(
+                      value: _isWorking,
+                      onChanged: (value) => setState(() => _isWorking = value),
+                      activeThumbColor: Colors.green,
+                      inactiveThumbColor: Colors.red,
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 24),
+
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 12),
+                  ElevatedButton(
+                    onPressed: _isLoading ? null : _updateSchedule,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFFF6B8B),
+                      foregroundColor: Colors.white,
+                    ),
+                    child: _isLoading
+                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Text('Update Schedule'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _updateSchedule() async {
+    setState(() => _isLoading = true);
+
+    try {
+      final localStartTime = '${_startTime.hour.toString().padLeft(2, '0')}:${_startTime.minute.toString().padLeft(2, '0')}:00';
+      final localEndTime = '${_endTime.hour.toString().padLeft(2, '0')}:${_endTime.minute.toString().padLeft(2, '0')}:00';
+      final utcStartTime = _localTimeToUtcString(localStartTime);
+      final utcEndTime = _localTimeToUtcString(localEndTime);
+
+      await supabase
+          .from('barber_schedules')
+          .update({
+            'start_time': utcStartTime,
+            'end_time': utcEndTime,
+            'is_working': _isWorking,
+          })
+          .eq('id', widget.schedule['id']);
+
+      if (mounted) Navigator.pop(context, {'success': true});
+    } catch (e) {
+      debugPrint('Error updating schedule: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
@@ -2943,10 +3706,7 @@ class _EnhancedTimePickerState extends State<_EnhancedTimePicker> {
                   ),
                   const SizedBox(width: 12),
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
-                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                     decoration: BoxDecoration(
                       color: Colors.grey[200],
                       borderRadius: BorderRadius.circular(20),
@@ -3075,12 +3835,8 @@ class _EnhancedTimePickerState extends State<_EnhancedTimePicker> {
                       item.toString(),
                       style: TextStyle(
                         fontSize: 20,
-                        fontWeight: isSelected
-                            ? FontWeight.bold
-                            : FontWeight.normal,
-                        color: isSelected
-                            ? const Color(0xFFFF6B8B)
-                            : Colors.grey[800],
+                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                        color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[800],
                       ),
                     ),
                   );
@@ -3096,6 +3852,7 @@ class _EnhancedTimePickerState extends State<_EnhancedTimePicker> {
 }
 
 // ==================== TIME PICKER FIELD ====================
+// ==================== IMPROVED TIME PICKER FIELD (Mobile Responsive) ====================
 class _TimePickerField extends StatefulWidget {
   final String label;
   final TimeOfDay? initialTime;
@@ -3123,45 +3880,80 @@ class _TimePickerFieldState extends State<_TimePickerField> {
   }
 
   String _formatTimeForDisplay(TimeOfDay time) {
-    final hour = time.hour == 0
-        ? 12
-        : (time.hour > 12 ? time.hour - 12 : time.hour);
+    final hour = time.hour == 0 ? 12 : (time.hour > 12 ? time.hour - 12 : time.hour);
     final minute = time.minute.toString().padLeft(2, '0');
     final period = time.hour >= 12 ? 'PM' : 'AM';
     return '$hour:$minute $period';
   }
 
   Future<void> _showTimePicker() async {
-    final result = await showDialog<TimeOfDay>(
-      context: context,
-      builder: (context) => _EnhancedTimePicker(
-        initialTime: _selectedTime,
-        onTimeSelected: (time) {
-          setState(() {
-            _selectedTime = time;
-          });
-          widget.onTimeSelected(time);
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isWeb = screenWidth > 800;
+    
+    if (isWeb) {
+      // Web - Use custom dialog
+      final result = await showDialog<TimeOfDay>(
+        context: context,
+        builder: (context) => _CustomTimePickerDialog(
+          initialTime: _selectedTime,
+          onTimeSelected: (time) {},
+        ),
+      );
+      if (result != null) {
+        setState(() => _selectedTime = result);
+        widget.onTimeSelected(result);
+      }
+    } else {
+      // Mobile - Use Flutter's built-in time picker (better for mobile)
+      final TimeOfDay? picked = await showTimePicker(
+        context: context,
+        initialTime: _selectedTime ?? const TimeOfDay(hour: 9, minute: 0),
+        builder: (context, child) {
+          return Theme(
+            data: Theme.of(context).copyWith(
+              colorScheme: const ColorScheme.light(
+                primary: Color(0xFFFF6B8B),
+                onPrimary: Colors.white,
+                surface: Colors.white,
+                onSurface: Colors.black,
+              ),
+              timePickerTheme: TimePickerThemeData(
+                backgroundColor: Colors.white,
+                hourMinuteTextColor: const Color(0xFFFF6B8B),
+                dayPeriodTextColor: const Color(0xFFFF6B8B),
+                dialHandColor: const Color(0xFFFF6B8B),
+                dialBackgroundColor: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                entryModeIconColor: const Color(0xFFFF6B8B),
+                helpTextStyle: const TextStyle(
+                  color: Color(0xFFFF6B8B),
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            child: child!,
+          );
         },
-      ),
-    );
-
-    if (result != null) {
-      setState(() {
-        _selectedTime = result;
-      });
-      widget.onTimeSelected(result);
+      );
+      
+      if (picked != null && mounted) {
+        setState(() => _selectedTime = picked);
+        widget.onTimeSelected(picked);
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isWeb = screenWidth > 800;
+    
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           widget.label,
           style: TextStyle(
-            fontSize: 14,
+            fontSize: isWeb ? 14 : 13,
             fontWeight: FontWeight.w600,
             color: Colors.grey[700],
           ),
@@ -3170,20 +3962,21 @@ class _TimePickerFieldState extends State<_TimePickerField> {
         GestureDetector(
           onTap: _showTimePicker,
           child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            padding: EdgeInsets.symmetric(
+              horizontal: isWeb ? 16 : 12,
+              vertical: isWeb ? 14 : 12,
+            ),
             decoration: BoxDecoration(
               border: Border.all(color: Colors.grey[300]!, width: 1),
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(isWeb ? 12 : 10),
               color: Colors.white,
             ),
             child: Row(
               children: [
                 Icon(
                   Icons.access_time,
-                  size: 20,
-                  color: _selectedTime != null
-                      ? const Color(0xFFFF6B8B)
-                      : Colors.grey[400],
+                  size: isWeb ? 20 : 18,
+                  color: _selectedTime != null ? const Color(0xFFFF6B8B) : Colors.grey[400],
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -3192,15 +3985,13 @@ class _TimePickerFieldState extends State<_TimePickerField> {
                         ? _formatTimeForDisplay(_selectedTime!)
                         : 'Select time',
                     style: TextStyle(
-                      fontSize: 16,
+                      fontSize: isWeb ? 16 : 14,
                       fontWeight: FontWeight.w500,
-                      color: _selectedTime != null
-                          ? Colors.black
-                          : Colors.grey[500],
+                      color: _selectedTime != null ? Colors.black : Colors.grey[500],
                     ),
                   ),
                 ),
-                const Icon(Icons.arrow_drop_down, color: Colors.grey, size: 24),
+                Icon(Icons.arrow_drop_down, color: Colors.grey, size: isWeb ? 24 : 20),
               ],
             ),
           ),
@@ -3210,510 +4001,302 @@ class _TimePickerFieldState extends State<_TimePickerField> {
   }
 }
 
-// ==================== ADD SCHEDULE DIALOG ====================
-class _AddScheduleDialog extends StatefulWidget {
-  final String barberId;
-  final String salonId;
-  final List<Map<String, dynamic>> existingSchedules;
-  final TimeOfDay? defaultOpenTime;
-  final TimeOfDay? defaultCloseTime;
+// ==================== CUSTOM TIME PICKER DIALOG FOR WEB ====================
+class _CustomTimePickerDialog extends StatefulWidget {
+  final TimeOfDay? initialTime;
+  final ValueChanged<TimeOfDay> onTimeSelected;
 
-  const _AddScheduleDialog({
-    required this.barberId,
-    required this.salonId,
-    required this.existingSchedules,
-    this.defaultOpenTime,
-    this.defaultCloseTime,
+  const _CustomTimePickerDialog({
+    required this.initialTime,
+    required this.onTimeSelected,
   });
 
   @override
-  State<_AddScheduleDialog> createState() => _AddScheduleDialogState();
+  State<_CustomTimePickerDialog> createState() => _CustomTimePickerDialogState();
 }
 
-class _AddScheduleDialogState extends State<_AddScheduleDialog> {
-  final supabase = Supabase.instance.client;
+class _CustomTimePickerDialogState extends State<_CustomTimePickerDialog> {
+  late int _selectedHour;
+  late int _selectedMinute;
+  late String _selectedPeriod;
 
-  int? _selectedDay;
-  TimeOfDay? _startTime;
-  TimeOfDay? _endTime;
-  bool _isWorking = true;
-  bool _isLoading = false;
-
-  final List<Map<String, dynamic>> _days = const [
-    {'id': 1, 'name': 'Monday'},
-    {'id': 2, 'name': 'Tuesday'},
-    {'id': 3, 'name': 'Wednesday'},
-    {'id': 4, 'name': 'Thursday'},
-    {'id': 5, 'name': 'Friday'},
-    {'id': 6, 'name': 'Saturday'},
-    {'id': 7, 'name': 'Sunday'},
-  ];
-
-  List<int> get _availableDays {
-    final existingDays = widget.existingSchedules
-        .where((s) => s['day_of_week'] != null)
-        .map((s) => s['day_of_week'] as int)
-        .toSet();
-    return _days
-        .where((d) => !existingDays.contains(d['id']))
-        .map((d) => d['id'] as int)
-        .toList();
-  }
+  final List<int> hours12 = [12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+  final List<int> minutes = List.generate(60, (i) => i);
+  final List<String> periods = ['AM', 'PM'];
 
   @override
   void initState() {
     super.initState();
-    _startTime = widget.defaultOpenTime;
-    _endTime = widget.defaultCloseTime;
+    _initializeTime();
+  }
+
+  void _initializeTime() {
+    if (widget.initialTime != null) {
+      final hour24 = widget.initialTime!.hour;
+      final minute = widget.initialTime!.minute;
+
+      if (hour24 == 0) {
+        _selectedHour = 12;
+        _selectedPeriod = 'AM';
+      } else if (hour24 == 12) {
+        _selectedHour = 12;
+        _selectedPeriod = 'PM';
+      } else if (hour24 > 12) {
+        _selectedHour = hour24 - 12;
+        _selectedPeriod = 'PM';
+      } else {
+        _selectedHour = hour24;
+        _selectedPeriod = 'AM';
+      }
+      _selectedMinute = minute;
+    } else {
+      final now = TimeOfDay.now();
+      final hour24 = now.hour;
+      if (hour24 == 0) {
+        _selectedHour = 12;
+        _selectedPeriod = 'AM';
+      } else if (hour24 == 12) {
+        _selectedHour = 12;
+        _selectedPeriod = 'PM';
+      } else if (hour24 > 12) {
+        _selectedHour = hour24 - 12;
+        _selectedPeriod = 'PM';
+      } else {
+        _selectedHour = hour24;
+        _selectedPeriod = 'AM';
+      }
+      _selectedMinute = now.minute;
+    }
+  }
+
+  void _confirmTime() {
+    int hour24;
+    if (_selectedPeriod == 'AM') {
+      hour24 = _selectedHour == 12 ? 0 : _selectedHour;
+    } else {
+      hour24 = _selectedHour == 12 ? 12 : _selectedHour + 12;
+    }
+
+    final selectedTime = TimeOfDay(hour: hour24, minute: _selectedMinute);
+    widget.onTimeSelected(selectedTime);
+    Navigator.of(context).pop(selectedTime);
+  }
+
+  void _cancelTime() {
+    Navigator.of(context).pop();
   }
 
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
     final bool isWeb = screenWidth > 800;
+    final bool isMobile = screenWidth < 600;
 
     return Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
       child: Container(
-        width: isWeb ? 500 : screenWidth * 0.9,
-        constraints: BoxConstraints(
-          maxHeight: MediaQuery.of(context).size.height * 0.8,
-        ),
-        padding: EdgeInsets.all(isWeb ? 24 : 16),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Add Schedule',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+        width: isWeb ? 320 : (isMobile ? screenWidth * 0.9 : 300),
+        padding: EdgeInsets.all(isMobile ? 16 : 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Select Time',
+              style: TextStyle(
+                fontSize: isMobile ? 16 : 18,
+                fontWeight: FontWeight.bold,
               ),
-              const SizedBox(height: 20),
+            ),
+            const SizedBox(height: 16),
 
-              const Text(
-                'Select Day',
-                style: TextStyle(fontWeight: FontWeight.bold),
+            // Time Display
+            Container(
+              padding: EdgeInsets.symmetric(vertical: isMobile ? 12 : 16),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(16),
               ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: _days.map((day) {
-                  final isSelected = _selectedDay == day['id'];
-                  final isAvailable = _availableDays.contains(day['id']);
-                  return FilterChip(
-                    label: Text(day['name']),
-                    selected: isSelected,
-                    onSelected: isAvailable
-                        ? (selected) => setState(() => _selectedDay = day['id'])
-                        : null,
-                    backgroundColor: Colors.grey[100],
-                    selectedColor: const Color(0xFFFF6B8B).withValues(alpha: 0.2),
-                    checkmarkColor: const Color(0xFFFF6B8B),
-                    avatar: isAvailable ? null : const Icon(Icons.lock, size: 16),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    _selectedHour.toString().padLeft(2, '0'),
+                    style: TextStyle(
+                      fontSize: isMobile ? 36 : 48,
+                      fontWeight: FontWeight.bold,
+                      color: const Color(0xFFFF6B8B),
+                    ),
+                  ),
+                  Text(
+                    ':',
+                    style: TextStyle(
+                      fontSize: isMobile ? 36 : 48,
+                      fontWeight: FontWeight.bold,
+                      color: const Color(0xFFFF6B8B),
+                    ),
+                  ),
+                  Text(
+                    _selectedMinute.toString().padLeft(2, '0'),
+                    style: TextStyle(
+                      fontSize: isMobile ? 36 : 48,
+                      fontWeight: FontWeight.bold,
+                      color: const Color(0xFFFF6B8B),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: isMobile ? 8 : 12,
+                      vertical: isMobile ? 4 : 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[200],
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      _selectedPeriod,
+                      style: TextStyle(
+                        fontSize: isMobile ? 12 : 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // Pickers Row
+            Row(
+              children: [
+                _buildScrollPicker(
+                  title: 'HOUR',
+                  items: hours12,
+                  selectedValue: _selectedHour,
+                  onChanged: (value) => setState(() => _selectedHour = value),
+                  isMobile: isMobile,
+                ),
+                const SizedBox(width: 8),
+                _buildScrollPicker(
+                  title: 'MINUTE',
+                  items: minutes,
+                  selectedValue: _selectedMinute,
+                  onChanged: (value) => setState(() => _selectedMinute = value),
+                  isMobile: isMobile,
+                ),
+                const SizedBox(width: 8),
+                _buildScrollPicker(
+                  title: 'PERIOD',
+                  items: periods,
+                  selectedValue: _selectedPeriod,
+                  onChanged: (value) => setState(() => _selectedPeriod = value),
+                  isMobile: isMobile,
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 20),
+
+            // Buttons
+            Row(
+              children: [
+                Expanded(
+                  child: TextButton(
+                    onPressed: _cancelTime,
+                    style: TextButton.styleFrom(
+                      padding: EdgeInsets.symmetric(vertical: isMobile ? 10 : 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: Text('Cancel', style: TextStyle(fontSize: isMobile ? 14 : 16)),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: _confirmTime,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFFF6B8B),
+                      foregroundColor: Colors.white,
+                      padding: EdgeInsets.symmetric(vertical: isMobile ? 10 : 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: Text(
+                      'OK',
+                      style: TextStyle(
+                        fontSize: isMobile ? 14 : 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildScrollPicker<T>({
+    required String title,
+    required List<T> items,
+    required T selectedValue,
+    required ValueChanged<T> onChanged,
+    required bool isMobile,
+  }) {
+    final pickerHeight = isMobile ? 120.0 : 150.0;
+    final itemHeight = isMobile ? 35.0 : 40.0;
+    final fontSize = isMobile ? 16.0 : 20.0;
+    final titleFontSize = isMobile ? 10.0 : 12.0;
+
+    return Expanded(
+      child: Column(
+        children: [
+          Text(
+            title,
+            style: TextStyle(
+              fontSize: titleFontSize,
+              color: Colors.grey,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 4),
+          SizedBox(
+            height: pickerHeight,
+            child: ListWheelScrollView.useDelegate(
+              itemExtent: itemHeight,
+              onSelectedItemChanged: (newIndex) {
+                if (newIndex >= 0 && newIndex < items.length) {
+                  onChanged(items[newIndex]);
+                }
+              },
+              childDelegate: ListWheelChildBuilderDelegate(
+                builder: (context, i) {
+                  final item = items[i];
+                  final isSelected = item == selectedValue;
+                  return Container(
+                    alignment: Alignment.center,
+                    child: Text(
+                      item.toString(),
+                      style: TextStyle(
+                        fontSize: fontSize,
+                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                        color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[800],
+                      ),
+                    ),
                   );
-                }).toList(),
+                },
+                childCount: items.length,
               ),
-
-              if (_availableDays.isEmpty && _selectedDay == null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text(
-                    'All days already have schedules!',
-                    style: TextStyle(color: Colors.orange[700], fontSize: 12),
-                  ),
-                ),
-
-              const SizedBox(height: 16),
-
-              Row(
-                children: [
-                  Expanded(
-                    child: _TimePickerField(
-                      label: 'Start Time',
-                      initialTime: _startTime,
-                      isRequired: true,
-                      onTimeSelected: (time) => setState(() => _startTime = time),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _TimePickerField(
-                      label: 'End Time',
-                      initialTime: _endTime,
-                      isRequired: true,
-                      onTimeSelected: (time) => setState(() => _endTime = time),
-                    ),
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 16),
-
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                decoration: BoxDecoration(
-                  color: _isWorking
-                      ? Colors.green.withValues(alpha: 0.1)
-                      : Colors.red.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: _isWorking
-                        ? Colors.green.withValues(alpha: 0.3)
-                        : Colors.red.withValues(alpha: 0.3),
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    Icon(
-                      _isWorking ? Icons.check_circle : Icons.cancel,
-                      color: _isWorking ? Colors.green : Colors.red,
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Working Day',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: _isWorking ? Colors.green : Colors.red,
-                            ),
-                          ),
-                          Text(
-                            _isWorking
-                                ? 'This day will be available for bookings'
-                                : 'This day will be marked as day off',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey[600],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Switch(
-                      value: _isWorking,
-                      onChanged: (value) => setState(() => _isWorking = value),
-                      activeThumbColor: Colors.green,
-                      inactiveThumbColor: Colors.red,
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 24),
-
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('Cancel'),
-                  ),
-                  const SizedBox(width: 12),
-                  ElevatedButton(
-                    onPressed:
-                        _selectedDay != null &&
-                            _startTime != null &&
-                            _endTime != null &&
-                            !_isLoading
-                        ? _saveSchedule
-                        : null,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFFF6B8B),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 20,
-                        vertical: 12,
-                      ),
-                    ),
-                    child: _isLoading
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                              color: Colors.white,
-                              strokeWidth: 2,
-                            ),
-                          )
-                        : const Text(
-                            'Add Schedule',
-                            style: TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                  ),
-                ],
-              ),
-            ],
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
 
-  Future<void> _saveSchedule() async {
-    setState(() => _isLoading = true);
-
-    try {
-      final salonIdInt = int.parse(widget.salonId);
-      final startTimeString =
-          '${_startTime!.hour.toString().padLeft(2, '0')}:${_startTime!.minute.toString().padLeft(2, '0')}:00';
-      final endTimeString =
-          '${_endTime!.hour.toString().padLeft(2, '0')}:${_endTime!.minute.toString().padLeft(2, '0')}:00';
-
-      await supabase.from('barber_schedules').insert({
-        'barber_id': widget.barberId,
-        'salon_id': salonIdInt,
-        'day_of_week': _selectedDay,
-        'start_time': startTimeString,
-        'end_time': endTimeString,
-        'is_working': _isWorking,
-      });
-
-      if (mounted) Navigator.pop(context, {'success': true});
-    } catch (e) {
-      debugPrint('Error saving schedule: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-        );
-        setState(() => _isLoading = false);
-      }
-    }
-  }
-}
-
-// ==================== EDIT SCHEDULE DIALOG ====================
-class _EditScheduleDialog extends StatefulWidget {
-  final Map<String, dynamic> schedule;
-  final TimeOfDay? defaultOpenTime;
-  final TimeOfDay? defaultCloseTime;
-
-  const _EditScheduleDialog({
-    required this.schedule,
-    this.defaultOpenTime,
-    this.defaultCloseTime,
-  });
-
-  @override
-  State<_EditScheduleDialog> createState() => _EditScheduleDialogState();
-}
-
-class _EditScheduleDialogState extends State<_EditScheduleDialog> {
-  late TimeOfDay _startTime;
-  late TimeOfDay _endTime;
-  late bool _isWorking;
-  bool _isLoading = false;
-  final supabase = Supabase.instance.client;
-
-  @override
-  void initState() {
-    super.initState();
-    final startParts = (widget.schedule['start_time'] as String).split(':');
-    _startTime = TimeOfDay(
-      hour: int.parse(startParts[0]),
-      minute: int.parse(startParts[1]),
-    );
-    final endParts = (widget.schedule['end_time'] as String).split(':');
-    _endTime = TimeOfDay(
-      hour: int.parse(endParts[0]),
-      minute: int.parse(endParts[1]),
-    );
-    _isWorking = widget.schedule['is_working'] ?? true;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final bool isWeb = screenWidth > 800;
-    final dayNames = {
-      1: 'Monday',
-      2: 'Tuesday',
-      3: 'Wednesday',
-      4: 'Thursday',
-      5: 'Friday',
-      6: 'Saturday',
-      7: 'Sunday',
-    };
-    final dayName = dayNames[widget.schedule['day_of_week']] ?? 'Unknown';
-
-    return Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Container(
-        width: isWeb ? 500 : screenWidth * 0.9,
-        constraints: BoxConstraints(
-          maxHeight: MediaQuery.of(context).size.height * 0.8,
-        ),
-        padding: EdgeInsets.all(isWeb ? 24 : 16),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Edit Schedule - $dayName',
-                style: const TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 20),
-
-              Row(
-                children: [
-                  Expanded(
-                    child: _TimePickerField(
-                      label: 'Start Time',
-                      initialTime: _startTime,
-                      isRequired: true,
-                      onTimeSelected: (time) => setState(() => _startTime = time),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _TimePickerField(
-                      label: 'End Time',
-                      initialTime: _endTime,
-                      isRequired: true,
-                      onTimeSelected: (time) => setState(() => _endTime = time),
-                    ),
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 16),
-
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                decoration: BoxDecoration(
-                  color: _isWorking
-                      ? Colors.green.withValues(alpha: 0.1)
-                      : Colors.red.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: _isWorking
-                        ? Colors.green.withValues(alpha: 0.3)
-                        : Colors.red.withValues(alpha: 0.3),
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    Icon(
-                      _isWorking ? Icons.check_circle : Icons.cancel,
-                      color: _isWorking ? Colors.green : Colors.red,
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Working Day',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: _isWorking ? Colors.green : Colors.red,
-                            ),
-                          ),
-                          Text(
-                            _isWorking
-                                ? 'This day will be available for bookings'
-                                : 'This day will be marked as day off',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey[600],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Switch(
-                      value: _isWorking,
-                      onChanged: (value) => setState(() => _isWorking = value),
-                      activeThumbColor: Colors.green,
-                      inactiveThumbColor: Colors.red,
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 24),
-
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('Cancel'),
-                  ),
-                  const SizedBox(width: 12),
-                  ElevatedButton(
-                    onPressed: _isLoading ? null : _updateSchedule,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFFF6B8B),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 20,
-                        vertical: 12,
-                      ),
-                    ),
-                    child: _isLoading
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                              color: Colors.white,
-                              strokeWidth: 2,
-                            ),
-                          )
-                        : const Text(
-                            'Update Schedule',
-                            style: TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Future<void> _updateSchedule() async {
-    setState(() => _isLoading = true);
-
-    try {
-      final startTimeString =
-          '${_startTime.hour.toString().padLeft(2, '0')}:${_startTime.minute.toString().padLeft(2, '0')}:00';
-      final endTimeString =
-          '${_endTime.hour.toString().padLeft(2, '0')}:${_endTime.minute.toString().padLeft(2, '0')}:00';
-
-      await supabase
-          .from('barber_schedules')
-          .update({
-            'start_time': startTimeString,
-            'end_time': endTimeString,
-            'is_working': _isWorking,
-          })
-          .eq('id', widget.schedule['id']);
-
-      if (mounted) Navigator.pop(context, {'success': true});
-    } catch (e) {
-      debugPrint('Error updating schedule: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-        );
-        setState(() => _isLoading = false);
-      }
-    }
-  }
 }
