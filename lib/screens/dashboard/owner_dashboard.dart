@@ -9,8 +9,6 @@ import 'package:flutter_application_1/services/session_manager.dart';
 import 'package:flutter_application_1/widgets/permission_card.dart';
 import 'package:flutter_application_1/widgets/side_menu.dart';
 import 'package:flutter_application_1/widgets/dashboard_stat_card.dart';
-import 'package:flutter_application_1/widgets/booking_tile.dart';
-import 'package:flutter_application_1/widgets/section_header.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -21,16 +19,22 @@ class OwnerDashboard extends StatefulWidget {
   State<OwnerDashboard> createState() => _OwnerDashboardState();
 }
 
-class _OwnerDashboardState extends State<OwnerDashboard> {
+class _OwnerDashboardState extends State<OwnerDashboard>
+    with SingleTickerProviderStateMixin {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   final NotificationService _notificationService = NotificationService();
   final PermissionService _permissionService = PermissionService();
   final PermissionManager _permissionManager = PermissionManager();
 
+  // ── Pulse animation for next step ──────────────────────────
+  late AnimationController _pulseCtrl;
+  late Animation<double> _pulseAnim;
+
   bool _hasPermission = false;
   bool _showPermissionCard = false;
   bool _isLoading = true;
+  bool _isSwitchingSalon = false;
 
   // Dashboard data
   int completedToday = 0;
@@ -44,7 +48,6 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
   // Multiple salons support
   List<Map<String, dynamic>> _ownerSalons = [];
   String? _selectedSalonId;
-  final bool _isLoadingSalons = false;
 
   // User info
   String _userName = 'Salon Owner';
@@ -65,8 +68,25 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
   @override
   void initState() {
     super.initState();
+
+    // Pulse: 1.0 → 1.06 → 1.0, repeating
+    _pulseCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat(reverse: true);
+
+    _pulseAnim = Tween<double>(begin: 1.0, end: 1.06).animate(
+      CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut),
+    );
+
     _loadAllData();
     _setupNotificationListeners();
+  }
+
+  @override
+  void dispose() {
+    _pulseCtrl.dispose();
+    super.dispose();
   }
 
   // ============================================================
@@ -75,7 +95,6 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
 
   Future<void> _loadAllData() async {
     setState(() => _isLoading = true);
-
     try {
       await Future.wait([_loadUserProfile(), _loadOwnerSalons()]);
       await _loadDashboardStats();
@@ -123,8 +142,10 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
           if (_ownerSalons.isNotEmpty && _selectedSalonId == null) {
             _selectedSalonId = _ownerSalons.first['id'].toString();
             _hasSalon = true;
-          } else {
+          } else if (_ownerSalons.isEmpty) {
             _hasSalon = false;
+          } else {
+            _hasSalon = true;
           }
         });
       }
@@ -154,27 +175,13 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
           _profileImageUrl = profileResponse['avatar_url'];
         });
       }
-
-      final rolesResponse = await supabase
-          .from('user_roles')
-          .select('roles!inner (name)')
-          .eq('user_id', currentUser.id);
-
-      final List<String> roleNames = [];
-      for (var roleEntry in rolesResponse) {
-        final role = roleEntry['roles'] as Map?;
-        if (role != null && role['name'] != null) {
-          roleNames.add(role['name'].toString());
-        }
-      }
     } catch (e) {
       debugPrint('Error loading user profile: $e');
     }
   }
 
   Future<void> _loadDashboardStats() async {
-    if (_selectedSalonId == null) return;
-
+    if (_selectedSalonId == null || _ownerSalons.isEmpty) return;
     try {
       final today = DateTime.now().toIso8601String().split('T')[0];
       final salonIdInt = int.parse(_selectedSalonId!);
@@ -203,10 +210,8 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
           .select('customer_id')
           .eq('salon_id', salonIdInt);
 
-      final uniqueCustomers = totalCustomers
-          .map((a) => a['customer_id'] as String)
-          .toSet()
-          .length;
+      final uniqueCustomers =
+          totalCustomers.map((a) => a['customer_id'] as String).toSet().length;
       final revenue = todayAppointments.fold<int>(
         0,
         (sum, item) => sum + ((item['price'] as num?)?.toInt() ?? 0),
@@ -231,7 +236,7 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
   }
 
   Future<void> _checkOnboardingStatus() async {
-    if (_ownerSalons.isEmpty) {
+    if (_ownerSalons.isEmpty || _selectedSalonId == null) {
       setState(() {
         _hasSalon = false;
         _hasServices = false;
@@ -243,167 +248,169 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
       return;
     }
 
-    final salonId = int.parse(_selectedSalonId!);
+    try {
+      final salonId = int.parse(_selectedSalonId!);
 
-    final servicesResponse = await supabase
-        .from('services')
-        .select('id')
-        .eq('salon_id', salonId)
-        .eq('is_active', true)
-        .limit(1);
-    _hasServices = servicesResponse.isNotEmpty;
+      final servicesResponse = await supabase
+          .from('services')
+          .select('id')
+          .eq('salon_id', salonId)
+          .eq('is_active', true)
+          .limit(1);
+      _hasServices = servicesResponse.isNotEmpty;
 
-    final barbersResponse = await supabase
-        .from('salon_barbers')
-        .select('id')
-        .eq('salon_id', salonId)
-        .eq('status', 'active')
-        .limit(1);
-    _hasBarbers = barbersResponse.isNotEmpty;
+      final barbersResponse = await supabase
+          .from('salon_barbers')
+          .select('id')
+          .eq('salon_id', salonId)
+          .eq('status', 'active')
+          .limit(1);
+      _hasBarbers = barbersResponse.isNotEmpty;
 
-    if (_hasBarbers) {
-      final schedulesResponse = await supabase
-          .from('barber_schedules')
+      if (_hasBarbers) {
+        final schedulesResponse = await supabase
+            .from('barber_schedules')
+            .select('id')
+            .eq('salon_id', salonId)
+            .limit(1);
+        _hasBarberSchedule = schedulesResponse.isNotEmpty;
+      } else {
+        _hasBarberSchedule = false;
+      }
+
+      final holidaysResponse = await supabase
+          .from('salon_holidays')
           .select('id')
           .eq('salon_id', salonId)
           .limit(1);
-      _hasBarberSchedule = schedulesResponse.isNotEmpty;
-    } else {
-      _hasBarberSchedule = false;
+      _hasHolidays = holidaysResponse.isNotEmpty;
+
+      if (mounted) {
+        setState(() {
+          _hasSalon = true;
+          _completedSteps =
+              (_hasSalon ? 1 : 0) +
+              (_hasServices ? 1 : 0) +
+              (_hasBarbers ? 1 : 0) +
+              (_hasBarberSchedule ? 1 : 0) +
+              (_hasHolidays ? 1 : 0);
+        });
+      }
+    } catch (e) {
+      debugPrint('Error checking onboarding status: $e');
     }
+  }
 
-    final holidaysResponse = await supabase
-        .from('salon_holidays')
-        .select('id')
-        .eq('salon_id', salonId)
-        .limit(1);
-    _hasHolidays = holidaysResponse.isNotEmpty;
+  Future<void> _refreshAllData() async => _loadAllData();
 
+  Future<void> _switchSalon(String salonId) async {
+    if (_isSwitchingSalon || salonId == _selectedSalonId) return;
+    
     setState(() {
-      _hasSalon = true;
-      _completedSteps =
-          (_hasSalon ? 1 : 0) +
-          (_hasServices ? 1 : 0) +
-          (_hasBarbers ? 1 : 0) +
-          (_hasBarberSchedule ? 1 : 0) +
-          (_hasHolidays ? 1 : 0);
+      _isSwitchingSalon = true;
+      _selectedSalonId = salonId;
     });
-  }
-
-  Future<void> _refreshAllData() async {
-    await _loadAllData();
-  }
-
-  void _switchSalon(String salonId) {
-    setState(() => _selectedSalonId = salonId);
-    _loadDashboardStats();
-    _checkOnboardingStatus();
+    
+    try {
+      await Future.wait([
+        _loadDashboardStats(),
+        _checkOnboardingStatus(),
+      ]);
+    } catch (e) {
+      debugPrint('Error switching salon: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _isSwitchingSalon = false);
+      }
+    }
   }
 
   // ============================================================
-  // BEAUTIFUL STEP FLOW WITH ARROWS & ANIMATED ICONS
+  // SALON SETUP STEP FLOW
   // ============================================================
 
   Widget _buildStepFlow() {
     final steps = [
       {
-        'label': 'Create\nSalon',
+        'label': 'Create Salon',
+        'subtitle': 'Set up your profile',
         'isCompleted': _hasSalon,
         'onTap': _navigateToCreateSalon,
-        'icon': Icons.store,
-        'completedIcon': Icons.check_circle,
-        'color': const Color(0xFFFF6B8B),
-        'description': 'Set up your salon profile',
+        'icon': Icons.storefront_outlined,
+        'locked': false,
       },
       {
-        'label': 'Add\nServices',
+        'label': 'Add Services',
+        'subtitle': 'Services & pricing',
         'isCompleted': _hasServices,
         'onTap': _navigateToAddService,
-        'icon': Icons.build,
-        'completedIcon': Icons.check_circle,
-        'color': Colors.green,
+        'icon': Icons.content_cut_outlined,
         'locked': !_hasSalon,
-        'description': 'Add your services and pricing',
       },
       {
-        'label': 'Add\nBarbers',
+        'label': 'Add Barbers',
+        'subtitle': 'Your team',
         'isCompleted': _hasBarbers,
         'onTap': _navigateToAddBarber,
-        'icon': Icons.person_add,
-        'completedIcon': Icons.check_circle,
-        'color': Colors.purple,
+        'icon': Icons.people_outline,
         'locked': !_hasSalon,
-        'description': 'Add your team members',
       },
       {
-        'label': 'Set\nSchedules',
+        'label': 'Set Schedules',
+        'subtitle': 'Working hours',
         'isCompleted': _hasBarberSchedule,
         'onTap': _navigateToBarberSchedule,
-        'icon': Icons.schedule,
-        'completedIcon': Icons.check_circle,
-        'color': Colors.orange,
+        'icon': Icons.calendar_month_outlined,
         'locked': !_hasBarbers,
-        'description': 'Set working hours',
       },
       {
-        'label': 'Set\nHolidays',
+        'label': 'Set Holidays',
+        'subtitle': 'Days off',
         'isCompleted': _hasHolidays,
         'onTap': _viewSalonHolidays,
-        'icon': Icons.beach_access,
-        'completedIcon': Icons.check_circle,
-        'color': Colors.teal,
+        'icon': Icons.wb_sunny_outlined,
         'locked': !_hasSalon,
-        'description': 'Add holidays and off days',
       },
     ];
 
+    final nextIdx = steps.indexWhere(
+      (s) => !(s['isCompleted'] as bool) && !(s['locked'] as bool? ?? false),
+    );
+
+    const pink = Color(0xFFFF6B8B);
+    const green = Color(0xFF22C55E);
+    final pct = _totalSteps == 0 ? 0.0 : _completedSteps / _totalSteps;
+
     return Container(
-      margin: const EdgeInsets.all(16),
-      padding: const EdgeInsets.all(16),
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            const Color(0xFFFF6B8B).withValues(alpha: 0.08),
-            Colors.white,
-          ],
-        ),
+        color: Colors.white,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: const Color(0xFFFF6B8B).withValues(alpha: 0.2),
-        ),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withValues(alpha: 0.08),
-            blurRadius: 12,
+            color: Colors.black.withValues(alpha: 0.06),
+            blurRadius: 20.0,
             offset: const Offset(0, 4),
           ),
         ],
       ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header
           Row(
             children: [
               Container(
-                padding: const EdgeInsets.all(10),
+                width: 42,
+                height: 42,
                 decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFFFF6B8B), Color(0xFFFF9BAB)],
-                  ),
-                  borderRadius: BorderRadius.circular(14),
-                  boxShadow: [
-                    BoxShadow(
-                      color: const Color(0xFFFF6B8B).withValues(alpha: 0.3),
-                      blurRadius: 8,
-                    ),
-                  ],
+                  color: pink,
+                  borderRadius: BorderRadius.circular(12),
                 ),
                 child: const Icon(
-                  Icons.rocket_launch,
+                  Icons.rocket_launch_outlined,
                   color: Colors.white,
-                  size: 22,
+                  size: 20,
                 ),
               ),
               const SizedBox(width: 12),
@@ -412,466 +419,366 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      'Salon Setup Progress',
+                      'Salon Setup',
                       style: TextStyle(
                         fontSize: 16,
-                        fontWeight: FontWeight.bold,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF1A1A1A),
                       ),
                     ),
                     Text(
-                      'Complete all steps to launch your salon',
-                      style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                      '$_completedSteps of $_totalSteps steps complete',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF9CA3AF),
+                      ),
                     ),
                   ],
                 ),
               ),
               Container(
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 6,
+                  horizontal: 10,
+                  vertical: 5,
                 ),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                  color: pct == 1.0
+                      ? green.withValues(alpha: 0.12)
+                      : pink.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(20),
                 ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.trending_up,
-                      size: 14,
-                      color: const Color(0xFFFF6B8B),
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      '$_completedSteps/$_totalSteps',
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFFFF6B8B),
-                      ),
-                    ),
-                  ],
+                child: Text(
+                  '${(pct * 100).round()}%',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: pct == 1.0 ? green : pink,
+                  ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 16),
-
-          // Progress Bar with Animation
+          const SizedBox(height: 14),
           TweenAnimationBuilder<double>(
-            tween: Tween<double>(begin: 0, end: _completedSteps / _totalSteps),
-            duration: const Duration(milliseconds: 500),
-            builder: (context, value, child) {
-              return ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: LinearProgressIndicator(
-                  value: value,
-                  backgroundColor: Colors.grey[200],
-                  color: const Color(0xFFFF6B8B),
-                  minHeight: 6,
+            tween: Tween<double>(begin: 0, end: pct),
+            duration: const Duration(milliseconds: 600),
+            curve: Curves.easeOut,
+            builder: (context, value, _) => Stack(
+              children: [
+                Container(
+                  height: 7,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF3F4F6),
+                    borderRadius: BorderRadius.circular(99),
+                  ),
                 ),
+                FractionallySizedBox(
+                  widthFactor: value,
+                  child: Container(
+                    height: 7,
+                    decoration: BoxDecoration(
+                      color: value >= 1.0 ? green : pink,
+                      borderRadius: BorderRadius.circular(99),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 22),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              const arrowSlot = 16.0;
+              final availableWidth = constraints.maxWidth - (arrowSlot * 4);
+              final cardWidth = availableWidth > 0 ? availableWidth / 5 : 60.0;
+
+              return Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List.generate(steps.length, (i) {
+                  final step = steps[i];
+                  final isCompleted = step['isCompleted'] as bool;
+                  final isLocked = step['locked'] as bool? ?? false;
+                  final isActive = !isCompleted && !isLocked;
+                  final isNext = i == nextIdx;
+
+                  return Row(
+                    children: [
+                      _buildStepCard(
+                        label: step['label'] as String,
+                        subtitle: step['subtitle'] as String,
+                        icon: step['icon'] as IconData,
+                        isCompleted: isCompleted,
+                        isLocked: isLocked,
+                        isActive: isActive,
+                        isNext: isNext,
+                        cardWidth: cardWidth,
+                        onTap: isActive
+                            ? step['onTap'] as VoidCallback?
+                            : null,
+                      ),
+                      if (i < steps.length - 1)
+                        SizedBox(
+                          width: arrowSlot,
+                          child: Center(
+                            child: Icon(
+                              Icons.arrow_forward_ios_rounded,
+                              size: 10,
+                              color: isCompleted
+                                  ? green.withValues(alpha: 0.7)
+                                  : const Color(0xFFE0E0E0),
+                            ),
+                          ),
+                        ),
+                    ],
+                  );
+                }),
               );
             },
           ),
-          const SizedBox(height: 20),
-
-          // Steps with Horizontal Scroll
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: steps.asMap().entries.map((entry) {
-                final index = entry.key;
-                final step = entry.value;
-                final isCompleted = step['isCompleted'] as bool;
-                final isLocked = step['locked'] as bool? ?? false;
-                final isActive = !isCompleted && !isLocked;
-                final color = step['color'] as Color;
-
-                return Row(
-                  children: [
-                    // Step Card with Animation
-                    TweenAnimationBuilder<double>(
-                      tween: Tween<double>(
-                        begin: 0.8,
-                        end: isActive ? 1.0 : 0.95,
-                      ),
-                      duration: const Duration(milliseconds: 300),
-                      builder: (context, scale, child) {
-                        return Transform.scale(
-                          scale: scale,
-                          child: GestureDetector(
-                            onTap: isActive
-                                ? step['onTap'] as VoidCallback
-                                : null,
-                            child: Container(
-                              width: 90,
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              decoration: BoxDecoration(
-                                gradient: isCompleted
-                                    ? LinearGradient(
-                                        begin: Alignment.topLeft,
-                                        end: Alignment.bottomRight,
-                                        colors: [
-                                          Colors.green.withValues(alpha: 0.15),
-                                          Colors.green.withValues(alpha: 0.05),
-                                        ],
-                                      )
-                                    : isActive
-                                    ? LinearGradient(
-                                        begin: Alignment.topLeft,
-                                        end: Alignment.bottomRight,
-                                        colors: [
-                                          color.withValues(alpha: 0.15),
-                                          color.withValues(alpha: 0.05),
-                                        ],
-                                      )
-                                    : null,
-                                color: !isCompleted && !isActive
-                                    ? Colors.grey.withValues(alpha: 0.05)
-                                    : null,
-                                borderRadius: BorderRadius.circular(16),
-                                border: Border.all(
-                                  color: isCompleted
-                                      ? Colors.green.withValues(alpha: 0.5)
-                                      : isActive
-                                      ? color.withValues(alpha: 0.5)
-                                      : Colors.grey.withValues(alpha: 0.3),
-                                  width: isActive ? 1.5 : 1,
-                                ),
-                                boxShadow: isActive
-                                    ? [
-                                        BoxShadow(
-                                          color: color.withValues(alpha: 0.2),
-                                          blurRadius: 8,
-                                          offset: const Offset(0, 2),
-                                        ),
-                                      ]
-                                    : null,
-                              ),
-                              child: Column(
-                                children: [
-                                  // Animated Icon Container
-                                  AnimatedContainer(
-                                    duration: const Duration(milliseconds: 400),
-                                    curve: Curves.easeOutBack,
-                                    width: 48,
-                                    height: 48,
-                                    decoration: BoxDecoration(
-                                      gradient: isCompleted
-                                          ? const LinearGradient(
-                                              colors: [
-                                                Colors.green,
-                                                Color(0xFF4CAF50),
-                                              ],
-                                            )
-                                          : isActive
-                                          ? LinearGradient(
-                                              colors: [
-                                                color,
-                                                color.withValues(alpha: 0.8),
-                                              ],
-                                            )
-                                          : null,
-                                      color: !isCompleted && !isActive
-                                          ? Colors.grey[300]
-                                          : null,
-                                      shape: BoxShape.circle,
-                                      boxShadow: isActive
-                                          ? [
-                                              BoxShadow(
-                                                color: color.withValues(
-                                                  alpha: 0.4,
-                                                ),
-                                                blurRadius: 12,
-                                                offset: const Offset(0, 4),
-                                              ),
-                                            ]
-                                          : null,
-                                    ),
-                                    child: Center(
-                                      child: AnimatedSwitcher(
-                                        duration: const Duration(
-                                          milliseconds: 300,
-                                        ),
-                                        transitionBuilder: (child, animation) {
-                                          return ScaleTransition(
-                                            scale: animation,
-                                            child: FadeTransition(
-                                              opacity: animation,
-                                              child: child,
-                                            ),
-                                          );
-                                        },
-                                        child: isCompleted
-                                            ? Icon(
-                                                step['completedIcon']
-                                                    as IconData,
-                                                key: const ValueKey(
-                                                  'completed',
-                                                ),
-                                                color: Colors.white,
-                                                size: 28,
-                                              )
-                                            : Icon(
-                                                step['icon'] as IconData,
-                                                key: const ValueKey(
-                                                  'incomplete',
-                                                ),
-                                                color: isActive
-                                                    ? Colors.white
-                                                    : Colors.grey[500],
-                                                size: isActive ? 26 : 24,
-                                              ),
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(height: 10),
-
-                                  // Step Label with Animation
-                                  AnimatedDefaultTextStyle(
-                                    duration: const Duration(milliseconds: 300),
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: isCompleted
-                                          ? FontWeight.bold
-                                          : FontWeight.w500,
-                                      color: isCompleted
-                                          ? Colors.green[700]
-                                          : isActive
-                                          ? color
-                                          : Colors.grey[500],
-                                    ),
-                                    child: Text(
-                                      step['label'] as String,
-                                      textAlign: TextAlign.center,
-                                    ),
-                                  ),
-
-                                  const SizedBox(height: 4),
-
-                                  // Status Indicator
-                                  if (!isCompleted && !isLocked)
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 6,
-                                        vertical: 2,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: color.withValues(alpha: 0.2),
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                      child: Text(
-                                        'Pending',
-                                        style: TextStyle(
-                                          fontSize: 8,
-                                          color: color,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                    )
-                                  else if (isLocked && !isCompleted)
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 6,
-                                        vertical: 2,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: Colors.grey.withValues(
-                                          alpha: 0.2,
-                                        ),
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Icon(
-                                            Icons.lock,
-                                            size: 8,
-                                            color: Colors.grey[600],
-                                          ),
-                                          const SizedBox(width: 2),
-                                          Text(
-                                            'Locked',
-                                            style: TextStyle(
-                                              fontSize: 8,
-                                              color: Colors.grey[600],
-                                              fontWeight: FontWeight.w500,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    )
-                                  else if (isCompleted)
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 6,
-                                        vertical: 2,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: Colors.green.withValues(
-                                          alpha: 0.2,
-                                        ),
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                      child: Text(
-                                        'Done ✓',
-                                        style: TextStyle(
-                                          fontSize: 8,
-                                          color: Colors.green[700],
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-
-                    // Animated Arrow between steps
-                    if (index < steps.length - 1)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 400),
-                          curve: Curves.easeInOut,
-                          child: Icon(
-                            Icons.arrow_forward_ios,
-                            size: 14,
-                            color: steps[index]['isCompleted'] as bool
-                                ? Colors.green
-                                : steps[index + 1]['isCompleted'] as bool
-                                ? Colors.green.withValues(alpha: 0.5)
-                                : Colors.grey[400],
-                          ),
-                        ),
-                      ),
-                  ],
-                );
-              }).toList(),
-            ),
-          ),
-
-          // Path/Follow Line Indicator
-          if (_completedSteps > 0 && _completedSteps < _totalSteps)
+          if (_completedSteps > 0 &&
+              _completedSteps < _totalSteps &&
+              nextIdx >= 0)
             Padding(
               padding: const EdgeInsets.only(top: 16),
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TweenAnimationBuilder<double>(
-                      tween: Tween<double>(begin: 0, end: 1),
-                      duration: const Duration(milliseconds: 800),
-                      builder: (context, value, child) {
-                        return Transform.rotate(
-                          angle: value * 3.14159 * 2,
-                          child: const Icon(
-                            Icons.arrow_forward,
-                            size: 16,
-                            color: Color(0xFFFF6B8B),
-                          ),
-                        );
-                      },
+              child: Row(
+                children: [
+                  Container(
+                    width: 6,
+                    height: 6,
+                    decoration: const BoxDecoration(
+                      color: pink,
+                      shape: BoxShape.circle,
                     ),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Next: ${_getNextStepLabel(steps)}',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: const Color(0xFFFF6B8B),
-                        fontWeight: FontWeight.w500,
-                      ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Up next:  ${steps[nextIdx]['label'] as String}',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: pink,
+                      fontWeight: FontWeight.w500,
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
-
-          // Completion Message with Animation
           if (_completedSteps == _totalSteps)
             TweenAnimationBuilder<double>(
               tween: Tween<double>(begin: 0, end: 1),
-              duration: const Duration(milliseconds: 600),
-              builder: (context, value, child) {
-                return Transform.scale(
-                  scale: value,
-                  child: Opacity(
-                    opacity: value,
-                    child: Padding(
-                      padding: const EdgeInsets.only(top: 16),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          vertical: 10,
-                          horizontal: 16,
+              duration: const Duration(milliseconds: 500),
+              curve: Curves.easeOutBack,
+              builder: (context, v, _) => Transform.scale(
+                scale: v,
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 18),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 13,
+                      horizontal: 16,
+                    ),
+                    decoration: BoxDecoration(
+                      color: green,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.celebration_outlined,
+                          color: Colors.white,
+                          size: 18,
                         ),
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [Colors.green, Colors.green[700]!],
+                        SizedBox(width: 8),
+                        Text(
+                          'Your salon is ready to launch! 🎉',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
                           ),
-                          borderRadius: BorderRadius.circular(24),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.green.withValues(alpha: 0.3),
-                              blurRadius: 12,
-                              offset: const Offset(0, 4),
-                            ),
-                          ],
                         ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(
-                              Icons.celebration,
-                              size: 20,
-                              color: Colors.white,
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              '🎉 Congratulations! Your salon is ready to launch! 🎉',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.white,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
+                      ],
                     ),
                   ),
-                );
-              },
+                ),
+              ),
             ),
         ],
       ),
     );
   }
 
-  // Helper method to get next step label
-  String _getNextStepLabel(List<Map<String, dynamic>> steps) {
-    for (var step in steps) {
-      if (!(step['isCompleted'] as bool) &&
-          !(step['locked'] as bool? ?? false)) {
-        return (step['label'] as String).replaceAll('\n', ' ');
-      }
+  // ── Step Card ───────────────────────────────────────────────
+  Widget _buildStepCard({
+    required String label,
+    required String subtitle,
+    required IconData icon,
+    required bool isCompleted,
+    required bool isLocked,
+    required bool isActive,
+    required bool isNext,
+    required double cardWidth,
+    VoidCallback? onTap,
+  }) {
+    const pink = Color(0xFFFF6B8B);
+    const green = Color(0xFF22C55E);
+
+    final Color circleBg = isCompleted
+        ? green
+        : isActive
+            ? pink
+            : const Color(0xFFE5E7EB);
+
+    final Color labelColor = isCompleted
+        ? const Color(0xFF15803D)
+        : isActive
+            ? const Color(0xFF1A1A1A)
+            : const Color(0xFFB0B5BF);
+
+    final Color subtitleColor = isCompleted
+        ? green.withValues(alpha: 0.8)
+        : isActive
+            ? const Color(0xFF6B7280)
+            : const Color(0xFFD1D5DB);
+
+    Widget card = AnimatedContainer(
+      duration: const Duration(milliseconds: 250),
+      width: cardWidth,
+      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 4),
+      decoration: BoxDecoration(
+        color: isCompleted
+            ? green.withValues(alpha: 0.06)
+            : isNext
+                ? pink.withValues(alpha: 0.07)
+                : isActive
+                    ? pink.withValues(alpha: 0.04)
+                    : const Color(0xFFFAFAFA),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isCompleted
+              ? green.withValues(alpha: 0.4)
+              : isNext
+                  ? pink.withValues(alpha: 0.65)
+                  : isActive
+                      ? pink.withValues(alpha: 0.3)
+                      : const Color(0xFFEEEEEE),
+          width: isNext ? 1.8 : isActive ? 1.5 : 1.0,
+        ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Icon Circle - FIXED: No boxShadow inside AnimatedContainer
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: circleBg,
+              shape: BoxShape.circle,
+            ),
+            child: Center(
+              child: isCompleted
+                  ? const Icon(
+                      Icons.check_rounded,
+                      color: Colors.white,
+                      size: 22,
+                    )
+                  : isLocked
+                      ? const Icon(
+                          Icons.lock_outline_rounded,
+                          color: Color(0xFFADB5BD),
+                          size: 18,
+                        )
+                      : Icon(
+                          icon,
+                          color: Colors.white,
+                          size: 20,
+                        ),
+            ),
+          ),
+          const SizedBox(height: 9),
+          Text(
+            label,
+            textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: labelColor,
+              height: 1.2,
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            subtitle,
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 9, color: subtitleColor, height: 1.2),
+          ),
+          const SizedBox(height: 8),
+          _buildStatusChip(
+            isCompleted: isCompleted,
+            isLocked: isLocked,
+            isNext: isNext,
+          ),
+        ],
+      ),
+    );
+
+    if (isNext) {
+      card = ScaleTransition(scale: _pulseAnim, child: card);
     }
-    return 'Complete remaining steps';
+
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: card,
+    );
   }
 
+  // ── Status Chip ─────────────────────────────────────────────
+  Widget _buildStatusChip({
+    required bool isCompleted,
+    required bool isLocked,
+    required bool isNext,
+  }) {
+    if (isCompleted) {
+      return _chip('Done', const Color(0xFF16A34A), const Color(0xFFDCFCE7));
+    }
+    if (isLocked) {
+      return _chip('Locked', const Color(0xFFADB5BD), const Color(0xFFF3F4F6));
+    }
+    if (isNext) {
+      return _chip(
+        'Do This',
+        const Color(0xFFFF6B8B),
+        const Color(0xFFFFEDF1),
+      );
+    }
+    return _chip('Pending', const Color(0xFFFF6B8B), const Color(0xFFFFEDF1));
+  }
+
+  Widget _chip(String text, Color textColor, Color bgColor) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+    decoration: BoxDecoration(
+      color: bgColor,
+      borderRadius: BorderRadius.circular(99),
+    ),
+    child: Text(
+      text,
+      style: TextStyle(
+        fontSize: 9,
+        fontWeight: FontWeight.w600,
+        color: textColor,
+      ),
+    ),
+  );
+
   // ============================================================
-  // ORIGINAL MANAGEMENT SECTION - SAME DESIGN AS BEFORE
+  // MANAGEMENT SECTION
   // ============================================================
 
   Widget _buildManagementSection() {
@@ -884,7 +791,7 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
         boxShadow: [
           BoxShadow(
             color: Colors.grey.withValues(alpha: 0.1),
-            blurRadius: 8,
+            blurRadius: 8.0,
             offset: const Offset(0, 2),
           ),
         ],
@@ -903,8 +810,6 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
             ],
           ),
           const SizedBox(height: 16),
-
-          // Row 1: Salon Management
           const Text(
             'Salon Management',
             style: TextStyle(
@@ -941,8 +846,6 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
             ],
           ),
           const SizedBox(height: 16),
-
-          // Row 2: Service Management
           const Text(
             'Service Management',
             style: TextStyle(
@@ -972,8 +875,6 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
             ],
           ),
           const SizedBox(height: 16),
-
-          // Row 3: Barber Management
           const Text(
             'Barber Management',
             style: TextStyle(
@@ -1023,8 +924,6 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
             ],
           ),
           const SizedBox(height: 16),
-
-          // Row 4: VIP & Reports
           const Text(
             'Reports',
             style: TextStyle(
@@ -1035,7 +934,7 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
           ),
           const SizedBox(height: 8),
           Row(
-            children: [             
+            children: [
               const SizedBox(width: 8),
               _buildQuickAction(
                 icon: Icons.bar_chart,
@@ -1115,7 +1014,7 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
         boxShadow: [
           BoxShadow(
             color: Colors.grey.withValues(alpha: 0.1),
-            blurRadius: 8,
+            blurRadius: 8.0,
             offset: const Offset(0, 2),
           ),
         ],
@@ -1133,7 +1032,8 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
               scrollDirection: Axis.horizontal,
               child: Row(
                 children: _ownerSalons.map((salon) {
-                  final isSelected = _selectedSalonId == salon['id'].toString();
+                  final isSelected =
+                      _selectedSalonId == salon['id'].toString();
                   return Padding(
                     padding: const EdgeInsets.only(right: 8),
                     child: FilterChip(
@@ -1142,7 +1042,8 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
                         style: const TextStyle(fontSize: 12),
                       ),
                       selected: isSelected,
-                      onSelected: (_) => _switchSalon(salon['id'].toString()),
+                      onSelected: (_) =>
+                          _switchSalon(salon['id'].toString()),
                       backgroundColor: Colors.grey[100],
                       selectedColor: const Color(
                         0xFFFF6B8B,
@@ -1236,67 +1137,59 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
     if (result == true) await _refreshAllData();
   }
 
-void _navigateToServiceList() {
-  if (_ownerSalons.isEmpty) {
-    _showCreateSalonFirstDialog();
-    return;
+  void _navigateToServiceList() {
+    if (_ownerSalons.isEmpty) {
+      _showCreateSalonFirstDialog();
+      return;
+    }
+    if (_ownerSalons.length == 1) {
+      final salon = _ownerSalons.first;
+      final salonId = salon['id'] as int;
+      final salonName = salon['name'] as String;
+      context.push(
+        '/owner/services?salonId=$salonId&salonName=${Uri.encodeComponent(salonName)}',
+      );
+    } else {
+      _showSalonSelectionDialogForServices();
+    }
   }
-  
-  // If there are multiple salons, show selection dialog
-  if (_ownerSalons.length == 1) {
-    // Single salon - navigate directly
-    final salon = _ownerSalons.first;
-    final salonId = salon['id'] as int;
-    final salonName = salon['name'] as String;
-    
-    debugPrint('📍 Navigating to service management for salon: $salonName (ID: $salonId)');
-    
-    // ✅ FIXED: Use the correct route path
-    context.push('/owner/services?salonId=$salonId&salonName=${Uri.encodeComponent(salonName)}');
-  } else {
-    // Multiple salons - show selection dialog
-    _showSalonSelectionDialogForServices();
-  }
-}
 
-void _showSalonSelectionDialogForServices() {
-  showDialog(
-    context: context,
-    builder: (context) => AlertDialog(
-      title: const Text('Select Salon'),
-      content: SizedBox(
-        width: double.maxFinite,
-        child: ListView.builder(
-          shrinkWrap: true,
-          itemCount: _ownerSalons.length,
-          itemBuilder: (context, index) {
-            final salon = _ownerSalons[index];
-            final salonId = salon['id'] as int;
-            final salonName = salon['name'] as String;
-            
-            return ListTile(
-              leading: const Icon(Icons.store, color: Color(0xFFFF6B8B)),
-              title: Text(salonName),
-              // subtitle: Text('ID: $salonId'),
-              onTap: () {
-                Navigator.pop(context);
-                debugPrint('📍 Navigating to service management for salon: $salonName (ID: $salonId)');
-                // ✅ FIXED: Use the correct route path
-                context.push('/owner/services?salonId=$salonId&salonName=${Uri.encodeComponent(salonName)}');
-              },
-            );
-          },
+  void _showSalonSelectionDialogForServices() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Select Salon'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: _ownerSalons.length,
+            itemBuilder: (context, index) {
+              final salon = _ownerSalons[index];
+              final salonId = salon['id'] as int;
+              final salonName = salon['name'] as String;
+              return ListTile(
+                leading: const Icon(Icons.store, color: Color(0xFFFF6B8B)),
+                title: Text(salonName),
+                onTap: () {
+                  Navigator.pop(context);
+                  context.push(
+                    '/owner/services?salonId=$salonId&salonName=${Uri.encodeComponent(salonName)}',
+                  );
+                },
+              );
+            },
+          ),
         ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+        ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
-      ],
-    ),
-  );
-}
+    );
+  }
 
   void _viewBookings() {
     if (_selectedSalonId != null) {
@@ -1322,17 +1215,9 @@ void _showSalonSelectionDialogForServices() {
     }
   }
 
-  void _viewReports() {
-    context.push('/owner/reports');
-  }
-
-  void _viewAnalytics() {
-    context.push('/owner/analytics');
-  }
-
-  void _viewSettings() {
-    context.push('/owner/settings');
-  }
+  void _viewReports() => context.push('/owner/reports');
+  void _viewAnalytics() => context.push('/owner/analytics');
+  void _viewSettings() => context.push('/owner/settings');
 
   void _viewSalonHolidays() {
     if (_ownerSalons.isEmpty) {
@@ -1340,14 +1225,6 @@ void _showSalonSelectionDialogForServices() {
       return;
     }
     context.push('/owner/salon/holidays?salonId=$_selectedSalonId');
-  }
-
-  void _viewVIPRequests() {
-    if (_ownerSalons.isEmpty) {
-      _showCreateSalonFirstDialog();
-      return;
-    }
-    context.push('/owner/vip-requests?salonId=$_selectedSalonId');
   }
 
   void _showCreateSalonFirstDialog() {
@@ -1372,48 +1249,6 @@ void _showSalonSelectionDialogForServices() {
               backgroundColor: const Color(0xFFFF6B8B),
             ),
             child: const Text('Create Salon'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _viewBookingDetails(String customerName) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Viewing $customerName\'s booking'),
-        duration: const Duration(seconds: 1),
-      ),
-    );
-  }
-
-  void _markAppointmentComplete() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Complete Appointment'),
-        content: const Text('Mark this appointment as completed?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              setState(() {
-                completedToday++;
-                pendingAppointments--;
-              });
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('✅ Appointment completed'),
-                  backgroundColor: Colors.green,
-                ),
-              );
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-            child: const Text('Complete'),
           ),
         ],
       ),
@@ -1605,21 +1440,15 @@ void _showSalonSelectionDialogForServices() {
   String _getFormattedDate() {
     final now = DateTime.now();
     const months = [
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec',
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
     ];
     return '${months[now.month - 1]} ${now.day}, ${now.year}';
   }
+
+  // ============================================================
+  // BUILD
+  // ============================================================
 
   @override
   Widget build(BuildContext context) {
@@ -1656,7 +1485,7 @@ void _showSalonSelectionDialogForServices() {
         profileImageUrl: _profileImageUrl,
         onMenuItemSelected: () => _refreshAllData(),
       ),
-      body: _isLoading || _isLoadingSalons
+      body: _isLoading
           ? const Center(
               child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
             )
@@ -1676,12 +1505,10 @@ void _showSalonSelectionDialogForServices() {
                             'Get instant notifications when customers book appointments',
                         compact: true,
                       ),
-
-                    // Header
                     Padding(
                       padding: const EdgeInsets.all(16),
                       child: Row(
-                        children: [                        
+                        children: [
                           const Spacer(),
                           Container(
                             padding: const EdgeInsets.symmetric(
@@ -1689,9 +1516,7 @@ void _showSalonSelectionDialogForServices() {
                               vertical: 5,
                             ),
                             decoration: BoxDecoration(
-                              color: const Color(
-                                0xFFFF6B8B,
-                              ).withValues(alpha: 0.1),
+                              color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
                               borderRadius: BorderRadius.circular(20),
                             ),
                             child: Row(
@@ -1715,12 +1540,8 @@ void _showSalonSelectionDialogForServices() {
                         ],
                       ),
                     ),
-
-                    // Step Flow (NEW DESIGN)
                     if (_completedSteps < _totalSteps) _buildStepFlow(),
-
                     if (_ownerSalons.length > 1) _buildSalonSelector(),
-
                     if (_ownerSalons.isEmpty)
                       Container(
                         margin: const EdgeInsets.all(16),
@@ -1770,75 +1591,85 @@ void _showSalonSelectionDialogForServices() {
                           ],
                         ),
                       ),
-
-                    if (_ownerSalons.isNotEmpty) ...[
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: DashboardStatCard(
-                                title: 'Today\'s Appointments',
-                                value: '$_todayAppointments',
-                                icon: Icons.calendar_today,
-                                color: Colors.blue,
-                                onTap: _viewBookings,
+                    if (_ownerSalons.isNotEmpty)
+                      _isSwitchingSalon
+                          ? const Padding(
+                              padding: EdgeInsets.all(32.0),
+                              child: Center(
+                                child: CircularProgressIndicator(
+                                  color: Color(0xFFFF6B8B),
+                                ),
                               ),
+                            )
+                          : Column(
+                              children: [
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: DashboardStatCard(
+                                          title: "Today's Appointments",
+                                          value: '$_todayAppointments',
+                                          icon: Icons.calendar_today,
+                                          color: Colors.blue,
+                                          onTap: _viewBookings,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: DashboardStatCard(
+                                          title: 'Pending',
+                                          value: '$_pendingBookings',
+                                          icon: Icons.pending_actions,
+                                          color: Colors.orange,
+                                          onTap: _viewBookings,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: DashboardStatCard(
+                                          title: 'Customers',
+                                          value: '$_totalCustomers',
+                                          icon: Icons.people,
+                                          color: Colors.purple,
+                                          onTap: _viewAllCustomers,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: DashboardStatCard(
+                                          title: 'Barbers',
+                                          value: '$_activeBarbers',
+                                          icon: Icons.content_cut,
+                                          color: Colors.green,
+                                          onTap: _navigateToBarberList,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                                  child: DashboardStatCard(
+                                    title: 'Revenue',
+                                    value: 'Rs. $_totalRevenue',
+                                    icon: Icons.currency_rupee,
+                                    color: Colors.green,
+                                    fullWidth: true,
+                                    onTap: _viewRevenue,
+                                  ),
+                                ),
+                              ],
                             ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: DashboardStatCard(
-                                title: 'Pending',
-                                value: '$_pendingBookings',
-                                icon: Icons.pending_actions,
-                                color: Colors.orange,
-                                onTap: _viewBookings,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: DashboardStatCard(
-                                title: 'Customers',
-                                value: '$_totalCustomers',
-                                icon: Icons.people,
-                                color: Colors.purple,
-                                onTap: _viewAllCustomers,
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: DashboardStatCard(
-                                title: 'Barbers',
-                                value: '$_activeBarbers',
-                                icon: Icons.content_cut,
-                                color: Colors.green,
-                                onTap: _navigateToBarberList,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: DashboardStatCard(
-                          title: 'Revenue',
-                          value: 'Rs. $_totalRevenue',
-                          icon: Icons.currency_rupee,
-                          color: Colors.green,
-                          fullWidth: true,
-                          onTap: _viewRevenue,
-                        ),
-                      ),
-                    ],
-
                     const SizedBox(height: 16),
                     _buildManagementSection(),
                     const SizedBox(height: 80),
