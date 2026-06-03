@@ -1026,7 +1026,7 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
 
           // Row 4: VIP & Reports
           const Text(
-            'VIP & Reports',
+            'Reports',
             style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w600,
@@ -1035,14 +1035,7 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
           ),
           const SizedBox(height: 8),
           Row(
-            children: [
-              _buildQuickAction(
-                icon: Icons.star,
-                label: 'VIP Requests',
-                color: Colors.deepOrange,
-                onTap: _viewVIPRequests,
-                enabled: _ownerSalons.isNotEmpty,
-              ),
+            children: [             
               const SizedBox(width: 8),
               _buildQuickAction(
                 icon: Icons.bar_chart,
@@ -1063,52 +1056,6 @@ class _OwnerDashboardState extends State<OwnerDashboard> {
                 label: 'Settings',
                 color: Colors.grey,
                 onTap: _viewSettings,
-              ),
-            ],
-          ),
-
-          // Row 5: Category Management
-          const Text(
-            'Category Management',
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: Colors.grey,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              _buildQuickAction(
-                icon: Icons.category,
-                label: 'Add Category',
-                color: Colors.brown,
-                onTap: _navigateToAddCategory,
-              ),
-              const SizedBox(width: 8),
-              _buildQuickAction(
-                icon: Icons.list,
-                label: 'Category List',
-                color: Colors.deepPurple,
-                onTap: _navigateToCategoryList,
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              _buildQuickAction(
-                icon: Icons.wc,
-                label: 'Add Gender',
-                color: Colors.pink,
-                onTap: _navigateToAddGender,
-              ),
-              const SizedBox(width: 8),
-              _buildQuickAction(
-                icon: Icons.cake,
-                label: 'Add Age Cat',
-                color: Colors.amber,
-                onTap: _navigateToAddAgeCategory,
               ),
             ],
           ),
@@ -1330,7 +1277,7 @@ void _showSalonSelectionDialogForServices() {
             return ListTile(
               leading: const Icon(Icons.store, color: Color(0xFFFF6B8B)),
               title: Text(salonName),
-              subtitle: Text('ID: $salonId'),
+              // subtitle: Text('ID: $salonId'),
               onTap: () {
                 Navigator.pop(context);
                 debugPrint('📍 Navigating to service management for salon: $salonName (ID: $salonId)');
@@ -1350,33 +1297,6 @@ void _showSalonSelectionDialogForServices() {
     ),
   );
 }
-
-  void _navigateToAddCategory() async {
-    final result = await context.push('/owner/categories/add');
-    if (result == true) await _refreshAllData();
-  }
-
-  void _navigateToCategoryList() {
-    context.push('/owner/categories');
-  }
-
-  void _navigateToAddGender() async {
-    final result = await context.push('/owner/genders/add');
-    if (result == true) await _refreshAllData();
-  }
-
-  void _navigateToGenderList() {
-    context.push('/owner/genders');
-  }
-
-  void _navigateToAddAgeCategory() async {
-    final result = await context.push('/owner/age-categories/add');
-    if (result == true) await _refreshAllData();
-  }
-
-  void _navigateToAgeCategoryList() {
-    context.push('/owner/age-categories');
-  }
 
   void _viewBookings() {
     if (_selectedSalonId != null) {
@@ -1761,26 +1681,7 @@ void _showSalonSelectionDialogForServices() {
                     Padding(
                       padding: const EdgeInsets.all(16),
                       child: Row(
-                        children: [
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'Welcome back,',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  color: Colors.grey,
-                                ),
-                              ),
-                              Text(
-                                _userName,
-                                style: const TextStyle(
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
-                          ),
+                        children: [                        
                           const Spacer(),
                           Container(
                             padding: const EdgeInsets.symmetric(
@@ -1940,56 +1841,7 @@ void _showSalonSelectionDialogForServices() {
 
                     const SizedBox(height: 16),
                     _buildManagementSection(),
-                    const SizedBox(height: 16),
-
-                    if (_ownerSalons.isNotEmpty) ...[
-                      const SectionHeader(
-                        title: 'Recent Bookings',
-                        actionText: 'View All',
-                      ),
-                      const SizedBox(height: 8),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: Column(
-                          children: [
-                            BookingTile(
-                              customerName: 'Nimal Perera',
-                              serviceName: 'Hair Cut',
-                              time: '10:30 AM',
-                              status: 'Confirmed',
-                              statusColor: Colors.green,
-                              barberName: 'Kamal',
-                              price: 1500,
-                              onTap: () => _viewBookingDetails('Nimal Perera'),
-                              onComplete: _markAppointmentComplete,
-                            ),
-                            BookingTile(
-                              customerName: 'Kamal Silva',
-                              serviceName: 'Facial',
-                              time: '2:00 PM',
-                              status: 'Pending',
-                              statusColor: Colors.orange,
-                              barberName: 'Sunil',
-                              price: 2500,
-                              onTap: () => _viewBookingDetails('Kamal Silva'),
-                              onComplete: _markAppointmentComplete,
-                            ),
-                            BookingTile(
-                              customerName: 'Sunil Weerasinghe',
-                              serviceName: 'Massage',
-                              time: '4:30 PM',
-                              status: 'Completed',
-                              statusColor: Colors.blue,
-                              barberName: 'Nuwan',
-                              price: 3000,
-                              onTap: () =>
-                                  _viewBookingDetails('Sunil Weerasinghe'),
-                              onComplete: _markAppointmentComplete,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
+                    const SizedBox(height: 80),
                   ],
                 ),
               ),
