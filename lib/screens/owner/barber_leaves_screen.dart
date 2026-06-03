@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import '../../services/notification_service.dart';
+import '../../services/timezone_service.dart';
 import '../../widgets/customer_choice_dialog.dart';
 
 class BarberLeavesScreen extends StatefulWidget {
@@ -24,13 +25,13 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
   List<Map<String, dynamic>> _leaves = [];
   Map<String, Map<String, dynamic>> _barberProfiles = {};
 
-  // Salon working hours
-  String? _salonOpenTime;
-  String? _salonCloseTime;
+  // Salon working hours (stored in UTC, will be converted to local for display)
+  String? _salonOpenTimeUtc;
+  String? _salonCloseTimeUtc;
   List<Map<String, dynamic>> _holidays = [];
 
-  // Filters
-  DateTime? _selectedDate;
+  // Filters (using local date for UI, will convert to UTC for DB queries)
+  DateTime? _selectedLocalDate;
   String? _selectedBarberId;
   String _selectedStatus = 'all';
   String _selectedType = 'all';
@@ -38,7 +39,18 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
   @override
   void initState() {
     super.initState();
-    _loadData();
+    _initializeAndLoad();
+  }
+
+  Future<void> _initializeAndLoad() async {
+    // Initialize TimezoneService first
+    await TimezoneService.initialize();
+    await _loadData();
+  }
+
+  @override
+  void dispose() {
+    super.dispose();
   }
 
   Future<void> _loadData() async {
@@ -53,11 +65,12 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
           .maybeSingle();
 
       if (salonResponse != null) {
-        _salonOpenTime = salonResponse['open_time'];
-        _salonCloseTime = salonResponse['close_time'];
+        // Store UTC times from DB
+        _salonOpenTimeUtc = salonResponse['open_time'];
+        _salonCloseTimeUtc = salonResponse['close_time'];
       }
 
-      // Load holidays for this salon
+      // Load holidays for this salon (holiday dates are stored as UTC dates)
       final holidaysResponse = await supabase
           .from('salon_holidays')
           .select('holiday_date, name, description')
@@ -78,19 +91,13 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
           .toList();
 
       if (barberIds.isNotEmpty) {
-        // Get profiles
-        List<Map<String, dynamic>> allProfiles = [];
-        for (String barberId in barberIds) {
-          final profile = await supabase
-              .from('profiles')
-              .select('id, full_name, email, avatar_url')
-              .eq('id', barberId)
-              .maybeSingle();
+        // Get profiles - optimized with single query
+        final profilesResponse = await supabase
+            .from('profiles')
+            .select('id, full_name, email, avatar_url')
+            .inFilter('id', barberIds);
 
-          if (profile != null) {
-            allProfiles.add(profile);
-          }
-        }
+        final allProfiles = List<Map<String, dynamic>>.from(profilesResponse);
 
         _barbers = allProfiles.map<Map<String, dynamic>>((p) {
           return {
@@ -101,12 +108,13 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
           };
         }).toList();
 
-        _barberProfiles = {};
+        _barberProfiles = <String, Map<String, dynamic>>{};
         for (var profile in allProfiles) {
-          _barberProfiles[profile['id']] = profile;
+          final id = profile['id'] as String;
+          _barberProfiles[id] = profile;
         }
 
-        // Get leaves
+        // Get leaves - optimized with single query
         await _loadLeavesWithFilters(barberIds);
       } else {
         _barbers = [];
@@ -125,23 +133,21 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
   }
 
   Future<void> _loadLeavesWithFilters(List<String> barberIds) async {
-    List<Map<String, dynamic>> allLeaves = [];
-
-    for (String barberId in barberIds) {
+    try {
       var query = supabase
           .from('barber_leaves')
           .select()
-          .eq('barber_id', barberId)
+          .inFilter('barber_id', barberIds)
           .eq('salon_id', int.parse(widget.salonId!));
 
       if (_selectedBarberId != null) {
         query = query.eq('barber_id', _selectedBarberId!);
       }
 
-      if (_selectedDate != null) {
-        final dateStr =
-            '${_selectedDate!.year.toString().padLeft(4, '0')}-${_selectedDate!.month.toString().padLeft(2, '0')}-${_selectedDate!.day.toString().padLeft(2, '0')}';
-        query = query.eq('leave_date', dateStr);
+      // Convert local selected date to UTC date for DB query
+      if (_selectedLocalDate != null) {
+        final utcDateStr = _localDateToUtcDateString(_selectedLocalDate!);
+        query = query.eq('leave_date', utcDateStr);
       }
 
       if (_selectedStatus != 'all') {
@@ -152,20 +158,27 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
         query = query.eq('leave_type', _selectedType);
       }
 
-      final leavesForBarber = await query;
-      allLeaves.addAll(leavesForBarber);
-    }
+      final leavesResponse = await query;
+      var allLeaves = List<Map<String, dynamic>>.from(leavesResponse);
 
-    allLeaves.sort((a, b) {
-      final dateA = a['leave_date'] ?? '';
-      final dateB = b['leave_date'] ?? '';
-      return dateB.compareTo(dateA);
-    });
-
-    if (mounted) {
-      setState(() {
-        _leaves = allLeaves;
+      allLeaves.sort((a, b) {
+        final dateA = a['leave_date'] ?? '';
+        final dateB = b['leave_date'] ?? '';
+        return dateB.compareTo(dateA);
       });
+
+      if (mounted) {
+        setState(() {
+          _leaves = allLeaves;
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ Error loading leaves: $e');
+      if (mounted) {
+        setState(() {
+          _leaves = [];
+        });
+      }
     }
   }
 
@@ -184,35 +197,99 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
 
     await _loadLeavesWithFilters(barberIds);
 
-    setState(() => _isLoading = false);
+    if (mounted) setState(() => _isLoading = false);
   }
 
-  // Check if a date is a holiday
-  bool _isHoliday(String dateStr) {
-    return _holidays.any((h) => h['holiday_date'] == dateStr);
+  // ==================== TIMEZONE HELPER METHODS ====================
+  
+  String _localDateToUtcDateString(DateTime localDate) {
+    // Convert local date to UTC date string for DB storage
+    final utcDateTime = DateTime.utc(
+      localDate.year, localDate.month, localDate.day,
+    );
+    return _formatDateForDb(utcDateTime);
   }
 
-  String? _getHolidayName(String dateStr) {
+  DateTime _utcDateStringToLocalDate(String utcDateStr) {
+    // Convert UTC date string from DB to local date for display
+    final utcDateTime = DateTime.parse(utcDateStr);
+    // Create local date at midnight in local timezone
+    final localDateTime = TimezoneService.utcToLocalDateTime('00:00', utcDateTime);
+    return localDateTime;
+  }
+
+  String _formatDateForDb(DateTime date) {
+    return '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+  }
+
+
+  String _getDisplayTime(String? utcTimeStr) {
+    if (utcTimeStr == null) return '';
+    try {
+      // Use TimezoneService to convert UTC time to local time
+      return TimezoneService.utcToLocalTime(utcTimeStr, DateTime.now());
+    } catch (e) {
+      return utcTimeStr;
+    }
+  }
+
+  String _formatDateForDisplay(DateTime date) {
+    final months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    return '${months[date.month - 1]} ${date.day}, ${date.year}';
+  }
+
+  String _formatDateForPicker(DateTime date) {
+    return DateFormat('EEEE, MMM d, yyyy').format(date);
+  }
+
+  // Check if a date (in UTC) is a holiday - convert to local for comparison
+  bool _isHoliday(String utcDateStr) {
+    final localDate = _utcDateStringToLocalDate(utcDateStr);
+    final localDateStr = _formatDateForDb(localDate);
+    
+    return _holidays.any((h) {
+      final holidayLocalDate = _utcDateStringToLocalDate(h['holiday_date']);
+      final holidayLocalStr = _formatDateForDb(holidayLocalDate);
+      return holidayLocalStr == localDateStr;
+    });
+  }
+
+  String? _getHolidayName(String utcDateStr) {
+    final localDate = _utcDateStringToLocalDate(utcDateStr);
+    final localDateStr = _formatDateForDb(localDate);
+    
     final holiday = _holidays.firstWhere(
-      (h) => h['holiday_date'] == dateStr,
+      (h) {
+        final holidayLocalDate = _utcDateStringToLocalDate(h['holiday_date']);
+        final holidayLocalStr = _formatDateForDb(holidayLocalDate);
+        return holidayLocalStr == localDateStr;
+      },
       orElse: () => {},
     );
     return holiday['name'];
   }
 
+ 
   // ==================== CUSTOMER CHOICE HANDLING ====================
 
   Future<void> _handleAffectedAppointment(
     Map<String, dynamic> appointment,
-    String dateStr,
+    String utcDateStr,
     String barberId,
   ) async {
+    if (!mounted) return;
+
     try {
       final customerId = appointment['customer_id'];
-      final startTime = appointment['start_time'];
+      final startTimeUtc = appointment['start_time'];
 
-      final timeFormatted = _formatTimeForDisplay(startTime);
-      final dateFormatted = _formatDate(dateStr);
+      // Convert UTC times to local for display
+      final localDate = _utcDateStringToLocalDate(utcDateStr);
+      final timeFormatted = _getDisplayTime(startTimeUtc);
+      final dateFormatted = _formatDateForDisplay(localDate);
 
       final customer = await supabase
           .from('profiles')
@@ -228,7 +305,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       // Try to find available barber
       final availableBarber = await _findAvailableBarber(
         salonId: widget.salonId!,
-        appointmentDate: dateStr,
+        appointmentDate: utcDateStr,
         startTime: appointment['start_time'],
         endTime: appointment['end_time'],
         excludeBarberId: barberId,
@@ -242,63 +319,63 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
           .single();
 
       // Show choice dialog to customer
-      if (context.mounted) {
-        final choice = await showDialog<String>(
-          context: context,
-          barrierDismissible: false,
-          builder: (dialogContext) => CustomerChoiceDialog(
-            customerName: customer['full_name'] ?? 'Customer',
-            appointmentDate: dateFormatted,
-            appointmentTime: timeFormatted,
-            serviceName: service['name'],
-            availableBarber: availableBarber,
-            onAcceptNewBarber: () => Navigator.pop(dialogContext, 'accept'),
-            onMoveToNextDay: () => Navigator.pop(dialogContext, 'next_day'),
-            onCancel: () => Navigator.pop(dialogContext, 'cancel'),
-          ),
-        );
+      if (!mounted) return;
+      final choice = await showDialog<String>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => CustomerChoiceDialog(
+          customerName: customer['full_name'] ?? 'Customer',
+          appointmentDate: dateFormatted,
+          appointmentTime: timeFormatted,
+          serviceName: service['name'],
+          availableBarber: availableBarber,
+          onAcceptNewBarber: () => Navigator.pop(dialogContext, 'accept'),
+          onMoveToNextDay: () => Navigator.pop(dialogContext, 'next_day'),
+          onCancel: () => Navigator.pop(dialogContext, 'cancel'),
+        ),
+      );
 
-        switch (choice) {
-          case 'accept':
-            if (availableBarber != null) {
-              await _reassignToBarber(appointment, availableBarber, barberId);
-              await _notificationService.sendAppointmentNotification(
-                customerId: customerId,
-                title: 'Appointment Reassigned',
-                body:
-                    'Your appointment has been reassigned to ${availableBarber['name']}.',
-                data: {
-                  'type': 'reassigned',
-                  'barber_name': availableBarber['name'],
-                },
-              );
-            }
-            break;
+      if (!mounted) return;
 
-          case 'next_day':
-            final newDate = await _moveToNextDay(appointment);
+      switch (choice) {
+        case 'accept':
+          if (availableBarber != null) {
+            await _reassignToBarber(appointment, availableBarber, barberId);
             await _notificationService.sendAppointmentNotification(
               customerId: customerId,
-              title: 'Appointment Moved to Tomorrow',
-              body:
-                  'Your appointment has been moved to ${_formatDate(newDate)} at 9:00 AM (Queue #1).',
-              data: {'type': 'moved', 'new_date': newDate},
+              title: 'Appointment Reassigned',
+              body: 'Your appointment has been reassigned to ${availableBarber['name']}.',
+              data: {
+                'type': 'reassigned',
+                'barber_name': availableBarber['name'],
+              },
             );
-            break;
+          }
+          break;
 
-          case 'cancel':
-            await _cancelAppointment(
-              appointment['id'],
-              'Customer cancelled due to barber leave',
-            );
-            await _notificationService.sendAppointmentNotification(
-              customerId: customerId,
-              title: 'Appointment Cancelled',
-              body: 'Your appointment has been cancelled as requested.',
-              data: {'type': 'cancelled'},
-            );
-            break;
-        }
+        case 'next_day':
+          final newDate = await _moveToNextDay(appointment);
+          final newLocalDate = _utcDateStringToLocalDate(newDate);
+          await _notificationService.sendAppointmentNotification(
+            customerId: customerId,
+            title: 'Appointment Moved to Tomorrow',
+            body: 'Your appointment has been moved to ${_formatDateForDisplay(newLocalDate)} at 9:00 AM (Queue #1).',
+            data: {'type': 'moved', 'new_date': newDate},
+          );
+          break;
+
+        case 'cancel':
+          await _cancelAppointment(
+            appointment['id'],
+            'Customer cancelled due to barber leave',
+          );
+          await _notificationService.sendAppointmentNotification(
+            customerId: customerId,
+            title: 'Appointment Cancelled',
+            body: 'Your appointment has been cancelled as requested.',
+            data: {'type': 'cancelled'},
+          );
+          break;
       }
     } catch (e) {
       debugPrint('❌ Error handling affected appointment: $e');
@@ -307,24 +384,26 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
 
   Future<int> _getAppointmentPriority(Map<String, dynamic> appointment) async {
     try {
-      if (appointment['is_vip'] == true &&
-          appointment['vip_booking_id'] != null) {
+      if (appointment['is_vip'] == true && appointment['vip_booking_id'] != null) {
         final vipBooking = await supabase
             .from('vip_bookings')
             .select('vip_type_id')
             .eq('id', appointment['vip_booking_id'])
-            .single();
+            .maybeSingle();
 
-        final vipType = await supabase
-            .from('vip_booking_types')
-            .select('priority_level')
-            .eq('id', vipBooking['vip_type_id'])
-            .single();
+        if (vipBooking != null) {
+          final vipType = await supabase
+              .from('vip_booking_types')
+              .select('priority_level')
+              .eq('id', vipBooking['vip_type_id'])
+              .maybeSingle();
 
-        return vipType['priority_level'] ?? 4;
+          return vipType?['priority_level'] ?? 4;
+        }
       }
       return 4;
     } catch (e) {
+      debugPrint('❌ Error getting appointment priority: $e');
       return 4;
     }
   }
@@ -387,7 +466,9 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     String endTime,
   ) async {
     try {
-      final dayOfWeek = DateTime.parse(appointmentDate).weekday;
+      // Convert UTC appointment date to local to get day of week
+      final localDate = _utcDateStringToLocalDate(appointmentDate);
+      final dayOfWeek = localDate.weekday;
 
       final schedule = await supabase
           .from('barber_schedules')
@@ -419,6 +500,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
 
       return conflict == null;
     } catch (e) {
+      debugPrint('❌ Error checking barber availability: $e');
       return false;
     }
   }
@@ -471,24 +553,26 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     try {
       final duration = await _getVariantDuration(appointment['variant_id']);
 
-      DateTime nextDate = DateTime.parse(
+      // Get current UTC date and convert to local for day calculation
+      DateTime nextLocalDate = _utcDateStringToLocalDate(
         appointment['appointment_date'],
       ).add(const Duration(days: 1));
 
       // Skip holidays and Sundays
-      while (await _isHolidayDate(nextDate) || nextDate.weekday == DateTime.sunday) {
-        nextDate = nextDate.add(const Duration(days: 1));
+      while (await _isHolidayDate(nextLocalDate) ||
+          nextLocalDate.weekday == DateTime.sunday) {
+        nextLocalDate = nextLocalDate.add(const Duration(days: 1));
       }
 
-      final nextDateStr =
-          '${nextDate.year.toString().padLeft(4, '0')}-${nextDate.month.toString().padLeft(2, '0')}-${nextDate.day.toString().padLeft(2, '0')}';
+      // Convert back to UTC for DB storage
+      final nextUtcDateStr = _localDateToUtcDateString(nextLocalDate);
       final queueNumber = 1;
 
       final appointmentsToShift = await supabase
           .from('appointments')
           .select('id, queue_number')
           .eq('barber_id', appointment['barber_id'])
-          .eq('appointment_date', nextDateStr)
+          .eq('appointment_date', nextUtcDateStr)
           .eq('status', 'confirmed')
           .gte('queue_number', queueNumber)
           .order('queue_number', ascending: false);
@@ -505,38 +589,39 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       await supabase
           .from('appointments')
           .update({
-            'appointment_date': nextDateStr,
+            'appointment_date': nextUtcDateStr,
             'start_time': '09:00:00',
             'end_time': endTime,
             'queue_number': queueNumber,
             'status': 'confirmed',
-            'notes':
-                'Moved from ${appointment['appointment_date']} due to barber leave',
+            'notes': 'Moved from ${appointment['appointment_date']} due to barber leave',
           })
           .eq('id', appointment['id']);
 
-      debugPrint(
-        '✅ Appointment moved to $nextDateStr at 09:00 AM (Queue #$queueNumber)',
-      );
-      return nextDateStr;
+      debugPrint('✅ Appointment moved to $nextUtcDateStr at 09:00 AM (Queue #$queueNumber)');
+      return nextUtcDateStr;
     } catch (e) {
       debugPrint('❌ Error moving to next day: $e');
       rethrow;
     }
   }
 
-  Future<bool> _isHolidayDate(DateTime date) async {
-    final dateStr =
-        '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
-    
-    final holiday = await supabase
-        .from('salon_holidays')
-        .select()
-        .eq('salon_id', int.parse(widget.salonId!))
-        .eq('holiday_date', dateStr)
-        .maybeSingle();
-    
-    return holiday != null;
+  Future<bool> _isHolidayDate(DateTime localDate) async {
+    try {
+      final utcDateStr = _localDateToUtcDateString(localDate);
+
+      final holiday = await supabase
+          .from('salon_holidays')
+          .select()
+          .eq('salon_id', int.parse(widget.salonId!))
+          .eq('holiday_date', utcDateStr)
+          .maybeSingle();
+
+      return holiday != null;
+    } catch (e) {
+      debugPrint('❌ Error checking holiday: $e');
+      return false;
+    }
   }
 
   String _calculateEndTimeWithDuration(String startTime, int durationMinutes) {
@@ -589,8 +674,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
         }
 
         if (existing['is_vip'] == newAppointment['is_vip']) {
-          if (newAppointment['start_time'].compareTo(existing['start_time']) <
-              0) {
+          if (newAppointment['start_time'].compareTo(existing['start_time']) < 0) {
             newQueueNumber = existing['queue_number'];
             break;
           }
@@ -645,33 +729,27 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
   Future<void> _approveLeaveWithReassign(
     int leaveId,
     String barberId,
-    DateTime leaveDate,
+    String utcDateStr,
     String leaveType,
   ) async {
     try {
-      if (context.mounted) {
-        showDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (context) => const Center(
-            child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
-          ),
-        );
-      }
+      if (!mounted) return;
+
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(
+          child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+        ),
+      );
 
       final currentUser = supabase.auth.currentUser;
       if (currentUser == null) throw Exception('No authenticated user');
 
       await supabase
           .from('barber_leaves')
-          .update({
-            'status': 'approved',
-            'approved_by': currentUser.id,
-          })
+          .update({'status': 'approved', 'approved_by': currentUser.id})
           .eq('id', leaveId);
-
-      final dateStr =
-          '${leaveDate.year.toString().padLeft(4, '0')}-${leaveDate.month.toString().padLeft(2, '0')}-${leaveDate.day.toString().padLeft(2, '0')}';
 
       String startTime = '00:00:00';
       String endTime = '23:59:59';
@@ -681,10 +759,12 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
             .from('barber_leaves')
             .select('start_time, end_time')
             .eq('id', leaveId)
-            .single();
+            .maybeSingle();
 
-        startTime = leaveRecord['start_time'] ?? '00:00:00';
-        endTime = leaveRecord['end_time'] ?? '23:59:59';
+        if (leaveRecord != null) {
+          startTime = leaveRecord['start_time'] ?? '00:00:00';
+          endTime = leaveRecord['end_time'] ?? '23:59:59';
+        }
       }
 
       var appointmentsQuery = supabase
@@ -700,7 +780,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
             vip_booking_id
           ''')
           .eq('barber_id', barberId)
-          .eq('appointment_date', dateStr)
+          .eq('appointment_date', utcDateStr)
           .eq('status', 'confirmed');
 
       if (leaveType == 'half_day') {
@@ -711,23 +791,19 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
 
       final affectedAppointments = await appointmentsQuery;
 
-      debugPrint(
-        '📋 Found ${affectedAppointments.length} appointments to handle',
-      );
+      debugPrint('📋 Found ${affectedAppointments.length} appointments to handle');
 
-      if (context.mounted) {
-        Navigator.pop(context);
-      }
+      if (!mounted) return;
+      Navigator.pop(context); // Close loading dialog
 
       if (affectedAppointments.isEmpty) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Leave approved. No appointments affected.'),
-              backgroundColor: Colors.green,
-            ),
-          );
-        }
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Leave approved. No appointments affected.'),
+            backgroundColor: Colors.green,
+          ),
+        );
         await _loadData();
         return;
       }
@@ -737,7 +813,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
 
       for (var appointment in affectedAppointments) {
         try {
-          await _handleAffectedAppointment(appointment, dateStr, barberId);
+          await _handleAffectedAppointment(appointment, utcDateStr, barberId);
           processedCount++;
         } catch (e) {
           debugPrint('❌ Error processing appointment ${appointment['id']}: $e');
@@ -745,27 +821,27 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
         }
       }
 
-      if (context.mounted) {
-        String message = 'Leave approved. ';
-        if (processedCount > 0) {
-          message += '$processedCount appointments processed. ';
-        }
-        if (failedCount > 0) {
-          message += '$failedCount appointments failed.';
-        }
+      if (!mounted) return;
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(message),
-            backgroundColor: failedCount > 0 ? Colors.orange : Colors.green,
-          ),
-        );
+      String message = 'Leave approved. ';
+      if (processedCount > 0) {
+        message += '$processedCount appointments processed. ';
       }
+      if (failedCount > 0) {
+        message += '$failedCount appointments failed.';
+      }
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: failedCount > 0 ? Colors.orange : Colors.green,
+        ),
+      );
 
       await _loadData();
     } catch (e) {
       debugPrint('❌ Error approving leave with reassign: $e');
-      if (context.mounted) {
+      if (mounted) {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
@@ -848,6 +924,8 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
         leaveData,
       );
     }
+    
+    reasonController.dispose();
   }
 
   Future<void> _rejectLeaveWithReason(
@@ -895,54 +973,28 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
 
   // ==================== HELPER METHODS ====================
 
-  String _formatDate(String? dateStr) {
-    if (dateStr == null) return 'Unknown';
+  String _formatDateForDisplayFromUtc(String? utcDateStr) {
+    if (utcDateStr == null) return 'Unknown';
     try {
-      final date = DateTime.parse(dateStr);
+      final localDate = _utcDateStringToLocalDate(utcDateStr);
       final months = [
-        'Jan',
-        'Feb',
-        'Mar',
-        'Apr',
-        'May',
-        'Jun',
-        'Jul',
-        'Aug',
-        'Sep',
-        'Oct',
-        'Nov',
-        'Dec',
+        'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
       ];
-      return '${months[date.month - 1]} ${date.day}, ${date.year}';
+      return '${months[localDate.month - 1]} ${localDate.day}, ${localDate.year}';
     } catch (e) {
-      return dateStr;
+      debugPrint('Error formatting date: $e');
+      return utcDateStr;
     }
   }
 
-  String _formatTime(String? timeStr) {
+  String _formatTimeForDisplayFromUtc(String? timeStr) {
     if (timeStr == null) return '';
     try {
-      final parts = timeStr.split(':');
-      final hour = int.parse(parts[0]);
-      final minute = int.parse(parts[1]);
-      final period = hour >= 12 ? 'PM' : 'AM';
-      final displayHour = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
-      return '$displayHour:${minute.toString().padLeft(2, '0')} $period';
+      return TimezoneService.utcToLocalTime(timeStr, DateTime.now());
     } catch (e) {
-      return '';
-    }
-  }
-
-  String _formatTimeForDisplay(String time) {
-    try {
-      final parts = time.split(':');
-      final hour = int.parse(parts[0]);
-      final minute = int.parse(parts[1]);
-      final period = hour >= 12 ? 'PM' : 'AM';
-      final displayHour = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
-      return '$displayHour:${minute.toString().padLeft(2, '0')} $period';
-    } catch (e) {
-      return time;
+      debugPrint('Error formatting time: $e');
+      return timeStr;
     }
   }
 
@@ -992,10 +1044,10 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
   // ==================== FILTER WIDGETS ====================
 
   Widget _buildBarberFilter() {
-    return Container(
+    return SizedBox(
       height: 50,
       child: DropdownButtonFormField<String>(
-        value: _selectedBarberId,
+        initialValue: _selectedBarberId,
         decoration: InputDecoration(
           contentPadding: const EdgeInsets.symmetric(
             horizontal: 12,
@@ -1014,7 +1066,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
               value: b['id'] as String,
               child: Text(b['name'] as String),
             );
-          }).toList(),
+          }),
         ],
         onChanged: (String? value) {
           setState(() {
@@ -1030,11 +1082,13 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       onTap: () async {
         final date = await showDatePicker(
           context: context,
-          initialDate: _selectedDate ?? DateTime.now(),
+          initialDate: _selectedLocalDate ?? DateTime.now(),
           firstDate: DateTime(2020),
           lastDate: DateTime(2030),
         );
-        if (date != null) setState(() => _selectedDate = date);
+        if (date != null && mounted) {
+          setState(() => _selectedLocalDate = date);
+        }
       },
       child: Container(
         height: 50,
@@ -1049,20 +1103,24 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                _selectedDate != null
-                    ? '${_selectedDate!.year}-${_selectedDate!.month.toString().padLeft(2, '0')}-${_selectedDate!.day.toString().padLeft(2, '0')}'
+                _selectedLocalDate != null
+                    ? _formatDateForPicker(_selectedLocalDate!)
                     : 'Select Date',
                 style: TextStyle(
-                  color: _selectedDate != null
+                  color: _selectedLocalDate != null
                       ? Colors.black
                       : Colors.grey[500],
                 ),
               ),
             ),
-            if (_selectedDate != null)
+            if (_selectedLocalDate != null)
               IconButton(
                 icon: const Icon(Icons.close, size: 16),
-                onPressed: () => setState(() => _selectedDate = null),
+                onPressed: () {
+                  if (mounted) {
+                    setState(() => _selectedLocalDate = null);
+                  }
+                },
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints(),
               ),
@@ -1073,10 +1131,10 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
   }
 
   Widget _buildTypeFilter() {
-    return Container(
+    return SizedBox(
       height: 50,
       child: DropdownButtonFormField<String>(
-        value: _selectedType,
+        initialValue: _selectedType,
         decoration: InputDecoration(
           contentPadding: const EdgeInsets.symmetric(
             horizontal: 12,
@@ -1098,19 +1156,21 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
           ),
         ],
         onChanged: (String? value) {
-          setState(() {
-            _selectedType = value ?? 'all';
-          });
+          if (mounted) {
+            setState(() {
+              _selectedType = value ?? 'all';
+            });
+          }
         },
       ),
     );
   }
 
   Widget _buildStatusFilter() {
-    return Container(
+    return SizedBox(
       height: 50,
       child: DropdownButtonFormField<String>(
-        value: _selectedStatus,
+        initialValue: _selectedStatus,
         decoration: InputDecoration(
           contentPadding: const EdgeInsets.symmetric(
             horizontal: 12,
@@ -1125,9 +1185,11 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
           DropdownMenuItem<String>(value: 'rejected', child: Text('Rejected')),
         ],
         onChanged: (String? value) {
-          setState(() {
-            _selectedStatus = value ?? 'all';
-          });
+          if (mounted) {
+            setState(() {
+              _selectedStatus = value ?? 'all';
+            });
+          }
         },
       ),
     );
@@ -1162,11 +1224,11 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
               _approveLeaveWithReassign(
                 leave['id'],
                 leave['barber_id'],
-                DateTime.parse(leave['leave_date']),
+                leave['leave_date'],
                 leave['leave_type'] ?? 'full_day',
               );
             } else {
-              _updateLeaveStatus(leave['id'], newValue, leaveData: leave);
+              _updateLeaveStatus(leave['id'], newValue);
             }
           }
         },
@@ -1227,12 +1289,10 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     );
   }
 
-  Future<void> _updateLeaveStatus(
-    int leaveId,
-    String status, {
-    Map<String, dynamic>? leaveData,
-  }) async {
+  Future<void> _updateLeaveStatus(int leaveId, String status) async {
     if (status == 'rejected' || status == 'approved') return;
+
+    if (!mounted) return;
 
     final bool? confirm = await showDialog<bool>(
       context: context,
@@ -1260,7 +1320,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       },
     );
 
-    if (confirm == true) {
+    if (confirm == true && mounted) {
       setState(() => _isLoading = true);
 
       try {
@@ -1280,8 +1340,8 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
           );
         }
       } catch (e) {
-        setState(() => _isLoading = false);
         if (mounted) {
+          setState(() => _isLoading = false);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('Error updating leave: $e'),
@@ -1295,6 +1355,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
 
   Future<void> _addLeave() async {
     if (_barbers.isEmpty) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('No barbers to add leave'),
@@ -1309,13 +1370,13 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       builder: (context) => _AddEditLeaveDialog(
         barbers: _barbers,
         salonId: widget.salonId!,
-        salonOpenTime: _salonOpenTime,
-        salonCloseTime: _salonCloseTime,
+        salonOpenTimeUtc: _salonOpenTimeUtc,
+        salonCloseTimeUtc: _salonCloseTimeUtc,
         holidays: _holidays,
       ),
     );
 
-    if (result != null && result['success'] == true) {
+    if (result != null && result['success'] == true && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Leave request added'),
@@ -1332,14 +1393,14 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       builder: (context) => _AddEditLeaveDialog(
         barbers: _barbers,
         salonId: widget.salonId!,
-        salonOpenTime: _salonOpenTime,
-        salonCloseTime: _salonCloseTime,
+        salonOpenTimeUtc: _salonOpenTimeUtc,
+        salonCloseTimeUtc: _salonCloseTimeUtc,
         leaveToEdit: leave,
         holidays: _holidays,
       ),
     );
 
-    if (result != null && result['success'] == true) {
+    if (result != null && result['success'] == true && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Leave updated successfully'),
@@ -1351,6 +1412,8 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
   }
 
   Future<void> _deleteLeave(Map<String, dynamic> leave) async {
+    if (!mounted) return;
+
     final bool? confirm = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) {
@@ -1377,7 +1440,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       },
     );
 
-    if (confirm == true) {
+    if (confirm == true && mounted) {
       setState(() => _isLoading = true);
 
       try {
@@ -1394,8 +1457,8 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
           );
         }
       } catch (e) {
-        setState(() => _isLoading = false);
         if (mounted) {
+          setState(() => _isLoading = false);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('Error deleting leave: $e'),
@@ -1415,9 +1478,26 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     final bool isWeb = screenWidth > 800;
     final double padding = isWeb ? 24.0 : 16.0;
 
+    // Display current timezone info in app bar
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Barber Leaves'),
+        title: Row(
+          children: [
+            const Text('Barber Leaves'),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                TimezoneService.getTimezoneFlag(),
+                style: const TextStyle(fontSize: 12),
+              ),
+            ),
+          ],
+        ),
         backgroundColor: const Color(0xFFFF6B8B),
         foregroundColor: Colors.white,
         centerTitle: isWeb,
@@ -1438,140 +1518,9 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       ),
       body: Column(
         children: [
-          Container(
-            padding: EdgeInsets.all(padding),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              border: Border(bottom: BorderSide(color: Colors.grey[300]!)),
-            ),
-            child: isWeb
-                ? Row(
-                    children: [
-                      Expanded(child: _buildBarberFilter()),
-                      const SizedBox(width: 12),
-                      Expanded(child: _buildDateFilter()),
-                      const SizedBox(width: 12),
-                      Expanded(child: _buildTypeFilter()),
-                      const SizedBox(width: 12),
-                      Expanded(child: _buildStatusFilter()),
-                      const SizedBox(width: 12),
-                      ElevatedButton.icon(
-                        onPressed: _applyFilters,
-                        icon: const Icon(Icons.filter_alt),
-                        label: const Text('Apply Filters'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFFF6B8B),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 24,
-                            vertical: 16,
-                          ),
-                        ),
-                      ),
-                    ],
-                  )
-                : Column(
-                    children: [
-                      _buildBarberFilter(),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Expanded(child: _buildDateFilter()),
-                          const SizedBox(width: 8),
-                          Expanded(child: _buildTypeFilter()),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Expanded(child: _buildStatusFilter()),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: ElevatedButton.icon(
-                              onPressed: _applyFilters,
-                              icon: const Icon(Icons.filter_alt),
-                              label: const Text('Apply'),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFFFF6B8B),
-                                foregroundColor: Colors.white,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-          ),
-
+          _buildFiltersSection(isWeb, padding),
           Expanded(
-            child: _isLoading
-                ? const Center(
-                    child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
-                  )
-                : _barbers.isEmpty
-                ? Center(
-                    child: Padding(
-                      padding: EdgeInsets.all(padding),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            Icons.person_off,
-                            size: isWeb ? 80 : 64,
-                            color: Colors.grey[400],
-                          ),
-                          const SizedBox(height: 16),
-                          const Text(
-                            'No barbers found',
-                            style: TextStyle(fontSize: 18, color: Colors.grey),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Add barbers first to manage leaves',
-                            style: TextStyle(color: Colors.grey[600]),
-                          ),
-                          const SizedBox(height: 16),
-                          ElevatedButton(
-                            onPressed: () => context.pop(),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFFFF6B8B),
-                              foregroundColor: Colors.white,
-                            ),
-                            child: const Text('Go Back'),
-                          ),
-                        ],
-                      ),
-                    ),
-                  )
-                : _leaves.isEmpty
-                ? Center(
-                    child: Padding(
-                      padding: EdgeInsets.all(padding),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            Icons.beach_access,
-                            size: isWeb ? 80 : 64,
-                            color: Colors.grey[400],
-                          ),
-                          const SizedBox(height: 16),
-                          const Text(
-                            'No leave records',
-                            style: TextStyle(fontSize: 18, color: Colors.grey),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Use + button to add leave for barbers',
-                            style: TextStyle(color: Colors.grey[600]),
-                          ),
-                        ],
-                      ),
-                    ),
-                  )
-                : isWeb
-                ? _buildWebView(padding)
-                : _buildMobileView(padding),
+            child: _buildMainContent(isWeb, padding),
           ),
         ],
       ),
@@ -1584,6 +1533,148 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     );
   }
 
+  Widget _buildFiltersSection(bool isWeb, double padding) {
+    return Container(
+      padding: EdgeInsets.all(padding),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border(bottom: BorderSide(color: Colors.grey[300]!)),
+      ),
+      child: isWeb
+          ? Row(
+              children: [
+                Expanded(child: _buildBarberFilter()),
+                const SizedBox(width: 12),
+                Expanded(child: _buildDateFilter()),
+                const SizedBox(width: 12),
+                Expanded(child: _buildTypeFilter()),
+                const SizedBox(width: 12),
+                Expanded(child: _buildStatusFilter()),
+                const SizedBox(width: 12),
+                ElevatedButton.icon(
+                  onPressed: _applyFilters,
+                  icon: const Icon(Icons.filter_alt),
+                  label: const Text('Apply Filters'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFFF6B8B),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 24,
+                      vertical: 16,
+                    ),
+                  ),
+                ),
+              ],
+            )
+          : Column(
+              children: [
+                _buildBarberFilter(),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(child: _buildDateFilter()),
+                    const SizedBox(width: 8),
+                    Expanded(child: _buildTypeFilter()),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(child: _buildStatusFilter()),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: _applyFilters,
+                        icon: const Icon(Icons.filter_alt),
+                        label: const Text('Apply'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFFFF6B8B),
+                          foregroundColor: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+    );
+  }
+
+  Widget _buildMainContent(bool isWeb, double padding) {
+    if (_isLoading) {
+      return const Center(
+        child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+      );
+    }
+
+    if (_barbers.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: EdgeInsets.all(padding),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.person_off,
+                size: isWeb ? 80 : 64,
+                color: Colors.grey[400],
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'No barbers found',
+                style: TextStyle(fontSize: 18, color: Colors.grey),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Add barbers first to manage leaves',
+                style: TextStyle(color: Colors.grey[600]),
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: () => context.pop(),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFFF6B8B),
+                  foregroundColor: Colors.white,
+                ),
+                child: const Text('Go Back'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (_leaves.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: EdgeInsets.all(padding),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.beach_access,
+                size: isWeb ? 80 : 64,
+                color: Colors.grey[400],
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'No leave records',
+                style: TextStyle(fontSize: 18, color: Colors.grey),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Use + button to add leave for barbers',
+                style: TextStyle(color: Colors.grey[600]),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return isWeb ? _buildWebView(padding) : _buildMobileView(padding);
+  }
+
   // ==================== WEB VIEW ====================
 
   Widget _buildWebView(double padding) {
@@ -1591,290 +1682,253 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       padding: EdgeInsets.all(padding),
       child: Column(
         children: [
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  _buildStatItem(
-                    'Total',
-                    _leaves.length.toString(),
-                    Icons.event_note,
-                  ),
-                  Container(width: 1, height: 40, color: Colors.grey[300]),
-                  _buildStatItem(
-                    'Pending',
-                    _leaves
-                        .where((l) => l['status'] == 'pending')
-                        .length
-                        .toString(),
-                    Icons.pending,
-                    Colors.orange,
-                  ),
-                  Container(width: 1, height: 40, color: Colors.grey[300]),
-                  _buildStatItem(
-                    'Approved',
-                    _leaves
-                        .where((l) => l['status'] == 'approved')
-                        .length
-                        .toString(),
-                    Icons.check_circle,
-                    Colors.green,
-                  ),
-                  Container(width: 1, height: 40, color: Colors.grey[300]),
-                  _buildStatItem(
-                    'Rejected',
-                    _leaves
-                        .where((l) => l['status'] == 'rejected')
-                        .length
-                        .toString(),
-                    Icons.cancel,
-                    Colors.red,
-                  ),
-                ],
-              ),
-            ),
-          ),
+          _buildStatsCard(),
           const SizedBox(height: 16),
+          _buildWebTableHeader(),
+          const SizedBox(height: 8),
+          ..._leaves.map((leave) => _buildWebLeaveRow(leave)),
+        ],
+      ),
+    );
+  }
 
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(8),
+  Widget _buildStatsCard() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            _buildStatItem(
+              'Total',
+              _leaves.length.toString(),
+              Icons.event_note,
             ),
+            Container(width: 1, height: 40, color: Colors.grey[300]),
+            _buildStatItem(
+              'Pending',
+              _leaves
+                  .where((l) => l['status'] == 'pending')
+                  .length
+                  .toString(),
+              Icons.pending,
+              Colors.orange,
+            ),
+            Container(width: 1, height: 40, color: Colors.grey[300]),
+            _buildStatItem(
+              'Approved',
+              _leaves
+                  .where((l) => l['status'] == 'approved')
+                  .length
+                  .toString(),
+              Icons.check_circle,
+              Colors.green,
+            ),
+            Container(width: 1, height: 40, color: Colors.grey[300]),
+            _buildStatItem(
+              'Rejected',
+              _leaves
+                  .where((l) => l['status'] == 'rejected')
+                  .length
+                  .toString(),
+              Icons.cancel,
+              Colors.red,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWebTableHeader() {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: const Row(
+        children: [
+          Expanded(flex: 2, child: Text('Barber', style: TextStyle(fontWeight: FontWeight.bold))),
+          Expanded(flex: 2, child: Text('Date', style: TextStyle(fontWeight: FontWeight.bold))),
+          Expanded(flex: 2, child: Text('Type', style: TextStyle(fontWeight: FontWeight.bold))),
+          Expanded(flex: 2, child: Text('Time', style: TextStyle(fontWeight: FontWeight.bold))),
+          Expanded(flex: 3, child: Text('Reason', style: TextStyle(fontWeight: FontWeight.bold))),
+          Expanded(flex: 1, child: Text('Status', style: TextStyle(fontWeight: FontWeight.bold), textAlign: TextAlign.center)),
+          Expanded(flex: 3, child: Text('Actions', style: TextStyle(fontWeight: FontWeight.bold), textAlign: TextAlign.center)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWebLeaveRow(Map<String, dynamic> leave) {
+    final barberId = leave['barber_id'] as String;
+    final profile = _barberProfiles[barberId] ?? {};
+    final barberName = profile['full_name'] ?? 'Unknown';
+    final leaveDate = _formatDateForDisplayFromUtc(leave['leave_date']);
+    final leaveType = leave['leave_type'] ?? 'full_day';
+    final status = leave['status'] ?? 'pending';
+    final reason = leave['reason'] ?? 'No reason provided';
+    final rejectionReason = leave['rejection_reason'];
+    final isHoliday = _isHoliday(leave['leave_date']);
+    final holidayName = _getHolidayName(leave['leave_date']);
+
+    String timeDisplay = '';
+    if (leaveType == 'full_day' || leaveType == 'emergency') {
+      timeDisplay = 'All Day';
+    } else if (leaveType == 'half_day') {
+      timeDisplay =
+          '${_formatTimeForDisplayFromUtc(leave['start_time'])} - ${_formatTimeForDisplayFromUtc(leave['end_time'])}';
+    } else if (leaveType == 'short_leave') {
+      timeDisplay =
+          '${_formatTimeForDisplayFromUtc(leave['start_time'])} - ${_formatTimeForDisplayFromUtc(leave['end_time'])}';
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 4),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isHoliday ? Colors.orange.withValues(alpha: 0.05) : Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: isHoliday ? Colors.orange : Colors.grey[200]!,
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 2,
             child: Row(
-              children: const [
-                Expanded(
-                  flex: 2,
-                  child: Text(
-                    'Barber',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
+              children: [
+                CircleAvatar(
+                  radius: 16,
+                  backgroundColor: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                  backgroundImage: profile['avatar_url'] != null
+                      ? NetworkImage(profile['avatar_url'])
+                      : null,
+                  child: profile['avatar_url'] == null
+                      ? Text(
+                          barberName[0].toUpperCase(),
+                          style: const TextStyle(
+                            color: Color(0xFFFF6B8B),
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
+                        )
+                      : null,
                 ),
+                const SizedBox(width: 8),
                 Expanded(
-                  flex: 2,
                   child: Text(
-                    'Date',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                ),
-                Expanded(
-                  flex: 2,
-                  child: Text(
-                    'Type',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                ),
-                Expanded(
-                  flex: 2,
-                  child: Text(
-                    'Time',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                ),
-                Expanded(
-                  flex: 3,
-                  child: Text(
-                    'Reason',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                ),
-                Expanded(
-                  flex: 1,
-                  child: Text(
-                    'Status',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                    textAlign: TextAlign.center,
-                  ),
-                ),
-                Expanded(
-                  flex: 3,
-                  child: Text(
-                    'Actions',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                    textAlign: TextAlign.center,
+                    barberName,
+                    style: const TextStyle(fontWeight: FontWeight.w500),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 8),
-
-          ..._leaves.map((leave) {
-            final barberId = leave['barber_id'] as String;
-            final profile = _barberProfiles[barberId] ?? {};
-            final barberName = profile['full_name'] ?? 'Unknown';
-            final leaveDate = _formatDate(leave['leave_date']);
-            final leaveType = leave['leave_type'] ?? 'full_day';
-            final status = leave['status'] ?? 'pending';
-            final reason = leave['reason'] ?? 'No reason provided';
-            final rejectionReason = leave['rejection_reason'];
-            final isHoliday = _isHoliday(leave['leave_date']);
-            final holidayName = _getHolidayName(leave['leave_date']);
-
-            String timeDisplay = '';
-            if (leaveType == 'full_day' || leaveType == 'emergency') {
-              timeDisplay = 'All Day';
-            } else if (leaveType == 'half_day') {
-              timeDisplay =
-                  '${_formatTime(leave['start_time'])} - ${_formatTime(leave['end_time'])}';
-            } else if (leaveType == 'short_leave') {
-              timeDisplay =
-                  '${_formatTime(leave['start_time'])} - ${_formatTime(leave['end_time'])}';
-            }
-
-            return Container(
-              margin: const EdgeInsets.only(bottom: 4),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: isHoliday ? Colors.orange.withValues(alpha: 0.05) : Colors.white,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: isHoliday ? Colors.orange : Colors.grey[200]!),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    flex: 2,
-                    child: Row(
-                      children: [
-                        CircleAvatar(
-                          radius: 16,
-                          backgroundColor: const Color(
-                            0xFFFF6B8B,
-                          ).withValues(alpha: 0.1),
-                          backgroundImage: profile['avatar_url'] != null
-                              ? NetworkImage(profile['avatar_url'])
-                              : null,
-                          child: profile['avatar_url'] == null
-                              ? Text(
-                                  barberName[0].toUpperCase(),
-                                  style: const TextStyle(
-                                    color: Color(0xFFFF6B8B),
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 12,
-                                  ),
-                                )
-                              : null,
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            barberName,
-                            style: const TextStyle(fontWeight: FontWeight.w500),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
+          Expanded(
+            flex: 2,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(leaveDate),
+                if (isHoliday && holidayName != null)
+                  Text(
+                    '⚠️ $holidayName',
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: Colors.orange,
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
-                  Expanded(
-                    flex: 2,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(leaveDate),
-                        if (isHoliday && holidayName != null)
-                          Text(
-                            '⚠️ $holidayName',
-                            style: TextStyle(
-                              fontSize: 10,
-                              color: Colors.orange[700],
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                      ],
-                    ),
+              ],
+            ),
+          ),
+          Expanded(
+            flex: 2,
+            child: Row(
+              children: [
+                Text(
+                  _getLeaveTypeIcon(leaveType),
+                  style: const TextStyle(fontSize: 14),
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  _getLeaveTypeName(leaveType),
+                  style: const TextStyle(fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            flex: 2,
+            child: Text(
+              timeDisplay,
+              style: const TextStyle(fontSize: 12),
+            ),
+          ),
+          Expanded(
+            flex: 3,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  reason,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey[700],
                   ),
-                  Expanded(
-                    flex: 2,
-                    child: Row(
-                      children: [
-                        Text(
-                          _getLeaveTypeIcon(leaveType),
-                          style: const TextStyle(fontSize: 14),
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          _getLeaveTypeName(leaveType),
-                          style: const TextStyle(fontSize: 12),
-                        ),
-                      ],
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                if (status == 'rejected' && rejectionReason != null) ...[
+                  const SizedBox(height: 2),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 2,
                     ),
-                  ),
-                  Expanded(
-                    flex: 2,
+                    decoration: BoxDecoration(
+                      color: Colors.red.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
                     child: Text(
-                      timeDisplay,
-                      style: const TextStyle(fontSize: 12),
-                    ),
-                  ),
-                  Expanded(
-                    flex: 3,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          reason,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[700],
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        if (status == 'rejected' &&
-                            rejectionReason != null) ...[
-                          const SizedBox(height: 2),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 4,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.red.withValues(alpha: 0.05),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Text(
-                              'Rejected: $rejectionReason',
-                              style: TextStyle(
-                                fontSize: 10,
-                                color: Colors.red[700],
-                                fontStyle: FontStyle.italic,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                  Expanded(
-                    flex: 1,
-                    child: Center(child: _buildStatusCell(leave, status)),
-                  ),
-                  Expanded(
-                    flex: 3,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.edit, color: Colors.blue),
-                          onPressed: () => _editLeave(leave),
-                          tooltip: 'Edit',
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.delete, color: Colors.red),
-                          onPressed: () => _deleteLeave(leave),
-                          tooltip: 'Delete',
-                        ),
-                      ],
+                      'Rejected: $rejectionReason',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: Colors.red,
+                        fontStyle: FontStyle.italic,
+                      ),
                     ),
                   ),
                 ],
-              ),
-            );
-          }),
+              ],
+            ),
+          ),
+          Expanded(
+            flex: 1,
+            child: Center(child: _buildStatusCell(leave, status)),
+          ),
+          Expanded(
+            flex: 3,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.edit, color: Colors.blue),
+                  onPressed: () => _editLeave(leave),
+                  tooltip: 'Edit',
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete, color: Colors.red),
+                  onPressed: () => _deleteLeave(leave),
+                  tooltip: 'Delete',
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -1888,191 +1942,192 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       itemCount: _leaves.length,
       itemBuilder: (context, index) {
         final leave = _leaves[index];
-        final barberId = leave['barber_id'] as String;
-        final profile = _barberProfiles[barberId] ?? {};
-        final barberName = profile['full_name'] ?? 'Unknown';
-        final leaveDate = _formatDate(leave['leave_date']);
-        final leaveType = leave['leave_type'] ?? 'full_day';
-        final status = leave['status'] ?? 'pending';
-        final reason = leave['reason'] ?? 'No reason provided';
-        final rejectionReason = leave['rejection_reason'];
-        final isHoliday = _isHoliday(leave['leave_date']);
-        final holidayName = _getHolidayName(leave['leave_date']);
+        return _buildMobileLeaveCard(leave);
+      },
+    );
+  }
 
-        String timeDisplay = '';
-        if (leaveType == 'full_day' || leaveType == 'emergency') {
-          timeDisplay = 'All Day';
-        } else if (leaveType == 'half_day') {
-          timeDisplay =
-              '${_formatTime(leave['start_time'])} - ${_formatTime(leave['end_time'])}';
-        } else if (leaveType == 'short_leave') {
-          timeDisplay =
-              '${_formatTime(leave['start_time'])} - ${_formatTime(leave['end_time'])}';
-        }
+  Widget _buildMobileLeaveCard(Map<String, dynamic> leave) {
+    final barberId = leave['barber_id'] as String;
+    final profile = _barberProfiles[barberId] ?? {};
+    final barberName = profile['full_name'] ?? 'Unknown';
+    final leaveDate = _formatDateForDisplayFromUtc(leave['leave_date']);
+    final leaveType = leave['leave_type'] ?? 'full_day';
+    final status = leave['status'] ?? 'pending';
+    final reason = leave['reason'] ?? 'No reason provided';
+    final rejectionReason = leave['rejection_reason'];
+    final isHoliday = _isHoliday(leave['leave_date']);
+    final holidayName = _getHolidayName(leave['leave_date']);
 
-        return Card(
-          margin: const EdgeInsets.only(bottom: 12),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Column(
-            children: [
-              ListTile(
-                contentPadding: const EdgeInsets.all(12),
-                leading: CircleAvatar(
-                  radius: 24,
-                  backgroundColor: const Color(
-                    0xFFFF6B8B,
-                  ).withValues(alpha: 0.1),
-                  backgroundImage: profile['avatar_url'] != null
-                      ? NetworkImage(profile['avatar_url'])
-                      : null,
-                  child: profile['avatar_url'] == null
-                      ? Text(
-                          barberName[0].toUpperCase(),
-                          style: const TextStyle(
-                            color: Color(0xFFFF6B8B),
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
-                          ),
-                        )
-                      : null,
-                ),
-                title: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        barberName,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                        ),
-                      ),
-                    ),
-                    _buildStatusCell(leave, status),
-                  ],
-                ),
-                subtitle: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.calendar_today,
-                          size: 14,
-                          color: Colors.grey[600],
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          leaveDate,
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: Colors.grey[800],
-                          ),
-                        ),
-                      ],
-                    ),
-                    if (isHoliday && holidayName != null) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        '⚠️ $holidayName',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: Colors.orange[700],
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        Text(
-                          _getLeaveTypeIcon(leaveType),
-                          style: const TextStyle(fontSize: 14),
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          _getLeaveTypeName(leaveType),
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: Colors.grey[800],
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        if (timeDisplay.isNotEmpty)
-                          Expanded(
-                            child: Text(
-                              '• $timeDisplay',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey[600],
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                      ],
-                    ),
-                    Text(
-                      reason,
-                      style: TextStyle(fontSize: 12, color: Colors.grey[700]),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    if (status == 'rejected' && rejectionReason != null) ...[
-                      const SizedBox(height: 4),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 3,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.red.withValues(alpha: 0.05),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          'Rejected: $rejectionReason',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: Colors.red[700],
-                            fontStyle: FontStyle.italic,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
+    String timeDisplay = '';
+    if (leaveType == 'full_day' || leaveType == 'emergency') {
+      timeDisplay = 'All Day';
+    } else if (leaveType == 'half_day') {
+      timeDisplay =
+          '${_formatTimeForDisplayFromUtc(leave['start_time'])} - ${_formatTimeForDisplayFromUtc(leave['end_time'])}';
+    } else if (leaveType == 'short_leave') {
+      timeDisplay =
+          '${_formatTimeForDisplayFromUtc(leave['start_time'])} - ${_formatTimeForDisplayFromUtc(leave['end_time'])}';
+    }
 
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.grey[50],
-                  borderRadius: const BorderRadius.only(
-                    bottomLeft: Radius.circular(12),
-                    bottomRight: Radius.circular(12),
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        children: [
+          ListTile(
+            contentPadding: const EdgeInsets.all(12),
+            leading: CircleAvatar(
+              radius: 24,
+              backgroundColor: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+              backgroundImage: profile['avatar_url'] != null
+                  ? NetworkImage(profile['avatar_url'])
+                  : null,
+              child: profile['avatar_url'] == null
+                  ? Text(
+                      barberName[0].toUpperCase(),
+                      style: const TextStyle(
+                        color: Color(0xFFFF6B8B),
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    )
+                  : null,
+            ),
+            title: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    barberName,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
                   ),
                 ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
+                _buildStatusCell(leave, status),
+              ],
+            ),
+            subtitle: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(height: 8),
+                Row(
                   children: [
-                    IconButton(
-                      icon: const Icon(Icons.edit, color: Colors.blue),
-                      onPressed: () => _editLeave(leave),
-                      tooltip: 'Edit',
+                    Icon(
+                      Icons.calendar_today,
+                      size: 14,
+                      color: Colors.grey[600],
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.delete, color: Colors.red),
-                      onPressed: () => _deleteLeave(leave),
-                      tooltip: 'Delete',
+                    const SizedBox(width: 4),
+                    Text(
+                      leaveDate,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Colors.grey[800],
+                      ),
                     ),
                   ],
                 ),
-              ),
-            ],
+                if (isHoliday && holidayName != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    '⚠️ $holidayName',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Colors.orange,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Text(
+                      _getLeaveTypeIcon(leaveType),
+                      style: const TextStyle(fontSize: 14),
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      _getLeaveTypeName(leaveType),
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Colors.grey[800],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    if (timeDisplay.isNotEmpty)
+                      Expanded(
+                        child: Text(
+                          '• $timeDisplay',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                  ],
+                ),
+                Text(
+                  reason,
+                  style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                if (status == 'rejected' && rejectionReason != null) ...[
+                  const SizedBox(height: 4),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.red.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      'Rejected: $rejectionReason',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.red,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
           ),
-        );
-      },
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: Colors.grey[50],
+              borderRadius: const BorderRadius.only(
+                bottomLeft: Radius.circular(12),
+                bottomRight: Radius.circular(12),
+              ),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.edit, color: Colors.blue),
+                  onPressed: () => _editLeave(leave),
+                  tooltip: 'Edit',
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete, color: Colors.red),
+                  onPressed: () => _deleteLeave(leave),
+                  tooltip: 'Delete',
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -2109,21 +2164,21 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
   }
 }
 
-// ==================== ADD/EDIT LEAVE DIALOG (UPDATED) ====================
+// ==================== ADD/EDIT LEAVE DIALOG ====================
 
 class _AddEditLeaveDialog extends StatefulWidget {
   final List<Map<String, dynamic>> barbers;
   final String salonId;
-  final String? salonOpenTime;
-  final String? salonCloseTime;
+  final String? salonOpenTimeUtc;
+  final String? salonCloseTimeUtc;
   final Map<String, dynamic>? leaveToEdit;
   final List<Map<String, dynamic>> holidays;
 
   const _AddEditLeaveDialog({
     required this.barbers,
     required this.salonId,
-    this.salonOpenTime,
-    this.salonCloseTime,
+    this.salonOpenTimeUtc,
+    this.salonCloseTimeUtc,
     this.leaveToEdit,
     required this.holidays,
   });
@@ -2136,21 +2191,21 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
   final supabase = Supabase.instance.client;
 
   String? _selectedBarberId;
-  DateTime? _selectedDate;
+  DateTime? _selectedLocalDate;
   String _leaveType = 'full_day';
   final TextEditingController _reasonController = TextEditingController();
 
-  TimeOfDay _startTime = const TimeOfDay(hour: 9, minute: 0);
-  TimeOfDay _endTime = const TimeOfDay(hour: 17, minute: 0);
+  TimeOfDay _startLocalTime = const TimeOfDay(hour: 9, minute: 0);
+  TimeOfDay _endLocalTime = const TimeOfDay(hour: 17, minute: 0);
 
   bool _isLoading = false;
   String? _errorMessage;
   bool _isEditMode = false;
   int _editLeaveId = 0;
 
-  TimeOfDay? _minTime;
-  TimeOfDay? _maxTime;
-  
+  TimeOfDay? _minLocalTime;
+  TimeOfDay? _maxLocalTime;
+
   bool _isHoliday = false;
   String? _holidayName;
 
@@ -2165,23 +2220,62 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
     }
   }
 
+  @override
+  void didUpdateWidget(_AddEditLeaveDialog oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.leaveToEdit != oldWidget.leaveToEdit) {
+      _loadLeaveData();
+    }
+  }
+
+  @override
+  void dispose() {
+    _reasonController.dispose();
+    super.dispose();
+  }
+
   void _parseSalonHours() {
-    if (widget.salonOpenTime != null) {
-      final openParts = widget.salonOpenTime!.split(':');
-      _minTime = TimeOfDay(
-        hour: int.parse(openParts[0]),
-        minute: int.parse(openParts[1]),
-      );
-      _startTime = _minTime!;
+    // Convert UTC salon hours to local time for display and validation
+    if (widget.salonOpenTimeUtc != null) {
+      try {
+        final localOpenTimeStr = TimezoneService.utcToLocalTime(
+          widget.salonOpenTimeUtc!,
+          DateTime.now(),
+        );
+        final openParts = localOpenTimeStr.split(' ');
+        final timeParts = openParts[0].split(':');
+        final period = openParts[1];
+        
+        int hour = int.parse(timeParts[0]);
+        if (period == 'PM' && hour != 12) hour += 12;
+        if (period == 'AM' && hour == 12) hour = 0;
+        
+        _minLocalTime = TimeOfDay(hour: hour, minute: int.parse(timeParts[1]));
+        _startLocalTime = _minLocalTime!;
+      } catch (e) {
+        debugPrint('Error parsing salon open time: $e');
+      }
     }
 
-    if (widget.salonCloseTime != null) {
-      final closeParts = widget.salonCloseTime!.split(':');
-      _maxTime = TimeOfDay(
-        hour: int.parse(closeParts[0]),
-        minute: int.parse(closeParts[1]),
-      );
-      _endTime = _maxTime!;
+    if (widget.salonCloseTimeUtc != null) {
+      try {
+        final localCloseTimeStr = TimezoneService.utcToLocalTime(
+          widget.salonCloseTimeUtc!,
+          DateTime.now(),
+        );
+        final timeParts = localCloseTimeStr.split(' ');
+        final hourMinute = timeParts[0].split(':');
+        final period = timeParts[1];
+        
+        int hour = int.parse(hourMinute[0]);
+        if (period == 'PM' && hour != 12) hour += 12;
+        if (period == 'AM' && hour == 12) hour = 0;
+        
+        _maxLocalTime = TimeOfDay(hour: hour, minute: int.parse(hourMinute[1]));
+        _endLocalTime = _maxLocalTime!;
+      } catch (e) {
+        debugPrint('Error parsing salon close time: $e');
+      }
     }
   }
 
@@ -2193,45 +2287,68 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
     _reasonController.text = leave['reason'] ?? '';
     _editLeaveId = leave['id'] as int;
 
+    // Convert UTC date from DB to local date for display
     if (leave['leave_date'] != null) {
       try {
-        _selectedDate = DateTime.parse(leave['leave_date']);
-        _checkHoliday(_selectedDate!);
-      } catch (e) {}
+        final utcDate = DateTime.parse(leave['leave_date']);
+        _selectedLocalDate = TimezoneService.utcToLocalDateTime('00:00', utcDate);
+        _checkHoliday(_selectedLocalDate!);
+      } catch (e) {
+        debugPrint('Error parsing leave_date: $e');
+      }
     }
 
+    // Convert UTC times to local times for display
     if (leave['start_time'] != null && leave['end_time'] != null) {
       try {
-        final startParts = leave['start_time'].split(':');
-        final endParts = leave['end_time'].split(':');
-
-        _startTime = TimeOfDay(
-          hour: int.parse(startParts[0]),
-          minute: int.parse(startParts[1]),
+        final localStartStr = TimezoneService.utcToLocalTime(
+          leave['start_time'],
+          _selectedLocalDate ?? DateTime.now(),
         );
-
-        _endTime = TimeOfDay(
-          hour: int.parse(endParts[0]),
-          minute: int.parse(endParts[1]),
+        final localEndStr = TimezoneService.utcToLocalTime(
+          leave['end_time'],
+          _selectedLocalDate ?? DateTime.now(),
         );
-      } catch (e) {}
+        
+        _startLocalTime = _parseTimeString(localStartStr);
+        _endLocalTime = _parseTimeString(localEndStr);
+      } catch (e) {
+        debugPrint('Error parsing start_time/end_time: $e');
+      }
     }
   }
 
-  void _checkHoliday(DateTime date) {
-    final dateStr =
-        '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+  TimeOfDay _parseTimeString(String timeStr) {
+    final parts = timeStr.split(' ');
+    final hourMinute = parts[0].split(':');
+    final period = parts[1];
     
+    int hour = int.parse(hourMinute[0]);
+    if (period == 'PM' && hour != 12) hour += 12;
+    if (period == 'AM' && hour == 12) hour = 0;
+    
+    return TimeOfDay(hour: hour, minute: int.parse(hourMinute[1]));
+  }
+
+  void _checkHoliday(DateTime localDate) {
+    final localDateStr = 
+        '${localDate.year.toString().padLeft(4, '0')}-${localDate.month.toString().padLeft(2, '0')}-${localDate.day.toString().padLeft(2, '0')}';
+
     final holiday = widget.holidays.firstWhere(
-      (h) => h['holiday_date'] == dateStr,
+      (h) {
+        final holidayLocalDate = _utcDateStringToLocalDate(h['holiday_date']);
+        final holidayLocalStr = 
+            '${holidayLocalDate.year.toString().padLeft(4, '0')}-${holidayLocalDate.month.toString().padLeft(2, '0')}-${holidayLocalDate.day.toString().padLeft(2, '0')}';
+        return holidayLocalStr == localDateStr;
+      },
       orElse: () => {},
     );
-    
+
     setState(() {
       _isHoliday = holiday.isNotEmpty;
       _holidayName = holiday['name'];
     });
-    
+
     if (_isHoliday && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -2241,6 +2358,30 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
         ),
       );
     }
+  }
+
+  DateTime _utcDateStringToLocalDate(String utcDateStr) {
+    final utcDateTime = DateTime.parse(utcDateStr);
+    return TimezoneService.utcToLocalDateTime('00:00', utcDateTime);
+  }
+
+  String _localDateToUtcDateString(DateTime localDate) {
+    final utcDateTime = DateTime.utc(
+      localDate.year, localDate.month, localDate.day,
+    );
+    return '${utcDateTime.year.toString().padLeft(4, '0')}-${utcDateTime.month.toString().padLeft(2, '0')}-${utcDateTime.day.toString().padLeft(2, '0')}';
+  }
+
+  String _localTimeToUtcTimeString(TimeOfDay localTime, DateTime localDate) {
+    final localDateTime = DateTime(
+      localDate.year, localDate.month, localDate.day,
+      localTime.hour, localTime.minute,
+    );
+    final utcTime = TimezoneService.localToUtcTime(
+      '${localTime.hour.toString().padLeft(2, '0')}:${localTime.minute.toString().padLeft(2, '0')}',
+      localDateTime,
+    );
+    return utcTime;
   }
 
   @override
@@ -2258,462 +2399,271 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFF6B8B),
-                borderRadius: const BorderRadius.only(
-                  topLeft: Radius.circular(16),
-                  topRight: Radius.circular(16),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    _isEditMode ? Icons.edit : Icons.beach_access,
-                    color: Colors.white,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    _isEditMode ? 'Edit Leave' : 'Add Leave',
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
+            _buildDialogHeader(),
             Expanded(
               child: SingleChildScrollView(
                 padding: EdgeInsets.all(isWeb ? 24 : 16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (_errorMessage != null) ...[
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.red.shade50,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.red.shade200),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.error_outline,
-                              color: Colors.red.shade700,
-                              size: 20,
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                _errorMessage!,
-                                style: TextStyle(
-                                  color: Colors.red.shade700,
-                                  fontSize: 13,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                    ],
-
-                    // Barber Selection
-                    const Text(
-                      'Select Barber',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 8),
-                    DropdownButtonFormField<String>(
-                      value: _selectedBarberId,
-                      decoration: InputDecoration(
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 8,
-                        ),
-                      ),
-                      hint: const Text('Choose barber'),
-                      items: widget.barbers.map<DropdownMenuItem<String>>((b) {
-                        return DropdownMenuItem<String>(
-                          value: b['id'] as String,
-                          child: Text(b['name'] as String),
-                        );
-                      }).toList(),
-                      onChanged: _isEditMode
-                          ? null
-                          : (String? value) {
-                              setState(() {
-                                _selectedBarberId = value;
-                                _errorMessage = null;
-                              });
-                            },
-                    ),
-
+                    if (_errorMessage != null) _buildErrorMessage(),
+                    _buildBarberSelector(),
                     const SizedBox(height: 16),
-
-                    // Date Selection with Holiday Check
-                    const Text(
-                      'Date',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 8),
-                    GestureDetector(
-                      onTap: () async {
-                        final date = await showDatePicker(
-                          context: context,
-                          initialDate: _selectedDate ?? DateTime.now(),
-                          firstDate: DateTime.now().subtract(
-                            const Duration(days: 30),
-                          ),
-                          lastDate: DateTime.now().add(
-                            const Duration(days: 365),
-                          ),
-                        );
-                        if (date != null) {
-                          setState(() {
-                            _selectedDate = date;
-                            _errorMessage = null;
-                          });
-                          _checkHoliday(date);
-                        }
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 12,
-                        ),
-                        decoration: BoxDecoration(
-                          border: Border.all(
-                            color: _isHoliday && !_isEditMode
-                                ? Colors.orange
-                                : Colors.grey[300]!,
-                            width: _isHoliday && !_isEditMode ? 2 : 1,
-                          ),
-                          borderRadius: BorderRadius.circular(8),
-                          color: _isHoliday && !_isEditMode
-                              ? Colors.orange.withValues(alpha: 0.05)
-                              : null,
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.calendar_today,
-                              size: 16,
-                              color: _isHoliday && !_isEditMode
-                                  ? Colors.orange
-                                  : Colors.grey[600],
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    _selectedDate != null
-                                        ? DateFormat('EEEE, MMM d, yyyy').format(_selectedDate!)
-                                        : 'Select date',
-                                    style: TextStyle(
-                                      color: _selectedDate != null
-                                          ? Colors.black
-                                          : Colors.grey[500],
-                                      fontWeight: _isHoliday && !_isEditMode
-                                          ? FontWeight.w500
-                                          : FontWeight.normal,
-                                    ),
-                                  ),
-                                  if (_isHoliday && !_isEditMode && _holidayName != null)
-                                    Padding(
-                                      padding: const EdgeInsets.only(top: 4),
-                                      child: Text(
-                                        '⚠️ $_holidayName - Salon closed',
-                                        style: TextStyle(
-                                          fontSize: 11,
-                                          color: Colors.orange[700],
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-
-                    // Holiday Warning
-                    if (_isHoliday && !_isEditMode)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.orange.shade50,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.orange.shade200),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(
-                                Icons.info_outline,
-                                size: 16,
-                                color: Colors.orange.shade700,
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  'The salon is closed on this day due to holiday. '
-                                  'Leave requests on holidays are not allowed.',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.orange.shade700,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-
+                    _buildDateSelector(),
+                    if (_isHoliday && !_isEditMode) _buildHolidayWarning(),
                     const SizedBox(height: 16),
-
-                    // Leave Type
-                    const Text(
-                      'Leave Type',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        _buildTypeChip(
-                          'Full Day',
-                          'full_day',
-                          Icons.calendar_month,
-                          Colors.purple,
-                        ),
-                        _buildTypeChip(
-                          'Half Day',
-                          'half_day',
-                          Icons.access_time,
-                          Colors.blue,
-                        ),
-                        _buildTypeChip(
-                          'Emergency',
-                          'emergency',
-                          Icons.warning,
-                          Colors.red,
-                        ),
-                        _buildTypeChip(
-                          'Short Leave',
-                          'short_leave',
-                          Icons.timer,
-                          Colors.green,
-                        ),
-                      ],
-                    ),
-
-                    if (_leaveType == 'half_day' ||
-                        _leaveType == 'short_leave') ...[
-                      const SizedBox(height: 16),
-                      const Text(
-                        'Select Time',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 8),
-
-                      if (_minTime != null && _maxTime != null)
-                        Container(
-                          margin: const EdgeInsets.only(bottom: 12),
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.blue.shade50,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(
-                                Icons.info,
-                                size: 16,
-                                color: Colors.blue.shade700,
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  'Salon hours: ${_formatTimeOfDay(_minTime!)} - ${_formatTimeOfDay(_maxTime!)}',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.blue.shade700,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-
-                      Container(
-                        margin: const EdgeInsets.only(bottom: 8),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: _buildTimePicker(
-                                label: 'Start Time',
-                                time: _startTime,
-                                onTimeSelected: (TimeOfDay newTime) {
-                                  setState(() => _startTime = newTime);
-                                },
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: _buildTimePicker(
-                                label: 'End Time',
-                                time: _endTime,
-                                onTimeSelected: (TimeOfDay newTime) {
-                                  setState(() => _endTime = newTime);
-                                },
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-
-                      if (_leaveType == 'short_leave')
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.green.shade50,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(
-                                Icons.timer,
-                                size: 16,
-                                color: Colors.green.shade700,
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  'Maximum 2 hours for short leave',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.green.shade700,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        )
-                      else if (_leaveType == 'half_day')
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.blue.shade50,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(
-                                Icons.access_time,
-                                size: 16,
-                                color: Colors.blue.shade700,
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  'Half day should be approximately 4 hours',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.blue.shade700,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                    ],
-
+                    _buildLeaveTypeSelector(),
+                    if (_leaveType == 'half_day' || _leaveType == 'short_leave')
+                      _buildTimeSection(),
                     const SizedBox(height: 16),
-
-                    // Reason
-                    const Text(
-                      'Reason',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: _reasonController,
-                      maxLines: 3,
-                      decoration: InputDecoration(
-                        hintText: 'Enter reason for leave',
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                    ),
-
-                    const SizedBox(height: 16),
+                    _buildReasonField(),
                   ],
                 ),
               ),
             ),
+            _buildDialogActions(),
+          ],
+        ),
+      ),
+    );
+  }
 
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.grey[50],
-                borderRadius: const BorderRadius.only(
-                  bottomLeft: Radius.circular(16),
-                  bottomRight: Radius.circular(16),
-                ),
-                border: Border(top: BorderSide(color: Colors.grey[300]!)),
+  Widget _buildDialogHeader() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: const BoxDecoration(
+        color: Color(0xFFFF6B8B),
+        borderRadius: BorderRadius.only(
+          topLeft: Radius.circular(16),
+          topRight: Radius.circular(16),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            _isEditMode ? Icons.edit : Icons.beach_access,
+            color: Colors.white,
+          ),
+          const SizedBox(width: 8),
+          Text(
+            _isEditMode ? 'Edit Leave' : 'Add Leave',
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          ),
+          const Spacer(),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.2),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Text(
+              TimezoneService.getTimezoneFlag(),
+              style: const TextStyle(fontSize: 10),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildErrorMessage() {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.red.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.error_outline,
+            color: Colors.red,
+            size: 20,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _errorMessage!,
+              style: TextStyle(
+                color: Colors.red,
+                fontSize: 13,
               ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('Cancel'),
-                  ),
-                  const SizedBox(width: 12),
-                  ElevatedButton(
-                    onPressed:
-                        _selectedBarberId != null &&
-                            _selectedDate != null &&
-                            !_isLoading &&
-                            (!_isHoliday || _isEditMode)
-                        ? _saveLeave
-                        : null,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFFF6B8B),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 24,
-                        vertical: 12,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBarberSelector() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Select Barber',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 8),
+        DropdownButtonFormField<String>(
+          initialValue: _selectedBarberId,
+          decoration: InputDecoration(
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 8,
+            ),
+          ),
+          hint: const Text('Choose barber'),
+          items: widget.barbers.map<DropdownMenuItem<String>>((b) {
+            return DropdownMenuItem<String>(
+              value: b['id'] as String,
+              child: Text(b['name'] as String),
+            );
+          }).toList(),
+          onChanged: _isEditMode
+              ? null
+              : (String? value) {
+                  setState(() {
+                    _selectedBarberId = value;
+                    _errorMessage = null;
+                  });
+                },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDateSelector() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Date',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 8),
+        GestureDetector(
+          onTap: () async {
+            final date = await showDatePicker(
+              context: context,
+              initialDate: _selectedLocalDate ?? DateTime.now(),
+              firstDate: DateTime.now().subtract(
+                const Duration(days: 30),
+              ),
+              lastDate: DateTime.now().add(
+                const Duration(days: 365),
+              ),
+            );
+            if (date != null && mounted) {
+              setState(() {
+                _selectedLocalDate = date;
+                _errorMessage = null;
+              });
+              _checkHoliday(date);
+            }
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 12,
+            ),
+            decoration: BoxDecoration(
+              border: Border.all(
+                color: _isHoliday && !_isEditMode
+                    ? Colors.orange
+                    : Colors.grey[300]!,
+                width: _isHoliday && !_isEditMode ? 2 : 1,
+              ),
+              borderRadius: BorderRadius.circular(8),
+              color: _isHoliday && !_isEditMode
+                  ? Colors.orange.withValues(alpha: 0.05)
+                  : null,
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.calendar_today,
+                  size: 16,
+                  color: _isHoliday && !_isEditMode
+                      ? Colors.orange
+                      : Colors.grey[600],
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _selectedLocalDate != null
+                            ? DateFormat('EEEE, MMM d, yyyy').format(_selectedLocalDate!)
+                            : 'Select date',
+                        style: TextStyle(
+                          color: _selectedLocalDate != null
+                              ? Colors.black
+                              : Colors.grey[500],
+                          fontWeight: _isHoliday && !_isEditMode
+                              ? FontWeight.w500
+                              : FontWeight.normal,
+                        ),
                       ),
-                    ),
-                    child: _isLoading
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                              color: Colors.white,
-                              strokeWidth: 2,
+                      if (_isHoliday &&
+                          !_isEditMode &&
+                          _holidayName != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Text(
+                            '⚠️ $_holidayName - Salon closed',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.orange,
+                              fontWeight: FontWeight.w500,
                             ),
-                          )
-                        : Text(_isEditMode ? 'Update' : 'Save'),
+                          ),
+                        ),
+                    ],
                   ),
-                ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildHolidayWarning() {
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: Colors.orange.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              Icons.info_outline,
+              size: 16,
+              color: Colors.orange,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'The salon is closed on this day due to holiday. '
+                'Leave requests on holidays are not allowed.',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.orange,
+                ),
               ),
             ),
           ],
@@ -2722,12 +2672,30 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
     );
   }
 
-  Widget _buildTypeChip(
-    String label,
-    String value,
-    IconData icon,
-    Color color,
-  ) {
+  Widget _buildLeaveTypeSelector() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Leave Type',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            _buildTypeChip('Full Day', 'full_day', Icons.calendar_month, Colors.purple),
+            _buildTypeChip('Half Day', 'half_day', Icons.access_time, Colors.blue),
+            _buildTypeChip('Emergency', 'emergency', Icons.warning, Colors.red),
+            _buildTypeChip('Short Leave', 'short_leave', Icons.timer, Colors.green),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTypeChip(String label, String value, IconData icon, Color color) {
     final isSelected = _leaveType == value;
     return FilterChip(
       label: Row(
@@ -2758,6 +2726,118 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
     );
   }
 
+  Widget _buildTimeSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 16),
+        const Text(
+          'Select Time',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 8),
+        if (_minLocalTime != null && _maxLocalTime != null) _buildSalonHoursInfo(),
+        Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: _buildTimePicker(
+                  label: 'Start Time',
+                  time: _startLocalTime,
+                  onTimeSelected: (TimeOfDay newTime) {
+                    setState(() => _startLocalTime = newTime);
+                  },
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildTimePicker(
+                  label: 'End Time',
+                  time: _endLocalTime,
+                  onTimeSelected: (TimeOfDay newTime) {
+                    setState(() => _endLocalTime = newTime);
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (_leaveType == 'short_leave')
+          _buildInfoCard(
+            icon: Icons.timer,
+            color: Colors.green,
+            message: 'Maximum 2 hours for short leave',
+          )
+        else if (_leaveType == 'half_day')
+          _buildInfoCard(
+            icon: Icons.access_time,
+            color: Colors.blue,
+            message: 'Half day should be approximately 4 hours',
+          ),
+      ],
+    );
+  }
+
+  Widget _buildSalonHoursInfo() {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: Colors.blue.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.info,
+            size: 16,
+            color: Colors.blue,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Salon hours: ${_formatTimeOfDay(_minLocalTime!)} - ${_formatTimeOfDay(_maxLocalTime!)}',
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.blue,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInfoCard({required IconData icon, required Color color, required String message}) {
+    return Container(
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            icon,
+            size: 16,
+            color: color,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(
+                fontSize: 12,
+                color: color,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildTimePicker({
     required String label,
     required TimeOfDay time,
@@ -2775,7 +2855,7 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
             );
           },
         );
-        if (picked != null) {
+        if (picked != null && mounted) {
           onTimeSelected(picked);
         }
       },
@@ -2803,6 +2883,79 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
     );
   }
 
+  Widget _buildReasonField() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Reason',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _reasonController,
+          maxLines: 3,
+          decoration: InputDecoration(
+            hintText: 'Enter reason for leave',
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDialogActions() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.grey[50],
+        borderRadius: const BorderRadius.only(
+          bottomLeft: Radius.circular(16),
+          bottomRight: Radius.circular(16),
+        ),
+        border: Border(top: BorderSide(color: Colors.grey[300]!)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          const SizedBox(width: 12),
+          ElevatedButton(
+            onPressed: _selectedBarberId != null &&
+                _selectedLocalDate != null &&
+                !_isLoading &&
+                (!_isHoliday || _isEditMode)
+                ? _saveLeave
+                : null,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFFF6B8B),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(
+                horizontal: 24,
+                vertical: 12,
+              ),
+            ),
+            child: _isLoading
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      color: Colors.white,
+                      strokeWidth: 2,
+                    ),
+                  )
+                : Text(_isEditMode ? 'Update' : 'Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
   String _formatTimeOfDay(TimeOfDay time) {
     final hour = time.hourOfPeriod == 0 ? 12 : time.hourOfPeriod;
     final period = time.period == DayPeriod.am ? 'AM' : 'PM';
@@ -2826,11 +2979,11 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
       }
 
       if (_leaveType == 'half_day' || _leaveType == 'short_leave') {
-        final startMinutes = _startTime.hour * 60 + _startTime.minute;
-        final endMinutes = _endTime.hour * 60 + _endTime.minute;
+        final startMinutes = _startLocalTime.hour * 60 + _startLocalTime.minute;
+        final endMinutes = _endLocalTime.hour * 60 + _endLocalTime.minute;
 
-        if (_minTime != null) {
-          final minMinutes = _minTime!.hour * 60 + _minTime!.minute;
+        if (_minLocalTime != null) {
+          final minMinutes = _minLocalTime!.hour * 60 + _minLocalTime!.minute;
           if (startMinutes < minMinutes) {
             setState(() {
               _errorMessage = 'Start time cannot be before salon opening time';
@@ -2840,8 +2993,8 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
           }
         }
 
-        if (_maxTime != null) {
-          final maxMinutes = _maxTime!.hour * 60 + _maxTime!.minute;
+        if (_maxLocalTime != null) {
+          final maxMinutes = _maxLocalTime!.hour * 60 + _maxLocalTime!.minute;
           if (endMinutes > maxMinutes) {
             setState(() {
               _errorMessage = 'End time cannot be after salon closing time';
@@ -2864,7 +3017,8 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
         if (_leaveType == 'half_day') {
           if (durationMinutes < 180 || durationMinutes > 300) {
             setState(() {
-              _errorMessage = 'Half day should be approximately 4 hours (3-5 hours range)';
+              _errorMessage =
+                  'Half day should be approximately 4 hours (3-5 hours range)';
               _isLoading = false;
             });
             return;
@@ -2887,15 +3041,15 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
         }
       }
 
-      final dateStr =
-          '${_selectedDate!.year.toString().padLeft(4, '0')}-${_selectedDate!.month.toString().padLeft(2, '0')}-${_selectedDate!.day.toString().padLeft(2, '0')}';
+      // Convert local date to UTC for DB storage
+      final utcDateStr = _localDateToUtcDateString(_selectedLocalDate!);
 
       if (!_isEditMode) {
         final existingLeave = await supabase
             .from('barber_leaves')
             .select()
             .eq('barber_id', _selectedBarberId!)
-            .eq('leave_date', dateStr)
+            .eq('leave_date', utcDateStr)
             .maybeSingle();
 
         if (existingLeave != null) {
@@ -2910,24 +3064,25 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
       final currentUser = supabase.auth.currentUser;
       if (currentUser == null) throw Exception('No authenticated user');
 
+      // Convert local times to UTC for DB storage
+      String? startTimeUtc;
+      String? endTimeUtc;
+      
+      if (_leaveType == 'half_day' || _leaveType == 'short_leave') {
+        startTimeUtc = _localTimeToUtcTimeString(_startLocalTime, _selectedLocalDate!);
+        endTimeUtc = _localTimeToUtcTimeString(_endLocalTime, _selectedLocalDate!);
+      }
+
       Map<String, dynamic> leaveData = {
         'barber_id': _selectedBarberId!,
         'salon_id': int.parse(widget.salonId),
-        'leave_date': dateStr,
+        'leave_date': utcDateStr,
         'leave_type': _leaveType,
         'reason': _reasonController.text.trim(),
         'status': _isEditMode ? widget.leaveToEdit!['status'] : 'pending',
+        'start_time': startTimeUtc,
+        'end_time': endTimeUtc,
       };
-
-      if (_leaveType == 'half_day' || _leaveType == 'short_leave') {
-        leaveData['start_time'] =
-            '${_startTime.hour.toString().padLeft(2, '0')}:${_startTime.minute.toString().padLeft(2, '0')}:00';
-        leaveData['end_time'] =
-            '${_endTime.hour.toString().padLeft(2, '0')}:${_endTime.minute.toString().padLeft(2, '0')}:00';
-      } else {
-        leaveData['start_time'] = null;
-        leaveData['end_time'] = null;
-      }
 
       if (_isEditMode) {
         await supabase
@@ -2941,17 +3096,17 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
       if (mounted) {
         Navigator.pop(context, {
           'success': true,
-          'leave_id': _editLeaveId ?? leaveData['id'],
+          'leave_id': _editLeaveId,
           'barber_id': _selectedBarberId,
           'barber_name': widget.barbers.firstWhere(
             (b) => b['id'] == _selectedBarberId,
             orElse: () => {'name': 'Unknown'},
           )['name'],
-          'leave_date': dateStr,
+          'leave_date': utcDateStr,
           'leave_type': _leaveType,
           'reason': _reasonController.text.trim(),
-          'start_time': leaveData['start_time'],
-          'end_time': leaveData['end_time'],
+          'start_time': startTimeUtc,
+          'end_time': endTimeUtc,
         });
       }
     } catch (e) {
