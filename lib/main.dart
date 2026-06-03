@@ -18,13 +18,9 @@ import 'package:flutter_application_1/screens/customer/booking_flow_screen.dart'
 import 'package:flutter_application_1/screens/customer/booking_screen.dart';
 import 'package:flutter_application_1/screens/customer/my_bookings_screen.dart';
 import 'package:flutter_application_1/screens/customer/salon_profile_screen.dart';
-import 'package:flutter_application_1/screens/customer/vip_booking_request_screen.dart';
 import 'package:flutter_application_1/screens/customer/vip_booking_screen.dart';
-import 'package:flutter_application_1/screens/owner/add_age_categories.dart';
 import 'package:flutter_application_1/screens/owner/add_barber_screen.dart';
 import 'package:flutter_application_1/screens/owner/add_barber_service_screen.dart';
-import 'package:flutter_application_1/screens/owner/add_category_screen.dart';
-import 'package:flutter_application_1/screens/owner/add_genders.dart';
 import 'package:flutter_application_1/screens/owner/add_services.dart';
 import 'package:flutter_application_1/screens/owner/barber_leaves_screen.dart';
 import 'package:flutter_application_1/screens/owner/barber_list_screen.dart';
@@ -33,10 +29,8 @@ import 'package:flutter_application_1/screens/owner/create_salon.dart';
 import 'package:flutter_application_1/screens/owner/edit_salon.dart';
 import 'package:flutter_application_1/screens/owner/salon_holidays_screen.dart';
 import 'package:flutter_application_1/screens/owner/service_management.dart';
-import 'package:flutter_application_1/screens/owner/vip_booking_requests_screen.dart';
 import 'package:flutter_application_1/services/notification_service.dart';
 import 'package:flutter_application_1/services/timezone_service.dart';
-import 'package:flutter_application_1/utils/timezone_helper.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -166,8 +160,8 @@ Future<void> main() async {
     appState = AppState();
     await appState.initializeApp();
 
-    // Initialize timezone 
-     await TimezoneService.initialize(); 
+    // Initialize timezone
+    await TimezoneService.initialize();
 
     // ========== PHASE 8: AUTH LISTENER ==========
     _setupAuthStateListener();
@@ -195,7 +189,6 @@ void _setupAuthStateListener() {
 
   supabase.auth.onAuthStateChange.listen((data) {
     final event = data.event;
-    final session = data.session;
 
     debugPrint('🔐 Auth State Change: $event');
 
@@ -215,24 +208,6 @@ void _setupAuthStateListener() {
       });
     }
   });
-}
-
-// ====================
-// HELPER: Has Local Profile
-// ====================
-Future<bool> _hasLocalProfile(String? email) async {
-  if (email == null) return false;
-
-  try {
-    final profile = await SessionManager.getProfileByEmail(email);
-    final hasProfile = profile != null && profile.isNotEmpty;
-
-    debugPrint('📱 Checking local profile for $email: $hasProfile');
-    return hasProfile;
-  } catch (e) {
-    debugPrint('❌ Error checking local profile: $e');
-    return false;
-  }
 }
 
 // ====================
@@ -915,14 +890,6 @@ GoRouter _createRouter() {
         },
       ),
 
-      // Add Category
-      GoRoute(
-        path: '/owner/categories/add',
-        name: 'addCategory',
-        pageBuilder: (context, state) =>
-            MaterialPage(child: const AddCategoryScreen()),
-      ),
-
       // Create Salon
       GoRoute(
         path: '/owner/salon/create',
@@ -968,27 +935,6 @@ GoRouter _createRouter() {
           final salonId = state.uri.queryParameters['salonId'];
           return BarberListScreen(salonId: salonId);
         },
-      ),     
-
-      // VIP Booking Requests
-      GoRoute(
-        path: '/owner/vip-requests',
-        builder: (context, state) {
-          final salonId = state.uri.queryParameters['salonId']!;
-          return VIPBookingRequestsScreen(salonId: salonId);
-        },
-      ),
-
-      // Add Gender
-      GoRoute(
-        path: '/owner/genders/add',
-        builder: (context, state) => const AddGenderScreen(),
-      ),
-
-      // Add Age Category
-      GoRoute(
-        path: '/owner/age-categories/add',
-        builder: (context, state) => const AddAgeCategoryScreen(),
       ),
 
       // Salon Holidays
