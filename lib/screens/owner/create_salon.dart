@@ -1,4 +1,3 @@
-
 import 'dart:io' show Platform, File;
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -9,6 +8,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
 import 'package:path/path.dart' as path;
 import 'package:image_cropper/image_cropper.dart';
+import 'package:timezone/timezone.dart' as tz;
 import '../../services/timezone_service.dart';
 
 // ==================== ENHANCED TIME PICKER ====================
@@ -113,7 +113,6 @@ class _EnhancedTimePickerState extends State<_EnhancedTimePicker> {
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 20),
-
             Container(
               padding: const EdgeInsets.symmetric(vertical: 16),
               decoration: BoxDecoration(
@@ -169,7 +168,6 @@ class _EnhancedTimePickerState extends State<_EnhancedTimePicker> {
               ),
             ),
             const SizedBox(height: 20),
-
             Row(
               children: [
                 _buildScrollPicker(
@@ -194,9 +192,7 @@ class _EnhancedTimePickerState extends State<_EnhancedTimePicker> {
                 ),
               ],
             ),
-
             const SizedBox(height: 24),
-
             Row(
               children: [
                 Expanded(
@@ -430,8 +426,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
   // Validation flags
   bool _isPhoneValid = true;
   bool _isEmailValid = true;
-
-  // Age validation flags
   bool _isMinAgeValid = true;
   bool _isMaxAgeValid = true;
   bool _isAgeRangeValid = true;
@@ -479,16 +473,23 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
   bool _isUploadingLogo = false;
   bool _isUploadingCover = false;
 
-  // Business hours
-  TimeOfDay? _openTime;
-  TimeOfDay? _closeTime;
-
-  // Timezone
-  String _deviceTimezone = '';
+  // ==================== TIMEZONE RELATED VARIABLES ====================
+  // Business hours - Store in UTC for database
+  String _openTimeUtc = '';
+  String _closeTimeUtc = '';
+  
+  // Business hours - Display in local time
+  TimeOfDay _openTimeLocal = const TimeOfDay(hour: 9, minute: 0);
+  TimeOfDay _closeTimeLocal = const TimeOfDay(hour: 18, minute: 0);
+  
+  // Timezone management
+  String _userTimezone = '';
+  String _salonTimezone = '';
   bool _isTimezoneLoaded = false;
   bool _isLoadingGlobalData = false;
   bool _hasErrorLoadingData = false;
   bool _isLoading = false;
+  
 
   final _formKey = GlobalKey<FormState>();
   bool get _isWeb => MediaQuery.of(context).size.width > 800;
@@ -499,30 +500,159 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
   @override
   void initState() {
     super.initState();
-    _openTime = const TimeOfDay(hour: 9, minute: 0);
-    _closeTime = const TimeOfDay(hour: 18, minute: 0);
     _ageCategoryMinAgeController.text = '0';
     _ageCategoryMaxAgeController.text = '100';
     _initializeWithTimezone();
+    
+    // Listen to timezone changes (when user changes in settings)
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkTimezoneChanges();
+    });
+  }
+  
+  // Check if timezone changed in settings
+  Future<void> _checkTimezoneChanges() async {
+    final prefs = await SharedPreferences.getInstance();
+    final currentTimezone = prefs.getString('user_timezone') ?? TimezoneService.getCurrentTimezone();
+    
+    if (_userTimezone.isNotEmpty && _userTimezone != currentTimezone) {
+      // Timezone changed - reload display times
+      setState(() {
+        _userTimezone = currentTimezone;
+        _refreshDisplayTimes();
+      });
+    }
+  }
+  
+  // Refresh all displayed times when timezone changes
+  void _refreshDisplayTimes() {
+    // Convert UTC stored times back to new local timezone
+    if (_openTimeUtc.isNotEmpty) {
+      _openTimeLocal = _utcTimeStringToLocalTimeOfDay(_openTimeUtc);
+      _closeTimeLocal = _utcTimeStringToLocalTimeOfDay(_closeTimeUtc);
+    }
+    setState(() {});
   }
 
   Future<void> _initializeWithTimezone() async {
+    // Initialize TimezoneService first
     await TimezoneService.initialize();
+    
     final prefs = await SharedPreferences.getInstance();
-    final cachedTimezone = prefs.getString('cached_timezone');
-
-    if (cachedTimezone != null && cachedTimezone.isNotEmpty) {
-      _deviceTimezone = cachedTimezone;     
+    
+    // Get user's device timezone (cached from previous or new)
+    String cachedUserTimezone = prefs.getString('user_timezone') ?? '';
+    
+    if (cachedUserTimezone.isEmpty) {
+      // First time - get from device
+      _userTimezone = TimezoneService.getCurrentTimezone();
+      await prefs.setString('user_timezone', _userTimezone);
     } else {
-      _deviceTimezone = TimezoneService.getCurrentTimezone();
-      await prefs.setString('cached_timezone', _deviceTimezone);     
+      _userTimezone = cachedUserTimezone;
+      // Ensure TimezoneService uses this timezone
+      await TimezoneService.setTimezone(_userTimezone);
     }
-
+    
+    // Salon timezone - same as user's current location
+    _salonTimezone = _userTimezone;
+    
+    // Initialize business hours
+    _initializeBusinessHours();
+    
     setState(() {
       _isTimezoneLoaded = true;
     });
-
+    
     await _loadGlobalData();
+  }
+  
+  void _initializeBusinessHours() {
+    // Set default times in LOCAL timezone (9:00 AM and 6:00 PM)
+    const defaultOpenLocal = TimeOfDay(hour: 9, minute: 0);
+    const defaultCloseLocal = TimeOfDay(hour: 18, minute: 0);
+    
+    // Convert to UTC for database storage
+    _openTimeUtc = _localTimeOfDayToUtcTimeString(defaultOpenLocal);
+    _closeTimeUtc = _localTimeOfDayToUtcTimeString(defaultCloseLocal);
+    
+    // Store local times for display
+    _openTimeLocal = defaultOpenLocal;
+    _closeTimeLocal = defaultCloseLocal;
+  }
+  
+  // ==================== TIMEZONE CONVERSION METHODS ====================
+
+/// Convert LOCAL TimeOfDay to UTC time string for database
+String _localTimeOfDayToUtcTimeString(TimeOfDay localTime) {
+  try {
+    // Get current date
+    final now = DateTime.now();
+    
+    // Create local DateTime using the salon's timezone
+    final location = tz.getLocation(_salonTimezone);
+    final localTZDateTime = tz.TZDateTime(
+      location,
+      now.year, now.month, now.day,
+      localTime.hour, localTime.minute,
+    );
+    
+    // Convert to UTC
+    final utcDateTime = localTZDateTime.toUtc();
+    
+    // Return time portion only
+    return '${utcDateTime.hour.toString().padLeft(2, '0')}:${utcDateTime.minute.toString().padLeft(2, '0')}:00';
+  } catch (e) {
+    debugPrint('Error converting local to UTC: $e');
+    // Fallback: simple conversion without timezone
+    final int offsetHours = TimezoneService.getUtcOffsetHours();
+    int utcHour = localTime.hour - offsetHours;
+    utcHour = ((utcHour % 24) + 24) % 24;
+    return '${utcHour.toString().padLeft(2, '0')}:${localTime.minute.toString().padLeft(2, '0')}:00';
+  }
+}
+
+/// Convert UTC time string (from database) to LOCAL TimeOfDay for display
+TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
+  try {
+    // Parse UTC time
+    final parts = utcTimeString.split(':');
+    final int utcHour = int.parse(parts[0]);
+    final int utcMinute = int.parse(parts[1]);
+    
+    // Get current date
+    final now = DateTime.now();
+    
+    // Create UTC DateTime
+    final utcDateTime = DateTime.utc(
+      now.year, now.month, now.day,
+      utcHour, utcMinute,
+    );
+    
+    // Convert to user's local timezone
+    final location = tz.getLocation(_userTimezone);
+    final localDateTime = tz.TZDateTime.from(utcDateTime, location);
+    
+    return TimeOfDay(hour: localDateTime.hour, minute: localDateTime.minute);
+  } catch (e) {
+    debugPrint('Error converting UTC to local: $e');
+    
+    // Fallback: simple conversion
+    try {
+      final parts = utcTimeString.split(':');
+      final int utcHour = int.parse(parts[0]);
+      final int utcMinute = int.parse(parts[1]);
+      final offsetHours = TimezoneService.getUtcOffsetHours();
+      final localHour = ((utcHour + offsetHours) % 24 + 24) % 24;
+      return TimeOfDay(hour: localHour, minute: utcMinute);
+    } catch (fallbackError) {
+      return const TimeOfDay(hour: 9, minute: 0);
+    }
+  }
+}
+  
+  /// Get current timezone display string
+  String _getTimezoneDisplay() {
+    return '${TimezoneService.getCurrentFlag()} ${TimezoneService.getTimezoneDisplayName()} (${TimezoneService.getUtcOffsetString()})';
   }
 
   @override
@@ -574,7 +704,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
         _globalCategories = List<Map<String, dynamic>>.from(categories);
         _hasErrorLoadingData = false;
       });
-    } catch (e) {     
+    } catch (e) {
       setState(() {
         _hasErrorLoadingData = true;
       });
@@ -759,7 +889,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
       _serviceCategoryDisplayNameController.clear();
       _serviceCategoryDescriptionController.clear();
     });
-   
   }
 
   void _removeServiceCategory(int index) {
@@ -1924,7 +2053,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     } catch (e) { return null; } finally { if (mounted) setState(() => _isUploadingCover = false); }
   }
 
-  // ==================== BUSINESS HOURS ====================
+  // ==================== BUSINESS HOURS CARD ====================
   Widget _buildBusinessHoursCard() {
     return Card(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -1934,53 +2063,100 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text('Business Hours', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _getTimezoneDisplay(),
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                  ),
+                  const SizedBox(width: 8),
+                  const Icon(Icons.access_time, size: 14),
+                ],
+              ),
+            ),
             const SizedBox(height: 16),
             Row(
               children: [
                 Expanded(
                   child: _TimePickerField(
                     label: 'Open Time',
-                    initialTime: _openTime,
+                    initialTime: _openTimeLocal,
                     isRequired: true,
-                    onTimeSelected: (time) => setState(() => _openTime = time),
+                    onTimeSelected: (time) {
+                      setState(() {
+                        _openTimeLocal = time;
+                        // Convert local to UTC when user selects
+                        _openTimeUtc = _localTimeOfDayToUtcTimeString(time);
+                      });
+                    },
                   ),
                 ),
                 const SizedBox(width: 16),
                 Expanded(
                   child: _TimePickerField(
                     label: 'Close Time',
-                    initialTime: _closeTime,
+                    initialTime: _closeTimeLocal,
                     isRequired: true,
-                    onTimeSelected: (time) => setState(() => _closeTime = time),
+                    onTimeSelected: (time) {
+                      setState(() {
+                        _closeTimeLocal = time;
+                        // Convert local to UTC when user selects
+                        _closeTimeUtc = _localTimeOfDayToUtcTimeString(time);
+                      });
+                    },
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.grey[50],
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.info_outline, size: 16, color: Colors.grey[600]),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Times are saved in UTC and will be displayed in your local timezone',
+                          style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Icon(Icons.cloud_queue, size: 16, color: Colors.grey[600]),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'UTC Time: $_openTimeUtc - $_closeTimeUtc',
+                          style: TextStyle(fontSize: 11, color: Colors.grey[500], fontFamily: 'monospace'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ],
         ),
       ),
     );
-  }
-
-  Widget _buildTimezoneInfoCard() {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 16),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Text(
-          '🌍 Current Timezone: ${TimezoneService.getTimezoneDisplayName()} (${TimezoneService.getUtcOffsetString()})',
-          style: const TextStyle(fontSize: 12, color: Colors.grey),
-        ),
-      ),
-    );
-  }
-
-  String _formatTimeOfDayToUtc(TimeOfDay time) {
-    final baseDate = DateTime.utc(2024, 1, 1);
-    final localDateTime = DateTime(baseDate.year, baseDate.month, baseDate.day, time.hour, time.minute);
-    final utcDateTime = localDateTime.toUtc();
-    return '${utcDateTime.hour.toString().padLeft(2, '0')}:${utcDateTime.minute.toString().padLeft(2, '0')}:00';
   }
 
   // ==================== CREATE SALON ====================
@@ -2031,12 +2207,12 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
       String? coverUrl = (_coverFile != null || _coverWebBytes != null) ? await _uploadCover() : null;
 
       final prefs = await SharedPreferences.getInstance();
-      final deviceTimezone = prefs.getString('cached_timezone') ?? TimezoneService.getCurrentTimezone();
+      final userTimezone = prefs.getString('user_timezone') ?? TimezoneService.getCurrentTimezone();
 
       final extraData = {
         'created_from': _isWeb ? 'web' : 'mobile',
         'platform': _getPlatformName(),
-        'timezone': deviceTimezone,
+        'user_timezone': userTimezone,
       };
 
       final salonData = {
@@ -2048,8 +2224,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
         'description': _descriptionController.text.trim().isEmpty ? null : _descriptionController.text.trim(),
         'logo_url': logoUrl,
         'cover_url': coverUrl,
-        'open_time': _formatTimeOfDayToUtc(_openTime!),
-        'close_time': _formatTimeOfDayToUtc(_closeTime!),
+        'open_time': _openTimeUtc,      // UTC time from conversion
+        'close_time': _closeTimeUtc,    // UTC time from conversion
+        'timezone': _salonTimezone,     // Salon's timezone
         'extra_data': extraData,
         'is_active': true,
       };
@@ -2098,10 +2275,13 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
         title: "🎉 Salon Created!",
         message:
             "${_nameController.text.trim()} created successfully.\n\n"
-            "✅ Timezone: ${TimezoneService.getTimezoneDisplayName()}\n"
+            "📍 Salon Timezone: ${_getTimezoneDisplay()}\n"
+            "🕐 Salon Hours (UTC): $_openTimeUtc - $_closeTimeUtc\n"
+            "🕐 Salon Hours (Local): ${_openTimeLocal.format(context)} - ${_closeTimeLocal.format(context)}\n"
             "✅ ${_selectedGenderIds.length} genders selected\n"
             "✅ ${_addedAgeCategories.length} age categories added\n"
-            "✅ ${_addedServiceCategories.length} service categories added",
+            "✅ ${_addedServiceCategories.length} service categories added\n\n"
+            "💡 Tip: Times will automatically adjust to your local timezone when viewing",
         isError: false,
       );
 
@@ -2170,7 +2350,37 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                       child: Align(alignment: Alignment.topLeft, child: _buildLogoSeparate()),
                     ),
                     const SizedBox(height: 16),
-                    _buildTimezoneInfoCard(),
+                    
+                    // Timezone info card
+                    Card(
+                      color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.access_time, color: Color(0xFFFF6B8B)),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Your Timezone: ${_getTimezoneDisplay()}',
+                                    style: const TextStyle(fontWeight: FontWeight.w500),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'All times you select will be saved in UTC and displayed in your local timezone',
+                                    style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                     const SizedBox(height: 16),
 
                     // Basic Information

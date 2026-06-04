@@ -1,5 +1,3 @@
-// lib/screens/owner/edit_salon_screen.dart
-
 import 'dart:io' show File;
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -10,6 +8,7 @@ import 'package:path/path.dart' as path;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:image_cropper/image_cropper.dart';
+import 'package:timezone/timezone.dart' as tz;
 import '../../services/timezone_service.dart';
 
 // ==================== ENHANCED TIME PICKER ====================
@@ -377,6 +376,7 @@ class _TimePickerFieldState extends State<TimePickerField> {
   }
 }
 
+// ==================== EDIT SALON SCREEN ====================
 class EditSalonScreen extends StatefulWidget {
   final int salonId;
 
@@ -387,7 +387,9 @@ class EditSalonScreen extends StatefulWidget {
 }
 
 class _EditSalonScreenState extends State<EditSalonScreen> {
-  // Controllers
+  // ============================================
+  // BASIC INFO CONTROLLERS
+  // ============================================
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _addressController = TextEditingController();
   final TextEditingController _phoneController = TextEditingController();
@@ -397,43 +399,35 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   // Validation flags
   bool _isPhoneValid = true;
   bool _isEmailValid = true;
-
-  // ============================================
-  // AGE VALIDATION FLAGS (NEW)
-  // ============================================
   bool _isMinAgeValid = true;
   bool _isMaxAgeValid = true;
   bool _isAgeRangeValid = true;
 
   // ============================================
-  // GENDER SECTION - MULTI-SELECT CHIPS ONLY
+  // GENDER SECTION
   // ============================================
   List<Map<String, dynamic>> _globalGenders = [];
   final List<int> _selectedGenderIds = [];
 
   // ============================================
-  // AGE CATEGORY SECTION - ADD WITH SUGGESTIONS
+  // AGE CATEGORY SECTION
   // ============================================
   final List<Map<String, dynamic>> _addedAgeCategories = [];
   final TextEditingController _ageCategoryDisplayNameController = TextEditingController();
   final TextEditingController _ageCategoryMinAgeController = TextEditingController();
   final TextEditingController _ageCategoryMaxAgeController = TextEditingController();
-  
   List<Map<String, dynamic>> _globalAgeCategories = [];
 
   // ============================================
-  // SERVICE CATEGORY SECTION - ADD WITH SUGGESTIONS
+  // SERVICE CATEGORY SECTION
   // ============================================
   final List<Map<String, dynamic>> _addedServiceCategories = [];
   final TextEditingController _serviceCategoryDisplayNameController = TextEditingController();
   final TextEditingController _serviceCategoryDescriptionController = TextEditingController();
-  
   String _selectedIcon = 'content_cut';
   Color _selectedColor = const Color(0xFFFF6B8B);
-  
   List<Map<String, dynamic>> _globalCategories = [];
 
-  // Icon list for selection
   final List<Map<String, dynamic>> _iconList = [  
     {'name': 'face', 'icon': Icons.face, 'label': 'Face'},
     {'name': 'face_retouching_natural', 'icon': Icons.face_retouching_natural, 'label': 'Beard'},
@@ -445,7 +439,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     {'name': 'spa_outlined', 'icon': Icons.spa_outlined, 'label': 'Wellness'},
   ];
 
-  // Images
+  // ============================================
+  // IMAGES
+  // ============================================
   File? _logoFile;
   Uint8List? _logoWebBytes;
   File? _coverFile;
@@ -455,22 +451,28 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   bool _isUploadingLogo = false;
   bool _isUploadingCover = false;
 
-  // Business hours
-  TimeOfDay? _openTime;
-  TimeOfDay? _closeTime;
-
-  // Timezone tracking
-  String _deviceTimezone = '';
+  // ============================================
+  // TIMEZONE VARIABLES (CRITICAL - DON'T MISS!)
+  // ============================================
+  String _userTimezone = '';
+  String _salonTimezone = '';
+  
+  // Business hours - UTC for database
+  String _openTimeUtc = '';
+  String _closeTimeUtc = '';
+  
+  // Business hours - Local for display
+  TimeOfDay? _openTimeLocal;
+  TimeOfDay? _closeTimeLocal;
+  
   bool _isTimezoneLoaded = false;
   bool _isLoadingGlobalData = false;
   bool _hasErrorLoadingData = false;
-
   bool _isLoading = true;
   bool _isSaving = false;
   bool _isDeleting = false;
 
   final _formKey = GlobalKey<FormState>();
-
   final supabase = Supabase.instance.client;
   final picker = ImagePicker();
 
@@ -489,14 +491,11 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     _phoneController.dispose();
     _emailController.dispose();
     _descriptionController.dispose();
-    
     _ageCategoryDisplayNameController.dispose();
     _ageCategoryMinAgeController.dispose();
     _ageCategoryMaxAgeController.dispose();
-    
     _serviceCategoryDisplayNameController.dispose();
     _serviceCategoryDescriptionController.dispose();
-    
     super.dispose();
   }
 
@@ -508,16 +507,12 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     await TimezoneService.initialize();
 
     final prefs = await SharedPreferences.getInstance();
-    final cachedTimezone = prefs.getString('cached_timezone');
-
-    if (cachedTimezone != null && cachedTimezone.isNotEmpty) {
-      _deviceTimezone = cachedTimezone;
-      debugPrint('✅ Using cached timezone: $_deviceTimezone');
-    } else {
-      _deviceTimezone = TimezoneService.getCurrentTimezone();
-      await prefs.setString('cached_timezone', _deviceTimezone);
-      debugPrint('✅ Saved device timezone to cache: $_deviceTimezone');
-    }
+    
+    // Get user's timezone
+    _userTimezone = prefs.getString('user_timezone') ?? TimezoneService.getCurrentTimezone();
+    
+    // Ensure TimezoneService uses this timezone
+    await TimezoneService.setTimezone(_userTimezone);
 
     setState(() {
       _isTimezoneLoaded = true;
@@ -527,35 +522,71 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   }
 
   // ============================================
-  // UTC TO LOCAL CONVERSION
+  // CORRECT TIMEZONE CONVERSIONS
   // ============================================
   
-  TimeOfDay _utcToLocalTime(String utcTimeStr) {
-    final parts = utcTimeStr.split(':');
-    final utcHour = int.parse(parts[0]);
-    final utcMinute = int.parse(parts[1]);
-    
-    final now = DateTime.now();
-    final utcDateTime = DateTime.utc(now.year, now.month, now.day, utcHour, utcMinute);
-    final localDateTime = utcDateTime.toLocal();
-    
-    debugPrint('🔄 UTC to Local: $utcTimeStr UTC → ${localDateTime.hour}:${localDateTime.minute} Local');
-    
-    return TimeOfDay(hour: localDateTime.hour, minute: localDateTime.minute);
+  /// Convert UTC time string (from database) to LOCAL TimeOfDay for display
+  TimeOfDay _utcToLocalTime(String utcTimeStr, String salonTimezone) {
+    try {
+      final parts = utcTimeStr.split(':');
+      final utcHour = int.parse(parts[0]);
+      final utcMinute = int.parse(parts[1]);
+      
+      final now = DateTime.now();
+      final utcDateTime = DateTime.utc(now.year, now.month, now.day, utcHour, utcMinute);
+      
+      // Use salon's timezone for conversion
+      final location = tz.getLocation(salonTimezone);
+      final localDateTime = tz.TZDateTime.from(utcDateTime, location);
+      
+      debugPrint('🔄 UTC to Local: $utcTimeStr UTC → ${localDateTime.hour}:${localDateTime.minute} ($salonTimezone)');
+      
+      return TimeOfDay(hour: localDateTime.hour, minute: localDateTime.minute);
+    } catch (e) {
+      debugPrint('Error converting UTC to local: $e');
+      // Fallback: simple conversion
+      final parts = utcTimeStr.split(':');
+      final utcHour = int.parse(parts[0]);
+      final utcMinute = int.parse(parts[1]);
+      final offsetHours = TimezoneService.getUtcOffsetHours();
+      int localHour = utcHour + offsetHours;
+      if (localHour >= 24) localHour -= 24;
+      if (localHour < 0) localHour += 24;
+      return TimeOfDay(hour: localHour, minute: utcMinute);
+    }
   }
-  
-  String _localTimeToUtc(TimeOfDay localTime) {
-    final now = DateTime.now();
-    final localDateTime = DateTime(
-      now.year,
-      now.month,
-      now.day,
-      localTime.hour,
-      localTime.minute,
-    );
-    final utcDateTime = localDateTime.toUtc();
-    
-    return '${utcDateTime.hour.toString().padLeft(2, '0')}:${utcDateTime.minute.toString().padLeft(2, '0')}:00';
+
+  /// Convert LOCAL TimeOfDay to UTC time string for database
+  String _localTimeToUtc(TimeOfDay localTime, String salonTimezone) {
+    try {
+      final now = DateTime.now();
+      final location = tz.getLocation(salonTimezone);
+      
+      final localTZDateTime = tz.TZDateTime(
+        location,
+        now.year, now.month, now.day,
+        localTime.hour, localTime.minute,
+      );
+      
+      final utcDateTime = localTZDateTime.toUtc();
+      
+      debugPrint('🔄 Local to UTC: ${localTime.hour}:${localTime.minute} ($salonTimezone) → ${utcDateTime.hour}:${utcDateTime.minute} UTC');
+      
+      return '${utcDateTime.hour.toString().padLeft(2, '0')}:${utcDateTime.minute.toString().padLeft(2, '0')}:00';
+    } catch (e) {
+      debugPrint('Error converting local to UTC: $e');
+      // Fallback: simple conversion
+      final offsetHours = TimezoneService.getUtcOffsetHours();
+      int utcHour = localTime.hour - offsetHours;
+      if (utcHour < 0) utcHour += 24;
+      if (utcHour >= 24) utcHour -= 24;
+      return '${utcHour.toString().padLeft(2, '0')}:${localTime.minute.toString().padLeft(2, '0')}:00';
+    }
+  }
+
+  /// Get timezone display string with flag
+  String _getTimezoneDisplay() {
+    return '${TimezoneService.getCurrentFlag()} ${TimezoneService.getTimezoneDisplayName()} (${TimezoneService.getUtcOffsetString()})';
   }
 
   // ============================================
@@ -644,22 +675,31 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
 
       _currentLogoUrl = response['logo_url'];
       _currentCoverUrl = response['cover_url'];
+      
+      // ✅ IMPORTANT: Get salon's timezone from database
+      _salonTimezone = response['timezone'] ?? TimezoneService.getCurrentTimezone();
 
+      // ✅ Load and convert times using salon's timezone
       if (response['open_time'] != null) {
-        final openTimeUtc = response['open_time'] as String;
-        _openTime = _utcToLocalTime(openTimeUtc);
+        _openTimeUtc = response['open_time'] as String;
+        _openTimeLocal = _utcToLocalTime(_openTimeUtc, _salonTimezone);
       } else {
-        _openTime = const TimeOfDay(hour: 9, minute: 0);
+        _openTimeLocal = const TimeOfDay(hour: 9, minute: 0);
+        _openTimeUtc = _localTimeToUtc(_openTimeLocal!, _salonTimezone);
       }
 
       if (response['close_time'] != null) {
-        final closeTimeUtc = response['close_time'] as String;
-        _closeTime = _utcToLocalTime(closeTimeUtc);
+        _closeTimeUtc = response['close_time'] as String;
+        _closeTimeLocal = _utcToLocalTime(_closeTimeUtc, _salonTimezone);
       } else {
-        _closeTime = const TimeOfDay(hour: 18, minute: 0);
+        _closeTimeLocal = const TimeOfDay(hour: 18, minute: 0);
+        _closeTimeUtc = _localTimeToUtc(_closeTimeLocal!, _salonTimezone);
       }
       
-      debugPrint('✅ Salon data loaded');
+      debugPrint('✅ Salon data loaded. Salon timezone: $_salonTimezone, User timezone: $_userTimezone');
+      debugPrint('✅ Open time: UTC=$_openTimeUtc, Local=${_openTimeLocal?.hour}:${_openTimeLocal?.minute}');
+      debugPrint('✅ Close time: UTC=$_closeTimeUtc, Local=${_closeTimeLocal?.hour}:${_closeTimeLocal?.minute}');
+      
     } catch (e) {
       debugPrint('Error loading salon: $e');
       rethrow;
@@ -769,13 +809,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     });
   }
 
-  // ============================================
-  // AGE VALIDATION FUNCTIONS (NEW)
-  // ============================================
-  
   void _validateAgeFields() {
     setState(() {
-      // Validate Min Age
       final minAgeStr = _ageCategoryMinAgeController.text.trim();
       if (minAgeStr.isEmpty) {
         _isMinAgeValid = true;
@@ -784,7 +819,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         _isMinAgeValid = minAge != null && minAge >= 0 && minAge <= 150;
       }
 
-      // Validate Max Age
       final maxAgeStr = _ageCategoryMaxAgeController.text.trim();
       if (maxAgeStr.isEmpty) {
         _isMaxAgeValid = true;
@@ -793,7 +827,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         _isMaxAgeValid = maxAge != null && maxAge >= 0 && maxAge <= 150;
       }
 
-      // Validate Min <= Max
       final minAge = int.tryParse(_ageCategoryMinAgeController.text.trim());
       final maxAge = int.tryParse(_ageCategoryMaxAgeController.text.trim());
       
@@ -927,49 +960,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     for (int i = 0; i < _addedServiceCategories.length; i++) {
       _addedServiceCategories[i]['display_order'] = i;
     }
-  }
-
-  // ============================================
-  // AGE TEXT FIELD WITH VALIDATION (NEW)
-  // ============================================
-  
-  Widget _buildAgeTextField({
-    required TextEditingController controller,
-    required String label,
-    required String hint,
-    required IconData icon,
-    required TextInputType keyboardType,
-    required bool isValid,
-    required VoidCallback onChanged,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: TextFormField(
-        controller: controller,
-        keyboardType: keyboardType,
-        onChanged: (value) => onChanged(),
-        decoration: InputDecoration(
-          labelText: label,
-          hintText: hint,
-          prefixIcon: Icon(icon, color: Colors.grey),
-          errorText: !isValid && controller.text.isNotEmpty ? 'Enter a valid number (0-150)' : null,
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: Color(0xFFFF6B8B), width: 2),
-          ),
-          errorBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: Colors.red, width: 1),
-          ),
-          focusedErrorBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: Colors.red, width: 2),
-          ),
-        ),
-      ),
-    );
   }
 
   // ============================================
@@ -1288,7 +1278,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       return;
     }
 
-    if (_openTime == null || _closeTime == null) {
+    if (_openTimeLocal == null || _closeTimeLocal == null) {
       _showSnackBar('Please set business hours', Colors.orange);
       return;
     }
@@ -1299,8 +1289,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       final logoUrl = await _uploadLogo();
       final coverUrl = await _uploadCover();
 
-      final openTimeUtc = _localTimeToUtc(_openTime!);
-      final closeTimeUtc = _localTimeToUtc(_closeTime!);
+      // ✅ IMPORTANT: Convert local times to UTC using salon's timezone
+      final openTimeUtc = _localTimeToUtc(_openTimeLocal!, _salonTimezone);
+      final closeTimeUtc = _localTimeToUtc(_closeTimeLocal!, _salonTimezone);
 
       final updateData = {
         'name': _nameController.text.trim(),
@@ -1367,8 +1358,13 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         context: context,
         title: "✅ Salon Updated!",
         message: "${_nameController.text.trim()} has been updated successfully.\n\n"
-            "⏰ Business hours saved in UTC.\n"
-            "🌍 Timezone: ${TimezoneService.getTimezoneDisplayName()}",
+            "📍 Salon Timezone: ${_getTimezoneDisplay()}\n"
+            "🕐 UTC Time: $openTimeUtc - $closeTimeUtc\n"
+            "🕐 Local Time: ${_openTimeLocal!.format(context)} - ${_closeTimeLocal!.format(context)}\n\n"
+            "✅ ${_selectedGenderIds.length} genders\n"
+            "✅ ${_addedAgeCategories.length} age categories\n"
+            "✅ ${_addedServiceCategories.length} service categories\n\n"
+            "💡 Times are saved in UTC and will be displayed in your local timezone",
         isError: false,
       );
 
@@ -1479,15 +1475,25 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(12),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Icon(Icons.access_time, size: 16, color: Colors.grey),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                '🌍 Current Timezone: ${TimezoneService.getTimezoneDisplayName()} (${TimezoneService.getUtcOffsetString()})',
-                style: const TextStyle(fontSize: 12, color: Colors.grey),
-              ),
+            Row(
+              children: [
+                Text(
+                  _getTimezoneDisplay(),
+                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Salon timezone: $_salonTimezone',
+              style: const TextStyle(fontSize: 11, color: Colors.grey),
+            ),
+            Text(
+              'Your timezone: $_userTimezone',
+              style: const TextStyle(fontSize: 11, color: Colors.grey),
             ),
           ],
         ),
@@ -1570,10 +1576,45 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     );
   }
 
-  // ============================================
-  // SPLIT VIEW SECTION
-  // ============================================
-  
+  Widget _buildAgeTextField({
+    required TextEditingController controller,
+    required String label,
+    required String hint,
+    required IconData icon,
+    required TextInputType keyboardType,
+    required bool isValid,
+    required VoidCallback onChanged,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: TextFormField(
+        controller: controller,
+        keyboardType: keyboardType,
+        onChanged: (value) => onChanged(),
+        decoration: InputDecoration(
+          labelText: label,
+          hintText: hint,
+          prefixIcon: Icon(icon, color: Colors.grey),
+          errorText: !isValid && controller.text.isNotEmpty ? 'Enter a valid number (0-150)' : null,
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: Color(0xFFFF6B8B), width: 2),
+          ),
+          errorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: Colors.red, width: 1),
+          ),
+          focusedErrorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: Colors.red, width: 2),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildSplitViewSection({
     required String title,
     required IconData icon,
@@ -1920,10 +1961,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     );
   }
 
-  // ============================================
-  // GENDER SECTION - MULTI-SELECT CHIPS
-  // ============================================
-  
   Widget _buildGenderSelection() {
     if (_isLoadingGlobalData) {
       return _buildLoadingCard('Genders', Icons.people, Colors.blue);
@@ -2033,10 +2070,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     );
   }
 
-  // ============================================
-  // AGE CATEGORY SECTION - SPLIT VIEW (UPDATED WITH VALIDATION)
-  // ============================================
-  
   Widget _buildAgeCategorySection() {
     if (_isLoadingGlobalData) {
       return _buildLoadingCard('Age Categories', Icons.calendar_today, Colors.green);
@@ -2119,10 +2152,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     );
   }
 
-  // ============================================
-  // SERVICE CATEGORY SECTION - SPLIT VIEW
-  // ============================================
-  
   Widget _buildServiceCategorySection() {
     if (_isLoadingGlobalData) {
       return _buildLoadingCard('Main Services', Icons.category, Colors.orange);
@@ -2579,7 +2608,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   }
 
   // ============================================
-  // BUSINESS HOURS CARD
+  // BUSINESS HOURS CARD (UPDATED WITH UTC DISPLAY)
   // ============================================
   
   Widget _buildBusinessHoursCard() {
@@ -2594,16 +2623,32 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               'Business Hours',
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                _getTimezoneDisplay(),
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+              ),
+            ),
             const SizedBox(height: 16),
             Row(
               children: [
                 Expanded(
                   child: TimePickerField(
                     label: 'Open Time',
-                    initialTime: _openTime,
+                    initialTime: _openTimeLocal,
                     isRequired: true,
                     onTimeSelected: (time) {
-                      setState(() => _openTime = time);
+                      setState(() {
+                        _openTimeLocal = time;
+                        // Update UTC when local changes
+                        _openTimeUtc = _localTimeToUtc(time, _salonTimezone);
+                      });
                     },
                   ),
                 ),
@@ -2611,14 +2656,55 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 Expanded(
                   child: TimePickerField(
                     label: 'Close Time',
-                    initialTime: _closeTime,
+                    initialTime: _closeTimeLocal,
                     isRequired: true,
                     onTimeSelected: (time) {
-                      setState(() => _closeTime = time);
+                      setState(() {
+                        _closeTimeLocal = time;
+                        // Update UTC when local changes
+                        _closeTimeUtc = _localTimeToUtc(time, _salonTimezone);
+                      });
                     },
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.grey[50],
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.info_outline, size: 16, color: Colors.grey[600]),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Times are saved in UTC and will be displayed in your local timezone',
+                          style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Icon(Icons.cloud_queue, size: 16, color: Colors.grey[600]),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'UTC Time (Database): $_openTimeUtc - $_closeTimeUtc',
+                          style: TextStyle(fontSize: 11, color: Colors.grey[500], fontFamily: 'monospace'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ],
         ),

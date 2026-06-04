@@ -1,4 +1,3 @@
-// screens/owner/salon_holidays_screen.dart
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
@@ -29,8 +28,9 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
   final Set<int> _selectedForDelete = {};
   bool _isSelectMode = false;
 
-  // Timezone
-  String _deviceTimezone = '';
+  // Timezone variables
+  String _userTimezone = '';
+  String _salonTimezone = '';
   bool _isTimezoneLoaded = false;
 
   @override
@@ -42,21 +42,18 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
   // Helper to check if current platform is web
   bool get _isWeb => MediaQuery.of(context).size.width > 800;
 
-  // ==================== TIMEZONE INITIALIZATION ====================
+  // ==================== CORRECT TIMEZONE FUNCTIONS ====================
+
   Future<void> _initializeWithTimezone() async {
     await TimezoneService.initialize();
 
     final prefs = await SharedPreferences.getInstance();
-    final cachedTimezone = prefs.getString('cached_timezone');
-
-    if (cachedTimezone != null && cachedTimezone.isNotEmpty) {
-      _deviceTimezone = cachedTimezone;
-      debugPrint('✅ Using cached timezone: $_deviceTimezone');
-    } else {
-      _deviceTimezone = TimezoneService.getCurrentTimezone();
-      await prefs.setString('cached_timezone', _deviceTimezone);
-      debugPrint('✅ Saved device timezone to cache: $_deviceTimezone');
-    }
+    
+    // Get user's timezone
+    _userTimezone = prefs.getString('user_timezone') ?? TimezoneService.getCurrentTimezone();
+    
+    // Load salon's timezone from database
+    await _loadSalonTimezone();
 
     setState(() {
       _isTimezoneLoaded = true;
@@ -65,25 +62,51 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
     await _loadHolidays();
   }
 
-  // ==================== UTC TO LOCAL DATE CONVERSION ====================
-  DateTime _utcToLocalDate(String utcDateStr) {
-    final utcDateTime = DateTime.parse(utcDateStr);
-    final utcDate = DateTime.utc(utcDateTime.year, utcDateTime.month, utcDateTime.day);
-    final localDateTime = utcDate.toLocal();
-    return localDateTime;
+  Future<void> _loadSalonTimezone() async {
+    try {
+      final response = await supabase
+          .from('salons')
+          .select('timezone')
+          .eq('id', widget.salonId)
+          .single();
+      
+      _salonTimezone = response['timezone'] ?? TimezoneService.getCurrentTimezone();
+      debugPrint('✅ Salon timezone: $_salonTimezone');
+      debugPrint('✅ User timezone: $_userTimezone');
+    } catch (e) {
+      debugPrint('❌ Error loading salon timezone: $e');
+      _salonTimezone = TimezoneService.getCurrentTimezone();
+    }
   }
 
-  // ==================== DISPLAY DATE FORMATTING ====================
+  /// Convert UTC date string to local date for display (using user's timezone)
+  DateTime _utcToLocalDate(String utcDateStr) {
+    try {
+      final utcDateTime = DateTime.parse(utcDateStr);
+      // Use TimezoneService for accurate conversion to user's local timezone
+      final localDateTime = TimezoneService.utcToLocalDateTime('12:00', utcDateTime);
+      return DateTime(localDateTime.year, localDateTime.month, localDateTime.day);
+    } catch (e) {
+      debugPrint('❌ Error converting UTC to local: $e');
+      // Fallback: simple conversion
+      final utcDateTime = DateTime.parse(utcDateStr);
+      return DateTime(utcDateTime.year, utcDateTime.month, utcDateTime.day);
+    }
+  }
+
+
+  /// Format date for display
   String _formatDateForDisplay(String utcDateStr) {
     try {
       final localDate = _utcToLocalDate(utcDateStr);
       return DateFormat('EEEE, MMM d, yyyy').format(localDate);
     } catch (e) {
+      debugPrint('❌ Error formatting date: $e');
       return utcDateStr;
     }
   }
 
-  // ==================== CHECK IF HOLIDAY IS PAST ====================
+  /// Check if holiday is past (using user's local timezone)
   bool _isPastHoliday(String utcDateStr) {
     try {
       final localDate = _utcToLocalDate(utcDateStr);
@@ -91,11 +114,18 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
       final today = DateTime(now.year, now.month, now.day);
       return localDate.isBefore(today);
     } catch (e) {
+      debugPrint('❌ Error checking past holiday: $e');
       return false;
     }
   }
 
+  /// Get timezone display string with flag
+  String _getTimezoneDisplay() {
+    return '${TimezoneService.getCurrentFlag()} ${TimezoneService.getTimezoneDisplayName()} (${TimezoneService.getUtcOffsetString()})';
+  }
+
   // ==================== LOAD HOLIDAYS ====================
+  
   Future<void> _loadHolidays() async {
     if (!_isTimezoneLoaded) return;
     
@@ -124,12 +154,14 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
   }
 
   // ==================== ADD HOLIDAY ====================
+  
   Future<void> _addHoliday() async {
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (context) => _AddEditHolidayDialog(
         salonId: widget.salonId,
-        deviceTimezone: _deviceTimezone,
+        salonTimezone: _salonTimezone,
+        userTimezone: _userTimezone,
       ),
     );
 
@@ -140,13 +172,15 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
   }
 
   // ==================== EDIT HOLIDAY ====================
+  
   Future<void> _editHoliday(Map<String, dynamic> holiday) async {
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (context) => _AddEditHolidayDialog(
         salonId: widget.salonId,
         holidayToEdit: holiday,
-        deviceTimezone: _deviceTimezone,
+        salonTimezone: _salonTimezone,
+        userTimezone: _userTimezone,
       ),
     );
 
@@ -157,6 +191,7 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
   }
 
   // ==================== DELETE SELECTED HOLIDAYS ====================
+  
   Future<void> _deleteSelectedHolidays() async {
     if (_selectedForDelete.isEmpty) return;
 
@@ -195,6 +230,7 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
   }
 
   // ==================== DELETE SINGLE HOLIDAY ====================
+  
   Future<void> _deleteHoliday(Map<String, dynamic> holiday) async {
     final confirm = await showCustomAlert(
       context: context,
@@ -220,6 +256,7 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
   }
 
   // ==================== SELECTION METHODS ====================
+  
   void _toggleSelectMode() {
     setState(() {
       _isSelectMode = !_isSelectMode;
@@ -259,6 +296,7 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
   }
 
   // ==================== UI BUILDERS ====================
+  
   @override
   Widget build(BuildContext context) {
     final isWeb = _isWeb;
@@ -378,6 +416,9 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
   }
 
   Widget _buildWebView() { 
+    final upcomingCount = _holidays.where((h) => !_isPastHoliday(h['holiday_date'])).length;
+    final pastCount = _holidays.where((h) => _isPastHoliday(h['holiday_date'])).length;
+
     return Column(
       children: [
         // Timezone Info Card
@@ -393,9 +434,11 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
             children: [
               const Icon(Icons.access_time, size: 20, color: Colors.blue),
               const SizedBox(width: 12),
-              Text(
-                '🌍 Timezone: ${TimezoneService.getTimezoneDisplayName()} (${TimezoneService.getUtcOffsetString()})',
-                style: const TextStyle(fontSize: 13, color: Colors.blueGrey),
+              Expanded(
+                child: Text(
+                  '🌍 Your Timezone: $_getTimezoneDisplay()',
+                  style: const TextStyle(fontSize: 13, color: Colors.blueGrey),
+                ),
               ),
             ],
           ),
@@ -419,8 +462,8 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
           child: Row(
             children: [
               _buildStatCard('Total Holidays', _holidays.length.toString(), Icons.event, const Color(0xFFFF6B8B)),
-              _buildStatCard('Upcoming', _holidays.where((h) => !_isPastHoliday(h['holiday_date'])).length.toString(), Icons.upcoming, Colors.green),
-              _buildStatCard('Past', _holidays.where((h) => _isPastHoliday(h['holiday_date'])).length.toString(), Icons.history, Colors.grey),
+              _buildStatCard('Upcoming', upcomingCount.toString(), Icons.upcoming, Colors.green),
+              _buildStatCard('Past', pastCount.toString(), Icons.history, Colors.grey),
             ],
           ),
         ),
@@ -582,7 +625,8 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
     );
   }
 
-  // ==================== FIXED MOBILE VIEW - NO OVERFLOW ====================
+  // ==================== MOBILE VIEW ====================
+  
   Widget _buildMobileView() {
     final upcomingCount = _holidays.where((h) => !_isPastHoliday(h['holiday_date'])).length;
     final pastCount = _holidays.where((h) => _isPastHoliday(h['holiday_date'])).length;
@@ -604,7 +648,7 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'Timezone: ${TimezoneService.getTimezoneDisplayName()}',
+                  'Your Timezone: ${TimezoneService.getTimezoneDisplayName()}',
                   style: const TextStyle(fontSize: 11, color: Colors.blueGrey),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -821,12 +865,14 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
 class _AddEditHolidayDialog extends StatefulWidget {
   final int salonId;
   final Map<String, dynamic>? holidayToEdit;
-  final String deviceTimezone;
+  final String salonTimezone;
+  final String userTimezone;
 
   const _AddEditHolidayDialog({
     required this.salonId,
     this.holidayToEdit,
-    required this.deviceTimezone,
+    required this.salonTimezone,
+    required this.userTimezone,
   });
 
   @override
@@ -857,10 +903,35 @@ class _AddEditHolidayDialogState extends State<_AddEditHolidayDialog> {
     }
   }
 
+  // ==================== CORRECT UTC/LOCAL CONVERSIONS ====================
+  
+  /// Convert UTC date string to local date for display
   DateTime _utcToLocalDate(String utcDateStr) {
-    final utcDateTime = DateTime.parse(utcDateStr);
-    final utcDate = DateTime.utc(utcDateTime.year, utcDateTime.month, utcDateTime.day);
-    return utcDate.toLocal();
+    try {
+      final utcDateTime = DateTime.parse(utcDateStr);
+      // Use TimezoneService for accurate conversion to user's local timezone
+      final localDateTime = TimezoneService.utcToLocalDateTime('12:00', utcDateTime);
+      return DateTime(localDateTime.year, localDateTime.month, localDateTime.day);
+    } catch (e) {
+      debugPrint('Error converting UTC to local: $e');
+      final utcDateTime = DateTime.parse(utcDateStr);
+      return DateTime(utcDateTime.year, utcDateTime.month, utcDateTime.day);
+    }
+  }
+
+  /// Convert local date to UTC date string for database
+  String _localDateToUtcDateString(DateTime localDate) {
+    try {
+      final utcDateTime = DateTime.utc(
+        localDate.year,
+        localDate.month,
+        localDate.day,
+      );
+      return '${utcDateTime.year.toString().padLeft(4, '0')}-${utcDateTime.month.toString().padLeft(2, '0')}-${utcDateTime.day.toString().padLeft(2, '0')}';
+    } catch (e) {
+      debugPrint('Error converting local date to UTC: $e');
+      return '${localDate.year}-${localDate.month.toString().padLeft(2, '0')}-${localDate.day.toString().padLeft(2, '0')}';
+    }
   }
 
   void _loadHolidayData() {
@@ -935,7 +1006,7 @@ class _AddEditHolidayDialogState extends State<_AddEditHolidayDialog> {
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              'Timezone: ${TimezoneService.getTimezoneDisplayName()}',
+                              'Your Timezone: ${TimezoneService.getTimezoneDisplayName()}',
                               style: const TextStyle(fontSize: 11, color: Colors.blueGrey),
                             ),
                           ),
@@ -1139,12 +1210,8 @@ class _AddEditHolidayDialogState extends State<_AddEditHolidayDialog> {
     });
 
     try {
-      final utcDateTime = DateTime.utc(
-        _selectedLocalDate!.year,
-        _selectedLocalDate!.month,
-        _selectedLocalDate!.day,
-      );
-      final utcDateStr = '${utcDateTime.year.toString().padLeft(4, '0')}-${utcDateTime.month.toString().padLeft(2, '0')}-${utcDateTime.day.toString().padLeft(2, '0')}';
+      // Convert local date to UTC for database storage
+      final utcDateStr = _localDateToUtcDateString(_selectedLocalDate!);
       
       debugPrint('📅 Saving holiday - Local: ${DateFormat('yyyy-MM-dd').format(_selectedLocalDate!)} → UTC: $utcDateStr');
 

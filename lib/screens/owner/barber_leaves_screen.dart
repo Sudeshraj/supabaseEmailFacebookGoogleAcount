@@ -1,4 +1,3 @@
-// screens/owner/barber_leaves_screen.dart
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -43,7 +42,6 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
   }
 
   Future<void> _initializeAndLoad() async {
-    // Initialize TimezoneService first
     await TimezoneService.initialize();
     await _loadData();
   }
@@ -53,11 +51,127 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     super.dispose();
   }
 
+  // ==================== CORRECT TIMEZONE HELPER METHODS ====================
+
+  /// Convert local date to UTC date string for DB storage
+  String _localDateToUtcDateString(DateTime localDate) {
+    try {
+      final utcDateTime = DateTime.utc(
+        localDate.year,
+        localDate.month,
+        localDate.day,
+      );
+      return _formatDateForDb(utcDateTime);
+    } catch (e) {
+      debugPrint('❌ Error converting local date to UTC: $e');
+      return '${localDate.year}-${localDate.month.toString().padLeft(2, '0')}-${localDate.day.toString().padLeft(2, '0')}';
+    }
+  }
+
+  /// Convert UTC date string from DB to local date for display
+  DateTime _utcDateStringToLocalDate(String utcDateStr) {
+    try {
+      final utcDateTime = DateTime.parse(utcDateStr);
+      final localDateTime = TimezoneService.utcToLocalDateTime('12:00', utcDateTime);
+      return DateTime(localDateTime.year, localDateTime.month, localDateTime.day);
+    } catch (e) {
+      debugPrint('❌ Error converting UTC date to local: $e');
+      return DateTime.now();
+    }
+  }
+
+  /// Format date for database storage (YYYY-MM-DD)
+  String _formatDateForDb(DateTime date) {
+    return '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+  }
+
+  /// Get display time from UTC time string
+  String _getDisplayTime(String? utcTimeStr) {
+    if (utcTimeStr == null || utcTimeStr.isEmpty) return '';
+    try {
+      return TimezoneService.utcToLocalTime(utcTimeStr, DateTime.now());
+    } catch (e) {
+      debugPrint('❌ Error getting display time: $e');
+      return utcTimeStr;
+    }
+  }
+
+  /// Format date for display (e.g., "Jan 15, 2024")
+  String _formatDateForDisplay(DateTime date) {
+    final months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    return '${months[date.month - 1]} ${date.day}, ${date.year}';
+  }
+
+  /// Format date for picker (e.g., "Monday, Jan 15, 2024")
+  String _formatDateForPicker(DateTime date) {
+    return DateFormat('EEEE, MMM d, yyyy').format(date);
+  }
+
+  /// Format date from UTC string for display
+  String _formatDateForDisplayFromUtc(String? utcDateStr) {
+    if (utcDateStr == null) return 'Unknown';
+    try {
+      final localDate = _utcDateStringToLocalDate(utcDateStr);
+      return _formatDateForDisplay(localDate);
+    } catch (e) {
+      debugPrint('Error formatting date from UTC: $e');
+      return utcDateStr;
+    }
+  }
+
+  /// Format time from UTC string for display
+  String _formatTimeForDisplayFromUtc(String? timeStr) {
+    if (timeStr == null) return '';
+    try {
+      return TimezoneService.utcToLocalTime(timeStr, DateTime.now());
+    } catch (e) {
+      debugPrint('Error formatting time from UTC: $e');
+      return timeStr;
+    }
+  }
+
+  /// Get current timezone flag for display
+  String _getTimezoneFlag() {
+    return TimezoneService.getCurrentFlag();
+  }
+
+  /// Check if a UTC date string is a holiday
+  bool _isHoliday(String utcDateStr) {
+    final localDate = _utcDateStringToLocalDate(utcDateStr);
+    final localDateStr = _formatDateForDb(localDate);
+    
+    return _holidays.any((h) {
+      final holidayLocalDate = _utcDateStringToLocalDate(h['holiday_date']);
+      final holidayLocalStr = _formatDateForDb(holidayLocalDate);
+      return holidayLocalStr == localDateStr;
+    });
+  }
+
+  /// Get holiday name for a UTC date string
+  String? _getHolidayName(String utcDateStr) {
+    final localDate = _utcDateStringToLocalDate(utcDateStr);
+    final localDateStr = _formatDateForDb(localDate);
+    
+    final holiday = _holidays.firstWhere(
+      (h) {
+        final holidayLocalDate = _utcDateStringToLocalDate(h['holiday_date']);
+        final holidayLocalStr = _formatDateForDb(holidayLocalDate);
+        return holidayLocalStr == localDateStr;
+      },
+      orElse: () => {},
+    );
+    return holiday['name'];
+  }
+
+  // ==================== DATA LOADING ====================
+
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
 
     try {
-      // Load salon details
       final salonResponse = await supabase
           .from('salons')
           .select('open_time, close_time')
@@ -65,12 +179,10 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
           .maybeSingle();
 
       if (salonResponse != null) {
-        // Store UTC times from DB
         _salonOpenTimeUtc = salonResponse['open_time'];
         _salonCloseTimeUtc = salonResponse['close_time'];
       }
 
-      // Load holidays for this salon (holiday dates are stored as UTC dates)
       final holidaysResponse = await supabase
           .from('salon_holidays')
           .select('holiday_date, name, description')
@@ -79,7 +191,6 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
 
       _holidays = List<Map<String, dynamic>>.from(holidaysResponse);
 
-      // Get barber IDs with status = 'active'
       final salonBarbersResponse = await supabase
           .from('salon_barbers')
           .select('barber_id')
@@ -91,7 +202,6 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
           .toList();
 
       if (barberIds.isNotEmpty) {
-        // Get profiles - optimized with single query
         final profilesResponse = await supabase
             .from('profiles')
             .select('id, full_name, email, avatar_url')
@@ -114,7 +224,6 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
           _barberProfiles[id] = profile;
         }
 
-        // Get leaves - optimized with single query
         await _loadLeavesWithFilters(barberIds);
       } else {
         _barbers = [];
@@ -144,7 +253,6 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
         query = query.eq('barber_id', _selectedBarberId!);
       }
 
-      // Convert local selected date to UTC date for DB query
       if (_selectedLocalDate != null) {
         final utcDateStr = _localDateToUtcDateString(_selectedLocalDate!);
         query = query.eq('leave_date', utcDateStr);
@@ -200,79 +308,6 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     if (mounted) setState(() => _isLoading = false);
   }
 
-  // ==================== TIMEZONE HELPER METHODS ====================
-  
-  String _localDateToUtcDateString(DateTime localDate) {
-    // Convert local date to UTC date string for DB storage
-    final utcDateTime = DateTime.utc(
-      localDate.year, localDate.month, localDate.day,
-    );
-    return _formatDateForDb(utcDateTime);
-  }
-
-  DateTime _utcDateStringToLocalDate(String utcDateStr) {
-    // Convert UTC date string from DB to local date for display
-    final utcDateTime = DateTime.parse(utcDateStr);
-    // Create local date at midnight in local timezone
-    final localDateTime = TimezoneService.utcToLocalDateTime('00:00', utcDateTime);
-    return localDateTime;
-  }
-
-  String _formatDateForDb(DateTime date) {
-    return '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
-  }
-
-
-  String _getDisplayTime(String? utcTimeStr) {
-    if (utcTimeStr == null) return '';
-    try {
-      // Use TimezoneService to convert UTC time to local time
-      return TimezoneService.utcToLocalTime(utcTimeStr, DateTime.now());
-    } catch (e) {
-      return utcTimeStr;
-    }
-  }
-
-  String _formatDateForDisplay(DateTime date) {
-    final months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-    ];
-    return '${months[date.month - 1]} ${date.day}, ${date.year}';
-  }
-
-  String _formatDateForPicker(DateTime date) {
-    return DateFormat('EEEE, MMM d, yyyy').format(date);
-  }
-
-  // Check if a date (in UTC) is a holiday - convert to local for comparison
-  bool _isHoliday(String utcDateStr) {
-    final localDate = _utcDateStringToLocalDate(utcDateStr);
-    final localDateStr = _formatDateForDb(localDate);
-    
-    return _holidays.any((h) {
-      final holidayLocalDate = _utcDateStringToLocalDate(h['holiday_date']);
-      final holidayLocalStr = _formatDateForDb(holidayLocalDate);
-      return holidayLocalStr == localDateStr;
-    });
-  }
-
-  String? _getHolidayName(String utcDateStr) {
-    final localDate = _utcDateStringToLocalDate(utcDateStr);
-    final localDateStr = _formatDateForDb(localDate);
-    
-    final holiday = _holidays.firstWhere(
-      (h) {
-        final holidayLocalDate = _utcDateStringToLocalDate(h['holiday_date']);
-        final holidayLocalStr = _formatDateForDb(holidayLocalDate);
-        return holidayLocalStr == localDateStr;
-      },
-      orElse: () => {},
-    );
-    return holiday['name'];
-  }
-
- 
   // ==================== CUSTOMER CHOICE HANDLING ====================
 
   Future<void> _handleAffectedAppointment(
@@ -286,7 +321,6 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       final customerId = appointment['customer_id'];
       final startTimeUtc = appointment['start_time'];
 
-      // Convert UTC times to local for display
       final localDate = _utcDateStringToLocalDate(utcDateStr);
       final timeFormatted = _getDisplayTime(startTimeUtc);
       final dateFormatted = _formatDateForDisplay(localDate);
@@ -299,10 +333,8 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
 
       if (customer == null) return;
 
-      // Get appointment priority
       final priority = await _getAppointmentPriority(appointment);
 
-      // Try to find available barber
       final availableBarber = await _findAvailableBarber(
         salonId: widget.salonId!,
         appointmentDate: utcDateStr,
@@ -318,7 +350,6 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
           .eq('id', appointment['service_id'])
           .single();
 
-      // Show choice dialog to customer
       if (!mounted) return;
       final choice = await showDialog<String>(
         context: context,
@@ -466,7 +497,6 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     String endTime,
   ) async {
     try {
-      // Convert UTC appointment date to local to get day of week
       final localDate = _utcDateStringToLocalDate(appointmentDate);
       final dayOfWeek = localDate.weekday;
 
@@ -553,18 +583,15 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     try {
       final duration = await _getVariantDuration(appointment['variant_id']);
 
-      // Get current UTC date and convert to local for day calculation
       DateTime nextLocalDate = _utcDateStringToLocalDate(
         appointment['appointment_date'],
       ).add(const Duration(days: 1));
 
-      // Skip holidays and Sundays
       while (await _isHolidayDate(nextLocalDate) ||
           nextLocalDate.weekday == DateTime.sunday) {
         nextLocalDate = nextLocalDate.add(const Duration(days: 1));
       }
 
-      // Convert back to UTC for DB storage
       final nextUtcDateStr = _localDateToUtcDateString(nextLocalDate);
       final queueNumber = 1;
 
@@ -724,7 +751,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     }
   }
 
-  // ==================== APPROVE LEAVE WITH REASSIGN ====================
+  // ==================== LEAVE APPROVAL WITH REASSIGN ====================
 
   Future<void> _approveLeaveWithReassign(
     int leaveId,
@@ -794,7 +821,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       debugPrint('📋 Found ${affectedAppointments.length} appointments to handle');
 
       if (!mounted) return;
-      Navigator.pop(context); // Close loading dialog
+      Navigator.pop(context);
 
       if (affectedAppointments.isEmpty) {
         if (!mounted) return;
@@ -849,8 +876,6 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       }
     }
   }
-
-  // ==================== REJECT WITH REASON ====================
 
   Future<void> _showRejectReasonDialog(
     int leaveId,
@@ -972,31 +997,6 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
   }
 
   // ==================== HELPER METHODS ====================
-
-  String _formatDateForDisplayFromUtc(String? utcDateStr) {
-    if (utcDateStr == null) return 'Unknown';
-    try {
-      final localDate = _utcDateStringToLocalDate(utcDateStr);
-      final months = [
-        'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-      ];
-      return '${months[localDate.month - 1]} ${localDate.day}, ${localDate.year}';
-    } catch (e) {
-      debugPrint('Error formatting date: $e');
-      return utcDateStr;
-    }
-  }
-
-  String _formatTimeForDisplayFromUtc(String? timeStr) {
-    if (timeStr == null) return '';
-    try {
-      return TimezoneService.utcToLocalTime(timeStr, DateTime.now());
-    } catch (e) {
-      debugPrint('Error formatting time: $e');
-      return timeStr;
-    }
-  }
 
   String _getLeaveTypeIcon(String type) {
     switch (type) {
@@ -1478,7 +1478,6 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     final bool isWeb = screenWidth > 800;
     final double padding = isWeb ? 24.0 : 16.0;
 
-    // Display current timezone info in app bar
     return Scaffold(
       appBar: AppBar(
         title: Row(
@@ -1492,7 +1491,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Text(
-                TimezoneService.getTimezoneFlag(),
+                _getTimezoneFlag(),
                 style: const TextStyle(fontSize: 12),
               ),
             ),
@@ -2235,7 +2234,6 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
   }
 
   void _parseSalonHours() {
-    // Convert UTC salon hours to local time for display and validation
     if (widget.salonOpenTimeUtc != null) {
       try {
         final localOpenTimeStr = TimezoneService.utcToLocalTime(
@@ -2287,18 +2285,16 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
     _reasonController.text = leave['reason'] ?? '';
     _editLeaveId = leave['id'] as int;
 
-    // Convert UTC date from DB to local date for display
     if (leave['leave_date'] != null) {
       try {
         final utcDate = DateTime.parse(leave['leave_date']);
-        _selectedLocalDate = TimezoneService.utcToLocalDateTime('00:00', utcDate);
+        _selectedLocalDate = TimezoneService.utcToLocalDateTime('12:00', utcDate);
         _checkHoliday(_selectedLocalDate!);
       } catch (e) {
         debugPrint('Error parsing leave_date: $e');
       }
     }
 
-    // Convert UTC times to local times for display
     if (leave['start_time'] != null && leave['end_time'] != null) {
       try {
         final localStartStr = TimezoneService.utcToLocalTime(
@@ -2361,27 +2357,40 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
   }
 
   DateTime _utcDateStringToLocalDate(String utcDateStr) {
-    final utcDateTime = DateTime.parse(utcDateStr);
-    return TimezoneService.utcToLocalDateTime('00:00', utcDateTime);
+    try {
+      final utcDateTime = DateTime.parse(utcDateStr);
+      final localDateTime = TimezoneService.utcToLocalDateTime('12:00', utcDateTime);
+      return DateTime(localDateTime.year, localDateTime.month, localDateTime.day);
+    } catch (e) {
+      debugPrint('Error converting UTC date to local: $e');
+      return DateTime.now();
+    }
   }
 
   String _localDateToUtcDateString(DateTime localDate) {
-    final utcDateTime = DateTime.utc(
-      localDate.year, localDate.month, localDate.day,
-    );
-    return '${utcDateTime.year.toString().padLeft(4, '0')}-${utcDateTime.month.toString().padLeft(2, '0')}-${utcDateTime.day.toString().padLeft(2, '0')}';
+    try {
+      final utcDateTime = DateTime.utc(
+        localDate.year, localDate.month, localDate.day,
+      );
+      return '${utcDateTime.year.toString().padLeft(4, '0')}-${utcDateTime.month.toString().padLeft(2, '0')}-${utcDateTime.day.toString().padLeft(2, '0')}';
+    } catch (e) {
+      debugPrint('Error converting local date to UTC: $e');
+      return '${localDate.year}-${localDate.month.toString().padLeft(2, '0')}-${localDate.day.toString().padLeft(2, '0')}';
+    }
   }
 
   String _localTimeToUtcTimeString(TimeOfDay localTime, DateTime localDate) {
-    final localDateTime = DateTime(
-      localDate.year, localDate.month, localDate.day,
-      localTime.hour, localTime.minute,
-    );
-    final utcTime = TimezoneService.localToUtcTime(
-      '${localTime.hour.toString().padLeft(2, '0')}:${localTime.minute.toString().padLeft(2, '0')}',
-      localDateTime,
-    );
-    return utcTime;
+    try {
+      final localDateTime = DateTime(
+        localDate.year, localDate.month, localDate.day,
+        localTime.hour, localTime.minute,
+      );
+      final timeString = '${localTime.hour.toString().padLeft(2, '0')}:${localTime.minute.toString().padLeft(2, '0')}';
+      return TimezoneService.localToUtcTime(timeString, localDateTime);
+    } catch (e) {
+      debugPrint('Error converting local time to UTC: $e');
+      return '${localTime.hour.toString().padLeft(2, '0')}:${localTime.minute.toString().padLeft(2, '0')}:00';
+    }
   }
 
   @override
@@ -2461,7 +2470,7 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
               borderRadius: BorderRadius.circular(12),
             ),
             child: Text(
-              TimezoneService.getTimezoneFlag(),
+              TimezoneService.getCurrentFlag(),
               style: const TextStyle(fontSize: 10),
             ),
           ),
@@ -2969,7 +2978,6 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
     });
 
     try {
-      // Check if date is holiday
       if (_isHoliday && !_isEditMode) {
         setState(() {
           _errorMessage = 'Cannot add leave on a holiday. The salon is closed.';
@@ -3041,7 +3049,6 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
         }
       }
 
-      // Convert local date to UTC for DB storage
       final utcDateStr = _localDateToUtcDateString(_selectedLocalDate!);
 
       if (!_isEditMode) {
@@ -3064,7 +3071,6 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
       final currentUser = supabase.auth.currentUser;
       if (currentUser == null) throw Exception('No authenticated user');
 
-      // Convert local times to UTC for DB storage
       String? startTimeUtc;
       String? endTimeUtc;
       

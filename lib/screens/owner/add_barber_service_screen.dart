@@ -1,4 +1,4 @@
-// screens/owner/add_barber_service_screen.dart
+// meka use karanne baber list screen eken edit service gihin service baberta add karaddi
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 

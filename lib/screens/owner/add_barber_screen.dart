@@ -1,9 +1,9 @@
-// screens/owner/add_barber_screen.dart
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:timezone/timezone.dart' as tz;
 import '../../utils/ip_helper.dart';
 import '../../services/timezone_service.dart';
 
@@ -36,6 +36,17 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   String? _selectedSalonId;
   Map<String, dynamic>? _selectedSalonDetails;
 
+  // ==================== TIMEZONE VARIABLES ====================
+  String _deviceTimezone = '';
+  String _salonTimezone = '';
+  bool _isTimezoneLoaded = false;
+
+  // Salon hours
+  String _salonOpenTimeUtc = '09:00:00';
+  String _salonCloseTimeUtc = '18:00:00';
+  TimeOfDay? _salonOpenTimeLocal;
+  TimeOfDay? _salonCloseTimeLocal;
+
   // ==================== UI STATES ====================
   bool _isLoading = true;
   bool _isSearching = false;
@@ -52,10 +63,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
 
   // ==================== CATEGORY TAB STATE ====================
   String? _selectedCategoryTab;
-
-  // ==================== TIMEZONE ====================
-  String _deviceTimezone = '';
-  bool _isTimezoneLoaded = false;
 
   // ==================== TIMERS ====================
   Timer? _debounceTimer;
@@ -136,17 +143,94 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     _refreshData();
   }
 
-  // ==================== INITIALIZE ALL DATA ====================
+  // ============================================================
+  // CORRECT TIMEZONE CONVERSION FUNCTIONS
+  // ============================================================
+
+  /// Convert UTC time string to Local TimeOfDay using salon's timezone
+  TimeOfDay _utcToLocalTimeOfDay(String utcTimeStr, String timezone) {
+    try {
+      final parts = utcTimeStr.split(':');
+      final utcHour = int.parse(parts[0]);
+      final utcMinute = int.parse(parts[1]);
+
+      final now = DateTime.now();
+      final utcDateTime = DateTime.utc(
+        now.year,
+        now.month,
+        now.day,
+        utcHour,
+        utcMinute,
+      );
+      final location = tz.getLocation(timezone);
+      final localDateTime = tz.TZDateTime.from(utcDateTime, location);
+
+      debugPrint(
+        '🔄 UTC to Local: $utcTimeStr UTC → ${localDateTime.hour}:${localDateTime.minute} ($timezone)',
+      );
+
+      return TimeOfDay(hour: localDateTime.hour, minute: localDateTime.minute);
+    } catch (e) {
+      debugPrint('❌ Error converting UTC to local: $e');
+      // Fallback: simple conversion
+      final parts = utcTimeStr.split(':');
+      final utcHour = int.parse(parts[0]);
+      final utcMinute = int.parse(parts[1]);
+      final offsetHours = TimezoneService.getUtcOffsetHours();
+      int localHour = utcHour + offsetHours;
+      if (localHour >= 24) localHour -= 24;
+      if (localHour < 0) localHour += 24;
+      return TimeOfDay(hour: localHour, minute: utcMinute);
+    }
+  }
+
+  /// Convert Local TimeOfDay to UTC time string using salon's timezone
+  String _localTimeToUtcString(TimeOfDay localTime, String timezone) {
+    try {
+      final now = DateTime.now();
+      final location = tz.getLocation(timezone);
+
+      final localTZDateTime = tz.TZDateTime(
+        location,
+        now.year,
+        now.month,
+        now.day,
+        localTime.hour,
+        localTime.minute,
+      );
+
+      final utcDateTime = localTZDateTime.toUtc();
+
+      debugPrint(
+        '🔄 Local to UTC: ${localTime.hour}:${localTime.minute} ($timezone) → ${utcDateTime.hour}:${utcDateTime.minute} UTC',
+      );
+
+      return '${utcDateTime.hour.toString().padLeft(2, '0')}:${utcDateTime.minute.toString().padLeft(2, '0')}:00';
+    } catch (e) {
+      debugPrint('❌ Error converting local to UTC: $e');
+      // Fallback: simple conversion
+      final offsetHours = TimezoneService.getUtcOffsetHours();
+      int utcHour = localTime.hour - offsetHours;
+      if (utcHour < 0) utcHour += 24;
+      if (utcHour >= 24) utcHour -= 24;
+      return '${utcHour.toString().padLeft(2, '0')}:${localTime.minute.toString().padLeft(2, '0')}:00';
+    }
+  }
+
+  // ============================================================
+  // INITIALIZE ALL DATA
+  // ============================================================
+
   Future<void> _initializeAllData() async {
     debugPrint('🔄 Initializing all data...');
-    
+
     try {
       // Load timezone first
       await TimezoneService.initialize();
-      
+
       final prefs = await SharedPreferences.getInstance();
       final cachedTimezone = prefs.getString('cached_timezone');
-      
+
       if (cachedTimezone != null && cachedTimezone.isNotEmpty) {
         _deviceTimezone = cachedTimezone;
         debugPrint('✅ Using cached timezone: $_deviceTimezone');
@@ -155,19 +239,18 @@ class _AddBarberScreenState extends State<AddBarberScreen>
         await prefs.setString('cached_timezone', _deviceTimezone);
         debugPrint('✅ Saved device timezone to cache: $_deviceTimezone');
       }
-      
+
       if (mounted) {
         setState(() {
           _isTimezoneLoaded = true;
         });
       }
-      
+
       // Load IP address
       await _loadIpAddress();
-      
+
       // Load salons (this will also load services)
       await _loadOwnerSalons();
-      
     } catch (e) {
       debugPrint('❌ Error in initialization: $e');
       if (mounted) {
@@ -181,43 +264,62 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     }
   }
 
-  // ==================== UTC TO LOCAL CONVERSION ====================
-  String _utcToLocalTimeString(String utcTimeStr) {
+  // ============================================================
+  // LOAD SALON TIMEZONE
+  // ============================================================
+
+  Future<void> _loadSalonTimezoneAndHours() async {
+    if (_selectedSalonId == null) return;
+
     try {
-      final parts = utcTimeStr.split(':');
-      final utcHour = int.parse(parts[0]);
-      final utcMinute = int.parse(parts[1]);
-      
-      final now = DateTime.now();
-      final utcDateTime = DateTime.utc(now.year, now.month, now.day, utcHour, utcMinute);
-      final localDateTime = utcDateTime.toLocal();
-      
-      return '${localDateTime.hour.toString().padLeft(2, '0')}:${localDateTime.minute.toString().padLeft(2, '0')}:00';
+      final salonIdInt = int.parse(_selectedSalonId!);
+      final response = await supabase
+          .from('salons')
+          .select('timezone, open_time, close_time')
+          .eq('id', salonIdInt)
+          .single();
+
+      setState(() {
+        _salonTimezone =
+            response['timezone'] ?? TimezoneService.getCurrentTimezone();
+        _salonOpenTimeUtc = response['open_time'] ?? '09:00:00';
+        _salonCloseTimeUtc = response['close_time'] ?? '18:00:00';
+
+        // Convert UTC to local for display
+        _salonOpenTimeLocal = _utcToLocalTimeOfDay(
+          _salonOpenTimeUtc,
+          _salonTimezone,
+        );
+        _salonCloseTimeLocal = _utcToLocalTimeOfDay(
+          _salonCloseTimeUtc,
+          _salonTimezone,
+        );
+      });
+
+      debugPrint('✅ Salon timezone loaded: $_salonTimezone');
+      debugPrint(
+        '✅ Salon hours - UTC: $_salonOpenTimeUtc - $_salonCloseTimeUtc',
+      );
+      debugPrint(
+        '✅ Salon hours - Local: ${_salonOpenTimeLocal?.hour}:${_salonOpenTimeLocal?.minute} - ${_salonCloseTimeLocal?.hour}:${_salonCloseTimeLocal?.minute}',
+      );
     } catch (e) {
-      debugPrint('❌ Error converting UTC to local: $e');
-      return utcTimeStr;
+      debugPrint('❌ Error loading salon timezone: $e');
+      // Set defaults
+      setState(() {
+        _salonTimezone = TimezoneService.getCurrentTimezone();
+        _salonOpenTimeUtc = '09:00:00';
+        _salonCloseTimeUtc = '18:00:00';
+        _salonOpenTimeLocal = const TimeOfDay(hour: 9, minute: 0);
+        _salonCloseTimeLocal = const TimeOfDay(hour: 18, minute: 0);
+      });
     }
   }
 
-  // ==================== LOCAL TO UTC CONVERSION ====================
-  String _localTimeToUtcString(String localTimeStr) {
-    try {
-      final parts = localTimeStr.split(':');
-      final localHour = int.parse(parts[0]);
-      final localMinute = int.parse(parts[1]);
-      
-      final now = DateTime.now();
-      final localDateTime = DateTime(now.year, now.month, now.day, localHour, localMinute);
-      final utcDateTime = localDateTime.toUtc();
-      
-      return '${utcDateTime.hour.toString().padLeft(2, '0')}:${utcDateTime.minute.toString().padLeft(2, '0')}:00';
-    } catch (e) {
-      debugPrint('❌ Error converting local to UTC: $e');
-      return localTimeStr;
-    }
-  }
+  // ============================================================
+  // IP ADDRESS LOADING
+  // ============================================================
 
-  // ==================== IP ADDRESS LOADING ====================
   Future<void> _loadIpAddress() async {
     if (_isLoadingIp) return;
 
@@ -233,7 +335,10 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     }
   }
 
-  // ==================== LOG OWNER ACTIVITY ====================
+  // ============================================================
+  // LOG OWNER ACTIVITY
+  // ============================================================
+
   Future<void> _logOwnerActivity({
     required String actionType,
     required String targetType,
@@ -264,7 +369,10 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     }
   }
 
-  // ==================== LOAD DATA METHODS ====================
+  // ============================================================
+  // LOAD DATA METHODS
+  // ============================================================
+
   Future<void> _refreshData() async {
     debugPrint('🔄 Refreshing data...');
     if (!mounted) return;
@@ -304,10 +412,12 @@ class _AddBarberScreenState extends State<AddBarberScreen>
       }
 
       debugPrint('📡 Fetching salons for user: $userId');
-      
+
       final response = await supabase
           .from('salons')
-          .select('id, name, address, logo_url, is_active, open_time, close_time')
+          .select(
+            'id, name, address, logo_url, is_active, open_time, close_time, timezone',
+          )
           .eq('owner_id', userId)
           .eq('is_active', true)
           .order('name');
@@ -319,13 +429,16 @@ class _AddBarberScreenState extends State<AddBarberScreen>
           _ownerSalons = List<Map<String, dynamic>>.from(response);
           _isLoadingSalons = false;
         });
-        
+
         // Load salon specific data if salons exist
         if (_ownerSalons.isNotEmpty) {
           // Select first salon by default
           _selectedSalonId = _ownerSalons[0]['id'].toString();
           _selectedSalonDetails = _ownerSalons[0];
-          
+
+          // Load salon timezone and hours
+          await _loadSalonTimezoneAndHours();
+
           // Load services for the selected salon
           await _loadSalonSpecificData();
         } else {
@@ -353,6 +466,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   // ============================================================
   // Helper: Check if barber is already in salon
   // ============================================================
+
   Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
     try {
       final response = await supabase
@@ -529,7 +643,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     }
 
     debugPrint('📡 Loading salon specific data for salon: $_selectedSalonId');
-    
+
     if (mounted) setState(() => _isLoadingSalonData = true);
 
     try {
@@ -537,7 +651,9 @@ class _AddBarberScreenState extends State<AddBarberScreen>
 
       final categoriesResponse = await supabase
           .from('salon_categories')
-          .select('id, display_name, description, icon_name, color, display_order, is_active')
+          .select(
+            'id, display_name, description, icon_name, color, display_order, is_active',
+          )
           .eq('salon_id', salonIdInt)
           .eq('is_active', true)
           .order('display_order');
@@ -551,7 +667,9 @@ class _AddBarberScreenState extends State<AddBarberScreen>
 
       final ageCategoriesResponse = await supabase
           .from('salon_age_categories')
-          .select('id, display_name, min_age, max_age, display_order, is_active')
+          .select(
+            'id, display_name, min_age, max_age, display_order, is_active',
+          )
           .eq('salon_id', salonIdInt)
           .eq('is_active', true)
           .order('display_order');
@@ -591,7 +709,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   }
 
   // ============================================================
-  // Load services and variants - WITH DEFAULT EXPAND ALL
+  // Load services and variants
   // ============================================================
 
   Future<void> _loadServicesWithVariants() async {
@@ -831,7 +949,10 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     }
   }
 
-  // ==================== SELECTION METHODS ====================
+  // ============================================================
+  // SELECTION METHODS
+  // ============================================================
+
   void _toggleSelection(String serviceId, [int? variantId]) {
     setState(() {
       if (variantId == null) {
@@ -1006,7 +1127,10 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     return widgets;
   }
 
-  // ==================== ADD BARBER WITH TIMEZONE ====================
+  // ============================================================
+  // ADD BARBER WITH CORRECT TIMEZONE CONVERSION
+  // ============================================================
+
   Future<void> _addBarber() async {
     if (_selectedBarberId == null) {
       if (mounted) _showSnackBar('Please select a barber', Colors.red);
@@ -1038,7 +1162,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
       return;
     }
     if (!mounted) return;
-    
+
     final confirm = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
@@ -1141,7 +1265,11 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.restaurant, color: Colors.orange, size: 20),
+                    const Icon(
+                      Icons.restaurant,
+                      color: Colors.orange,
+                      size: 20,
+                    ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Column(
@@ -1155,7 +1283,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                             ),
                           ),
                           Text(
-                            'Lunch break will be set from 12:00 PM to 1:00 PM',
+                            'Lunch break will be set from 12:00 PM to 1:00 PM (Local time)',
                             style: TextStyle(
                               fontSize: 11,
                               color: Colors.grey[700],
@@ -1190,7 +1318,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                             ),
                           ),
                           Text(
-                            'Business hours saved in UTC. Current timezone: ${TimezoneService.getTimezoneDisplayName()}',
+                            'Business hours saved in UTC. Salon timezone: ${_salonTimezone.split('/').last}',
                             style: TextStyle(
                               fontSize: 11,
                               color: Colors.grey[700],
@@ -1255,21 +1383,26 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     try {
       final salonIdInt = int.parse(_selectedSalonId!);
 
-      final salonResponse = await supabase
-          .from('salons')
-          .select('open_time, close_time')
-          .eq('id', salonIdInt)
-          .single();
+      // ✅ Use salon's UTC hours from database (already loaded)
+      final openTimeUtc = _salonOpenTimeUtc;
+      final closeTimeUtc = _salonCloseTimeUtc;
 
-      String openTimeUtc = salonResponse['open_time'] as String? ?? '09:00:00';
-      String closeTimeUtc = salonResponse['close_time'] as String? ?? '18:00:00';
-      
-      String openTimeLocal = _utcToLocalTimeString(openTimeUtc);
-      String closeTimeLocal = _utcToLocalTimeString(closeTimeUtc);
-      
+      // ✅ Convert lunch break from local (12:00-13:00) to UTC using salon's timezone
+      const lunchStartLocal = TimeOfDay(hour: 12, minute: 0);
+      const lunchEndLocal = TimeOfDay(hour: 13, minute: 0);
+      final lunchStartUtc = _localTimeToUtcString(
+        lunchStartLocal,
+        _salonTimezone,
+      );
+      final lunchEndUtc = _localTimeToUtcString(lunchEndLocal, _salonTimezone);
+
+      debugPrint('⏰ Salon timezone: $_salonTimezone');
       debugPrint('⏰ Salon hours - UTC: $openTimeUtc - $closeTimeUtc');
-      debugPrint('⏰ Salon hours - Local: $openTimeLocal - $closeTimeLocal');
-      debugPrint('🌍 Timezone: $_deviceTimezone');
+      debugPrint(
+        '⏰ Salon hours - Local: ${_salonOpenTimeLocal?.hour}:${_salonOpenTimeLocal?.minute} - ${_salonCloseTimeLocal?.hour}:${_salonCloseTimeLocal?.minute}',
+      );
+      debugPrint('🍽️ Lunch break - Local: 12:00-13:00');
+      debugPrint('🍽️ Lunch break - UTC: $lunchStartUtc - $lunchEndUtc');
 
       final List<int> weekDays = [1, 2, 3, 4, 5, 6, 7];
       final Map<int, String> dayNames = {
@@ -1350,14 +1483,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
         }
       }
 
-      final lunchStartLocal = '12:00:00';
-      final lunchEndLocal = '13:00:00';
-      final lunchStartUtc = _localTimeToUtcString(lunchStartLocal);
-      final lunchEndUtc = _localTimeToUtcString(lunchEndLocal);
-      
-      debugPrint('🍽️ Lunch break - Local: $lunchStartLocal - $lunchEndLocal');
-      debugPrint('🍽️ Lunch break - UTC: $lunchStartUtc - $lunchEndUtc');
-
       int lunchBreakCreatedCount = 0;
       int lunchBreakUpdatedCount = 0;
       List<String> lunchBreakErrorDays = [];
@@ -1396,7 +1521,9 @@ class _AddBarberScreenState extends State<AddBarberScreen>
           }
         } catch (e) {
           lunchBreakErrorDays.add(dayNames[dayOfWeek] ?? 'Day $dayOfWeek');
-          debugPrint('❌ Error creating lunch break for ${dayNames[dayOfWeek]}: $e');
+          debugPrint(
+            '❌ Error creating lunch break for ${dayNames[dayOfWeek]}: $e',
+          );
         }
       }
 
@@ -1492,9 +1619,10 @@ class _AddBarberScreenState extends State<AddBarberScreen>
           'barber_id': _selectedBarberId,
           'salon_id': salonIdInt,
           'salon_name': _selectedSalonDetails?['name'],
+          'salon_timezone': _salonTimezone,
           'selected_services_count': _totalSelectedItems,
           'selected_services': selectedServicesList,
-          'timezone': _deviceTimezone,
+          'device_timezone': _deviceTimezone,
           'schedules_created': createdCount,
           'schedules_updated': updatedCount,
           'lunch_breaks_created': lunchBreakCreatedCount,
@@ -1505,18 +1633,24 @@ class _AddBarberScreenState extends State<AddBarberScreen>
       );
 
       if (mounted) {
-        String message = 
+        String message =
             'Barber added successfully!\n'
             '• $createdCount schedules created\n'
-            '• $lunchBreakCreatedCount lunch breaks added (12:00-13:00 local time)\n'
+            '• $lunchBreakCreatedCount lunch breaks added\n'
             '• $servicesAddedCount services, $variantsAddedCount variants added\n'
-            '• Timezone: ${TimezoneService.getTimezoneDisplayName()}';
-        
+            '• Salon timezone: ${_salonTimezone.split('/').last}';
+
         if (lunchBreakErrorDays.isNotEmpty) {
-          message += '\n⚠️ Lunch break failed for: ${lunchBreakErrorDays.join(', ')}';
+          message +=
+              '\n⚠️ Lunch break failed for: ${lunchBreakErrorDays.join(', ')}';
         }
-        
-        _showSnackBar(message, errorCount > 0 || lunchBreakErrorDays.isNotEmpty ? Colors.orange : Colors.green);
+
+        _showSnackBar(
+          message,
+          errorCount > 0 || lunchBreakErrorDays.isNotEmpty
+              ? Colors.orange
+              : Colors.green,
+        );
 
         setState(() {
           _selectedBarberId = null;
@@ -1549,7 +1683,9 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     );
   }
 
-  // ==================== UI BUILDERS ====================
+  // ============================================================
+  // UI BUILDERS
+  // ============================================================
 
   Widget _buildCategoryChip(String label, bool isSelected, VoidCallback onTap) {
     return FilterChip(
@@ -1779,7 +1915,9 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                           size: 18,
                         ),
                         label: Text(
-                          _isSelected(serviceId) ? 'Selected' : 'Select Service',
+                          _isSelected(serviceId)
+                              ? 'Selected'
+                              : 'Select Service',
                           style: const TextStyle(fontSize: 13),
                         ),
                         style: ElevatedButton.styleFrom(
@@ -2220,7 +2358,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
 
   Widget _buildSalonTile(Map<String, dynamic> salon, bool isSelected) {
     return InkWell(
-      onTap: () {
+      onTap: () async {
         if (mounted) {
           setState(() {
             _selectedSalonId = salon['id'].toString();
@@ -2233,7 +2371,9 @@ class _AddBarberScreenState extends State<AddBarberScreen>
             _selectedCategoryTab = null;
           });
         }
-        _loadSalonSpecificData();
+        // Load salon timezone and hours
+        await _loadSalonTimezoneAndHours();
+        await _loadSalonSpecificData();
       },
       child: Container(
         padding: const EdgeInsets.all(12),
@@ -2665,14 +2805,17 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     super.build(context);
     final screenWidth = MediaQuery.of(context).size.width;
     final isWeb = screenWidth > 800;
-    
-    final isLoading = _isLoading ||
+
+    final isLoading =
+        _isLoading ||
         _isLoadingServices ||
         _isLoadingSalons ||
         _isLoadingSalonData ||
         !_isTimezoneLoaded;
 
-    debugPrint('🔍 Build state - isLoading: $_isLoading, isLoadingServices: $_isLoadingServices, isLoadingSalons: $_isLoadingSalons, isLoadingSalonData: $_isLoadingSalonData, isTimezoneLoaded: $_isTimezoneLoaded, ownerSalons length: ${_ownerSalons.length}');
+    debugPrint(
+      '🔍 Build state - isLoading: $_isLoading, isLoadingServices: $_isLoadingServices, isLoadingSalons: $_isLoadingSalons, isLoadingSalonData: $_isLoadingSalonData, isTimezoneLoaded: $_isTimezoneLoaded, ownerSalons length: ${_ownerSalons.length}',
+    );
 
     return Scaffold(
       appBar: AppBar(
@@ -2748,7 +2891,9 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                   const CircularProgressIndicator(color: Color(0xFFFF6B8B)),
                   const SizedBox(height: 16),
                   Text(
-                    _isTimezoneLoaded ? 'Loading salons...' : 'Loading timezone...',
+                    _isTimezoneLoaded
+                        ? 'Loading salons...'
+                        : 'Loading timezone...',
                     style: const TextStyle(color: Colors.grey),
                   ),
                   const SizedBox(height: 8),
