@@ -1,5 +1,3 @@
-// lib/screens/employee/employee_dashboard.dart
-
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/alertBox/show_logout_conf.dart';
@@ -15,6 +13,8 @@ import 'package:flutter_application_1/widgets/booking_tile.dart';
 import 'package:flutter_application_1/widgets/section_header.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../../services/timezone_service.dart';
 
 class EmployeeDashboard extends StatefulWidget {
   const EmployeeDashboard({super.key});
@@ -44,9 +44,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
   int _monthlyEarnings = 0;
   double _rating = 0.0;
   String _employeeName = 'Loading...';
-  String _employeeRole = 'Barber';
+  final String _employeeRole = 'Barber';
   String _employeeId = '';
-  String _employeeEmail = '';  // 🔥 ADDED: Email for Side Menu
+  String _employeeEmail = '';
   int? _salonBarberId;
   int? _salonId;
 
@@ -57,19 +57,752 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
   // Appointments list
   List<Map<String, dynamic>> _todaysAppointmentsList = [];
 
+  // ==================== TIMEZONE VARIABLES ====================
+  String _userTimezone = '';
+  String _lastTimezone = '';
+  bool _isTimezoneLoaded = false;
+
   @override
   void initState() {
     super.initState();
+    _initializeTimezone();
     _loadEmployeeData();
     _loadData();
     _setupNotificationListeners();
     debugPrint('🔄 EmployeeDashboard initState completed');
   }
 
-  // ============================================================
-  // LOAD EMPLOYEE DATA FROM NEW SCHEMA
-  // ============================================================
-  
+  // ==================== TIMEZONE INITIALIZATION ====================
+
+  Future<void> _initializeTimezone() async {
+    await TimezoneService.initialize();
+
+    final prefs = await SharedPreferences.getInstance();
+    _userTimezone =
+        prefs.getString('cached_timezone') ??
+        TimezoneService.getCurrentTimezone();
+    await TimezoneService.setTimezone(_userTimezone);
+    _lastTimezone = _userTimezone;
+
+    setState(() {
+      _isTimezoneLoaded = true;
+    });
+
+    debugPrint('✅ User timezone: $_userTimezone');
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _checkTimezoneChange();
+  }
+
+  void _checkTimezoneChange() async {
+    final prefs = await SharedPreferences.getInstance();
+    final currentTimezone =
+        prefs.getString('cached_timezone') ??
+        TimezoneService.getCurrentTimezone();
+
+    if (_lastTimezone != currentTimezone && _lastTimezone.isNotEmpty) {
+      _userTimezone = currentTimezone;
+      await TimezoneService.setTimezone(_userTimezone);
+    }
+    _lastTimezone = currentTimezone;
+  }
+
+  bool _isDST() {
+    final timezone = _userTimezone;
+    if (!timezone.contains('America/') && !timezone.contains('Europe/')) {
+      return false;
+    }
+    final now = DateTime.now();
+    final month = now.month;
+    return month > 3 && month < 11;
+  }
+
+  // ==================== ADVANCED TIMEZONE PICKER ====================
+
+  Future<void> _showTimezonePickerDialog() async {
+    final allTimezones = TimezoneService.getAllAvailableTimezones();
+    final continentGroups = _groupTimezonesByContinent(allTimezones);
+
+    final List<Map<String, dynamic>> searchableList = [];
+    for (var entry in continentGroups.entries) {
+      final continent = entry.key;
+      for (final tz in entry.value) {
+        final displayName = tz.split('/').last.replaceAll('_', ' ');
+        final countryCode = _extractCountryCode(tz);
+        final flag = _getFlagByCountryCode(countryCode);
+
+        final searchText = [
+          continent.toLowerCase(),
+          displayName.toLowerCase(),
+          tz.toLowerCase(),
+          countryCode.toLowerCase(),
+          displayName.toLowerCase(),
+        ].join(' ');
+
+        searchableList.add({
+          'timezone': tz,
+          'displayName': displayName,
+          'continent': continent,
+          'flag': flag,
+          'searchText': searchText,
+        });
+      }
+    }
+
+    TextEditingController searchController = TextEditingController();
+
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) {
+        String searchQuery = '';
+
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            List<Map<String, dynamic>> filteredList = searchableList;
+            if (searchQuery.isNotEmpty) {
+              final query = searchQuery.toLowerCase();
+              filteredList = searchableList
+                  .where((item) => item['searchText'].contains(query))
+                  .toList();
+            }
+
+            Map<String, List<Map<String, dynamic>>> filteredGroups = {};
+            for (var item in filteredList) {
+              final continent = item['continent'];
+              if (!filteredGroups.containsKey(continent)) {
+                filteredGroups[continent] = [];
+              }
+              filteredGroups[continent]!.add(item);
+            }
+
+            return Dialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(24),
+              ),
+              child: Container(
+                width: MediaQuery.of(context).size.width * 0.9,
+                height: MediaQuery.of(context).size.height * 0.85,
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  children: [
+                    _buildDialogHeader(),
+                    const Divider(),
+                    Container(
+                      margin: const EdgeInsets.symmetric(vertical: 12),
+                      child: TextField(
+                        controller: searchController,
+                        autofocus: false,
+                        onChanged: (value) {
+                          setDialogState(() {
+                            searchQuery = value;
+                          });
+                        },
+                        decoration: InputDecoration(
+                          hintText:
+                              '🔍 Search by country, city, or timezone...',
+                          hintStyle: TextStyle(color: Colors.grey[400]),
+                          prefixIcon: const Icon(
+                            Icons.search,
+                            color: Colors.grey,
+                          ),
+                          suffixIcon: searchQuery.isNotEmpty
+                              ? IconButton(
+                                  icon: const Icon(
+                                    Icons.clear,
+                                    color: Colors.grey,
+                                  ),
+                                  onPressed: () {
+                                    searchController.clear();
+                                    setDialogState(() {
+                                      searchQuery = '';
+                                    });
+                                  },
+                                )
+                              : null,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            borderSide: BorderSide.none,
+                          ),
+                          filled: true,
+                          fillColor: Colors.grey[100],
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 14,
+                          ),
+                        ),
+                      ),
+                    ),
+                    if (searchQuery.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Text(
+                          'Found ${filteredList.length} timezone${filteredList.length != 1 ? 's' : ''}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                      ),
+                    Expanded(
+                      child: searchQuery.isEmpty
+                          ? DefaultTabController(
+                              length: continentGroups.keys.length,
+                              child: Column(
+                                children: [
+                                  SizedBox(
+                                    height: 45,
+                                    child: TabBar(
+                                      isScrollable: true,
+                                      labelColor: const Color(0xFFFF6B8B),
+                                      unselectedLabelColor: Colors.grey,
+                                      indicatorColor: const Color(0xFFFF6B8B),
+                                      labelStyle: const TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 13,
+                                      ),
+                                      tabs: continentGroups.keys
+                                          .map(
+                                            (continent) => Tab(text: continent),
+                                          )
+                                          .toList(),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Expanded(
+                                    child: TabBarView(
+                                      children: continentGroups.values.map((
+                                        timezones,
+                                      ) {
+                                        return ListView.builder(
+                                          itemCount: timezones.length,
+                                          itemBuilder: (context, index) {
+                                            final tz = timezones[index];
+                                            final displayName = tz
+                                                .split('/')
+                                                .last
+                                                .replaceAll('_', ' ');
+                                            final countryCode =
+                                                _extractCountryCode(tz);
+                                            final flag = _getFlagByCountryCode(
+                                              countryCode,
+                                            );
+                                            return _buildTimezoneTile(
+                                              tz,
+                                              displayName,
+                                              flag,
+                                            );
+                                          },
+                                        );
+                                      }).toList(),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            )
+                          : filteredList.isNotEmpty
+                          ? ListView.builder(
+                              itemCount: filteredGroups.keys.length,
+                              itemBuilder: (context, index) {
+                                final continent = filteredGroups.keys.elementAt(
+                                  index,
+                                );
+                                final items = filteredGroups[continent]!;
+                                return Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 12,
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          Text(
+                                            _getContinentEmoji(continent),
+                                            style: const TextStyle(
+                                              fontSize: 18,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Text(
+                                            continent,
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 14,
+                                            ),
+                                          ),
+                                          Container(
+                                            margin: const EdgeInsets.only(
+                                              left: 8,
+                                            ),
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 6,
+                                              vertical: 2,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: Colors.grey[200],
+                                              borderRadius:
+                                                  BorderRadius.circular(10),
+                                            ),
+                                            child: Text(
+                                              '${items.length}',
+                                              style: TextStyle(
+                                                fontSize: 10,
+                                                color: Colors.grey[600],
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    ...items.map(
+                                      (item) => _buildTimezoneTile(
+                                        item['timezone'],
+                                        item['displayName'],
+                                        item['flag'],
+                                      ),
+                                    ),
+                                    if (index != filteredGroups.keys.length - 1)
+                                      const Divider(),
+                                  ],
+                                );
+                              },
+                            )
+                          : Center(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.search_off,
+                                    size: 64,
+                                    color: Colors.grey[400],
+                                  ),
+                                  const SizedBox(height: 16),
+                                  Text(
+                                    'No timezones found',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      color: Colors.grey[600],
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'Try "Sri Lanka", "Tokyo", "London", or "New York"',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.grey[500],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                    ),
+                    const SizedBox(height: 8),
+                    _buildCurrentTimezoneInfo(),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    if (result != null && result != _userTimezone) {
+      await _applyTimezoneChange(result);
+    }
+  }
+
+  Future<void> _applyTimezoneChange(String newTimezone) async {
+    setState(() => _isLoading = true);
+
+    try {
+      await TimezoneService.setTimezone(newTimezone);
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('cached_timezone', newTimezone);
+
+      _userTimezone = newTimezone;
+      _lastTimezone = newTimezone;
+
+      await _loadData();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Timezone changed to ${newTimezone.split('/').last.replaceAll('_', ' ')}',
+            ),
+            backgroundColor: Colors.green,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error changing timezone: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error changing timezone: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  // ==================== TIMEZONE HELPER METHODS ====================
+
+  String _extractCountryCode(String timezone) {
+    final countryMap = {
+      'Asia/Colombo': 'LK',
+      'Asia/Tokyo': 'JP',
+      'Asia/Seoul': 'KR',
+      'Asia/Shanghai': 'CN',
+      'Asia/Hong_Kong': 'HK',
+      'Asia/Taipei': 'TW',
+      'Asia/Kolkata': 'IN',
+      'Asia/Dubai': 'AE',
+      'Asia/Singapore': 'SG',
+      'Asia/Kuala_Lumpur': 'MY',
+      'Asia/Bangkok': 'TH',
+      'Asia/Jakarta': 'ID',
+      'Asia/Manila': 'PH',
+      'Asia/Ho_Chi_Minh': 'VN',
+      'Asia/Dhaka': 'BD',
+      'Asia/Karachi': 'PK',
+      'Asia/Kathmandu': 'NP',
+      'Asia/Riyadh': 'SA',
+      'Asia/Kuwait': 'KW',
+      'Asia/Doha': 'QA',
+      'Europe/London': 'GB',
+      'Europe/Paris': 'FR',
+      'Europe/Berlin': 'DE',
+      'Europe/Rome': 'IT',
+      'Europe/Madrid': 'ES',
+      'Europe/Amsterdam': 'NL',
+      'Europe/Zurich': 'CH',
+      'Europe/Moscow': 'RU',
+      'America/New_York': 'US',
+      'America/Chicago': 'US',
+      'America/Denver': 'US',
+      'America/Los_Angeles': 'US',
+      'America/Toronto': 'CA',
+      'America/Vancouver': 'CA',
+      'America/Mexico_City': 'MX',
+      'America/Sao_Paulo': 'BR',
+      'Australia/Sydney': 'AU',
+      'Australia/Melbourne': 'AU',
+      'Australia/Perth': 'AU',
+      'Australia/Adelaide': 'AU',
+      'Pacific/Auckland': 'NZ',
+      'Africa/Johannesburg': 'ZA',
+      'Africa/Cairo': 'EG',
+      'Africa/Lagos': 'NG',
+      'Africa/Nairobi': 'KE',
+    };
+    if (countryMap.containsKey(timezone)) return countryMap[timezone]!;
+    for (var entry in countryMap.entries) {
+      if (timezone.contains(entry.key) || entry.key.contains(timezone)) {
+        return entry.value;
+      }
+    }
+    return '';
+  }
+
+  String _getFlagByCountryCode(String countryCode) {
+    final flags = {
+      'LK': '🇱🇰',
+      'JP': '🇯🇵',
+      'KR': '🇰🇷',
+      'CN': '🇨🇳',
+      'HK': '🇭🇰',
+      'TW': '🇹🇼',
+      'IN': '🇮🇳',
+      'AE': '🇦🇪',
+      'SG': '🇸🇬',
+      'MY': '🇲🇾',
+      'TH': '🇹🇭',
+      'ID': '🇮🇩',
+      'PH': '🇵🇭',
+      'VN': '🇻🇳',
+      'BD': '🇧🇩',
+      'PK': '🇵🇰',
+      'NP': '🇳🇵',
+      'SA': '🇸🇦',
+      'KW': '🇰🇼',
+      'QA': '🇶🇦',
+      'GB': '🇬🇧',
+      'FR': '🇫🇷',
+      'DE': '🇩🇪',
+      'IT': '🇮🇹',
+      'ES': '🇪🇸',
+      'NL': '🇳🇱',
+      'CH': '🇨🇭',
+      'RU': '🇷🇺',
+      'US': '🇺🇸',
+      'CA': '🇨🇦',
+      'MX': '🇲🇽',
+      'BR': '🇧🇷',
+      'AU': '🇦🇺',
+      'NZ': '🇳🇿',
+      'ZA': '🇿🇦',
+      'EG': '🇪🇬',
+      'NG': '🇳🇬',
+      'KE': '🇰🇪',
+    };
+    return flags[countryCode] ?? '🌐';
+  }
+
+  String _getContinentEmoji(String continent) {
+    final emojis = {
+      'Asia': '🌏',
+      'Europe': '🌍',
+      'Africa': '🌍',
+      'America': '🌎',
+      'Australia': '🇦🇺',
+      'Pacific': '🌏',
+      'UTC': '🌐',
+    };
+    return emojis[continent] ?? '🌐';
+  }
+
+  Map<String, List<String>> _groupTimezonesByContinent(List<String> timezones) {
+    final groups = <String, List<String>>{};
+    for (final tz in timezones) {
+      final parts = tz.split('/');
+      if (parts.length >= 2) {
+        final continent = parts[0];
+        if (!groups.containsKey(continent)) groups[continent] = [];
+        groups[continent]!.add(tz);
+      } else {
+        if (!groups.containsKey('UTC')) groups['UTC'] = [];
+        groups['UTC']!.add(tz);
+      }
+    }
+    for (final key in groups.keys) {
+      groups[key]!.sort();
+    }
+    return groups;
+  }
+
+  Widget _buildTimezoneTile(String tz, String displayName, String flag) {
+    final isSelected = tz == _userTimezone;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 2),
+      decoration: BoxDecoration(
+        color: isSelected
+            ? const Color(0xFFFF6B8B).withValues(alpha: 0.1)
+            : null,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: ListTile(
+        leading: CircleAvatar(
+          radius: 20,
+          backgroundColor: isSelected
+              ? const Color(0xFFFF6B8B)
+              : Colors.grey[200],
+          child: Text(flag, style: const TextStyle(fontSize: 16)),
+        ),
+        title: Text(
+          displayName,
+          style: TextStyle(
+            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+            color: isSelected ? const Color(0xFFFF6B8B) : null,
+          ),
+        ),
+        subtitle: Text(
+          tz,
+          style: const TextStyle(fontSize: 11),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        trailing: isSelected
+            ? const Icon(Icons.check_circle, color: Color(0xFFFF6B8B))
+            : null,
+        onTap: () => Navigator.of(context).pop(tz),
+      ),
+    );
+  }
+
+  Widget _buildCurrentTimezoneInfo() {
+    final displayName = _userTimezone.split('/').last.replaceAll('_', ' ');
+    final offset = TimezoneService.getUtcOffsetString();
+    final flag = TimezoneService.getCurrentFlag();
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.grey[50],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey[200]!),
+      ),
+      child: Row(
+        children: [
+          Text(flag, style: const TextStyle(fontSize: 24)),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Current: $displayName',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                  ),
+                ),
+                Text(
+                  _userTimezone,
+                  style: const TextStyle(fontSize: 10, color: Colors.grey),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text(
+              offset,
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 11,
+                color: Color(0xFFFF6B8B),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDialogHeader() {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(
+              Icons.access_time,
+              color: Color(0xFFFF6B8B),
+              size: 28,
+            ),
+          ),
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Text(
+              'Select Your Timezone',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFFFF6B8B),
+              ),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.close),
+            onPressed: () => Navigator.pop(context),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTimezoneSelector() {
+    return GestureDetector(
+      onTap: _showTimezonePickerDialog,
+      child: Container(
+        margin: const EdgeInsets.only(right: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.2),
+          borderRadius: BorderRadius.circular(25),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              TimezoneService.getCurrentFlag(),
+              style: const TextStyle(fontSize: 16),
+            ),
+            const SizedBox(width: 6),
+            Text(
+              TimezoneService.getTimezoneDisplayName(),
+              style: const TextStyle(
+                fontSize: 13,
+                color: Colors.white,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            const SizedBox(width: 4),
+            const Icon(Icons.arrow_drop_down, size: 20, color: Colors.white),
+            if (_isDST()) ...[
+              const SizedBox(width: 4),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.amber.shade100,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  'DST',
+                  style: TextStyle(
+                    fontSize: 8,
+                    color: Colors.amber.shade800,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ==================== UTC TO LOCAL CONVERSION ====================
+
+  /// Convert UTC time string to local time string for display
+  String _utcToLocalTimeString(String utcTime) {
+    try {
+      return TimezoneService.utcToLocalTime(utcTime, DateTime.now());
+    } catch (e) {
+      debugPrint('Error converting UTC to local: $e');
+      return _formatTimeString(utcTime);
+    }
+  }
+
+  /// Format time string (fallback)
+  String _formatTimeString(String timeStr) {
+    try {
+      final parts = timeStr.split(':');
+      final hour = int.parse(parts[0]);
+      final minute = int.parse(parts[1]);
+      final period = hour >= 12 ? 'PM' : 'AM';
+      final displayHour = hour % 12 == 0 ? 12 : hour % 12;
+      return '$displayHour:${minute.toString().padLeft(2, '0')} $period';
+    } catch (e) {
+      return timeStr;
+    }
+  }
+
+  // ==================== LOAD EMPLOYEE DATA ====================
+
   Future<void> _loadEmployeeData() async {
     try {
       final currentUser = supabase.auth.currentUser;
@@ -80,9 +813,10 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
 
       _employeeId = currentUser.id;
       _employeeEmail = currentUser.email ?? '';
-      debugPrint('📋 Loading employee data for user: $_employeeId, email: $_employeeEmail');
+      debugPrint(
+        '📋 Loading employee data for user: $_employeeId, email: $_employeeEmail',
+      );
 
-      // Get user roles to verify barber role
       final userRolesResponse = await supabase
           .from('user_roles')
           .select('role_id, roles!inner(name)')
@@ -98,8 +832,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
       }
 
       if (!isBarber) {
-        debugPrint('⚠️ User is not a barber');
-        // Try to get from profile roles as fallback
         final profile = await SessionManager.getProfileByEmail(_employeeEmail);
         if (profile != null) {
           final roles = profile['roles'] as List? ?? [];
@@ -108,14 +840,13 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
             debugPrint('✅ Found barber role in SessionManager');
           }
         }
-        
+
         if (!isBarber) {
           debugPrint('❌ User does not have barber role');
           return;
         }
       }
 
-      // Get profile data
       final profileResponse = await supabase
           .from('profiles')
           .select('full_name, email, avatar_url')
@@ -124,24 +855,30 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
 
       if (profileResponse != null) {
         setState(() {
-          _employeeName = profileResponse['full_name'] ?? currentUser.email?.split('@').first ?? 'Barber';
-          if (profileResponse['email'] != null && profileResponse['email'].toString().isNotEmpty) {
+          _employeeName =
+              profileResponse['full_name'] ??
+              currentUser.email?.split('@').first ??
+              'Barber';
+          if (profileResponse['email'] != null &&
+              profileResponse['email'].toString().isNotEmpty) {
             _employeeEmail = profileResponse['email'].toString();
           }
         });
-        debugPrint('✅ Profile loaded: name=$_employeeName, email=$_employeeEmail');
+        debugPrint(
+          '✅ Profile loaded: name=$_employeeName, email=$_employeeEmail',
+        );
       } else {
-        // Fallback to SessionManager
         final profile = await SessionManager.getProfileByEmail(_employeeEmail);
         if (profile != null) {
           setState(() {
             _employeeName = profile['name'] ?? _employeeEmail.split('@').first;
           });
-          debugPrint('✅ Profile loaded from SessionManager: name=$_employeeName');
+          debugPrint(
+            '✅ Profile loaded from SessionManager: name=$_employeeName',
+          );
         }
       }
 
-      // Get salon_barber record
       final salonBarberResponse = await supabase
           .from('salon_barbers')
           .select('id, salon_id, status')
@@ -154,15 +891,15 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
           _salonBarberId = salonBarberResponse['id'];
           _salonId = salonBarberResponse['salon_id'];
         });
-        debugPrint('✅ Found salon_barber: id=$_salonBarberId, salon_id=$_salonId');
+        debugPrint(
+          '✅ Found salon_barber: id=$_salonBarberId, salon_id=$_salonId',
+        );
       } else {
         debugPrint('⚠️ No active salon_barber record found');
       }
-
     } catch (e) {
       debugPrint('❌ Error loading employee data: $e');
-      
-      // Fallback: Try to get data from SessionManager
+
       try {
         final email = await SessionManager.getCurrentUserEmail();
         if (email != null) {
@@ -172,7 +909,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
               _employeeEmail = email;
               _employeeName = profile['name'] ?? email.split('@').first;
             });
-            debugPrint('✅ Fallback profile loaded: name=$_employeeName, email=$_employeeEmail');
+            debugPrint(
+              '✅ Fallback profile loaded: name=$_employeeName, email=$_employeeEmail',
+            );
           }
         }
       } catch (fallbackError) {
@@ -181,10 +920,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
     }
   }
 
-  // ============================================================
-  // LOAD DASHBOARD DATA
-  // ============================================================
-  
+  // ==================== LOAD DASHBOARD DATA ====================
+
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
 
@@ -194,12 +931,13 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
       _hasPermission = await _notificationService.hasPermission();
 
       if (!_hasPermission) {
-        _showPermissionCard = await _permissionManager.shouldShowPermissionCard('employee_dashboard');
+        _showPermissionCard = await _permissionManager.shouldShowPermissionCard(
+          'employee_dashboard',
+        );
       } else {
         _showPermissionCard = false;
       }
 
-      // Load appointments if we have salon_barber_id
       if (_salonBarberId != null) {
         await _loadAppointments();
         await _loadStatistics();
@@ -214,22 +952,22 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
       if (mounted) {
         setState(() => _isLoading = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error loading data: $e'), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text('Error loading data: $e'),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     }
   }
 
-  // ============================================================
-  // LOAD APPOINTMENTS
-  // ============================================================
-  
+  // ==================== LOAD APPOINTMENTS (WITH LOCAL TIME CONVERSION) ====================
+
   Future<void> _loadAppointments() async {
     try {
       final today = DateTime.now();
       final todayStr = today.toIso8601String().split('T').first;
 
-      // Get today's appointments for this barber
       final appointmentsResponse = await supabase
           .from('appointments')
           .select('''
@@ -262,7 +1000,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
           .eq('appointment_date', todayStr)
           .order('start_time');
 
-      debugPrint('📊 Found ${appointmentsResponse.length} appointments for today');
+      debugPrint(
+        '📊 Found ${appointmentsResponse.length} appointments for today',
+      );
 
       final List<Map<String, dynamic>> appointments = [];
       int completed = 0;
@@ -273,10 +1013,16 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
         final service = apt['services'] as Map?;
         final variant = apt['service_variants'] as Map?;
         final customer = apt['profiles'] as Map?;
-        
+
         final status = apt['status'] as String? ?? 'pending';
-        final price = (apt['price'] as num?)?.toDouble() ?? 
-                      (variant?['price'] as num?)?.toDouble() ?? 0.0;
+        final price =
+            (apt['price'] as num?)?.toDouble() ??
+            (variant?['price'] as num?)?.toDouble() ??
+            0.0;
+
+        // ✅ Convert UTC times to local for display
+        final startTimeLocal = _utcToLocalTimeString(apt['start_time']);
+        final endTimeLocal = _utcToLocalTimeString(apt['end_time']);
 
         if (status == 'completed') {
           completed++;
@@ -291,11 +1037,11 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
           'customer_name': customer?['full_name'] ?? 'Unknown Customer',
           'customer_phone': customer?['phone'] ?? '',
           'service_name': service?['name'] ?? 'Unknown Service',
-          'variant_name': variant != null 
+          'variant_name': variant != null
               ? '${variant['salon_genders']?['display_name'] ?? ''} • ${variant['salon_age_categories']?['display_name'] ?? ''}'
               : null,
-          'start_time': apt['start_time'],
-          'end_time': apt['end_time'],
+          'start_time': startTimeLocal,
+          'end_time': endTimeLocal,
           'status': status,
           'price': price,
           'duration': variant?['duration'] ?? 30,
@@ -309,34 +1055,40 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
         _pendingAppointments = pending;
         _todayEarnings = earnings;
       });
-
     } catch (e) {
       debugPrint('❌ Error loading appointments: $e');
     }
   }
 
-  // ============================================================
-  // LOAD STATISTICS
-  // ============================================================
-  
+  // ==================== LOAD STATISTICS ====================
+
   Future<void> _loadStatistics() async {
     try {
-      // Get total customers served (unique customers from appointments)
       final customersResponse = await supabase
           .from('appointments')
           .select('customer_id')
           .eq('barber_id', _employeeId)
           .eq('status', 'completed');
 
-      final uniqueCustomers = customersResponse.map((a) => a['customer_id']).toSet().length;
+      final uniqueCustomers = customersResponse
+          .map((a) => a['customer_id'])
+          .toSet()
+          .length;
       setState(() {
         _totalCustomers = uniqueCustomers;
       });
 
-      // Get monthly earnings
-      final firstDayOfMonth = DateTime(DateTime.now().year, DateTime.now().month, 1);
+      final firstDayOfMonth = DateTime(
+        DateTime.now().year,
+        DateTime.now().month,
+        1,
+      );
       final firstDayStr = firstDayOfMonth.toIso8601String().split('T').first;
-      final lastDayOfMonth = DateTime(DateTime.now().year, DateTime.now().month + 1, 0);
+      final lastDayOfMonth = DateTime(
+        DateTime.now().year,
+        DateTime.now().month + 1,
+        0,
+      );
       final lastDayStr = lastDayOfMonth.toIso8601String().split('T').first;
 
       final monthlyResponse = await supabase
@@ -355,7 +1107,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
         _monthlyEarnings = monthlyTotal;
       });
 
-      // Get average rating
       final reviewsResponse = await supabase
           .from('reviews')
           .select('overall_rating')
@@ -370,16 +1121,13 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
           _rating = totalRating / reviewsResponse.length;
         });
       }
-
     } catch (e) {
       debugPrint('❌ Error loading statistics: $e');
     }
   }
 
-  // ============================================================
-  // NOTIFICATION SETUP
-  // ============================================================
-  
+  // ==================== NOTIFICATION SETUP ====================
+
   void _setupNotificationListeners() {
     try {
       FirebaseMessaging.onMessage.listen((RemoteMessage message) {
@@ -387,7 +1135,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
 
         if (message.data['type'] == 'new_booking_assigned') {
           _showNewAssignmentAlert(message);
-          _loadData(); // Refresh data
+          _loadData();
         } else if (message.data['type'] == 'booking_reminder') {
           _showReminderAlert(message);
         }
@@ -408,7 +1156,10 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
           children: [
             Container(
               padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(color: Colors.blue.withValues(alpha: 0.1), shape: BoxShape.circle),
+              decoration: BoxDecoration(
+                color: Colors.blue.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
               child: const Icon(Icons.assignment_add, color: Colors.blue),
             ),
             const SizedBox(width: 12),
@@ -421,17 +1172,25 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
           children: [
             Text(message.notification?.title ?? 'New Appointment'),
             const SizedBox(height: 8),
-            Text(message.notification?.body ?? 'You have a new booking assigned', style: TextStyle(color: Colors.grey[600])),
+            Text(
+              message.notification?.body ?? 'You have a new booking assigned',
+              style: TextStyle(color: Colors.grey[600]),
+            ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Later')),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Later'),
+          ),
           ElevatedButton(
             onPressed: () {
               Navigator.pop(context);
               _viewMySchedule();
             },
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF6B8B)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFFF6B8B),
+            ),
             child: const Text('View'),
           ),
         ],
@@ -448,20 +1207,24 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
           children: [
             const Icon(Icons.access_time, color: Colors.white),
             const SizedBox(width: 8),
-            Expanded(child: Text(message.notification?.body ?? 'Upcoming appointment')),
+            Expanded(
+              child: Text(message.notification?.body ?? 'Upcoming appointment'),
+            ),
           ],
         ),
         backgroundColor: Colors.blue,
         duration: const Duration(seconds: 5),
-        action: SnackBarAction(label: 'View', textColor: Colors.white, onPressed: _viewMySchedule),
+        action: SnackBarAction(
+          label: 'View',
+          textColor: Colors.white,
+          onPressed: _viewMySchedule,
+        ),
       ),
     );
   }
 
-  // ============================================================
-  // PERMISSIONS
-  // ============================================================
-  
+  // ==================== PERMISSIONS ====================
+
   Future<void> _enableNotifications() async {
     setState(() => _showPermissionCard = false);
 
@@ -472,12 +1235,13 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
         _showSettingsDialog();
         return;
       }
-
+      if (!mounted) return;
       await _permissionService.requestPermissionAtAction(
         context: context,
         action: 'employee_dashboard',
         customTitle: '🔔 Get Booking Updates',
-        customMessage: 'Get instant notifications for new bookings, reminders, and schedule changes',
+        customMessage:
+            'Get instant notifications for new bookings, reminders, and schedule changes',
         onGranted: () async {
           await _permissionManager.markPermissionGranted();
           setState(() {
@@ -486,7 +1250,10 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
           });
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('✅ Notifications enabled!'), backgroundColor: Colors.green),
+              const SnackBar(
+                content: Text('✅ Notifications enabled!'),
+                backgroundColor: Colors.green,
+              ),
             );
           }
         },
@@ -494,7 +1261,10 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
           await _permissionManager.markPermissionDenied(permanent: false);
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('You can enable later from settings'), backgroundColor: Colors.orange),
+              const SnackBar(
+                content: Text('You can enable later from settings'),
+                backgroundColor: Colors.orange,
+              ),
             );
           }
         },
@@ -509,15 +1279,22 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('🔔 Notifications Disabled'),
-        content: const Text('To enable notifications, please go to your device settings.'),
+        content: const Text(
+          'To enable notifications, please go to your device settings.',
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
           ElevatedButton(
             onPressed: () {
               Navigator.pop(context);
               _permissionService.openAppSettings();
             },
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF6B8B)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFFF6B8B),
+            ),
             child: const Text('Open Settings'),
           ),
         ],
@@ -530,10 +1307,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
     await _permissionManager.markPermissionShown('employee_dashboard');
   }
 
-  // ============================================================
-  // BREAK MANAGEMENT
-  // ============================================================
-  
+  // ==================== BREAK MANAGEMENT ====================
+
   void _toggleBreak() {
     setState(() {
       _isOnBreak = !_isOnBreak;
@@ -541,16 +1316,28 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
         _breakStartTime = TimeOfDay.now();
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Row(children: [Icon(Icons.free_breakfast, color: Colors.white), SizedBox(width: 8), Text('Break started')]),
+            content: Row(
+              children: [
+                Icon(Icons.free_breakfast, color: Colors.white),
+                SizedBox(width: 8),
+                Text('Break started'),
+              ],
+            ),
             backgroundColor: Colors.orange,
             duration: Duration(seconds: 3),
           ),
         );
       } else {
         final breakEndTime = TimeOfDay.now();
-        final breakDuration = _calculateBreakDuration(_breakStartTime!, breakEndTime);
+        final breakDuration = _calculateBreakDuration(
+          _breakStartTime!,
+          breakEndTime,
+        );
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Break ended • Duration: $breakDuration'), backgroundColor: Colors.green),
+          SnackBar(
+            content: Text('Break ended • Duration: $breakDuration'),
+            backgroundColor: Colors.green,
+          ),
         );
         _breakStartTime = null;
       }
@@ -572,20 +1359,23 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
     }
   }
 
-  // ============================================================
-  // ATTENDANCE
-  // ============================================================
-  
+  // ==================== ATTENDANCE ====================
+
   void _handleAttendance() {
     showModalBottomSheet(
       context: context,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
       builder: (context) => Padding(
         padding: const EdgeInsets.all(20),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('Attendance', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            const Text(
+              'Attendance',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 20),
             Row(
               children: [
@@ -598,7 +1388,10 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                     onTap: () {
                       Navigator.pop(context);
                       ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('✅ Checked in at ${_getCurrentTime()}'), backgroundColor: Colors.green),
+                        SnackBar(
+                          content: Text('✅ Checked in at ${_getCurrentTime()}'),
+                          backgroundColor: Colors.green,
+                        ),
                       );
                     },
                   ),
@@ -613,7 +1406,12 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                     onTap: () {
                       Navigator.pop(context);
                       ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('✅ Checked out at ${_getCurrentTime()}'), backgroundColor: Colors.orange),
+                        SnackBar(
+                          content: Text(
+                            '✅ Checked out at ${_getCurrentTime()}',
+                          ),
+                          backgroundColor: Colors.orange,
+                        ),
                       );
                     },
                   ),
@@ -621,7 +1419,10 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
               ],
             ),
             const SizedBox(height: 16),
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
           ],
         ),
       ),
@@ -658,7 +1459,14 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
           children: [
             Icon(icon, color: color, size: 32),
             const SizedBox(height: 8),
-            Text(label, style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: color)),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: color,
+              ),
+            ),
             const SizedBox(height: 4),
             Text(time, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
           ],
@@ -667,10 +1475,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
     );
   }
 
-  // ============================================================
-  // NAVIGATION
-  // ============================================================
-  
+  // ==================== NAVIGATION ====================
+
   void _viewMySchedule() {
     context.push('/barber/appointments');
   }
@@ -689,7 +1495,10 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
 
   void _viewBookingDetails(String customerName) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Viewing $customerName\'s booking'), duration: const Duration(seconds: 1)),
+      SnackBar(
+        content: Text('Viewing $customerName\'s booking'),
+        duration: const Duration(seconds: 1),
+      ),
     );
   }
 
@@ -700,13 +1509,19 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
         title: const Text('Complete Appointment'),
         content: const Text('Mark this appointment as completed?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
           ElevatedButton(
             onPressed: () {
               Navigator.pop(context);
-              _loadData(); // Refresh data
+              _loadData();
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('✅ Appointment marked as completed'), backgroundColor: Colors.green),
+                const SnackBar(
+                  content: Text('✅ Appointment marked as completed'),
+                  backgroundColor: Colors.green,
+                ),
               );
             },
             style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
@@ -789,7 +1604,12 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
             ],
           ),
         ),
-        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
       ),
     );
   }
@@ -803,7 +1623,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
         showDialog(
           context: context,
           barrierDismissible: false,
-          builder: (context) => const Center(child: CircularProgressIndicator(color: Color(0xFFFF6B8B))),
+          builder: (context) => const Center(
+            child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+          ),
         );
 
         try {
@@ -818,7 +1640,10 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
           if (context.mounted) {
             Navigator.pop(context);
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Logout failed: $e'), backgroundColor: Colors.red),
+              SnackBar(
+                content: Text('Logout failed: $e'),
+                backgroundColor: Colors.red,
+              ),
             );
           }
         }
@@ -826,24 +1651,41 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
     );
   }
 
-  // ============================================================
-  // UI BUILDERS
-  // ============================================================
-  
+  // ==================== UI BUILDERS ====================
+
   Widget _buildStatusIndicator() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: _isOnBreak ? Colors.orange.withValues(alpha: 0.1) : Colors.green.withValues(alpha: 0.1),
+        color: _isOnBreak
+            ? Colors.orange.withValues(alpha: 0.1)
+            : Colors.green.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: _isOnBreak ? Colors.orange : Colors.green, width: 1),
+        border: Border.all(
+          color: _isOnBreak ? Colors.orange : Colors.green,
+          width: 1,
+        ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(width: 8, height: 8, decoration: BoxDecoration(color: _isOnBreak ? Colors.orange : Colors.green, shape: BoxShape.circle)),
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(
+              color: _isOnBreak ? Colors.orange : Colors.green,
+              shape: BoxShape.circle,
+            ),
+          ),
           const SizedBox(width: 6),
-          Text(_isOnBreak ? 'On Break' : 'Working', style: TextStyle(color: _isOnBreak ? Colors.orange : Colors.green, fontWeight: FontWeight.w500, fontSize: 12)),
+          Text(
+            _isOnBreak ? 'On Break' : 'Working',
+            style: TextStyle(
+              color: _isOnBreak ? Colors.orange : Colors.green,
+              fontWeight: FontWeight.w500,
+              fontSize: 12,
+            ),
+          ),
         ],
       ),
     );
@@ -868,7 +1710,14 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
           children: [
             Icon(icon, color: color, size: 24),
             const SizedBox(height: 4),
-            Text(label, style: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.w500)),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                color: color,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
           ],
         ),
       ),
@@ -885,7 +1734,14 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
       children: [
         Icon(icon, color: color, size: 20),
         const SizedBox(height: 4),
-        Text(value, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: color)),
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: color,
+          ),
+        ),
         Text(label, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
       ],
     );
@@ -893,6 +1749,31 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
 
   @override
   Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isWeb = screenWidth > 800;
+
+    if (!_isTimezoneLoaded) {
+      return Scaffold(
+        key: _scaffoldKey,
+        appBar: AppBar(
+          title: const Text('Employee Dashboard'),
+          backgroundColor: const Color(0xFFFF6B8B),
+          foregroundColor: Colors.white,
+          elevation: 0,
+        ),
+        body: const Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+              SizedBox(height: 16),
+              Text('Loading timezone...'),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       key: _scaffoldKey,
       appBar: AppBar(
@@ -900,28 +1781,56 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
         backgroundColor: const Color(0xFFFF6B8B),
         foregroundColor: Colors.white,
         elevation: 0,
-        leading: IconButton(icon: const Icon(Icons.menu), onPressed: _openDrawer, tooltip: 'Menu', iconSize: 28),
+        centerTitle: isWeb,
+        leading: IconButton(
+          icon: const Icon(Icons.menu),
+          onPressed: _openDrawer,
+          tooltip: 'Menu',
+          iconSize: 28,
+        ),
         actions: [
+          _buildTimezoneSelector(),
           IconButton(
             icon: Icon(_isOnBreak ? Icons.free_breakfast : Icons.coffee),
             onPressed: _toggleBreak,
             tooltip: _isOnBreak ? 'End Break' : 'Take Break',
             color: _isOnBreak ? Colors.orange : Colors.white,
           ),
-          IconButton(icon: const Icon(Icons.access_time), onPressed: _handleAttendance, tooltip: 'Attendance'),
+          IconButton(
+            icon: const Icon(Icons.access_time),
+            onPressed: _handleAttendance,
+            tooltip: 'Attendance',
+          ),
           Stack(
             clipBehavior: Clip.none,
             children: [
-              IconButton(icon: const Icon(Icons.notifications_outlined), onPressed: _viewUpcomingAppointments),
+              IconButton(
+                icon: const Icon(Icons.notifications_outlined),
+                onPressed: _viewUpcomingAppointments,
+              ),
               if (_pendingAppointments > 0)
                 Positioned(
                   right: 8,
                   top: 8,
                   child: Container(
                     padding: const EdgeInsets.all(2),
-                    decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
-                    constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
-                    child: Text('$_pendingAppointments', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+                    decoration: const BoxDecoration(
+                      color: Colors.red,
+                      shape: BoxShape.circle,
+                    ),
+                    constraints: const BoxConstraints(
+                      minWidth: 18,
+                      minHeight: 18,
+                    ),
+                    child: Text(
+                      '$_pendingAppointments',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
                   ),
                 ),
             ],
@@ -929,16 +1838,17 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
           IconButton(icon: const Icon(Icons.refresh), onPressed: _loadData),
         ],
       ),
-      // 🔥 FIXED: SideMenu with email parameter
       drawer: SideMenu(
         userRole: 'barber',
         userName: _employeeName,
-        userEmail: _employeeEmail,  // 🔥 Email passed to Side Menu
+        userEmail: _employeeEmail,
         profileImageUrl: null,
         onMenuItemSelected: () => _loadData(),
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: Color(0xFFFF6B8B)))
+          ? const Center(
+              child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+            )
           : RefreshIndicator(
               onRefresh: _loadData,
               color: const Color(0xFFFF6B8B),
@@ -951,7 +1861,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                         onEnable: _enableNotifications,
                         onNotNow: _handleNotNow,
                         title: '🔔 Get Booking Updates',
-                        message: 'Get instant notifications for new bookings and schedule changes',
+                        message:
+                            'Get instant notifications for new bookings and schedule changes',
                         compact: false,
                       ),
                     Padding(
@@ -961,15 +1872,42 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text('Welcome back,', style: TextStyle(fontSize: 14, color: Colors.grey[600])),
+                              Text(
+                                'Welcome back,',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.grey[600],
+                                ),
+                              ),
                               Row(
                                 children: [
-                                  Text(_employeeName, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                                  Text(
+                                    _employeeName,
+                                    style: const TextStyle(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
                                   const SizedBox(width: 8),
                                   Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                    decoration: BoxDecoration(color: Colors.purple.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)),
-                                    child: Text(_employeeRole, style: const TextStyle(fontSize: 12, color: Colors.purple, fontWeight: FontWeight.w500)),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 4,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: Colors.purple.withValues(
+                                        alpha: 0.1,
+                                      ),
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: Text(
+                                      _employeeRole,
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.purple,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
                                   ),
                                 ],
                               ),
@@ -985,36 +1923,93 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                       margin: const EdgeInsets.symmetric(horizontal: 16),
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        gradient: LinearGradient(colors: [Colors.amber.withValues(alpha: 0.1), Colors.orange.withValues(alpha: 0.1)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+                        gradient: LinearGradient(
+                          colors: [
+                            Colors.amber.withValues(alpha: 0.1),
+                            Colors.orange.withValues(alpha: 0.1),
+                          ],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
                         borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: Colors.amber.withValues(alpha: 0.3)),
+                        border: Border.all(
+                          color: Colors.amber.withValues(alpha: 0.3),
+                        ),
                       ),
                       child: Row(
                         children: [
                           Container(
                             padding: const EdgeInsets.all(10),
-                            decoration: BoxDecoration(color: Colors.amber.withValues(alpha: 0.2), shape: BoxShape.circle),
-                            child: const Icon(Icons.star, color: Colors.amber, size: 28),
+                            decoration: BoxDecoration(
+                              color: Colors.amber.withValues(alpha: 0.2),
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(
+                              Icons.star,
+                              color: Colors.amber,
+                              size: 28,
+                            ),
                           ),
                           const SizedBox(width: 16),
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('Your Rating', style: TextStyle(fontSize: 14, color: Colors.grey)),
+                              const Text(
+                                'Your Rating',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.grey,
+                                ),
+                              ),
                               Row(
                                 children: [
-                                  Text(_rating.toStringAsFixed(1), style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.amber)),
+                                  Text(
+                                    _rating.toStringAsFixed(1),
+                                    style: const TextStyle(
+                                      fontSize: 28,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.amber,
+                                    ),
+                                  ),
                                   const SizedBox(width: 4),
-                                  const Text('/ 5.0', style: TextStyle(fontSize: 16, color: Colors.grey)),
+                                  const Text(
+                                    '/ 5.0',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      color: Colors.grey,
+                                    ),
+                                  ),
                                 ],
                               ),
                             ],
                           ),
                           const Spacer(),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                            decoration: BoxDecoration(color: Colors.green.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(20)),
-                            child: const Row(children: [Icon(Icons.arrow_upward, color: Colors.green, size: 16), SizedBox(width: 4), Text('12%', style: TextStyle(color: Colors.green, fontWeight: FontWeight.w500))]),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.green.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: const Row(
+                              children: [
+                                Icon(
+                                  Icons.arrow_upward,
+                                  color: Colors.green,
+                                  size: 16,
+                                ),
+                                SizedBox(width: 4),
+                                Text(
+                                  '12%',
+                                  style: TextStyle(
+                                    color: Colors.green,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ],
                       ),
@@ -1060,7 +2055,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                               value: 'Rs. $_todayEarnings',
                               icon: Icons.currency_rupee,
                               color: Colors.green,
-                              percentageChange: 8.5,
                               onTap: _viewTodayEarnings,
                             ),
                           ),
@@ -1098,40 +2092,80 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                       padding: const EdgeInsets.symmetric(horizontal: 16),
                       child: Row(
                         children: [
-                          Expanded(child: _buildQuickAction(icon: Icons.check_circle_outline, label: 'Complete', color: Colors.green, onTap: _markAppointmentComplete)),
+                          Expanded(
+                            child: _buildQuickAction(
+                              icon: Icons.check_circle_outline,
+                              label: 'Complete',
+                              color: Colors.green,
+                              onTap: _markAppointmentComplete,
+                            ),
+                          ),
                           const SizedBox(width: 12),
-                          Expanded(child: _buildQuickAction(icon: Icons.schedule_outlined, label: 'My Schedule', color: Colors.blue, onTap: _viewMySchedule)),
+                          Expanded(
+                            child: _buildQuickAction(
+                              icon: Icons.schedule_outlined,
+                              label: 'My Schedule',
+                              color: Colors.blue,
+                              onTap: _viewMySchedule,
+                            ),
+                          ),
                           const SizedBox(width: 12),
                           Expanded(
                             child: _buildQuickAction(
                               icon: Icons.message_outlined,
                               label: 'Notify Customer',
                               color: Colors.purple,
-                              onTap: () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('📱 Customer notification sent'), backgroundColor: Colors.purple)),
+                              onTap: () =>
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        '📱 Customer notification sent',
+                                      ),
+                                      backgroundColor: Colors.purple,
+                                    ),
+                                  ),
                             ),
                           ),
                         ],
                       ),
                     ),
                     const SizedBox(height: 16),
-                    const SectionHeader(title: 'Today\'s Schedule', actionText: 'View All'),
+                    const SectionHeader(
+                      title: 'Today\'s Schedule',
+                      actionText: 'View All',
+                    ),
                     const SizedBox(height: 8),
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
                       child: _todaysAppointmentsList.isEmpty
                           ? Container(
                               padding: const EdgeInsets.all(32),
-                              decoration: BoxDecoration(color: Colors.grey[50], borderRadius: BorderRadius.circular(12)),
-                              child: const Center(child: Text('No appointments today', style: TextStyle(color: Colors.grey))),
+                              decoration: BoxDecoration(
+                                color: Colors.grey[50],
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: const Center(
+                                child: Text(
+                                  'No appointments today',
+                                  style: TextStyle(color: Colors.grey),
+                                ),
+                              ),
                             )
                           : Column(
                               children: _todaysAppointmentsList.map((apt) {
                                 Color statusColor;
                                 switch (apt['status']) {
-                                  case 'completed': statusColor = Colors.green; break;
-                                  case 'confirmed': statusColor = Colors.blue; break;
-                                  case 'cancelled': statusColor = Colors.red; break;
-                                  default: statusColor = Colors.orange;
+                                  case 'completed':
+                                    statusColor = Colors.green;
+                                    break;
+                                  case 'confirmed':
+                                    statusColor = Colors.blue;
+                                    break;
+                                  case 'cancelled':
+                                    statusColor = Colors.red;
+                                    break;
+                                  default:
+                                    statusColor = Colors.orange;
                                 }
                                 return BookingTile(
                                   customerName: apt['customer_name'],
@@ -1142,7 +2176,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                                   barberName: 'You',
                                   price: apt['price'],
                                   showActions: apt['status'] != 'completed',
-                                  onTap: () => _viewBookingDetails(apt['customer_name']),
+                                  onTap: () =>
+                                      _viewBookingDetails(apt['customer_name']),
                                   onComplete: _markAppointmentComplete,
                                 );
                               }).toList(),
@@ -1152,17 +2187,48 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                     Container(
                       margin: const EdgeInsets.all(16),
                       padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(color: Colors.grey[50], borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.grey[200]!)),
+                      decoration: BoxDecoration(
+                        color: Colors.grey[50],
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: Colors.grey[200]!),
+                      ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text('Today\'s Performance', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                          const Text(
+                            'Today\'s Performance',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                           const SizedBox(height: 16),
                           Row(
                             children: [
-                              Expanded(child: _buildPerformanceItem(label: 'Completed', value: '$_completedToday', icon: Icons.check_circle, color: Colors.green)),
-                              Expanded(child: _buildPerformanceItem(label: 'No-show', value: '0', icon: Icons.cancel, color: Colors.red)),
-                              Expanded(child: _buildPerformanceItem(label: 'On Time', value: '100%', icon: Icons.timer, color: Colors.blue)),
+                              Expanded(
+                                child: _buildPerformanceItem(
+                                  label: 'Completed',
+                                  value: '$_completedToday',
+                                  icon: Icons.check_circle,
+                                  color: Colors.green,
+                                ),
+                              ),
+                              Expanded(
+                                child: _buildPerformanceItem(
+                                  label: 'No-show',
+                                  value: '0',
+                                  icon: Icons.cancel,
+                                  color: Colors.red,
+                                ),
+                              ),
+                              Expanded(
+                                child: _buildPerformanceItem(
+                                  label: 'On Time',
+                                  value: '100%',
+                                  icon: Icons.timer,
+                                  color: Colors.blue,
+                                ),
+                              ),
                             ],
                           ),
                         ],
@@ -1171,15 +2237,32 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                     if (_hasPermission)
                       Container(
                         margin: const EdgeInsets.only(bottom: 16),
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        decoration: BoxDecoration(color: Colors.green.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(20)),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.green.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Icon(Icons.notifications_active, size: 16, color: Colors.green[700]),
+                            Icon(
+                              Icons.notifications_active,
+                              size: 16,
+                              color: Colors.green[700],
+                            ),
                             const SizedBox(width: 4),
-                            Text('Notifications active', style: TextStyle(fontSize: 12, color: Colors.green[700], fontWeight: FontWeight.w500)),
+                            Text(
+                              'Notifications active',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.green[700],
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
                           ],
                         ),
                       ),
