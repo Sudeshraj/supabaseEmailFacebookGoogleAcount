@@ -1,8 +1,7 @@
-// lib/screens/booking/vip_booking_screen.dart
-
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/timezone_service.dart';
 
 class VIPBookingScreen extends StatefulWidget {
@@ -66,8 +65,12 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   bool _isBooking = false;
   bool _isInitialized = false;
 
-  // Timezone tracking
+  // ============================================
+  // TIMEZONE VARIABLES - USING UNIFIED KEY 'cached_timezone'
+  // ============================================
+  String _userTimezone = '';
   String _lastTimezone = '';
+  bool _isTimezoneLoaded = false;
 
   // Colors
   final Color _primaryColor = const Color(0xFFFF6B8B);
@@ -88,11 +91,26 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     _initialize();
   }
 
+  // ============================================
+  // TIMEZONE INITIALIZATION & DETECTION - USING 'cached_timezone'
+  // ============================================
+  
   Future<void> _initialize() async {
     await TimezoneService.initialize();
-    _lastTimezone = TimezoneService.getCurrentTimezone();
+    
+    final prefs = await SharedPreferences.getInstance();
+    
+    // ✅ Use 'cached_timezone' for consistency across all screens
+    _userTimezone = prefs.getString('cached_timezone') ?? TimezoneService.getCurrentTimezone();
+    await TimezoneService.setTimezone(_userTimezone);
+    
+    _lastTimezone = _userTimezone;
+    
+    setState(() {
+      _isTimezoneLoaded = true;
+    });
+    
     _initializeScreen();
-    if (mounted) setState(() {});
   }
 
   @override
@@ -101,9 +119,14 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     _checkTimezoneChange();
   }
 
-  void _checkTimezoneChange() {
-    final currentTimezone = TimezoneService.getCurrentTimezone();
+  void _checkTimezoneChange() async {
+    final prefs = await SharedPreferences.getInstance();
+    // ✅ Use 'cached_timezone' for consistency
+    final currentTimezone = prefs.getString('cached_timezone') ?? TimezoneService.getCurrentTimezone();
+    
     if (_lastTimezone != currentTimezone && _lastTimezone.isNotEmpty) {
+      _userTimezone = currentTimezone;
+      await TimezoneService.setTimezone(_userTimezone);
       _onTimezoneChanged();
     }
     _lastTimezone = currentTimezone;
@@ -118,15 +141,14 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         _generatedVipNumber = 0;
         _selectedStartTime = '';
         _slotErrorMessage = null;
+        _isLoadingSlots = true;
       });
       await _loadAvailableSlots();
-
+      
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(
-              'Timezone changed to ${TimezoneService.getTimezoneDisplayName()}',
-            ),
+            content: Text('Timezone changed to ${TimezoneService.getTimezoneDisplayName()}'),
             backgroundColor: _primaryColor,
             duration: const Duration(seconds: 2),
           ),
@@ -150,15 +172,34 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     super.dispose();
   }
 
+  // ============================================
+  // HELPER FUNCTIONS
+  // ============================================
 
   int _calculateTotalDuration() =>
       _selectedServices.fold(0, (sum, s) => sum + (s['duration'] as int));
+      
   double _calculateTotalPrice() => _selectedServices.fold(
     0.0,
     (sum, s) => sum + ((s['price'] as num?)?.toDouble() ?? 0.0),
   );
+  
   String _getChildNameForBooking() =>
       _isSameAsCustomer ? '' : (_selectedChildName?.trim() ?? '');
+
+  bool _isDST() {
+    final timezone = _userTimezone;
+    if (!timezone.contains('America/') && !timezone.contains('Europe/')) {
+      return false;
+    }
+    final now = DateTime.now();
+    final month = now.month;
+    return month > 3 && month < 11;
+  }
+
+  String _getTimezoneDisplay() {
+    return '${TimezoneService.getCurrentFlag()} ${TimezoneService.getTimezoneDisplayName()} (${TimezoneService.getUtcOffsetString()})';
+  }
 
   void _resetBooking() {
     setState(() {
@@ -192,193 +233,50 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     });
   }
 
-  Widget _buildTimezoneSelector() {
-    return GestureDetector(
-      onTap: () => _showTimezonePickerDialog(),
-      child: Container(
-        margin: const EdgeInsets.only(right: 8),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.2),
-          borderRadius: BorderRadius.circular(25),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              TimezoneService.getTimezoneFlag(),
-              style: const TextStyle(fontSize: 16),
-            ),
-            const SizedBox(width: 6),
-            Text(
-              TimezoneService.getTimezoneDisplayName(),
-              style: const TextStyle(
-                fontSize: 13,
-                color: Colors.white,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            const SizedBox(width: 4),
-            const Icon(Icons.arrow_drop_down, size: 20, color: Colors.white),
-          ],
-        ),
+  // ============================================
+  // TIMEZONE FLAG DISPLAY (No Picker - Flag Only)
+  // ============================================
+  
+  Widget _buildTimezoneFlag() {
+    return Container(
+      margin: const EdgeInsets.only(right: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.2),
+        borderRadius: BorderRadius.circular(20),
       ),
-    );
-  }
-
-  Future<void> _showTimezonePickerDialog() async {
-    String selectedCountryCode = TimezoneService.getCurrentCountryCode();
-    String selectedTimezone = TimezoneService.getCurrentTimezone();
-
-    await showDialog<Map<String, String>>(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setStateDialog) {
-          final countries = TimezoneService.getAllCountries();
-          final timezones = TimezoneService.getTimezonesForCountry(
-            selectedCountryCode,
-          );
-          return AlertDialog(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(24),
-            ),
-            title: const Text(
-              'Select Your Timezone',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const SizedBox(height: 8),
-                const Text(
-                  'VIP appointments will be shown in your local time',
-                  style: TextStyle(fontSize: 13),
-                ),
-                const SizedBox(height: 20),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Colors.grey[300]!),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<String>(
-                      value: selectedCountryCode,
-                      isExpanded: true,
-                      items: countries.map((country) {
-                        return DropdownMenuItem<String>(
-                          value: country['code'],
-                          child: Row(
-                            children: [
-                              Text(
-                                country['flag']!,
-                                style: const TextStyle(fontSize: 18),
-                              ),
-                              const SizedBox(width: 10),
-                              Text(country['name']!),
-                            ],
-                          ),
-                        );
-                      }).toList(),
-                      onChanged: (value) {
-                        if (value != null) {
-                          setStateDialog(() {
-                            selectedCountryCode = value;
-                            final newTimezones =
-                                TimezoneService.getTimezonesForCountry(value);
-                            if (newTimezones.isNotEmpty) {
-                              selectedTimezone =
-                                  newTimezones.first['timezone']!;
-                            }
-                          });
-                        }
-                      },
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Colors.grey[300]!),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<String>(
-                      value: selectedTimezone,
-                      isExpanded: true,
-                      items: timezones.map((tz) {
-                        return DropdownMenuItem<String>(
-                          value: tz['timezone'],
-                          child: Row(
-                            children: [
-                              Text(tz['name']!),
-                              const SizedBox(width: 8),
-                              Text(
-                                '(${tz['offset']})',
-                                style: const TextStyle(fontSize: 12),
-                              ),
-                            ],
-                          ),
-                        );
-                      }).toList(),
-                      onChanged: (value) =>
-                          setStateDialog(() => selectedTimezone = value!),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Cancel', style: TextStyle(fontSize: 16)),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            TimezoneService.getCurrentFlag(),
+            style: const TextStyle(fontSize: 16),
+          ),
+          if (_isDST()) ...[
+            const SizedBox(width: 4),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.amber.shade100,
+                borderRadius: BorderRadius.circular(8),
               ),
-              ElevatedButton(
-                onPressed: () async {
-                  await TimezoneService.setTimezone(selectedTimezone);
-                  if (context.mounted) Navigator.pop(context);
-                  if (mounted) {
-                    setState(() {
-                      _allTimeSlots = [];
-                      _selectedSlot = null;
-                      _showingVipNumber = false;
-                      _generatedVipNumber = 0;
-                      _selectedStartTime = '';
-                      _slotErrorMessage = null;
-                    });
-                    if (_currentStep == 5 &&
-                        _selectedDate != null &&
-                        _selectedBarber != null) {
-                      await _loadAvailableSlots();
-                    }
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          'Timezone changed to ${TimezoneService.getTimezoneDisplayName()}',
-                        ),
-                        backgroundColor: _primaryColor,
-                        duration: const Duration(seconds: 2),
-                      ),
-                    );
-                  }
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: _primaryColor,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
+              child: Text(
+                'DST',
+                style: TextStyle(
+                  fontSize: 8,
+                  color: Colors.amber.shade800,
+                  fontWeight: FontWeight.bold,
                 ),
-                child: const Text('Apply', style: TextStyle(fontSize: 16)),
               ),
-            ],
-          );
-        },
+            ),
+          ],
+        ],
       ),
     );
   }
 
   // ==================== STEP 1: SALON SEARCH ====================
+  
   Widget _buildSalonSearchStep() => Column(
     children: [
       Container(
@@ -561,20 +459,13 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     ),
   );
 
-  // Helper function to convert UTC to local
   String _getSalonLocalTime(Map<String, dynamic> salon) {
     final openTimeUTC = salon['open_time']?.toString() ?? '09:00:00';
     final closeTimeUTC = salon['close_time']?.toString() ?? '18:00:00';
+    final referenceDate = _selectedDate ?? DateTime.now();
 
-    // Convert UTC to local time
-    final openLocal = TimezoneService.utcToLocalTime(
-      openTimeUTC,
-      DateTime.now(),
-    );
-    final closeLocal = TimezoneService.utcToLocalTime(
-      closeTimeUTC,
-      DateTime.now(),
-    );
+    final openLocal = TimezoneService.utcToLocalTime(openTimeUTC, referenceDate);
+    final closeLocal = TimezoneService.utcToLocalTime(closeTimeUTC, referenceDate);
 
     return '$openLocal - $closeLocal';
   }
@@ -617,6 +508,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   }
 
   // ==================== STEP 2: DATE SELECTION ====================
+  
   Future<void> _loadHolidays() async {
     if (_selectedSalon == null) return;
     try {
@@ -832,6 +724,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   }
 
   // ==================== STEP 3: SERVICE SELECTION ====================
+  
   Future<void> _loadSalonServices() async {
     if (_servicesLoaded) return;
     setState(() => _isLoadingServices = true);
@@ -1292,6 +1185,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   }
 
   // ==================== STEP 4: BARBER SELECTION ====================
+  
   Future<Map<String, dynamic>> _checkBarberFullAvailability(
     String barberId,
     DateTime date,
@@ -1763,6 +1657,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   }
 
   // ==================== STEP 5: PERSON SELECTION ====================
+  
   Widget _buildPersonSelectionStep() {
     final user = supabase.auth.currentUser;
     final customerName =
@@ -2202,6 +2097,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   }
 
   // ==================== STEP 6: VIP TIME SLOT SELECTION ====================
+  
   Widget _buildTimezoneIndicator() => Container(
     margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
@@ -2214,7 +2110,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(
-          TimezoneService.getTimezoneFlag(),
+          TimezoneService.getCurrentFlag(),
           style: const TextStyle(fontSize: 16),
         ),
         const SizedBox(width: 8),
@@ -2231,21 +2127,36 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           '(${TimezoneService.getUtcOffsetString()})',
           style: TextStyle(fontSize: 11, color: Colors.grey[500]),
         ),
+        if (_isDST()) ...[
+          const SizedBox(width: 6),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: Colors.amber.shade100,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              'DST',
+              style: TextStyle(
+                fontSize: 9,
+                color: Colors.amber.shade800,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
       ],
     ),
   );
 
-  bool _isSlotInPast(DateTime slotStartTime, int durationMinutes) {
+  bool _isSlotInPast(DateTime localSlotStart, int durationMinutes) {
     final now = DateTime.now();
-    final todayDate = DateTime(now.year, now.month, now.day);
-    final slotDate = DateTime(
-      slotStartTime.year,
-      slotStartTime.month,
-      slotStartTime.day,
-    );
-
-    if (slotDate.isAtSameMomentAs(todayDate)) {
-      return slotStartTime.isBefore(now);
+    final slotEnd = localSlotStart.add(Duration(minutes: durationMinutes));
+    
+    if (localSlotStart.isBefore(now)) {
+      if (slotEnd.isBefore(now)) {
+        return true;
+      }
     }
     return false;
   }
@@ -2281,7 +2192,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate!);
       final totalDuration = _calculateTotalDuration();
 
-      // 1. GET BARBER EFFECTIVE SCHEDULE (Returns UTC times)
       final scheduleResult = await supabase.rpc(
         'get_barber_effective_schedule',
         params: {
@@ -2303,7 +2213,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         }
       }
 
-      // Check if barber is on leave
       final leaveType = effectiveSchedule['leave_type'] as String?;
       if (leaveType == 'full_day') {
         setState(() {
@@ -2314,7 +2223,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         return;
       }
 
-      // 2. GET WORK HOURS (UTC from DB)
       String workStartUTC =
           effectiveSchedule['work_start']?.toString() ?? '09:00';
       String workEndUTC = effectiveSchedule['work_end']?.toString() ?? '18:00';
@@ -2322,7 +2230,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       if (workStartUTC.length > 5) workStartUTC = workStartUTC.substring(0, 5);
       if (workEndUTC.length > 5) workEndUTC = workEndUTC.substring(0, 5);
 
-      // Parse UTC hours
       final workStartParts = workStartUTC.split(':');
       final workEndParts = workEndUTC.split(':');
       int workStartHour = int.parse(workStartParts[0]);
@@ -2334,7 +2241,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           ? int.parse(workEndParts[1])
           : 0;
 
-      // 3. GET BREAKS (UTC from DB)
       List<Map<String, dynamic>> breakRanges = [];
 
       String? breakStartUTC = effectiveSchedule['lunch_break_start']
@@ -2365,7 +2271,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         });
       }
 
-      // 4. GET EXISTING VIP APPOINTMENTS (VIP ONLY)
       final existingAppointments = await supabase
           .from('appointments')
           .select('id, start_time, end_time, vip_queue_number, is_vip, status')
@@ -2399,7 +2304,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         });
       }
 
-      // 5. GENERATE SLOTS
       final List<Map<String, dynamic>> slots = [];
       int slotNumber = 1;
 
@@ -2419,13 +2323,11 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         workEndMinute,
       );
 
-      // Handle cross-midnight work hours
       if (workEndHour < workStartHour ||
           (workEndHour == workStartHour && workEndMinute <= workStartMinute)) {
         workEndDateTimeUTC = workEndDateTimeUTC.add(const Duration(days: 1));
       }
 
-      // Helper function to check overlap
       bool isOverlapWithRanges(
         int startMin,
         int endMin,
@@ -2437,7 +2339,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           int rangeEndMin =
               (range['end_hour'] as int) * 60 + (range['end_min'] as int);
 
-          // Handle ranges that cross midnight
           if (rangeEndMin < rangeStartMin) {
             rangeEndMin += 24 * 60;
           }
@@ -2478,7 +2379,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           breakRanges,
         );
 
-        // Convert to local for past check
         final localSlotStart = TimezoneService.utcToLocalDateTime(
           '${slotStartUTC.hour.toString().padLeft(2, '0')}:${slotStartUTC.minute.toString().padLeft(2, '0')}',
           _selectedDate!,
@@ -2512,7 +2412,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         } else if (isPast) {
           statusText = 'Time Passed';
         } else {
-          // Calculate VIP number based on start time order
           int vipCountBefore = 0;
           for (final booked in bookedRanges) {
             if (booked['is_vip'] == true) {
@@ -2527,7 +2426,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           displayVipNumber = vipCountBefore + 1;
         }
 
-        // Convert UTC to Local for DISPLAY
         final localStartDateTime = TimezoneService.utcToLocalDateTime(
           '${slotStartUTC.hour.toString().padLeft(2, '0')}:${slotStartUTC.minute.toString().padLeft(2, '0')}',
           _selectedDate!,
@@ -2571,7 +2469,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         _isLoadingSlots = false;
       });
     } catch (e) {
-     
       setState(() {
         _isLoadingSlots = false;
         _slotErrorMessage = 'Failed to load time slots. Please try again.';
@@ -2628,7 +2525,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         _isLoadingSlots = false;
       });
     } catch (e) {
-     
       setState(() {
         _isLoadingSlots = false;
         _selectedSlot = slot;
@@ -2840,7 +2736,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                       ),
                       const SizedBox(height: 20),
 
-                      // VIP Number Card
                       if (_showingVipNumber && _selectedSlot != null) ...[
                         Center(
                           child: Card(
@@ -2915,7 +2810,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                         const SizedBox(height: 24),
                       ],
 
-                      // Available Slots
                       if (availableSlots.isNotEmpty) ...[
                         const Text(
                           'Available Slots',
@@ -2993,7 +2887,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                         ),
                       ],
 
-                      // Unavailable Slots
                       if (unavailableSlots.isNotEmpty) ...[
                         const SizedBox(height: 24),
                         const Text(
@@ -3073,7 +2966,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                         ),
                       ],
 
-                      // No available slots message
                       if (availableSlots.isEmpty &&
                           unavailableSlots.isNotEmpty) ...[
                         const SizedBox(height: 24),
@@ -3172,6 +3064,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   }
 
   // ==================== STEP 7: CONFIRMATION ====================
+  
   Widget _buildConfirmationStep() {
     if (_selectedSalon == null ||
         _selectedServices.isEmpty ||
@@ -3238,6 +3131,30 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
             padding: const EdgeInsets.all(16),
             child: Column(
               children: [
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.blue.shade200),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.access_time, size: 20, color: Colors.blue),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          '⏰ Times shown in your local timezone: $_getTimezoneDisplay()',
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: Colors.blueGrey,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
                 _buildConfirmationTile(
                   Icons.star,
                   'VIP Booking',
@@ -3446,6 +3363,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   }
 
   // ==================== MAIN BUILD METHOD ====================
+  
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
@@ -3455,6 +3373,28 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     final stepFontSize = isMobile ? 9.0 : 11.0;
     final connectorWidth = isMobile ? 20.0 : 35.0;
     final showLabels = !isMobile;
+
+    if (!_isTimezoneLoaded) {
+      return Scaffold(
+        backgroundColor: _bgLight,
+        appBar: AppBar(
+          title: const Text('VIP Booking'),
+          backgroundColor: _primaryColor,
+          foregroundColor: Colors.white,
+          elevation: 0,
+        ),
+        body: const Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(height: 16),
+              Text('Loading timezone...'),
+            ],
+          ),
+        ),
+      );
+    }
 
     return Scaffold(
       backgroundColor: _bgLight,
@@ -3482,7 +3422,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           },
         ),
         actions: [
-          _buildTimezoneSelector(),
+          _buildTimezoneFlag(),
           if (_currentStep > 0)
             TextButton(
               onPressed: _resetBooking,

@@ -1,5 +1,3 @@
-// lib/screens/customer/customer_dashboard.dart
-
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/alertBox/show_logout_conf.dart';
@@ -16,7 +14,8 @@ import 'package:flutter_application_1/widgets/section_header.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
+import 'package:shared_preferences/shared_preferences.dart';
+import '../../services/timezone_service.dart';
 
 class CustomerDashboard extends StatefulWidget {
   const CustomerDashboard({super.key});
@@ -63,6 +62,11 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
   // Special Offers
   List<Map<String, dynamic>> _offers = [];
 
+  // ==================== TIMEZONE VARIABLES ====================
+  String _userTimezone = '';
+  String _lastTimezone = '';
+  bool _isTimezoneLoaded = false;
+
   // ==================== SEARCH STATE ====================
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
@@ -74,6 +78,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
   @override
   void initState() {
     super.initState();
+    _initializeTimezone();
     _loadCustomerData();
     _loadDashboardData();
     _setupNotificationListeners();
@@ -81,16 +86,551 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
     debugPrint('🔄 CustomerDashboard initState completed');
   }
 
+  // ==================== TIMEZONE INITIALIZATION ====================
+  
+  Future<void> _initializeTimezone() async {
+    await TimezoneService.initialize();
+    
+    final prefs = await SharedPreferences.getInstance();
+    
+    // ✅ Use 'cached_timezone' for consistency
+    final savedTimezone = prefs.getString('cached_timezone');
+    
+    if (savedTimezone != null && savedTimezone.isNotEmpty) {
+      _userTimezone = savedTimezone;
+      await TimezoneService.setTimezone(_userTimezone);
+      debugPrint('✅ Using cached timezone: $_userTimezone');
+    } else {
+      _userTimezone = TimezoneService.getCurrentTimezone();
+      await prefs.setString('cached_timezone', _userTimezone);
+      debugPrint('✅ Saved device timezone to cache: $_userTimezone');
+    }
+    
+    _lastTimezone = _userTimezone;
+    
+    setState(() {
+      _isTimezoneLoaded = true;
+    });
+  }
+
   @override
-  void dispose() {
-    _searchController.removeListener(_onSearchTextChanged);
-    _searchController.dispose();
-    _searchFocusNode.dispose();
-    _removeSearchOverlay();
-    super.dispose();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _checkTimezoneChange();
+  }
+
+  void _checkTimezoneChange() async {
+    final prefs = await SharedPreferences.getInstance();
+    final currentTimezone = prefs.getString('cached_timezone') ?? TimezoneService.getCurrentTimezone();
+    
+    if (_lastTimezone != currentTimezone && _lastTimezone.isNotEmpty) {
+      _userTimezone = currentTimezone;
+      await TimezoneService.setTimezone(_userTimezone);
+    
+    }
+    _lastTimezone = currentTimezone;
+  }
+
+
+  bool _isDST() {
+    final timezone = _userTimezone;
+    if (!timezone.contains('America/') && !timezone.contains('Europe/')) {
+      return false;
+    }
+    final now = DateTime.now();
+    final month = now.month;
+    return month > 3 && month < 11;
+  }
+
+  // ==================== TIMEZONE CONVERSION METHODS ====================
+  
+  /// Convert UTC time string to local time string for display
+  String _convertUtcToLocalTime(String? utcTime, DateTime referenceDate) {
+    if (utcTime == null || utcTime.isEmpty) return '--:--';
+    try {
+      String timeStr = utcTime;
+      if (timeStr.length > 5) timeStr = timeStr.substring(0, 5);
+      return TimezoneService.utcToLocalTime(timeStr, referenceDate);
+    } catch (e) {
+      debugPrint('Error converting time: $e');
+      return utcTime.length > 5 ? utcTime.substring(0, 5) : utcTime;
+    }
+  }
+
+  /// Format salon hours for display in local timezone
+  String _getFormattedSalonHours(Map<String, dynamic> salon) {
+    final openTimeUtc = salon['open_time']?.toString() ?? '09:00:00';
+    final closeTimeUtc = salon['close_time']?.toString() ?? '18:00:00';
+    final referenceDate = DateTime.now();
+    
+    final openLocal = _convertUtcToLocalTime(openTimeUtc, referenceDate);
+    final closeLocal = _convertUtcToLocalTime(closeTimeUtc, referenceDate);
+    
+    return '$openLocal - $closeLocal';
+  }
+
+  /// Format appointment time for display
+  String _formatAppointmentTime(Map<String, dynamic> apt) {
+    final date = DateTime.parse(apt['appointment_date']);
+    final timeStr = _convertUtcToLocalTime(apt['start_time'], date);
+    final dateStr = DateFormat('MMM dd, yyyy').format(date);
+    return '$dateStr at $timeStr';
+  }
+
+  // ==================== ADVANCED TIMEZONE PICKER METHODS ====================
+  
+  String _extractCountryCode(String timezone) {
+    final countryMap = {
+      'Asia/Colombo': 'LK', 'Asia/Tokyo': 'JP', 'Asia/Seoul': 'KR', 'Asia/Shanghai': 'CN',
+      'Asia/Hong_Kong': 'HK', 'Asia/Taipei': 'TW', 'Asia/Kolkata': 'IN', 'Asia/Dubai': 'AE',
+      'Asia/Singapore': 'SG', 'Asia/Kuala_Lumpur': 'MY', 'Asia/Bangkok': 'TH', 'Asia/Jakarta': 'ID',
+      'Asia/Manila': 'PH', 'Asia/Ho_Chi_Minh': 'VN', 'Asia/Dhaka': 'BD', 'Asia/Karachi': 'PK',
+      'Asia/Kathmandu': 'NP', 'Asia/Riyadh': 'SA', 'Asia/Kuwait': 'KW', 'Asia/Doha': 'QA',
+      'Europe/London': 'GB', 'Europe/Paris': 'FR', 'Europe/Berlin': 'DE', 'Europe/Rome': 'IT',
+      'Europe/Madrid': 'ES', 'Europe/Amsterdam': 'NL', 'Europe/Zurich': 'CH', 'Europe/Moscow': 'RU',
+      'America/New_York': 'US', 'America/Chicago': 'US', 'America/Denver': 'US', 'America/Los_Angeles': 'US',
+      'America/Toronto': 'CA', 'America/Vancouver': 'CA', 'America/Mexico_City': 'MX', 'America/Sao_Paulo': 'BR',
+      'Australia/Sydney': 'AU', 'Australia/Melbourne': 'AU', 'Australia/Perth': 'AU', 'Australia/Adelaide': 'AU',
+      'Pacific/Auckland': 'NZ', 'Africa/Johannesburg': 'ZA', 'Africa/Cairo': 'EG', 'Africa/Lagos': 'NG',
+      'Africa/Nairobi': 'KE', 'America/Argentina/Buenos_Aires': 'AR', 'America/Santiago': 'CL',
+      'America/Bogota': 'CO', 'America/Lima': 'PE',
+    };
+    if (countryMap.containsKey(timezone)) return countryMap[timezone]!;
+    for (var entry in countryMap.entries) {
+      if (timezone.contains(entry.key) || entry.key.contains(timezone)) return entry.value;
+    }
+    return '';
+  }
+
+  String _getFlagByCountryCode(String countryCode) {
+    final flags = {
+      'LK': '🇱🇰', 'JP': '🇯🇵', 'KR': '🇰🇷', 'CN': '🇨🇳', 'HK': '🇭🇰', 'TW': '🇹🇼',
+      'IN': '🇮🇳', 'AE': '🇦🇪', 'SG': '🇸🇬', 'MY': '🇲🇾', 'TH': '🇹🇭', 'ID': '🇮🇩',
+      'PH': '🇵🇭', 'VN': '🇻🇳', 'BD': '🇧🇩', 'PK': '🇵🇰', 'NP': '🇳🇵', 'SA': '🇸🇦',
+      'KW': '🇰🇼', 'QA': '🇶🇦', 'GB': '🇬🇧', 'FR': '🇫🇷', 'DE': '🇩🇪', 'IT': '🇮🇹',
+      'ES': '🇪🇸', 'NL': '🇳🇱', 'CH': '🇨🇭', 'RU': '🇷🇺', 'US': '🇺🇸', 'CA': '🇨🇦',
+      'MX': '🇲🇽', 'BR': '🇧🇷', 'AU': '🇦🇺', 'NZ': '🇳🇿', 'ZA': '🇿🇦', 'EG': '🇪🇬',
+      'NG': '🇳🇬', 'KE': '🇰🇪', 'AR': '🇦🇷', 'CL': '🇨🇱', 'CO': '🇨🇴', 'PE': '🇵🇪',
+    };
+    return flags[countryCode] ?? '🌐';
+  }
+
+  String _getContinentEmoji(String continent) {
+    final emojis = {
+      'Asia': '🌏', 'Europe': '🌍', 'Africa': '🌍', 'America': '🌎',
+      'Australia': '🇦🇺', 'Pacific': '🌏', 'UTC': '🌐',
+    };
+    return emojis[continent] ?? '🌐';
+  }
+
+  Map<String, List<String>> _groupTimezonesByContinent(List<String> timezones) {
+    final groups = <String, List<String>>{};
+    for (final tz in timezones) {
+      final parts = tz.split('/');
+      if (parts.length >= 2) {
+        final continent = parts[0];
+        if (!groups.containsKey(continent)) groups[continent] = [];
+        groups[continent]!.add(tz);
+      } else {
+        if (!groups.containsKey('UTC')) groups['UTC'] = [];
+        groups['UTC']!.add(tz);
+      }
+    }
+    for (final key in groups.keys) {
+      groups[key]!.sort();
+    }
+    return groups;
+  }
+
+  Widget _buildTimezoneTile(String tz, String displayName, String flag) {
+    final isSelected = tz == _userTimezone;
+    
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 2),
+      decoration: BoxDecoration(
+        color: isSelected ? const Color(0xFFFF6B8B).withValues(alpha: 0.1) : null,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: ListTile(
+        leading: CircleAvatar(
+          radius: 20,
+          backgroundColor: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[200],
+          child: Text(flag, style: const TextStyle(fontSize: 16)),
+        ),
+        title: Text(
+          displayName,
+          style: TextStyle(
+            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+            color: isSelected ? const Color(0xFFFF6B8B) : null,
+          ),
+        ),
+        subtitle: Text(tz, style: const TextStyle(fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
+        trailing: isSelected ? const Icon(Icons.check_circle, color: Color(0xFFFF6B8B)) : null,
+        onTap: () => Navigator.of(context).pop(tz),
+      ),
+    );
+  }
+
+  Widget _buildCurrentTimezoneInfo() {
+    final displayName = _userTimezone.split('/').last.replaceAll('_', ' ');
+    final offset = TimezoneService.getUtcOffsetString();
+    final flag = TimezoneService.getCurrentFlag();
+    
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.grey[50],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey[200]!),
+      ),
+      child: Row(
+        children: [
+          Text(flag, style: const TextStyle(fontSize: 24)),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Current: $displayName', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                Text(_userTimezone, style: const TextStyle(fontSize: 10, color: Colors.grey), maxLines: 1, overflow: TextOverflow.ellipsis),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text(offset, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Color(0xFFFF6B8B))),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDialogHeader() {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(Icons.access_time, color: Color(0xFFFF6B8B), size: 28),
+          ),
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Text(
+              'Select Your Timezone',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFFFF6B8B)),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.close),
+            onPressed: () => Navigator.pop(context),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showAdvancedTimezonePicker() async {
+    final allTimezones = TimezoneService.getAllAvailableTimezones();
+    final continentGroups = _groupTimezonesByContinent(allTimezones);
+    
+    final List<Map<String, dynamic>> searchableList = [];
+    for (var entry in continentGroups.entries) {
+      final continent = entry.key;
+      for (final tz in entry.value) {
+        final displayName = tz.split('/').last.replaceAll('_', ' ');
+        final countryCode = _extractCountryCode(tz);
+        final flag = _getFlagByCountryCode(countryCode);
+        
+        final searchText = [
+          continent.toLowerCase(),
+          displayName.toLowerCase(),
+          tz.toLowerCase(),
+          countryCode.toLowerCase(),
+          displayName.toLowerCase(),
+        ].join(' ');
+        
+        searchableList.add({
+          'timezone': tz,
+          'displayName': displayName,
+          'continent': continent,
+          'flag': flag,
+          'searchText': searchText,
+        });
+      }
+    }
+    
+    TextEditingController searchController = TextEditingController();
+    
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) {
+        String searchQuery = '';
+        
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            List<Map<String, dynamic>> filteredList = searchableList;
+            if (searchQuery.isNotEmpty) {
+              final query = searchQuery.toLowerCase();
+              filteredList = searchableList
+                  .where((item) => item['searchText'].contains(query))
+                  .toList();
+            }
+            
+            Map<String, List<Map<String, dynamic>>> filteredGroups = {};
+            for (var item in filteredList) {
+              final continent = item['continent'];
+              if (!filteredGroups.containsKey(continent)) {
+                filteredGroups[continent] = [];
+              }
+              filteredGroups[continent]!.add(item);
+            }
+            
+            return Dialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+              child: Container(
+                width: MediaQuery.of(context).size.width * 0.9,
+                height: MediaQuery.of(context).size.height * 0.85,
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  children: [
+                    _buildDialogHeader(),
+                    const Divider(),
+                    Container(
+                      margin: const EdgeInsets.symmetric(vertical: 12),
+                      child: TextField(
+                        controller: searchController,
+                        autofocus: false,
+                        onChanged: (value) {
+                          setDialogState(() {
+                            searchQuery = value;
+                          });
+                        },
+                        decoration: InputDecoration(
+                          hintText: '🔍 Search by country, city, or timezone...',
+                          hintStyle: TextStyle(color: Colors.grey[400]),
+                          prefixIcon: const Icon(Icons.search, color: Colors.grey),
+                          suffixIcon: searchQuery.isNotEmpty
+                              ? IconButton(
+                                  icon: const Icon(Icons.clear, color: Colors.grey),
+                                  onPressed: () {
+                                    searchController.clear();
+                                    setDialogState(() {
+                                      searchQuery = '';
+                                    });
+                                  },
+                                )
+                              : null,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            borderSide: BorderSide.none,
+                          ),
+                          filled: true,
+                          fillColor: Colors.grey[100],
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                        ),
+                      ),
+                    ),
+                    if (searchQuery.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Text(
+                          'Found ${filteredList.length} timezone${filteredList.length != 1 ? 's' : ''}',
+                          style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                        ),
+                      ),
+                    Expanded(
+                      child: searchQuery.isEmpty
+                          ? DefaultTabController(
+                              length: continentGroups.keys.length,
+                              child: Column(
+                                children: [
+                                  SizedBox(
+                                    height: 45,
+                                    child: TabBar(
+                                      isScrollable: true,
+                                      labelColor: const Color(0xFFFF6B8B),
+                                      unselectedLabelColor: Colors.grey,
+                                      indicatorColor: const Color(0xFFFF6B8B),
+                                      labelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                                      tabs: continentGroups.keys.map((continent) => Tab(text: continent)).toList(),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Expanded(
+                                    child: TabBarView(
+                                      children: continentGroups.values.map((timezones) {
+                                        return ListView.builder(
+                                          itemCount: timezones.length,
+                                          itemBuilder: (context, index) {
+                                            final tz = timezones[index];
+                                            final displayName = tz.split('/').last.replaceAll('_', ' ');
+                                            final countryCode = _extractCountryCode(tz);
+                                            final flag = _getFlagByCountryCode(countryCode);
+                                            return _buildTimezoneTile(tz, displayName, flag);
+                                          },
+                                        );
+                                      }).toList(),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            )
+                          : filteredList.isNotEmpty
+                              ? ListView.builder(
+                                  itemCount: filteredGroups.keys.length,
+                                  itemBuilder: (context, index) {
+                                    final continent = filteredGroups.keys.elementAt(index);
+                                    final items = filteredGroups[continent]!;
+                                    return Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Padding(
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+                                          child: Row(
+                                            children: [
+                                              Text(_getContinentEmoji(continent), style: const TextStyle(fontSize: 18)),
+                                              const SizedBox(width: 8),
+                                              Text(continent, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                                              Container(
+                                                margin: const EdgeInsets.only(left: 8),
+                                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                decoration: BoxDecoration(color: Colors.grey[200], borderRadius: BorderRadius.circular(10)),
+                                                child: Text('${items.length}', style: TextStyle(fontSize: 10, color: Colors.grey[600])),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        ...items.map((item) => _buildTimezoneTile(
+                                          item['timezone'], 
+                                          item['displayName'], 
+                                          item['flag']
+                                        )),
+                                        if (index != filteredGroups.keys.length - 1) const Divider(),
+                                      ],
+                                    );
+                                  },
+                                )
+                              : Center(
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(Icons.search_off, size: 64, color: Colors.grey[400]),
+                                      const SizedBox(height: 16),
+                                      Text('No timezones found', style: TextStyle(fontSize: 16, color: Colors.grey[600])),
+                                      const SizedBox(height: 8),
+                                      Text('Try "Sri Lanka", "Tokyo", "London", or "New York"',
+                                          style: TextStyle(fontSize: 12, color: Colors.grey[500])),
+                                    ],
+                                  ),
+                                ),
+                    ),
+                    const SizedBox(height: 8),
+                    _buildCurrentTimezoneInfo(),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+    
+    if (result != null && result != _userTimezone) {
+      await _applyTimezoneChange(result);
+    }
+  }
+
+  Future<void> _applyTimezoneChange(String newTimezone) async {
+    setState(() => _isLoading = true);
+    
+    try {
+      await TimezoneService.setTimezone(newTimezone);
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('cached_timezone', newTimezone);
+      
+      _userTimezone = newTimezone;
+      _lastTimezone = newTimezone;
+      
+      await _loadDashboardData();
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Timezone changed to ${newTimezone.split('/').last.replaceAll('_', ' ')}'),
+            backgroundColor: Colors.green,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error changing timezone: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error changing timezone: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  // ==================== TIMEZONE DISPLAY WIDGET ====================
+  
+  Widget _buildTimezoneSelector() {
+    return GestureDetector(
+      onTap: _showAdvancedTimezonePicker,
+      child: Container(
+        margin: const EdgeInsets.only(right: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.2),
+          borderRadius: BorderRadius.circular(25),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              TimezoneService.getCurrentFlag(),
+              style: const TextStyle(fontSize: 16),
+            ),
+            const SizedBox(width: 6),
+            Text(
+              TimezoneService.getTimezoneDisplayName(),
+              style: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w500),
+            ),
+            const SizedBox(width: 4),
+            const Icon(Icons.arrow_drop_down, size: 20, color: Colors.white),
+            if (_isDST()) ...[
+              const SizedBox(width: 4),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.amber.shade100,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  'DST',
+                  style: TextStyle(fontSize: 8, color: Colors.amber.shade800, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
   }
 
   // ==================== SEARCH METHODS ====================
+  
   void _onSearchTextChanged() {
     final query = _searchController.text.trim();
     if (query.isNotEmpty) {
@@ -150,12 +690,9 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
   void _showSearchOverlay() {
     _removeSearchOverlay();
 
-    final RenderBox renderBox = context.findRenderObject() as RenderBox;
-    final size = renderBox.size;
-
     _searchOverlay = OverlayEntry(
       builder: (context) => Positioned(
-        top: MediaQuery.of(context).padding.top + kToolbarHeight + 65, // Adjusted for search bar height
+        top: MediaQuery.of(context).padding.top + kToolbarHeight + 65,
         left: 0,
         right: 0,
         child: Material(
@@ -206,12 +743,12 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
     Overlay.of(context).insert(_searchOverlay!);
   }
 
+  // ✅ FIXED: Search result tile with timezone converted hours
   Widget _buildSearchResultTile(Map<String, dynamic> salon) {
     return InkWell(
       onTap: () {
         _hideSearchResults();
         _searchController.clear();
-        // 🔧 MODIFIED: Navigate to Salon Profile instead of Booking Flow
         _navigateToSalonProfile(salon);
       },
       child: Container(
@@ -223,7 +760,6 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
         ),
         child: Row(
           children: [
-            // Salon Logo or Placeholder
             Container(
               width: 45,
               height: 45,
@@ -270,12 +806,13 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                       overflow: TextOverflow.ellipsis,
                     ),
                   const SizedBox(height: 2),
+                  // ✅ FIXED: Convert UTC to local time
                   Row(
                     children: [
                       Icon(Icons.access_time, size: 10, color: Colors.grey[500]),
                       const SizedBox(width: 2),
                       Text(
-                        '${salon['open_time']?.toString().substring(0, 5) ?? '09:00'} - ${salon['close_time']?.toString().substring(0, 5) ?? '18:00'}',
+                        _getFormattedSalonHours(salon),
                         style: TextStyle(fontSize: 10, color: Colors.grey[500]),
                       ),
                     ],
@@ -325,13 +862,12 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
     }
   }
 
-  // 🔧 MODIFIED: Navigate to Salon Profile Screen
   void _navigateToSalonProfile(Map<String, dynamic> salon) {
-    // Navigate to salon profile screen with selected salon data
     context.push('/customer/salon-profile', extra: salon);
   }
 
   // ==================== LOAD CUSTOMER DATA ====================
+  
   Future<void> _loadCustomerData() async {
     try {
       final user = supabase.auth.currentUser;
@@ -339,7 +875,6 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
 
       _customerEmail = user.email ?? '';
 
-      // Get profile from database
       final profile = await supabase
           .from('profiles')
           .select('full_name, avatar_url')
@@ -364,6 +899,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
   }
 
   // ==================== LOAD DASHBOARD DATA ====================
+  
   Future<void> _loadDashboardData() async {
     if (!mounted) return;
     setState(() => _isLoading = true);
@@ -375,42 +911,41 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
         return;
       }
 
-      // Get all appointments for this customer
-      final appointments = await supabase
-          .from('appointments')
-          .select('''
-            id,
-            booking_number,
-            appointment_date,
-            start_time,
-            end_time,
-            status,
-            is_vip,
-            vip_booking_id,
-            price,
-            queue_number,
-            queue_token,
-            barber_id,
-            service_id,
-            variant_id,
-            services!inner (
-              name
-            ),
-            service_variants!left (
-              price,
-              duration,
-              salon_genders!left (display_name),
-              salon_age_categories!left (display_name)
-            ),
-            profiles!appointments_customer_id_fkey (
-              full_name,
-              avatar_url
-            )
-          ''')
-          .eq('customer_id', user.id)
-          .order('appointment_date', ascending: false);
+final appointments = await supabase
+    .from('appointments')
+    .select('''
+      id,
+      booking_number,
+      appointment_date,
+      start_time,
+      end_time,
+      status,
+      is_vip,
+      vip_booking_id,
+      price,
+      queue_number,
+      queue_token,
+      barber_id,
+      service_id,
+      variant_id,
+      services!inner (
+        name
+      ),
+      service_variants!left (
+        price,
+        duration,
+        salon_genders!left (display_name),
+        salon_age_categories!left (display_name)
+      ),
+      profiles!fk_appointments_customer_id (
+        id,
+        full_name,
+        avatar_url
+      )
+    ''')
+    .eq('customer_id', user.id)
+    .order('appointment_date', ascending: false);
 
-      // Calculate statistics
       int upcoming = 0;
       int pending = 0;
       int completed = 0;
@@ -424,12 +959,10 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
         final status = apt['status'] as String;
         final isVip = apt['is_vip'] == true;
         
-        // Convert price to double
         final double price = (apt['price'] as num?)?.toDouble() ?? 
                              (apt['service_variants']?['price'] as num?)?.toDouble() ?? 
                              0.0;
 
-        // Count by status
         if (status == 'confirmed' || status == 'pending') {
           final dateStr = apt['appointment_date'] as String;
           final date = DateTime.parse(dateStr);
@@ -446,17 +979,14 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
         }
         if (status == 'cancelled') cancelled++;
 
-        // VIP counts
         if (isVip) {
           vip++;
           if (status == 'pending') pendingVip++;
         }
       }
 
-      // Get favorite barbers (from completed appointments)
       final favoriteBarbers = await _getFavoriteBarbers(user.id);
 
-      // Sample offers (can be from database)
       final offers = [
         {
           'title': '20% Off',
@@ -497,7 +1027,6 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
         });
       }
 
-      // Check notification permission
       _hasPermission = await _notificationService.hasPermission();
       if (!_hasPermission) {
         _showPermissionCard = await _permissionManager.shouldShowPermissionCard('customer_dashboard');
@@ -514,14 +1043,14 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
   }
 
   // ==================== GET FAVORITE BARBERS ====================
+  
   Future<List<Map<String, dynamic>>> _getFavoriteBarbers(String customerId) async {
     try {
-      // Get barbers with most completed appointments
       final response = await supabase
           .from('appointments')
           .select('''
             barber_id,
-            profiles!appointments_barber_id_fkey (
+            profiles!barber_id (
               full_name,
               avatar_url
             )
@@ -529,7 +1058,6 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
           .eq('customer_id', customerId)
           .eq('status', 'completed');
 
-      // Count occurrences per barber
       final Map<String, Map<String, dynamic>> barberCount = {};
       for (var apt in response) {
         final barberId = apt['barber_id'] as String;
@@ -546,11 +1074,9 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
         barberCount[barberId]!['count'] = barberCount[barberId]!['count'] + 1;
       }
 
-      // Convert to list and sort by count
       List<Map<String, dynamic>> barbers = barberCount.values.toList();
       barbers.sort((a, b) => (b['count'] as int).compareTo(a['count'] as int));
       
-      // Add rating
       for (var barber in barbers.take(5)) {
         final reviews = await supabase
             .from('reviews')
@@ -576,6 +1102,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
   }
 
   // ==================== SETUP NOTIFICATION LISTENERS ====================
+  
   void _setupNotificationListeners() {
     try {
       FirebaseMessaging.onMessage.listen((RemoteMessage message) {
@@ -609,6 +1136,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
   }
 
   // ==================== NOTIFICATION HANDLERS ====================
+  
   void _showBookingUpdateAlert(RemoteMessage message, String type) {
     if (!mounted) return;
 
@@ -764,6 +1292,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
   }
 
   // ==================== PERMISSION HANDLERS ====================
+  
   Future<void> _enableNotifications() async {
     setState(() => _showPermissionCard = false);
 
@@ -834,6 +1363,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
   }
 
   // ==================== NAVIGATION METHODS ====================
+  
   void _viewMyBookings() {
     context.push('/customer/my-bookings');
   }
@@ -873,6 +1403,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
   }
 
   // ==================== DRAWER METHODS ====================
+  
   void _openDrawer() {
     try {
       if (_scaffoldKey.currentState != null) {
@@ -915,6 +1446,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
   }
 
   // ==================== LOGOUT ====================
+  
   Future<void> _logout(BuildContext context) async {
     showLogoutConfirmation(
       context,
@@ -948,10 +1480,34 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
   }
 
   // ==================== UI BUILDERS ====================
+  
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
     final bool isWeb = screenWidth > 800;
+
+    if (!_isTimezoneLoaded) {
+      return Scaffold(
+        key: _scaffoldKey,
+        appBar: AppBar(
+          title: const Text('My Dashboard'),
+          backgroundColor: const Color(0xFFFF6B8B),
+          foregroundColor: Colors.white,
+          elevation: 0,
+          centerTitle: isWeb,
+        ),
+        body: const Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+              SizedBox(height: 16),
+              Text('Loading timezone...'),
+            ],
+          ),
+        ),
+      );
+    }
 
     return Scaffold(
       key: _scaffoldKey,
@@ -967,46 +1523,8 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
           tooltip: 'Menu',
           iconSize: 28,
         ),
-        // Search Bar in App Bar
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(65),
-          child: Container(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(30),
-              ),
-              child: TextField(
-                controller: _searchController,
-                focusNode: _searchFocusNode,
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(
-                  hintText: '🔍 Search for salons...',
-                  hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.7)),
-                  prefixIcon: const Icon(Icons.search, color: Colors.white),
-                  suffixIcon: _searchController.text.isNotEmpty
-                      ? GestureDetector(
-                          onTap: () {
-                            _searchController.clear();
-                            _hideSearchResults();
-                          },
-                          child: const Icon(Icons.close, color: Colors.white),
-                        )
-                      : null,
-                  border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(vertical: 12),
-                ),
-                onTap: () {
-                  if (_searchController.text.isNotEmpty && _searchResults.isNotEmpty) {
-                    _showSearchOverlay();
-                  }
-                },
-              ),
-            ),
-          ),
-        ),
         actions: [
+          _buildTimezoneSelector(),
           IconButton(
             icon: const Icon(Icons.star, color: Colors.white),
             onPressed: _createVipBooking,
@@ -1046,6 +1564,44 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
             onPressed: _loadDashboardData,
           ),
         ],
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(65),
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(30),
+              ),
+              child: TextField(
+                controller: _searchController,
+                focusNode: _searchFocusNode,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  hintText: '🔍 Search for salons...',
+                  hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.7)),
+                  prefixIcon: const Icon(Icons.search, color: Colors.white),
+                  suffixIcon: _searchController.text.isNotEmpty
+                      ? GestureDetector(
+                          onTap: () {
+                            _searchController.clear();
+                            _hideSearchResults();
+                          },
+                          child: const Icon(Icons.close, color: Colors.white),
+                        )
+                      : null,
+                  border: InputBorder.none,
+                  contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+                onTap: () {
+                  if (_searchController.text.isNotEmpty && _searchResults.isNotEmpty) {
+                    _showSearchOverlay();
+                  }
+                },
+              ),
+            ),
+          ),
+        ),
       ),
       drawer: SideMenu(
         userRole: 'customer',
@@ -1076,7 +1632,6 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                           message: 'Get instant notifications for booking confirmations, VIP approvals, and special offers',
                           compact: false,
                         ),
-                      // Welcome text only (without profile image)
                       Padding(
                         padding: const EdgeInsets.all(16),
                         child: Align(
@@ -1097,7 +1652,6 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                           ),
                         ),
                       ),
-                      // Quick Action Buttons
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16),
                         child: Row(
@@ -1119,7 +1673,6 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                         ),
                       ),
                       const SizedBox(height: 16),
-                      // Stats Cards
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16),
                         child: Row(
@@ -1133,7 +1686,6 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                         ),
                       ),
                       const SizedBox(height: 16),
-                      // VIP Pending Banner
                       if (_pendingVipBookings > 0)
                         Container(
                           margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -1171,7 +1723,6 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                           ),
                         ),
                       const SizedBox(height: 16),
-                      // Upcoming Bookings Section
                       SectionHeader(title: 'Upcoming Bookings', actionText: _upcomingBookings > 3 ? 'View All' : ''),
                       const SizedBox(height: 8),
                       _upcomingAppointments.isNotEmpty
@@ -1195,14 +1746,13 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                                   }
                                 }
 
-                                final date = DateTime.parse(apt['appointment_date']);
-                                final dateStr = DateFormat('MMM dd, yyyy').format(date);
-                                final timeStr = apt['start_time'].toString().substring(0, 5);
+                                // ✅ FIXED: Convert appointment time to local timezone
+                                final appointmentTime = _formatAppointmentTime(apt);
 
                                 return BookingTile(
                                   customerName: 'You',
                                   serviceName: serviceName,
-                                  time: '$dateStr at $timeStr',
+                                  time: appointmentTime,
                                   status: apt['status'] == 'confirmed' ? 'Confirmed' : 'Pending',
                                   statusColor: apt['status'] == 'confirmed' ? Colors.green : Colors.orange,
                                   barberName: 'Barber',
@@ -1250,7 +1800,6 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                               ),
                             ),
                       const SizedBox(height: 16),
-                      // Special Offers Section
                       SectionHeader(title: 'Special Offers', actionText: 'View All'),
                       const SizedBox(height: 8),
                       SizedBox(
@@ -1263,7 +1812,6 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                         ),
                       ),
                       const SizedBox(height: 16),
-                      // Favorite Barbers Section
                       if (_favoriteBarbers.isNotEmpty) ...[
                         SectionHeader(title: 'Favorite Barbers', actionText: 'View All'),
                         const SizedBox(height: 8),
@@ -1278,7 +1826,6 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                         ),
                         const SizedBox(height: 16),
                       ],
-                      // Activity Summary
                       Container(
                         margin: const EdgeInsets.all(16),
                         padding: const EdgeInsets.all(16),
@@ -1309,7 +1856,6 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                           ],
                         ),
                       ),
-                      // Notification Status
                       if (_hasPermission)
                         Container(
                           margin: const EdgeInsets.only(bottom: 16),
@@ -1334,6 +1880,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
   }
 
   // ==================== HELPER WIDGETS ====================
+  
   Widget _buildQuickActionButton({
     required IconData icon,
     required String label,

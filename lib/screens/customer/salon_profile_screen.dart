@@ -1,10 +1,10 @@
-// lib/screens/customer/salon_profile_screen.dart
-
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../../services/timezone_service.dart';
 
 class SalonProfileScreen extends StatefulWidget {
   final Map<String, dynamic> salon;
@@ -27,15 +27,127 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
   List<Map<String, dynamic>> _offers = [];
   bool _isLoadingOffers = true;
 
+  // ==================== TIMEZONE VARIABLES ====================
+  String _userTimezone = '';
+  bool _isTimezoneLoaded = false;
+  
+  // Salon hours in local time (converted from UTC using user's timezone)
+  String _openTimeLocal = '';
+  String _closeTimeLocal = '';
+
   @override
   void initState() {
     super.initState();
-    _loadSalonDetails();
-    _checkIfFollowing();
-    _loadFollowersCount();
-    _loadSalonOffers();
+    _initialize();
   }
 
+  // ==================== INITIALIZATION ====================
+  
+  Future<void> _initialize() async {
+    await _initializeTimezone();
+    await Future.wait([
+      _loadSalonDetails(),
+      _checkIfFollowing(),
+      _loadFollowersCount(),
+      _loadSalonOffers(),
+    ]);
+  }
+
+  Future<void> _initializeTimezone() async {
+    await TimezoneService.initialize();
+    
+    final prefs = await SharedPreferences.getInstance();
+    _userTimezone = prefs.getString('cached_timezone') ?? TimezoneService.getCurrentTimezone();
+    await TimezoneService.setTimezone(_userTimezone);
+    
+    // Convert salon hours to local time using user's timezone
+    _convertSalonHoursToLocal();
+    
+    setState(() {
+      _isTimezoneLoaded = true;
+    });
+    
+    debugPrint('✅ User timezone: $_userTimezone');
+  }
+
+  // ==================== TIMEZONE CONVERSION ====================
+  
+  /// Convert UTC salon hours to user's local time
+  void _convertSalonHoursToLocal() {
+    try {
+      final openTimeUtc = widget.salon['open_time']?.toString() ?? '09:00:00';
+      final closeTimeUtc = widget.salon['close_time']?.toString() ?? '18:00:00';
+      
+      _openTimeLocal = _utcToLocalTimeString(openTimeUtc);
+      _closeTimeLocal = _utcToLocalTimeString(closeTimeUtc);
+      
+      debugPrint('🔄 Hours converted: UTC $openTimeUtc-$closeTimeUtc → Local $_openTimeLocal-$_closeTimeLocal');
+    } catch (e) {
+      debugPrint('❌ Error converting hours: $e');
+      _openTimeLocal = _formatTimeString(widget.salon['open_time']?.toString() ?? '09:00:00');
+      _closeTimeLocal = _formatTimeString(widget.salon['close_time']?.toString() ?? '18:00:00');
+    }
+  }
+
+  /// Convert UTC time string to user's local time string
+  String _utcToLocalTimeString(String utcTime) {
+    try {
+      return TimezoneService.utcToLocalTime(utcTime, DateTime.now());
+    } catch (e) {
+      debugPrint('Error converting UTC to local: $e');
+      return _formatTimeString(utcTime);
+    }
+  }
+
+  /// Format time string (fallback)
+  String _formatTimeString(String timeStr) {
+    try {
+      final parts = timeStr.split(':');
+      final hour = int.parse(parts[0]);
+      final minute = int.parse(parts[1]);
+      final period = hour >= 12 ? 'PM' : 'AM';
+      final displayHour = hour % 12 == 0 ? 12 : hour % 12;
+      return '$displayHour:${minute.toString().padLeft(2, '0')} $period';
+    } catch (e) {
+      return timeStr;
+    }
+  }
+
+  /// Check if salon is open now (using user's local time)
+  bool _isOpenNow() {
+    try {
+      final now = DateTime.now();
+      final nowMinutes = now.hour * 60 + now.minute;
+      
+      TimeOfDay parseTime(String timeStr) {
+        final parts = timeStr.split(' ');
+        final hourMinute = parts[0].split(':');
+        final period = parts[1];
+        int hour = int.parse(hourMinute[0]);
+        if (period == 'PM' && hour != 12) hour += 12;
+        if (period == 'AM' && hour == 12) hour = 0;
+        return TimeOfDay(hour: hour, minute: int.parse(hourMinute[1]));
+      }
+      
+      final openTime = parseTime(_openTimeLocal);
+      final closeTime = parseTime(_closeTimeLocal);
+      
+      final openMinutes = openTime.hour * 60 + openTime.minute;
+      final closeMinutes = closeTime.hour * 60 + closeTime.minute;
+      
+      if (closeMinutes < openMinutes) {
+        // Overnight hours (e.g., 9 PM to 2 AM)
+        return nowMinutes >= openMinutes || nowMinutes <= closeMinutes;
+      }
+      return nowMinutes >= openMinutes && nowMinutes <= closeMinutes;
+    } catch (e) {
+      debugPrint('Error checking open status: $e');
+      return true;
+    }
+  }
+
+  // ==================== DATA LOADING ====================
+  
   Future<void> _loadSalonDetails() async {
     try {
       final reviews = await supabase
@@ -62,7 +174,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         });
       }
     } catch (e) {
-      debugPrint('Error loading salon details: $e');
+      debugPrint('Error loading reviews: $e');
       setState(() => _isLoadingRating = false);
     }
   }
@@ -78,13 +190,15 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         _followersCount = followers.length;
       });
     } catch (e) {
-      debugPrint('Error loading followers count: $e');
+      debugPrint('Error loading followers: $e');
       setState(() => _followersCount = 0);
     }
   }
 
   Future<void> _loadSalonOffers() async {
     try {
+      final today = DateTime.now().toIso8601String().split('T')[0];
+      
       final offers = await supabase
           .from('offers')
           .select('''
@@ -100,8 +214,8 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
           ''')
           .eq('salon_id', widget.salon['id'])
           .eq('is_active', true)
-          .lte('valid_from', DateTime.now().toIso8601String().split('T')[0])
-          .gte('valid_to', DateTime.now().toIso8601String().split('T')[0])
+          .lte('valid_from', today)
+          .gte('valid_to', today)
           .order('points_required', ascending: true);
 
       setState(() {
@@ -134,6 +248,8 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     }
   }
 
+  // ==================== ACTIONS ====================
+  
   Future<void> _toggleFollow() async {
     try {
       final user = supabase.auth.currentUser;
@@ -155,6 +271,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
           _isFollowing = false;
           _followersCount--;
         });
+        _showSnackBar('Unfollowed ${widget.salon['name']}', Colors.grey);
       } else {
         await supabase.from('salon_followers').insert({
           'customer_id': user.id,
@@ -165,18 +282,18 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
           _isFollowing = true;
           _followersCount++;
         });
+        _showSnackBar('Following ${widget.salon['name']}', Colors.green);
       }
     } catch (e) {
       debugPrint('Error toggling follow: $e');
+      _showSnackBar('Error: $e', Colors.red);
     }
   }
 
   Future<void> _openWhatsApp() async {
     final phone = widget.salon['phone'];
     if (phone == null || phone.toString().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Phone number not available')),
-      );
+      _showSnackBar('Phone number not available', Colors.orange);
       return;
     }
 
@@ -192,17 +309,11 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
       if (await canLaunchUrl(url)) {
         await launchUrl(url, mode: LaunchMode.externalApplication);
       } else {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('WhatsApp is not installed')),
-        );
+        _showSnackBar('WhatsApp is not installed', Colors.orange);
       }
     } catch (e) {
       debugPrint('Error opening WhatsApp: $e');
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Could not open WhatsApp')));
+      _showSnackBar('Could not open WhatsApp', Colors.red);
     }
   }
 
@@ -237,7 +348,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Text(
-                offer['image_url'] ?? '🎯',
+                offer['image_url'] ?? _getOfferIcon(offer['discount_type']),
                 style: const TextStyle(fontSize: 24),
               ),
             ),
@@ -348,13 +459,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
   }
 
   void _applyOffer(Map<String, dynamic> offer) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('✅ Offer "${offer['title']}" applied!'),
-        backgroundColor: Colors.green,
-        duration: const Duration(seconds: 2),
-      ),
-    );
+    _showSnackBar('✅ Offer "${offer['title']}" applied!', Colors.green);
     context.push(
       '/customer/booking-flow',
       extra: {'salon': widget.salon, 'offer': offer},
@@ -371,6 +476,15 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     }
   }
 
+  String _getOfferIcon(String? discountType) {
+    switch (discountType) {
+      case 'percentage': return '💰';
+      case 'fixed': return '💵';
+      case 'free_service': return '🎁';
+      default: return '🏷️';
+    }
+  }
+
   Color _getOfferColor(int index) {
     final colors = [
       const Color(0xFFFF6B8B),
@@ -382,24 +496,98 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     return colors[index % colors.length];
   }
 
+  void _showAllOffersDialog() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.8,
+        minChildSize: 0.5,
+        maxChildSize: 0.95,
+        expand: false,
+        builder: (context, scrollController) => Column(
+          children: [
+            Container(
+              margin: const EdgeInsets.symmetric(vertical: 12),
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                'All Offers',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+            ),
+            Expanded(
+              child: ListView.builder(
+                controller: scrollController,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                itemCount: _offers.length,
+                itemBuilder: (context, index) => Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  child: _buildOfferCard(_offers[index], index),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showSnackBar(String message, Color color) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: color,
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  // ==================== UI BUILDERS ====================
+  
   @override
   Widget build(BuildContext context) {
-    final salon = widget.salon;
-    final openTime = salon['open_time'] != null
-        ? DateFormat(
-            'h:mm a',
-          ).format(DateTime.parse('2000-01-01 ${salon['open_time']}'))
-        : '09:00 AM';
-    final closeTime = salon['close_time'] != null
-        ? DateFormat(
-            'h:mm a',
-          ).format(DateTime.parse('2000-01-01 ${salon['close_time']}'))
-        : '06:00 PM';
-
     final screenWidth = MediaQuery.of(context).size.width;
     final isWeb = screenWidth > 800;
     final isTablet = screenWidth > 600 && screenWidth <= 800;
     final contentWidth = isWeb ? 1000.0 : double.infinity;
+
+    final openTime = _openTimeLocal.isNotEmpty ? _openTimeLocal : '09:00 AM';
+    final closeTime = _closeTimeLocal.isNotEmpty ? _closeTimeLocal : '06:00 PM';
+    final isOpen = _isOpenNow();
+
+    if (!_isTimezoneLoaded) {
+      return Scaffold(
+        backgroundColor: Colors.white,
+        appBar: AppBar(
+          title: const Text('Salon Profile'),
+          backgroundColor: const Color(0xFFFF6B8B),
+          foregroundColor: Colors.white,
+          elevation: 0,
+        ),
+        body: const Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+              SizedBox(height: 16),
+              Text('Loading timezone...'),
+            ],
+          ),
+        ),
+      );
+    }
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -407,7 +595,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Cover Image Section - Full width
+            // Cover Image Section
             Stack(
               children: [
                 SizedBox(
@@ -415,7 +603,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                   height: isWeb ? 350 : 280,
                   child: _buildCoverImage(),
                 ),
-                // Gradient overlay at bottom
                 Positioned(
                   bottom: 0,
                   left: 0,
@@ -435,7 +622,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                     ),
                   ),
                 ),
-                // Back button
                 Positioned(
                   top: 40,
                   left: 16,
@@ -455,13 +641,11 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                     onPressed: () => Navigator.pop(context),
                   ),
                 ),
-                // Share and Follow buttons (Heart icon on cover image)
                 Positioned(
                   top: 40,
                   right: 16,
                   child: Row(
                     children: [
-                      // Share button
                       IconButton(
                         icon: Container(
                           padding: const EdgeInsets.all(8),
@@ -478,7 +662,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                         onPressed: () {},
                       ),
                       const SizedBox(width: 8),
-                      // Follow button (Heart icon on cover)
                       IconButton(
                         icon: Container(
                           padding: const EdgeInsets.all(8),
@@ -502,25 +685,21 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
               ],
             ),
 
-            // Logo and Action Buttons (WhatsApp + Follow text button)
+            // Logo and Action Buttons
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  // Logo Over Cover Image
                   Transform.translate(
                     offset: Offset(0, -40),
                     child: _buildLogo(),
                   ),
                   const Spacer(),
-                  // WhatsApp Button and Follow Button (without heart icon)
                   Row(
                     children: [
-                      // WhatsApp Button
                       _buildWhatsAppButton(),
                       const SizedBox(width: 12),
-                      // Follow Button (Text button, no heart icon)
                       _buildFollowButton(),
                     ],
                   ),
@@ -536,26 +715,24 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                   constraints: BoxConstraints(maxWidth: contentWidth),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
+                    children: [                
+
                       // Salon Info Section
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            // Salon Name
                             Text(
-                              salon['name'] ?? 'Salon',
+                              widget.salon['name'] ?? 'Salon',
                               style: TextStyle(
                                 fontSize: isWeb ? 28 : (isTablet ? 24 : 22),
                                 fontWeight: FontWeight.bold,
                                 color: Colors.black87,
                               ),
                             ),
-
                             const SizedBox(height: 6),
 
-                            // Rating and Followers
                             if (!_isLoadingRating)
                               Wrap(
                                 spacing: 16,
@@ -615,8 +792,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
 
                             const SizedBox(height: 12),
 
-                            // Address
-                            if (salon['address'] != null)
+                            if (widget.salon['address'] != null)
                               Row(
                                 children: [
                                   Icon(
@@ -627,7 +803,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                                   const SizedBox(width: 6),
                                   Expanded(
                                     child: Text(
-                                      salon['address'],
+                                      widget.salon['address'],
                                       style: TextStyle(
                                         fontSize: 14,
                                         color: Colors.grey[700],
@@ -639,7 +815,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
 
                             const SizedBox(height: 10),
 
-                            // Hours & Status
                             Wrap(
                               spacing: 16,
                               crossAxisAlignment: WrapCrossAlignment.center,
@@ -668,7 +843,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                                     vertical: 4,
                                   ),
                                   decoration: BoxDecoration(
-                                    color: _isOpenNow(openTime, closeTime)
+                                    color: isOpen
                                         ? Colors.green.withValues(alpha: 0.1)
                                         : Colors.red.withValues(alpha: 0.1),
                                     borderRadius: BorderRadius.circular(20),
@@ -680,7 +855,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                                         width: 8,
                                         height: 8,
                                         decoration: BoxDecoration(
-                                          color: _isOpenNow(openTime, closeTime)
+                                          color: isOpen
                                               ? Colors.green
                                               : Colors.red,
                                           shape: BoxShape.circle,
@@ -688,12 +863,10 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                                       ),
                                       const SizedBox(width: 6),
                                       Text(
-                                        _isOpenNow(openTime, closeTime)
-                                            ? 'Open Now'
-                                            : 'Closed',
+                                        isOpen ? 'Open Now' : 'Closed',
                                         style: TextStyle(
                                           fontSize: 12,
-                                          color: _isOpenNow(openTime, closeTime)
+                                          color: isOpen
                                               ? Colors.green
                                               : Colors.red,
                                           fontWeight: FontWeight.w500,
@@ -707,7 +880,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
 
                             const SizedBox(height: 24),
 
-                            // ==================== BOOKING BUTTONS ====================
+                            // Booking Buttons
                             isWeb || isTablet
                                 ? Row(
                                     children: [
@@ -729,15 +902,10 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                                             ),
                                           ),
                                           style: ElevatedButton.styleFrom(
-                                            backgroundColor: const Color(
-                                              0xFFFF6B8B,
-                                            ),
-                                            padding: const EdgeInsets.symmetric(
-                                              vertical: 14,
-                                            ),
+                                            backgroundColor: const Color(0xFFFF6B8B),
+                                            padding: const EdgeInsets.symmetric(vertical: 14),
                                             shape: RoundedRectangleBorder(
-                                              borderRadius:
-                                                  BorderRadius.circular(12),
+                                              borderRadius: BorderRadius.circular(12),
                                             ),
                                             elevation: 2,
                                           ),
@@ -770,8 +938,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                                               vertical: 14,
                                             ),
                                             shape: RoundedRectangleBorder(
-                                              borderRadius:
-                                                  BorderRadius.circular(12),
+                                              borderRadius: BorderRadius.circular(12),
                                             ),
                                           ),
                                         ),
@@ -798,15 +965,10 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                                             ),
                                           ),
                                           style: ElevatedButton.styleFrom(
-                                            backgroundColor: const Color(
-                                              0xFFFF6B8B,
-                                            ),
-                                            padding: const EdgeInsets.symmetric(
-                                              vertical: 14,
-                                            ),
+                                            backgroundColor: const Color(0xFFFF6B8B),
+                                            padding: const EdgeInsets.symmetric(vertical: 14),
                                             shape: RoundedRectangleBorder(
-                                              borderRadius:
-                                                  BorderRadius.circular(12),
+                                              borderRadius: BorderRadius.circular(12),
                                             ),
                                             elevation: 2,
                                           ),
@@ -835,12 +997,9 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                                               color: Colors.amber,
                                               width: 1.5,
                                             ),
-                                            padding: const EdgeInsets.symmetric(
-                                              vertical: 14,
-                                            ),
+                                            padding: const EdgeInsets.symmetric(vertical: 14),
                                             shape: RoundedRectangleBorder(
-                                              borderRadius:
-                                                  BorderRadius.circular(12),
+                                              borderRadius: BorderRadius.circular(12),
                                             ),
                                           ),
                                         ),
@@ -855,7 +1014,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                         ),
                       ),
 
-                      // ==================== OFFERS SECTION ====================
+                      // Offers Section
                       if (_offers.isNotEmpty || _isLoadingOffers)
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -863,8 +1022,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
                                   const Text(
                                     '🔥 Special Offers',
@@ -904,10 +1062,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                                             ? 3
                                             : _offers.length,
                                         itemBuilder: (context, index) =>
-                                            _buildOfferCard(
-                                              _offers[index],
-                                              index,
-                                            ),
+                                            _buildOfferCard(_offers[index], index),
                                       ),
                                     ),
                               const SizedBox(height: 20),
@@ -918,9 +1073,9 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
 
                       const SizedBox(height: 24),
 
-                      // ==================== ABOUT SECTION ====================
-                      if (salon['description'] != null &&
-                          salon['description'].toString().isNotEmpty)
+                      // About Section
+                      if (widget.salon['description'] != null &&
+                          widget.salon['description'].toString().isNotEmpty)
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 16),
                           child: Column(
@@ -942,7 +1097,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                                   borderRadius: BorderRadius.circular(16),
                                 ),
                                 child: Text(
-                                  salon['description'],
+                                  widget.salon['description'],
                                   style: TextStyle(
                                     fontSize: 14,
                                     color: Colors.grey[700],
@@ -958,7 +1113,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
 
                       const SizedBox(height: 24),
 
-                      // ==================== CONTACT SECTION ====================
+                      // Contact Section
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16),
                         child: Column(
@@ -980,18 +1135,14 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                               ),
                               child: Column(
                                 children: [
-                                  if (salon['phone'] != null &&
-                                      salon['phone'].toString().isNotEmpty)
+                                  if (widget.salon['phone'] != null &&
+                                      widget.salon['phone'].toString().isNotEmpty)
                                     ListTile(
                                       leading: Container(
                                         padding: const EdgeInsets.all(10),
                                         decoration: BoxDecoration(
-                                          color: const Color(
-                                            0xFFFF6B8B,
-                                          ).withValues(alpha: 0.1),
-                                          borderRadius: BorderRadius.circular(
-                                            12,
-                                          ),
+                                          color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                                          borderRadius: BorderRadius.circular(12),
                                         ),
                                         child: const Icon(
                                           Icons.phone,
@@ -1001,15 +1152,11 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                                       ),
                                       title: const Text(
                                         'Phone',
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.w600,
-                                        ),
+                                        style: TextStyle(fontWeight: FontWeight.w600),
                                       ),
                                       subtitle: Text(
-                                        salon['phone'],
-                                        style: TextStyle(
-                                          color: Colors.grey[600],
-                                        ),
+                                        widget.salon['phone'],
+                                        style: TextStyle(color: Colors.grey[600]),
                                       ),
                                       trailing: const Icon(
                                         Icons.chevron_right,
@@ -1018,18 +1165,14 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                                       ),
                                       onTap: _openWhatsApp,
                                     ),
-                                  if (salon['email'] != null &&
-                                      salon['email'].toString().isNotEmpty)
+                                  if (widget.salon['email'] != null &&
+                                      widget.salon['email'].toString().isNotEmpty)
                                     ListTile(
                                       leading: Container(
                                         padding: const EdgeInsets.all(10),
                                         decoration: BoxDecoration(
-                                          color: const Color(
-                                            0xFFFF6B8B,
-                                          ).withValues(alpha: 0.1),
-                                          borderRadius: BorderRadius.circular(
-                                            12,
-                                          ),
+                                          color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                                          borderRadius: BorderRadius.circular(12),
                                         ),
                                         child: const Icon(
                                           Icons.email,
@@ -1039,15 +1182,11 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                                       ),
                                       title: const Text(
                                         'Email',
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.w600,
-                                        ),
+                                        style: TextStyle(fontWeight: FontWeight.w600),
                                       ),
                                       subtitle: Text(
-                                        salon['email'],
-                                        style: TextStyle(
-                                          color: Colors.grey[600],
-                                        ),
+                                        widget.salon['email'],
+                                        style: TextStyle(color: Colors.grey[600]),
                                       ),
                                       trailing: const Icon(
                                         Icons.chevron_right,
@@ -1056,18 +1195,14 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                                       ),
                                       onTap: () {},
                                     ),
-                                  if (salon['address'] != null &&
-                                      salon['address'].toString().isNotEmpty)
+                                  if (widget.salon['address'] != null &&
+                                      widget.salon['address'].toString().isNotEmpty)
                                     ListTile(
                                       leading: Container(
                                         padding: const EdgeInsets.all(10),
                                         decoration: BoxDecoration(
-                                          color: const Color(
-                                            0xFFFF6B8B,
-                                          ).withValues(alpha: 0.1),
-                                          borderRadius: BorderRadius.circular(
-                                            12,
-                                          ),
+                                          color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                                          borderRadius: BorderRadius.circular(12),
                                         ),
                                         child: const Icon(
                                           Icons.location_on,
@@ -1077,15 +1212,11 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                                       ),
                                       title: const Text(
                                         'Address',
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.w600,
-                                        ),
+                                        style: TextStyle(fontWeight: FontWeight.w600),
                                       ),
                                       subtitle: Text(
-                                        salon['address'],
-                                        style: TextStyle(
-                                          color: Colors.grey[600],
-                                        ),
+                                        widget.salon['address'],
+                                        style: TextStyle(color: Colors.grey[600]),
                                       ),
                                       trailing: const Icon(
                                         Icons.chevron_right,
@@ -1105,7 +1236,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
 
                       const SizedBox(height: 24),
 
-                      // ==================== SERVICES SECTION ====================
+                      // Services Section
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16),
                         child: Column(
@@ -1136,6 +1267,8 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     );
   }
 
+  // ==================== HELPER WIDGETS ====================
+  
   Widget _buildLogo() {
     final screenWidth = MediaQuery.of(context).size.width;
     final isDesktop = screenWidth > 800;
@@ -1218,9 +1351,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     return ElevatedButton(
       onPressed: _toggleFollow,
       style: ElevatedButton.styleFrom(
-        backgroundColor: _isFollowing
-            ? Colors.grey[200]
-            : const Color(0xFFFF6B8B),
+        backgroundColor: _isFollowing ? Colors.grey[200] : const Color(0xFFFF6B8B),
         foregroundColor: _isFollowing ? Colors.grey[600] : Colors.white,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
@@ -1351,8 +1482,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                       ),
                       child: Center(
                         child: Text(
-                          offer['image_url'] ??
-                              _getOfferIcon(offer['discount_type']),
+                          offer['image_url'] ?? _getOfferIcon(offer['discount_type']),
                           style: const TextStyle(fontSize: 28),
                         ),
                       ),
@@ -1408,10 +1538,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                   children: [
                     if (offer['points_required'] > 0)
                       Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 2,
-                        ),
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
                           color: Colors.amber.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(8),
@@ -1419,32 +1546,20 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Icon(
-                              Icons.star,
-                              color: Colors.amber,
-                              size: 12,
-                            ),
+                            const Icon(Icons.star, color: Colors.amber, size: 12),
                             const SizedBox(width: 2),
                             Text(
                               '${offer['points_required']} pts',
-                              style: const TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w500,
-                              ),
+                              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w500),
                             ),
                           ],
                         ),
                       ),
                     const Spacer(),
                     Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 2,
-                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
-                        color: daysLeft <= 3
-                            ? Colors.red.withValues(alpha: 0.1)
-                            : Colors.grey.withValues(alpha: 0.1),
+                        color: daysLeft <= 3 ? Colors.red.withValues(alpha: 0.1) : Colors.grey.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Row(
@@ -1453,18 +1568,14 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                           Icon(
                             Icons.access_time,
                             size: 10,
-                            color: daysLeft <= 3
-                                ? Colors.red
-                                : Colors.grey[600],
+                            color: daysLeft <= 3 ? Colors.red : Colors.grey[600],
                           ),
                           const SizedBox(width: 2),
                           Text(
                             daysLeft <= 0 ? 'Expired' : '$daysLeft days left',
                             style: TextStyle(
                               fontSize: 10,
-                              color: daysLeft <= 3
-                                  ? Colors.red
-                                  : Colors.grey[600],
+                              color: daysLeft <= 3 ? Colors.red : Colors.grey[600],
                             ),
                           ),
                         ],
@@ -1487,10 +1598,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                     ),
                     child: const Text(
                       'Claim Offer',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
                     ),
                   ),
                 ),
@@ -1500,66 +1608,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         ),
       ),
     );
-  }
-
-  void _showAllOffersDialog() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => DraggableScrollableSheet(
-        initialChildSize: 0.8,
-        minChildSize: 0.5,
-        maxChildSize: 0.95,
-        expand: false,
-        builder: (context, scrollController) => Column(
-          children: [
-            Container(
-              margin: const EdgeInsets.symmetric(vertical: 12),
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: Colors.grey[300],
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text(
-                'All Offers',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-              ),
-            ),
-            Expanded(
-              child: ListView.builder(
-                controller: scrollController,
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                itemCount: _offers.length,
-                itemBuilder: (context, index) => Container(
-                  margin: const EdgeInsets.only(bottom: 12),
-                  child: _buildOfferCard(_offers[index], index),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  String _getOfferIcon(String? discountType) {
-    switch (discountType) {
-      case 'percentage':
-        return '💰';
-      case 'fixed':
-        return '💵';
-      case 'free_service':
-        return '🎁';
-      default:
-        return '🏷️';
-    }
   }
 
   Widget _buildServicesPreview() {
@@ -1589,9 +1637,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
           );
         }
 
-        if (!snapshot.hasData ||
-            snapshot.data == null ||
-            snapshot.data!.isEmpty) {
+        if (!snapshot.hasData || snapshot.data == null || snapshot.data!.isEmpty) {
           return Container(
             width: double.infinity,
             padding: const EdgeInsets.all(32),
@@ -1608,11 +1654,15 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         return Column(
           children: services.map((service) {
             final variants = service['service_variants'] as List?;
-            final lowestPrice = variants != null && variants.isNotEmpty
-                ? variants
-                      .map((v) => (v['price'] as num?)?.toDouble() ?? 0)
-                      .reduce((a, b) => a < b ? a : b)
-                : 0.0;
+            double lowestPrice = 0.0;
+            if (variants != null && variants.isNotEmpty) {
+              final prices = variants
+                  .map<double>((v) => (v['price'] as num?)?.toDouble() ?? 0)
+                  .toList();
+              if (prices.isNotEmpty) {
+                lowestPrice = prices.reduce((a, b) => a < b ? a : b);
+              }
+            }
 
             return Container(
               margin: const EdgeInsets.only(bottom: 12),
@@ -1677,39 +1727,5 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         );
       },
     );
-  }
-
-  bool _isOpenNow(String openTimeStr, String closeTimeStr) {
-    try {
-      final now = DateTime.now();
-      final openTime = DateFormat('h:mm a').parse(openTimeStr);
-      final closeTime = DateFormat('h:mm a').parse(closeTimeStr);
-
-      final nowTime = DateTime(
-        now.year,
-        now.month,
-        now.day,
-        now.hour,
-        now.minute,
-      );
-      final openDateTime = DateTime(
-        now.year,
-        now.month,
-        now.day,
-        openTime.hour,
-        openTime.minute,
-      );
-      final closeDateTime = DateTime(
-        now.year,
-        now.month,
-        now.day,
-        closeTime.hour,
-        closeTime.minute,
-      );
-
-      return nowTime.isAfter(openDateTime) && nowTime.isBefore(closeDateTime);
-    } catch (e) {
-      return true;
-    }
   }
 }
