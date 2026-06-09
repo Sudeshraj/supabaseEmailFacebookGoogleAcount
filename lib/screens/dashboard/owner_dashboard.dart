@@ -87,6 +87,21 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _checkForUpdates();
+  }
+
+  // ✅ Auto refresh when coming back to dashboard
+  void _checkForUpdates() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && !_isLoading) {
+        _loadAllData();
+      }
+    });
+  }
+
+  @override
   void dispose() {
     _pulseCtrl.dispose();
     super.dispose();
@@ -126,72 +141,24 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   }
 
   // ============================================================
-  // HELPER FUNCTIONS FOR COUNTRY CODES & FLAGS
+  // TIMEZONE PICKER
   // ============================================================
-
-  String _getCountryNameFromCode(String countryCode) {
-    final countryNames = {
-      'LK': 'Sri Lanka', 'JP': 'Japan', 'KR': 'South Korea', 'CN': 'China',
-      'HK': 'Hong Kong', 'TW': 'Taiwan', 'IN': 'India', 'AE': 'United Arab Emirates',
-      'SG': 'Singapore', 'MY': 'Malaysia', 'TH': 'Thailand', 'ID': 'Indonesia',
-      'PH': 'Philippines', 'VN': 'Vietnam', 'MM': 'Myanmar', 'BD': 'Bangladesh',
-      'PK': 'Pakistan', 'NP': 'Nepal', 'IR': 'Iran', 'IQ': 'Iraq',
-      'SA': 'Saudi Arabia', 'KW': 'Kuwait', 'QA': 'Qatar', 'BH': 'Bahrain',
-      'OM': 'Oman', 'AM': 'Armenia', 'GE': 'Georgia', 'AZ': 'Azerbaijan',
-      'KZ': 'Kazakhstan', 'UZ': 'Uzbekistan', 'KG': 'Kyrgyzstan', 'TJ': 'Tajikistan',
-      'TM': 'Turkmenistan', 'AF': 'Afghanistan', 'IL': 'Israel', 'JO': 'Jordan',
-      'LB': 'Lebanon', 'SY': 'Syria', 'CY': 'Cyprus', 'TR': 'Turkey',
-      'GB': 'United Kingdom', 'FR': 'France', 'DE': 'Germany', 'IT': 'Italy',
-      'ES': 'Spain', 'PT': 'Portugal', 'NL': 'Netherlands', 'BE': 'Belgium',
-      'CH': 'Switzerland', 'AT': 'Austria', 'DK': 'Denmark', 'SE': 'Sweden',
-      'NO': 'Norway', 'FI': 'Finland', 'PL': 'Poland', 'CZ': 'Czech Republic',
-      'HU': 'Hungary', 'RO': 'Romania', 'BG': 'Bulgaria', 'GR': 'Greece',
-      'RU': 'Russia', 'UA': 'Ukraine', 'IE': 'Ireland', 'IS': 'Iceland',
-      'US': 'United States', 'CA': 'Canada', 'MX': 'Mexico', 'BR': 'Brazil',
-      'AR': 'Argentina', 'CL': 'Chile', 'PE': 'Peru', 'CO': 'Colombia',
-      'VE': 'Venezuela', 'PA': 'Panama', 'CR': 'Costa Rica', 'SV': 'El Salvador',
-      'GT': 'Guatemala', 'NI': 'Nicaragua', 'HN': 'Honduras',
-      'AU': 'Australia', 'NZ': 'New Zealand', 'FJ': 'Fiji', 'GU': 'Guam',
-      'ZA': 'South Africa', 'EG': 'Egypt', 'NG': 'Nigeria', 'KE': 'Kenya',
-      'MA': 'Morocco', 'TN': 'Tunisia', 'DZ': 'Algeria', 'GH': 'Ghana',
-      'ET': 'Ethiopia', 'TZ': 'Tanzania',
-    };
-    return countryNames[countryCode] ?? countryCode;
-  }
 
   String _extractCountryCode(String timezone) {
     final countryMap = {
       'Asia/Colombo': 'LK', 'Asia/Tokyo': 'JP', 'Asia/Seoul': 'KR', 'Asia/Shanghai': 'CN',
-      'Asia/Beijing': 'CN', 'Asia/Chongqing': 'CN', 'Asia/Harbin': 'CN', 'Asia/Hong_Kong': 'HK',
-      'Asia/Taipei': 'TW', 'Asia/Kolkata': 'IN', 'Asia/Calcutta': 'IN', 'Asia/Mumbai': 'IN',
-      'Asia/Dubai': 'AE', 'Asia/Singapore': 'SG', 'Asia/Kuala_Lumpur': 'MY', 'Asia/Bangkok': 'TH',
-      'Asia/Jakarta': 'ID', 'Asia/Manila': 'PH', 'Asia/Ho_Chi_Minh': 'VN', 'Asia/Saigon': 'VN',
-      'Asia/Rangoon': 'MM', 'Asia/Yangon': 'MM', 'Asia/Dhaka': 'BD', 'Asia/Karachi': 'PK',
-      'Asia/Kathmandu': 'NP', 'Asia/Tehran': 'IR', 'Asia/Baghdad': 'IQ', 'Asia/Riyadh': 'SA',
-      'Asia/Kuwait': 'KW', 'Asia/Doha': 'QA', 'Asia/Bahrain': 'BH', 'Asia/Muscat': 'OM',
-      'Asia/Yerevan': 'AM', 'Asia/Tbilisi': 'GE', 'Asia/Baku': 'AZ', 'Asia/Almaty': 'KZ',
-      'Asia/Tashkent': 'UZ', 'Asia/Bishkek': 'KG', 'Asia/Dushanbe': 'TJ', 'Asia/Ashgabat': 'TM',
-      'Asia/Kabul': 'AF', 'Asia/Jerusalem': 'IL', 'Asia/Amman': 'JO', 'Asia/Beirut': 'LB',
-      'Asia/Damascus': 'SY', 'Asia/Nicosia': 'CY', 'Asia/Ankara': 'TR', 'Asia/Istanbul': 'TR',
+      'Asia/Hong_Kong': 'HK', 'Asia/Taipei': 'TW', 'Asia/Kolkata': 'IN', 'Asia/Dubai': 'AE',
+      'Asia/Singapore': 'SG', 'Asia/Kuala_Lumpur': 'MY', 'Asia/Bangkok': 'TH', 'Asia/Jakarta': 'ID',
+      'Asia/Manila': 'PH', 'Asia/Ho_Chi_Minh': 'VN', 'Asia/Dhaka': 'BD', 'Asia/Karachi': 'PK',
+      'Asia/Kathmandu': 'NP', 'Asia/Riyadh': 'SA', 'Asia/Kuwait': 'KW', 'Asia/Doha': 'QA',
       'Europe/London': 'GB', 'Europe/Paris': 'FR', 'Europe/Berlin': 'DE', 'Europe/Rome': 'IT',
-      'Europe/Madrid': 'ES', 'Europe/Lisbon': 'PT', 'Europe/Amsterdam': 'NL', 'Europe/Brussels': 'BE',
-      'Europe/Zurich': 'CH', 'Europe/Vienna': 'AT', 'Europe/Copenhagen': 'DK', 'Europe/Stockholm': 'SE',
-      'Europe/Oslo': 'NO', 'Europe/Helsinki': 'FI', 'Europe/Warsaw': 'PL', 'Europe/Prague': 'CZ',
-      'Europe/Budapest': 'HU', 'Europe/Bucharest': 'RO', 'Europe/Sofia': 'BG', 'Europe/Athens': 'GR',
-      'Europe/Istanbul': 'TR', 'Europe/Moscow': 'RU', 'Europe/St_Petersburg': 'RU', 'Europe/Kiev': 'UA',
-      'Europe/Dublin': 'IE', 'Europe/Reykjavik': 'IS',
+      'Europe/Madrid': 'ES', 'Europe/Amsterdam': 'NL', 'Europe/Zurich': 'CH', 'Europe/Moscow': 'RU',
       'America/New_York': 'US', 'America/Chicago': 'US', 'America/Denver': 'US', 'America/Los_Angeles': 'US',
-      'America/Phoenix': 'US', 'America/Anchorage': 'US', 'America/Honolulu': 'US', 'America/Toronto': 'CA',
-      'America/Vancouver': 'CA', 'America/Montreal': 'CA', 'America/Mexico_City': 'MX', 'America/Sao_Paulo': 'BR',
-      'America/Rio_de_Janeiro': 'BR', 'America/Buenos_Aires': 'AR', 'America/Santiago': 'CL', 'America/Lima': 'PE',
-      'America/Bogota': 'CO', 'America/Caracas': 'VE', 'America/Panama': 'PA', 'America/Costa_Rica': 'CR',
-      'America/El_Salvador': 'SV', 'America/Guatemala': 'GT', 'America/Managua': 'NI', 'America/Tegucigalpa': 'HN',
-      'Australia/Sydney': 'AU', 'Australia/Melbourne': 'AU', 'Australia/Brisbane': 'AU', 'Australia/Perth': 'AU',
-      'Australia/Adelaide': 'AU', 'Australia/Darwin': 'AU', 'Australia/Hobart': 'AU', 'Pacific/Auckland': 'NZ',
-      'Pacific/Fiji': 'FJ', 'Pacific/Guam': 'GU', 'Pacific/Honolulu': 'US',
-      'Africa/Johannesburg': 'ZA', 'Africa/Cairo': 'EG', 'Africa/Lagos': 'NG', 'Africa/Nairobi': 'KE',
-      'Africa/Casablanca': 'MA', 'Africa/Tunis': 'TN', 'Africa/Algiers': 'DZ', 'Africa/Accra': 'GH',
-      'Africa/Addis_Ababa': 'ET', 'Africa/Dar_es_Salaam': 'TZ',
+      'America/Toronto': 'CA', 'America/Vancouver': 'CA', 'America/Mexico_City': 'MX', 'America/Sao_Paulo': 'BR',
+      'Australia/Sydney': 'AU', 'Australia/Melbourne': 'AU', 'Australia/Perth': 'AU', 'Australia/Adelaide': 'AU',
+      'Pacific/Auckland': 'NZ', 'Africa/Johannesburg': 'ZA', 'Africa/Cairo': 'EG', 'Africa/Lagos': 'NG',
+      'Africa/Nairobi': 'KE', 'America/Argentina/Buenos_Aires': 'AR', 'America/Santiago': 'CL',
+      'America/Bogota': 'CO', 'America/Lima': 'PE',
     };
     if (countryMap.containsKey(timezone)) return countryMap[timezone]!;
     for (var entry in countryMap.entries) {
@@ -204,32 +171,13 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     final flags = {
       'LK': '🇱🇰', 'JP': '🇯🇵', 'KR': '🇰🇷', 'CN': '🇨🇳', 'HK': '🇭🇰', 'TW': '🇹🇼',
       'IN': '🇮🇳', 'AE': '🇦🇪', 'SG': '🇸🇬', 'MY': '🇲🇾', 'TH': '🇹🇭', 'ID': '🇮🇩',
-      'PH': '🇵🇭', 'VN': '🇻🇳', 'MM': '🇲🇲', 'BD': '🇧🇩', 'PK': '🇵🇰', 'NP': '🇳🇵',
-      'IR': '🇮🇷', 'IQ': '🇮🇶', 'SA': '🇸🇦', 'KW': '🇰🇼', 'QA': '🇶🇦', 'BH': '🇧🇭',
-      'OM': '🇴🇲', 'AM': '🇦🇲', 'GE': '🇬🇪', 'AZ': '🇦🇿', 'KZ': '🇰🇿', 'UZ': '🇺🇿',
-      'KG': '🇰🇬', 'TJ': '🇹🇯', 'TM': '🇹🇲', 'AF': '🇦🇫', 'IL': '🇮🇱', 'JO': '🇯🇴',
-      'LB': '🇱🇧', 'SY': '🇸🇾', 'CY': '🇨🇾', 'TR': '🇹🇷',
-      'GB': '🇬🇧', 'FR': '🇫🇷', 'DE': '🇩🇪', 'IT': '🇮🇹', 'ES': '🇪🇸', 'PT': '🇵🇹',
-      'NL': '🇳🇱', 'BE': '🇧🇪', 'CH': '🇨🇭', 'AT': '🇦🇹', 'DK': '🇩🇰', 'SE': '🇸🇪',
-      'NO': '🇳🇴', 'FI': '🇫🇮', 'PL': '🇵🇱', 'CZ': '🇨🇿', 'HU': '🇭🇺', 'RO': '🇷🇴',
-      'BG': '🇧🇬', 'GR': '🇬🇷', 'RU': '🇷🇺', 'UA': '🇺🇦', 'IE': '🇮🇪', 'IS': '🇮🇸',
-      'US': '🇺🇸', 'CA': '🇨🇦', 'MX': '🇲🇽', 'BR': '🇧🇷', 'AR': '🇦🇷', 'CL': '🇨🇱',
-      'PE': '🇵🇪', 'CO': '🇨🇴', 'VE': '🇻🇪', 'PA': '🇵🇦', 'CR': '🇨🇷', 'SV': '🇸🇻',
-      'GT': '🇬🇹', 'NI': '🇳🇮', 'HN': '🇭🇳',
-      'AU': '🇦🇺', 'NZ': '🇳🇿', 'FJ': '🇫🇯', 'GU': '🇬🇺',
-      'ZA': '🇿🇦', 'EG': '🇪🇬', 'NG': '🇳🇬', 'KE': '🇰🇪', 'MA': '🇲🇦', 'TN': '🇹🇳',
-      'DZ': '🇩🇿', 'GH': '🇬🇭', 'ET': '🇪🇹', 'TZ': '🇹🇿',
+      'PH': '🇵🇭', 'VN': '🇻🇳', 'BD': '🇧🇩', 'PK': '🇵🇰', 'NP': '🇳🇵', 'SA': '🇸🇦',
+      'KW': '🇰🇼', 'QA': '🇶🇦', 'GB': '🇬🇧', 'FR': '🇫🇷', 'DE': '🇩🇪', 'IT': '🇮🇹',
+      'ES': '🇪🇸', 'NL': '🇳🇱', 'CH': '🇨🇭', 'RU': '🇷🇺', 'US': '🇺🇸', 'CA': '🇨🇦',
+      'MX': '🇲🇽', 'BR': '🇧🇷', 'AU': '🇦🇺', 'NZ': '🇳🇿', 'ZA': '🇿🇦', 'EG': '🇪🇬',
+      'NG': '🇳🇬', 'KE': '🇰🇪', 'AR': '🇦🇷', 'CL': '🇨🇱', 'CO': '🇨🇴', 'PE': '🇵🇪',
     };
     return flags[countryCode] ?? '🌐';
-  }
-
-  String _getContinentEmoji(String continent) {
-    final emojis = {
-      'Asia': '🌏', 'Europe': '🌍', 'Africa': '🌍', 'America': '🌎',
-      'Australia': '🇦🇺', 'Pacific': '🌏', 'Atlantic': '🌎', 'Indian': '🌏',
-      'Antarctica': '🇦🇶', 'UTC': '🌐',
-    };
-    return emojis[continent] ?? '🌐';
   }
 
   Map<String, List<String>> _groupTimezonesByContinent(List<String> timezones) {
@@ -250,10 +198,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     }
     return groups;
   }
-
-  // ============================================================
-  // TIMEZONE TILE WIDGET
-  // ============================================================
 
   Widget _buildTimezoneTile(String tz, String displayName, String flag) {
     final isSelected = tz == _currentTimezone;
@@ -277,22 +221,18 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             color: isSelected ? const Color(0xFFFF6B8B) : null,
           ),
         ),
-        subtitle: Text(
-          tz,
-          style: const TextStyle(fontSize: 11),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
+        subtitle: Text(tz, style: const TextStyle(fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
         trailing: isSelected ? const Icon(Icons.check_circle, color: Color(0xFFFF6B8B)) : null,
-        onTap: () {
-          debugPrint('✅ Timezone selected: $tz');
-          Navigator.of(context).pop(tz);
-        },
+        onTap: () => Navigator.of(context).pop(tz),
       ),
     );
   }
 
   Widget _buildCurrentTimezoneInfo() {
+    final displayName = _currentTimezone.split('/').last.replaceAll('_', ' ');
+    final offset = TimezoneService.getUtcOffsetString();
+    final flag = TimezoneService.getCurrentFlag();
+    
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -302,22 +242,14 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       ),
       child: Row(
         children: [
-          Text(_currentTimezoneFlag, style: const TextStyle(fontSize: 24)),
+          Text(flag, style: const TextStyle(fontSize: 24)),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Current: ${_currentTimezone.split('/').last.replaceAll('_', ' ')}',
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                ),
-                Text(
-                  _currentTimezone,
-                  style: const TextStyle(fontSize: 10, color: Colors.grey),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
+                Text('Current: $displayName', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                Text(_currentTimezone, style: const TextStyle(fontSize: 10, color: Colors.grey), maxLines: 1, overflow: TextOverflow.ellipsis),
               ],
             ),
           ),
@@ -327,10 +259,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
               color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(20),
             ),
-            child: Text(
-              _currentTimezoneOffset,
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Color(0xFFFF6B8B)),
-            ),
+            child: Text(offset, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Color(0xFFFF6B8B))),
           ),
         ],
       ),
@@ -366,10 +295,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     );
   }
 
-  // ============================================================
-  // TIMEZONE PICKER WITH WORKING SEARCH
-  // ============================================================
-
   Future<void> _changeTimezone() async {
     final allTimezones = TimezoneService.getAllAvailableTimezones();
     final continentGroups = _groupTimezonesByContinent(allTimezones);
@@ -381,14 +306,12 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         final displayName = tz.split('/').last.replaceAll('_', ' ');
         final countryCode = _extractCountryCode(tz);
         final flag = _getFlagByCountryCode(countryCode);
-        final countryName = _getCountryNameFromCode(countryCode);
         
         final searchText = [
           continent.toLowerCase(),
           displayName.toLowerCase(),
           tz.toLowerCase(),
           countryCode.toLowerCase(),
-          countryName.toLowerCase(),
           displayName.toLowerCase(),
         ].join(' ');
         
@@ -616,6 +539,14 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  String _getContinentEmoji(String continent) {
+    final emojis = {
+      'Asia': '🌏', 'Europe': '🌍', 'Africa': '🌍', 'America': '🌎',
+      'Australia': '🇦🇺', 'Pacific': '🌏', 'UTC': '🌐',
+    };
+    return emojis[continent] ?? '🌐';
   }
 
   // ============================================================
@@ -971,6 +902,10 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           const SizedBox(height: 8),
           Row(children: [_buildQuickAction(icon: Icons.list, label: 'Barber List', color: Colors.indigo, onTap: _navigateToBarberList, enabled: _ownerSalons.isNotEmpty)]),
           const SizedBox(height: 16),
+          const Text('Offers & Promotions', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.grey)),
+          const SizedBox(height: 8),
+          Row(children: [_buildQuickAction(icon: Icons.local_offer, label: 'Manage Offers', color: const Color(0xFFFF6B8B), onTap: _navigateToOffers, enabled: _ownerSalons.isNotEmpty)]),
+          const SizedBox(height: 16),
           const Text('Reports', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.grey)),
           const SizedBox(height: 8),
           Row(children: [const SizedBox(width: 8), _buildQuickAction(icon: Icons.bar_chart, label: 'Reports', color: Colors.deepOrange, onTap: _viewReports), const SizedBox(width: 8), _buildQuickAction(icon: Icons.analytics, label: 'Analytics', color: Colors.indigoAccent, onTap: _viewAnalytics), const SizedBox(width: 8), _buildQuickAction(icon: Icons.settings, label: 'Settings', color: Colors.grey, onTap: _viewSettings)]),
@@ -1131,6 +1066,15 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     if (result == true) await _refreshAllData();
   }
 
+  void _navigateToOffers() {
+    if (_ownerSalons.isEmpty) { _showCreateSalonFirstDialog(); return; }
+    if (_selectedSalonId != null) {
+      context.push('/owner/offers/$_selectedSalonId');
+    } else {
+      context.push('/owner/offers');
+    }
+  }
+
   void _navigateToAddBarber() { if (_ownerSalons.isEmpty) { _showCreateSalonFirstDialog(); return; } context.push('/owner/add-barber?salonId=$_selectedSalonId'); }
   void _navigateToBarberLeaves() { if (_ownerSalons.isEmpty) { _showCreateSalonFirstDialog(); return; } context.push('/owner/barber-leaves?salonId=$_selectedSalonId'); }
   void _navigateToBarberSchedule() { if (_ownerSalons.isEmpty) { _showCreateSalonFirstDialog(); return; } context.push('/owner/barber-schedule?salonId=$_selectedSalonId'); }
@@ -1246,6 +1190,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             ListTile(leading: const Icon(Icons.calendar_today), title: const Text('Appointments'), onTap: () { Navigator.pop(context); _viewBookings(); }),
             ListTile(leading: const Icon(Icons.people), title: const Text('Customers'), onTap: () { Navigator.pop(context); _viewAllCustomers(); }),
             ListTile(leading: const Icon(Icons.content_cut), title: const Text('Barbers'), onTap: () { Navigator.pop(context); _navigateToBarberList(); }),
+            ListTile(leading: const Icon(Icons.local_offer), title: const Text('Offers'), onTap: () { Navigator.pop(context); _navigateToOffers(); }),
             const Divider(),
             ListTile(leading: const Icon(Icons.logout, color: Colors.red), title: const Text('Logout'), onTap: () { Navigator.pop(context); _logout(context); }),
           ]),
@@ -1285,7 +1230,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         elevation: 0,
         centerTitle: isWeb,
         leading: IconButton(icon: const Icon(Icons.menu), onPressed: _openDrawer, tooltip: 'Menu'),
-        actions: [IconButton(icon: const Icon(Icons.refresh), onPressed: _refreshAllData, tooltip: 'Refresh')],
+        // ✅ Refresh button removed
       ),
       drawer: SideMenu(userRole: 'owner', userName: _userName, userEmail: _userEmail, profileImageUrl: _profileImageUrl, onMenuItemSelected: () => _refreshAllData()),
       body: _isLoading

@@ -3,8 +3,9 @@
 <head>
   <base href="/" />
   <meta charset="UTF-8">
-  <!-- Simple viewport for Flutter compatibility -->
-  <!-- <meta name="viewport" content="width=device-width"> -->
+  
+  <!-- ==================== VIEWPORT FOR RESPONSIVE ==================== -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
   
   <!-- ==================== SEO META TAGS ==================== -->
   <title>SBooking</title>
@@ -73,13 +74,19 @@
   }
   </script>
   
-  <!-- ==================== EXISTING PWA CONFIG (UNCHANGED) ==================== -->
+  <!-- ==================== PWA CONFIG ==================== -->
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <meta name="apple-mobile-web-app-title" content="MySalon">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
   <link rel="icon" type="image/png" href="favicon.png">
   <link rel="manifest" href="manifest.json">
+  
+  <!-- ==================== 🔥 FIREBASE SCRIPTS (WEB NOTIFICATIONS) ==================== -->
+  <!-- Firebase Core SDK -->
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <!-- Firebase Messaging SDK -->
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-messaging-compat.js"></script>
   
   <!-- ==================== HIDDEN SEO CONTENT STYLE ==================== -->
   <style>
@@ -96,7 +103,7 @@
       border: 0;
     }
     
-    /* Simple loading indicator (optional) */
+    /* Loading indicator */
     .loading-indicator {
       position: fixed;
       top: 0;
@@ -175,17 +182,99 @@
     <p>Colombo Salon Booking | Kandy Beauty Services | Galle Spa Appointments | Negombo Hair Salons | Kurunegala Beauty Parlors | Jaffna Salon Services</p>
   </div>
   
-  <!-- ==================== OPTIONAL LOADING INDICATOR ==================== -->
+  <!-- ==================== LOADING INDICATOR ==================== -->
   <div class="loading-indicator" id="app-loading">
     <div class="spinner"></div>
   </div>
   
-  <!-- ==================== EXISTING CODE (UNCHANGED) ==================== -->
-  <!-- Service Worker Registration -->
+  <!-- ==================== 🔥 FIREBASE INITIALIZATION ==================== -->
+  <script>
+    // Your Firebase Configuration
+    const firebaseConfig = {
+      apiKey: "AIzaSyAnllE8MwHPRHDlEjo50_fMrzwyxNlvq-c",
+      authDomain: "saloonf-ba359.firebaseapp.com",
+      projectId: "saloonf-ba359",
+      storageBucket: "saloonf-ba359.firebasestorage.app",
+      messagingSenderId: "624521405165",
+      appId: "1:624521405165:web:09323a1025f02b668262e4",
+      measurementId: "G-925VW9Z44F"
+    };
+    
+    // Initialize Firebase
+    firebase.initializeApp(firebaseConfig);
+    const messaging = firebase.messaging();
+    
+    // Request Notification Permission
+    async function requestNotificationPermission() {
+      try {
+        const permission = await Notification.requestPermission();
+        console.log('🔔 Notification permission:', permission);
+        
+        if (permission === 'granted') {
+          // Get FCM token
+          const token = await messaging.getToken({
+            vapidKey: 'BFj7Eoc2BRmQQrXHBFvWXjcmeb3seAyHmOpVZEOLpKTpwbelZoo5tqci-o7KR-sr0hgO9yIYDRV1KP88vhV0l6k'
+          });
+          console.log('✅ FCM Token:', token);
+          
+          // Store token in localStorage for Flutter app
+          localStorage.setItem('fcm_token', token);
+        }
+      } catch (error) {
+        console.error('❌ Error getting notification permission:', error);
+      }
+    }
+    
+    // Handle foreground messages
+    messaging.onMessage((payload) => {
+      console.log('📩 Foreground message received:', payload);
+      
+      // Show browser notification
+      if (Notification.permission === 'granted' && payload.notification) {
+        new Notification(payload.notification.title || 'New Notification', {
+          body: payload.notification.body || 'You have a new notification',
+          icon: '/favicon.png',
+          badge: '/icons/Icon-192.png',
+          data: payload.data,
+        });
+      }
+    });
+    
+    // Handle notification click
+    messaging.onNotificationClick((payload) => {
+      console.log('🔔 Notification clicked:', payload);
+      // You can add navigation logic here
+      if (payload.data && payload.data.screen) {
+        // Navigate to specific screen (handled by Flutter app)
+        window.location.href = `/#/${payload.data.screen}`;
+      }
+    });
+    
+    // Request permission when page loads
+    if (Notification.permission === 'default') {
+      requestNotificationPermission();
+    } else if (Notification.permission === 'granted') {
+      messaging.getToken().then(token => {
+        console.log('✅ Existing FCM Token:', token);
+        localStorage.setItem('fcm_token', token);
+      }).catch(err => console.error('Error getting token:', err));
+    }
+  </script>
+  
+  <!-- ==================== SERVICE WORKER REGISTRATION ==================== -->
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {
-        // Auto-detect version from flutter_bootstrap.js
+        // Register Firebase messaging service worker
+        navigator.serviceWorker.register('/firebase-messaging-sw.js')
+          .then((registration) => {
+            console.log('✅ Firebase SW registered:', registration.scope);
+          })
+          .catch((error) => {
+            console.log('❌ Firebase SW registration failed:', error);
+          });
+        
+        // Register Flutter service worker
         var scripts = document.getElementsByTagName('script');
         for (var i = 0; i < scripts.length; i++) {
           if (scripts[i].src.includes('flutter_bootstrap')) {
@@ -199,7 +288,7 @@
     }
   </script>
   
-  <!-- Smart URL Strategy -->
+  <!-- ==================== URL STRATEGY ==================== -->
   <script>
     (function() {
       var url = window.location.href;
@@ -223,13 +312,12 @@
     })();
   </script>
   
-  <!-- Main Flutter bootstrap -->
+  <!-- ==================== MAIN FLUTTER BOOTSTRAP ==================== -->
   <script src="flutter_bootstrap.js" async></script>
   
-  <!-- Optional: Custom Flutter configuration -->
+  <!-- ==================== HIDE LOADING INDICATOR ==================== -->
   <script>
     window.addEventListener('load', function() {
-      // Hide loading indicator when Flutter app loads
       setTimeout(function() {
         var loading = document.getElementById('app-loading');
         if (loading) {
@@ -239,13 +327,10 @@
           }, 300);
         }
       }, 1000);
-      
-      // You can add custom configuration here if needed
-      // _flutter.loader.load({ config: { renderer: 'html' } });
     });
   </script>
-
-    <!-- 🔥 Apple Sign-In සඳහා script එක -->
+  
+  <!-- ==================== APPLE SIGN-IN SCRIPT ==================== -->
   <script type="text/javascript" src="https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js"></script>
 </body>
 </html>

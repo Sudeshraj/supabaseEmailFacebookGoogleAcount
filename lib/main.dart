@@ -17,8 +17,10 @@ import 'package:flutter_application_1/screens/baber/barber_appointments_screen.d
 import 'package:flutter_application_1/screens/customer/booking_flow_screen.dart';
 import 'package:flutter_application_1/screens/customer/booking_screen.dart';
 import 'package:flutter_application_1/screens/customer/my_bookings_screen.dart';
+import 'package:flutter_application_1/screens/customer/offers_screen.dart';
 import 'package:flutter_application_1/screens/customer/salon_profile_screen.dart';
 import 'package:flutter_application_1/screens/customer/vip_booking_screen.dart';
+import 'package:flutter_application_1/screens/customer/notification_screen.dart';
 import 'package:flutter_application_1/screens/owner/add_barber_screen.dart';
 import 'package:flutter_application_1/screens/owner/add_barber_service_screen.dart';
 import 'package:flutter_application_1/screens/owner/add_services.dart';
@@ -28,6 +30,7 @@ import 'package:flutter_application_1/screens/owner/barber_schedule_screen.dart'
 import 'package:flutter_application_1/screens/owner/create_salon.dart';
 import 'package:flutter_application_1/screens/owner/edit_barber_services_screen.dart';
 import 'package:flutter_application_1/screens/owner/edit_salon.dart';
+import 'package:flutter_application_1/screens/owner/owner_offers_screen.dart';
 import 'package:flutter_application_1/screens/owner/salon_holidays_screen.dart';
 import 'package:flutter_application_1/screens/owner/service_management.dart';
 import 'package:flutter_application_1/services/notification_service.dart';
@@ -1002,6 +1005,25 @@ GoRouter _createRouter() {
         path: '/customer/my-bookings',
         name: 'my-bookings',
         builder: (context, state) => const MyBookingsScreen(),
+      ),
+      // With salonId parameter (from dashboard)
+      GoRoute(
+        path: '/owner/offers/:salonId',
+        name: 'owner-offers',
+        builder: (context, state) {
+          final salonId = state.pathParameters['salonId'];
+          return OwnerOffersScreen(salonId: salonId);
+        },
+      ),
+      GoRoute(
+        path: '/customer/offers',
+        name: 'customer-offers',
+        builder: (context, state) => const OffersScreen(),
+      ),
+      GoRoute(
+        path: '/customer/notifications',
+        name: 'customer-notifications',
+        builder: (context, state) => const NotificationScreen(),
       ),
 
       // ============================================
