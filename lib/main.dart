@@ -36,6 +36,7 @@ import 'package:flutter_application_1/screens/owner/service_management.dart';
 import 'package:flutter_application_1/services/notification_service.dart';
 import 'package:flutter_application_1/services/timezone_service.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'config/environment_manager.dart';
@@ -1081,6 +1082,7 @@ class _MyAppState extends State<MyApp> {
       debugShowCheckedModeBanner: false,
       title: 'Salon Management',
       theme: ThemeData(
+        textTheme: GoogleFonts.notoSansTextTheme(),
         primaryColor: const Color(0xFFFF6B8B),
         colorScheme: ColorScheme.fromSeed(
           seedColor: const Color(0xFFFF6B8B),

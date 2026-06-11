@@ -67,6 +67,7 @@ dependencies:
 
   timezone: ^0.10.1
   flutter_native_timezone: ^2.0.0 # Device timezone eka ganna
+  google_fonts: ^8.1.0
  
 
 dev_dependencies:
