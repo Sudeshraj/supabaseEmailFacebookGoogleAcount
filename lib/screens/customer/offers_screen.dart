@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../../services/timezone_service.dart';
 
 class OffersScreen extends StatefulWidget {
   const OffersScreen({super.key});
@@ -21,13 +23,106 @@ class _OffersScreenState extends State<OffersScreen> {
   String _selectedFilter = 'all';
   String _selectedSort = 'newest';
   
+  // ============================================
+  // TIMEZONE VARIABLES
+  // ============================================
+  String _userTimezone = '';
+  bool _isTimezoneLoaded = false;
+  
   @override
   void initState() {
     super.initState();
-    _loadOffers();
+    _initializeTimezone();
   }
   
+  // ============================================
+  // TIMEZONE INITIALIZATION
+  // ============================================
+  
+  Future<void> _initializeTimezone() async {
+    await TimezoneService.initialize();
+    
+    final prefs = await SharedPreferences.getInstance();
+    _userTimezone = prefs.getString('cached_timezone') ?? TimezoneService.getCurrentTimezone();
+    await TimezoneService.setTimezone(_userTimezone);
+    
+    setState(() {
+      _isTimezoneLoaded = true;
+    });
+    
+    debugPrint('✅ User timezone: $_userTimezone');
+    
+    await _loadOffers();
+  }
+  
+  // ============================================
+  // TIMEZONE HELPER METHODS
+  // ============================================
+  
+  /// Convert UTC date string to local date
+  DateTime _utcToLocalDate(String utcDateStr) {
+    try {
+      final utcDateTime = DateTime.parse(utcDateStr);
+      final localDateTime = TimezoneService.utcToLocalDateTime('12:00', utcDateTime);
+      return DateTime(localDateTime.year, localDateTime.month, localDateTime.day);
+    } catch (e) {
+      debugPrint('Error converting UTC to local: $e');
+      return DateTime.parse(utcDateStr);
+    }
+  }
+  
+  
+  /// Check if offer is active based on local date
+  bool _isOfferActiveLocally(Map<String, dynamic> offer) {
+    try {
+      final now = DateTime.now();
+      final todayLocal = DateTime(now.year, now.month, now.day);
+      final validFromLocal = _utcToLocalDate(offer['valid_from']);
+      final validToLocal = _utcToLocalDate(offer['valid_to']);
+      
+      return validFromLocal.isBefore(todayLocal) && validToLocal.isAfter(todayLocal);
+    } catch (e) {
+      debugPrint('Error checking offer active: $e');
+      return false;
+    }
+  }
+  
+  /// Get days left in local timezone
+  int _getDaysLeftLocal(String validToUtc) {
+    try {
+      final now = DateTime.now();
+      final todayLocal = DateTime(now.year, now.month, now.day);
+      final validToLocal = _utcToLocalDate(validToUtc);
+      return validToLocal.difference(todayLocal).inDays;
+    } catch (e) {
+      debugPrint('Error calculating days left: $e');
+      return _getDaysLeft(validToUtc);
+    }
+  }
+  
+  /// Get timezone display string
+  String _getTimezoneDisplay() {
+    return '${TimezoneService.getCurrentFlag()} ${TimezoneService.getTimezoneDisplayName()} (${TimezoneService.getUtcOffsetString()})';
+  }
+  
+  /// Check if DST is active
+  bool _isDST() {
+    final timezone = _userTimezone;
+    if (!timezone.contains('America/') && !timezone.contains('Europe/')) {
+      return false;
+    }
+    final now = DateTime.now();
+    final month = now.month;
+    return month > 3 && month < 11;
+  }
+  
+  // ============================================
+  // ORIGINAL METHODS (UPDATED)
+  // ============================================
+  
   Future<void> _loadOffers() async {
+    if (!_isTimezoneLoaded) return;
+    
     setState(() {
       _isLoading = true;
       _hasError = false;
@@ -62,7 +157,8 @@ class _OffersScreenState extends State<OffersScreen> {
         followedSalonIds.add(item['salon_id'] as int);
       }
       
-      final today = DateTime.now().toIso8601String().split('T')[0];
+      // ✅ Use UTC date for DB query (dates are stored in UTC)
+      final todayUtc = DateTime.now().toUtc().toIso8601String().split('T')[0];
       
       final result = await supabase
           .from('offers')
@@ -75,6 +171,8 @@ class _OffersScreenState extends State<OffersScreen> {
             points_required,
             valid_from,
             valid_to,
+            valid_from_time,
+            valid_to_time,
             image_url,
             salon_id,
             salons:salon_id (
@@ -87,8 +185,8 @@ class _OffersScreenState extends State<OffersScreen> {
           ''')
           .inFilter('salon_id', followedSalonIds)
           .eq('is_active', true)
-          .lte('valid_from', today)
-          .gte('valid_to', today)
+          .lte('valid_from', todayUtc)
+          .gte('valid_to', todayUtc)
           .order('created_at', ascending: false);
       
       if (result.isNotEmpty) {
@@ -116,17 +214,14 @@ class _OffersScreenState extends State<OffersScreen> {
   List<Map<String, dynamic>> get _filteredAndSortedOffers {
     List<Map<String, dynamic>> filtered = List.from(_offers);
     
+    // ✅ Use local date for filtering
     switch (_selectedFilter) {
       case 'active':
-        filtered = filtered.where((offer) {
-          final validTo = DateTime.parse(offer['valid_to']);
-          return validTo.isAfter(DateTime.now());
-        }).toList();
+        filtered = filtered.where((offer) => _isOfferActiveLocally(offer)).toList();
         break;
       case 'expiring':
         filtered = filtered.where((offer) {
-          final validTo = DateTime.parse(offer['valid_to']);
-          final daysLeft = validTo.difference(DateTime.now()).inDays;
+          final daysLeft = _getDaysLeftLocal(offer['valid_to']);
           return daysLeft <= 7 && daysLeft >= 0;
         }).toList();
         break;
@@ -139,9 +234,14 @@ class _OffersScreenState extends State<OffersScreen> {
         break;
     }
     
+    // Sort using local dates
     switch (_selectedSort) {
       case 'newest':
-        filtered.sort((a, b) => DateTime.parse(b['valid_from']).compareTo(DateTime.parse(a['valid_from'])));
+        filtered.sort((a, b) {
+          final aDate = _utcToLocalDate(a['valid_from']);
+          final bDate = _utcToLocalDate(b['valid_from']);
+          return bDate.compareTo(aDate);
+        });
         break;
       case 'discount':
         filtered.sort((a, b) {
@@ -294,10 +394,80 @@ class _OffersScreenState extends State<OffersScreen> {
     context.push('/customer/salon-profile', extra: salon);
   }
   
+  // ============================================
+  // TIMEZONE INFO WIDGET
+  // ============================================
+  
+  Widget _buildTimezoneInfoCard() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.blue.shade50,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.blue.shade200),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.access_time, size: 16, color: Colors.blue),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '⏰ Offers shown in your local timezone: $_getTimezoneDisplay()',
+              style: const TextStyle(fontSize: 12, color: Colors.blueGrey),
+            ),
+          ),
+          if (_isDST())
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.amber.shade100,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                'DST',
+                style: TextStyle(
+                  fontSize: 9,
+                  color: Colors.amber.shade800,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+  
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
     final isMobile = screenWidth < 600;
+    
+    if (!_isTimezoneLoaded) {
+      return Scaffold(
+        backgroundColor: Colors.grey[50],
+        appBar: AppBar(
+          title: const Text(
+            'Special Offers',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+          backgroundColor: const Color(0xFFFF6B8B),
+          foregroundColor: Colors.white,
+          elevation: 0,
+          centerTitle: false,
+        ),
+        body: const Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+              SizedBox(height: 16),
+              Text('Loading timezone...'),
+            ],
+          ),
+        ),
+      );
+    }
     
     return Scaffold(
       backgroundColor: Colors.grey[50],
@@ -401,6 +571,9 @@ class _OffersScreenState extends State<OffersScreen> {
                     )
                   : Column(
                       children: [
+                        // Timezone info card
+                        _buildTimezoneInfoCard(),
+                        
                         // Filter and Sort Bar - FIXED for mobile
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -534,7 +707,8 @@ class _OffersScreenState extends State<OffersScreen> {
     final salonLogo = salonData != null ? salonData['logo_url'] : null;
     final salonAddress = salonData != null ? salonData['address'] : null;
     
-    final daysLeft = _getDaysLeft(offer['valid_to']);
+    // ✅ Use local date for days left calculation
+    final daysLeft = _getDaysLeftLocal(offer['valid_to']);
     final discountColor = _getDiscountColor(offer['discount_type']);
     final discountIcon = _getDiscountIcon(offer['discount_type']);
     final discountText = _getDiscountText(offer);
@@ -566,7 +740,7 @@ class _OffersScreenState extends State<OffersScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header with Salon Info - FIXED: No overflow
+            // Header with Salon Info
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(

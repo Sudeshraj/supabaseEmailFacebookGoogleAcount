@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/notification_service.dart';
+import '../../services/timezone_service.dart';
 
 class OwnerOffersScreen extends StatefulWidget {
   final String? salonId;
@@ -33,10 +35,16 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
   final ScrollController _scrollController = ScrollController();
   bool _showFloatingButton = true;
   
+  // ============================================
+  // TIMEZONE VARIABLES
+  // ============================================
+  String _userTimezone = '';
+  bool _isTimezoneLoaded = false;
+  
   @override
   void initState() {
     super.initState();
-    _loadSalonAndOffers();
+    _initializeTimezone();
     _scrollController.addListener(_onScroll);
   }
   
@@ -46,6 +54,82 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
     super.dispose();
   }
   
+  // ============================================
+  // TIMEZONE INITIALIZATION
+  // ============================================
+  
+  Future<void> _initializeTimezone() async {
+    await TimezoneService.initialize();
+    
+    final prefs = await SharedPreferences.getInstance();
+    _userTimezone = prefs.getString('cached_timezone') ?? TimezoneService.getCurrentTimezone();
+    await TimezoneService.setTimezone(_userTimezone);
+    
+    setState(() {
+      _isTimezoneLoaded = true;
+    });
+    
+    debugPrint('✅ User timezone: $_userTimezone');
+    
+    await _loadSalonAndOffers();
+  }
+  
+  // ============================================
+  // TIMEZONE HELPER METHODS
+  // ============================================
+  
+  /// Convert UTC date string to local date for display
+  DateTime _utcToLocalDate(String utcDateStr) {
+    try {
+      final utcDateTime = DateTime.parse(utcDateStr);
+      final localDateTime = TimezoneService.utcToLocalDateTime('12:00', utcDateTime);
+      return DateTime(localDateTime.year, localDateTime.month, localDateTime.day);
+    } catch (e) {
+      debugPrint('Error converting UTC to local: $e');
+      return DateTime.parse(utcDateStr);
+    }
+  }
+  
+  /// Format UTC date to local date string
+  String _formatLocalDate(String utcDateStr) {
+    try {
+      final localDate = _utcToLocalDate(utcDateStr);
+      return DateFormat('MMM dd, yyyy').format(localDate);
+    } catch (e) {
+      debugPrint('Error formatting date: $e');
+      return utcDateStr;
+    }
+  }
+  
+  /// Check if offer is active based on local date
+  bool _isOfferActive(Map<String, dynamic> offer) {
+    final now = DateTime.now();
+    final nowLocal = DateTime(now.year, now.month, now.day);    
+  
+    final validToLocal = _utcToLocalDate(offer['valid_to']);
+    
+    return offer['is_active'] == true && validToLocal.isAfter(nowLocal);
+  }
+  
+  /// Check if offer is expired based on local date
+  bool _isOfferExpired(Map<String, dynamic> offer) {
+    final now = DateTime.now();
+    final nowLocal = DateTime(now.year, now.month, now.day);
+    
+    final validToLocal = _utcToLocalDate(offer['valid_to']);
+    final validFromLocal = _utcToLocalDate(offer['valid_from']);
+    
+    return validToLocal.isBefore(nowLocal) || validFromLocal.isAfter(nowLocal);
+  }
+  
+  /// Get days left in local timezone
+  int _getDaysLeft(Map<String, dynamic> offer) {
+    final now = DateTime.now();
+    final nowLocal = DateTime(now.year, now.month, now.day);
+    final validToLocal = _utcToLocalDate(offer['valid_to']);
+    return validToLocal.difference(nowLocal).inDays;
+  }
+      
   void _onScroll() {
     if (_scrollController.position.pixels > 200 && _showFloatingButton) {
       setState(() => _showFloatingButton = false);
@@ -169,28 +253,17 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
   }
   
   List<Map<String, dynamic>> get _filteredOffers {
-    final now = DateTime.now();
-    
     switch(_selectedFilter) {
       case 'active':
-        return _offers.where((offer) {
-          final validTo = DateTime.parse(offer['valid_to']);
-          return offer['is_active'] == true && validTo.isAfter(now);
-        }).toList();
+        return _offers.where((offer) => _isOfferActive(offer)).toList();
       case 'expired':
-        return _offers.where((offer) {
-          final validTo = DateTime.parse(offer['valid_to']);
-          return validTo.isBefore(now) || offer['is_active'] == false;
-        }).toList();
+        return _offers.where((offer) => !_isOfferActive(offer)).toList();
       default:
         return _offers;
     }
   }
   
-  int get _activeCount => _offers.where((o) {
-    final validTo = DateTime.parse(o['valid_to']);
-    return o['is_active'] == true && validTo.isAfter(DateTime.now());
-  }).length;
+  int get _activeCount => _offers.where((o) => _isOfferActive(o)).length;
   
   Future<void> _createOffer() async {
     final result = await showDialog<Map<String, dynamic>>(
@@ -232,7 +305,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
     setState(() => _isLoading = true);
     
     try {
-      // Prepare insert data
+      // Prepare insert data (dates already in UTC format from dialog)
       final Map<String, dynamic> insertData = {
         'salon_id': salonId,
         'title': offerData['title'],
@@ -246,10 +319,10 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
         'is_active': true,
         'usage_limit': offerData['usage_limit'],
         'used_count': 0,
-        'created_at': DateTime.now().toIso8601String(),
+        'created_at': DateTime.now().toUtc().toIso8601String(),
       };
       
-      // ✅ Add time range if provided
+      // Add time range if provided
       if (offerData['valid_from_time'] != null && offerData['valid_to_time'] != null) {
         insertData['valid_from_time'] = offerData['valid_from_time'];
         insertData['valid_to_time'] = offerData['valid_to_time'];
@@ -355,10 +428,10 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
         'valid_to': offerData['valid_to'],
         'image_url': offerData['image_url'],
         'usage_limit': offerData['usage_limit'],
-        'updated_at': DateTime.now().toIso8601String(),
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
       };
       
-      // ✅ Add time range if provided
+      // Add time range if provided
       if (offerData['valid_from_time'] != null && offerData['valid_to_time'] != null) {
         updateData['valid_from_time'] = offerData['valid_from_time'];
         updateData['valid_to_time'] = offerData['valid_to_time'];
@@ -407,7 +480,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
           .from('offers')
           .update({
             'is_active': !isActive,
-            'updated_at': DateTime.now().toIso8601String(),
+            'updated_at': DateTime.now().toUtc().toIso8601String(),
           })
           .eq('id', offerId);
       
@@ -520,28 +593,19 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
   }
   
   Color _getStatusColor(Map<String, dynamic> offer) {
-    final now = DateTime.now();
-    final validTo = DateTime.parse(offer['valid_to']);
-    final isExpired = validTo.isBefore(now);
-    
     if (!offer['is_active']) return Colors.grey;
-    if (isExpired) return Colors.red;
+    if (_isOfferExpired(offer)) return Colors.red;
     return Colors.green;
   }
   
   String _getStatusText(Map<String, dynamic> offer) {
-    final now = DateTime.now();
-    final validTo = DateTime.parse(offer['valid_to']);
-    final isExpired = validTo.isBefore(now);
-    
     if (!offer['is_active']) return 'Inactive';
-    if (isExpired) return 'Expired';
+    if (_isOfferExpired(offer)) return 'Expired';
     
-    final daysLeft = validTo.difference(now).inDays;
+    final daysLeft = _getDaysLeft(offer);
     return daysLeft == 0 ? 'Ends today' : '$daysLeft days left';
   }
   
-  // ✅ Helper method to format time range for display
   String _getTimeRangeText(String? fromTime, String? toTime) {
     if (fromTime == null || toTime == null) return '';
     try {
@@ -578,10 +642,37 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
     return Colors.green;
   }
   
+  // ============================================
+  // TIMEZONE INFO WIDGET (NEW)
+  // ============================================
+  
+
+  
   @override
   Widget build(BuildContext context) {
     final isSmallScreen = MediaQuery.of(context).size.width < 600;
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    
+    if (!_isTimezoneLoaded) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('Manage Offers'),
+          backgroundColor: const Color(0xFFFF6B8B),
+          foregroundColor: Colors.white,
+          elevation: 0,
+        ),
+        body: const Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+              SizedBox(height: 16),
+              Text('Loading timezone...'),
+            ],
+          ),
+        ),
+      );
+    }
     
     return Scaffold(
       backgroundColor: isDarkMode ? Colors.grey[900] : Colors.grey[50],
@@ -680,7 +771,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
   Widget _buildMainContent(bool isSmallScreen, bool isDarkMode) {
     return Column(
       children: [
-        _buildSalonInfoCard(isDarkMode),
+        _buildSalonInfoCard(isDarkMode),      
         _buildFilterChips(isSmallScreen),
         Expanded(
           child: _filteredOffers.isEmpty
@@ -925,12 +1016,14 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
     final statusColor = _getStatusColor(offer);
     final statusText = _getStatusText(offer);
     final discountText = _getDiscountText(offer);
-    final validFrom = DateFormat('MMM dd, yyyy').format(DateTime.parse(offer['valid_from']));
-    final validTo = DateFormat('MMM dd, yyyy').format(DateTime.parse(offer['valid_to']));
+    
+    // ✅ Use local date conversion for display
+    final validFrom = _formatLocalDate(offer['valid_from']);
+    final validTo = _formatLocalDate(offer['valid_to']);
+    
     final usageLimit = offer['usage_limit'];
     final usedCount = offer['used_count'] ?? 0;
     
-    // ✅ Get time range
     final timeRangeText = _getTimeRangeText(offer['valid_from_time'], offer['valid_to_time']);
     final hasTimeRestriction = timeRangeText.isNotEmpty;
     
@@ -1076,7 +1169,6 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
                     ),
                   ),
                   
-                  // ✅ Time Range Chip (NEW)
                   if (hasTimeRestriction)
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
@@ -1323,7 +1415,7 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
   DateTime _validTo = DateTime.now().add(const Duration(days: 30));
   bool _sendNotification = true;
   
-  // ✅ Time range variables (NEW)
+  // Time range variables
   bool _hasTimeRestriction = false;
   TimeOfDay? _validFromTime;
   TimeOfDay? _validToTime;
@@ -1349,7 +1441,7 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
       _validFrom = DateTime.parse(widget.offer!['valid_from']);
       _validTo = DateTime.parse(widget.offer!['valid_to']);
       
-      // ✅ Load time range if exists
+      // Load time range if exists
       if (widget.offer!.containsKey('valid_from_time') && widget.offer!['valid_from_time'] != null) {
         final fromTimeStr = widget.offer!['valid_from_time'].toString();
         final toTimeStr = widget.offer!['valid_to_time'].toString();
@@ -1368,7 +1460,6 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
     }
   }
   
-  // ✅ Helper to parse time string (NEW)
   TimeOfDay _parseTimeString(String timeStr) {
     final parts = timeStr.split(':');
     final hour = int.parse(parts[0]);
@@ -1408,7 +1499,6 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
     }
   }
   
-  // ✅ Select from time (NEW)
   Future<void> _selectFromTime() async {
     final TimeOfDay? picked = await showTimePicker(
       context: context,
@@ -1423,7 +1513,6 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
     }
   }
   
-  // ✅ Select to time (NEW)
   Future<void> _selectToTime() async {
     final TimeOfDay? picked = await showTimePicker(
       context: context,
@@ -1456,7 +1545,6 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
         return;
       }
       
-      // ✅ Validate time range
       if (_hasTimeRestriction) {
         if (_validFromTime == null || _validToTime == null) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -1767,7 +1855,7 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                       ),
                       const SizedBox(height: 16),
                       
-                      // ✅ Time Range Section (NEW)
+                      // Time Range Section
                       Container(
                         decoration: BoxDecoration(
                           color: Colors.purple.withValues(alpha: 0.05),
