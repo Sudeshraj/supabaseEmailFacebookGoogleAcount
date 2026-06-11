@@ -89,13 +89,13 @@ class NotificationService {
       _handleMessage(message);
     });
 
-    FirebaseMessaging.instance.getInitialMessage().then(
-      (RemoteMessage? message) {
-        if (message != null) {
-          _handleMessage(message);
-        }
-      },
-    );
+    FirebaseMessaging.instance.getInitialMessage().then((
+      RemoteMessage? message,
+    ) {
+      if (message != null) {
+        _handleMessage(message);
+      }
+    });
   }
 
   void _handleWebForegroundMessage(RemoteMessage message) {
@@ -415,7 +415,9 @@ class NotificationService {
         return false;
       }
 
-      debugPrint('🔍 [RPC] Marking notification $notificationId as read for user ${user.id}');
+      debugPrint(
+        '🔍 [RPC] Marking notification $notificationId as read for user ${user.id}',
+      );
 
       // ✅ Call RPC function
       final result = await supabase.rpc(
@@ -426,7 +428,9 @@ class NotificationService {
       debugPrint('✅ [RPC] mark_notification_as_read result: $result');
 
       if (result != null && result['success'] == true) {
-        debugPrint('✅ Successfully marked notification $notificationId as read');
+        debugPrint(
+          '✅ Successfully marked notification $notificationId as read',
+        );
         return true;
       } else {
         debugPrint('⚠️ [RPC] Failed to mark as read: $result');
@@ -434,46 +438,48 @@ class NotificationService {
       }
     } catch (e) {
       debugPrint('❌ [RPC] Error marking as read: $e');
-      
+
       // ✅ Fallback: Direct update if RPC fails
       return await _markAsReadDirect(notificationId);
     }
   }
 
   /// ✅ Fallback method: Direct update without RPC
-/// ✅ Fallback method: Direct update without RPC (NO updated_at)
-Future<bool> _markAsReadDirect(int notificationId) async {
-  try {
-    final user = supabase.auth.currentUser;
-    if (user == null) return false;
+  /// ✅ Fallback method: Direct update without RPC (NO updated_at)
+  Future<bool> _markAsReadDirect(int notificationId) async {
+    try {
+      final user = supabase.auth.currentUser;
+      if (user == null) return false;
 
-    debugPrint('🔍 [DIRECT] Attempting direct update for notification $notificationId');
+      debugPrint(
+        '🔍 [DIRECT] Attempting direct update for notification $notificationId',
+      );
 
-    // ✅ Remove updated_at - it doesn't exist in your table
-    final result = await supabase
-        .from('notifications')
-        .update({
-          'is_read': true,
-          // 'updated_at': DateTime.now().toIso8601String(), // ❌ REMOVE THIS LINE
-        })
-        .eq('id', notificationId)
-        .eq('user_id', user.id)
-        .select();
+      // ✅ Remove updated_at - it doesn't exist in your table
+      final result = await supabase
+          .from('notifications')
+          .update({
+            'is_read': true,
+            // 'updated_at': DateTime.now().toIso8601String(), // ❌ REMOVE THIS LINE
+          })
+          .eq('id', notificationId)
+          .eq('user_id', user.id)
+          .select();
 
-    debugPrint('✅ [DIRECT] Update result: $result');
-    
-    if (result.isNotEmpty) {
-      final isNowRead = result[0]['is_read'] == true;
-      debugPrint('✅ [DIRECT] Notification is_read: $isNowRead');
-      return isNowRead;
+      debugPrint('✅ [DIRECT] Update result: $result');
+
+      if (result.isNotEmpty) {
+        final isNowRead = result[0]['is_read'] == true;
+        debugPrint('✅ [DIRECT] Notification is_read: $isNowRead');
+        return isNowRead;
+      }
+
+      return false;
+    } catch (e) {
+      debugPrint('❌ [DIRECT] Error: $e');
+      return false;
     }
-    
-    return false;
-  } catch (e) {
-    debugPrint('❌ [DIRECT] Error: $e');
-    return false;
   }
-}
 
   /// ✅ RPC: Mark all notifications as read
   Future<bool> markAllAsRead(String userId) async {
@@ -501,26 +507,28 @@ Future<bool> _markAsReadDirect(int notificationId) async {
   }
 
   /// ✅ Fallback: Direct update for mark all as read
-Future<bool> _markAllAsReadDirect(String userId) async {
-  try {
-    debugPrint('🔍 [DIRECT] Marking all notifications as read for user $userId');
+  Future<bool> _markAllAsReadDirect(String userId) async {
+    try {
+      debugPrint(
+        '🔍 [DIRECT] Marking all notifications as read for user $userId',
+      );
 
-    await supabase
-        .from('notifications')
-        .update({
-          'is_read': true,
-          // 'updated_at': DateTime.now().toIso8601String(), // ❌ REMOVE THIS LINE
-        })
-        .eq('user_id', userId)
-        .eq('is_read', false);
+      await supabase
+          .from('notifications')
+          .update({
+            'is_read': true,
+            // 'updated_at': DateTime.now().toIso8601String(), // ❌ REMOVE THIS LINE
+          })
+          .eq('user_id', userId)
+          .eq('is_read', false);
 
-    debugPrint('✅ [DIRECT] All notifications marked as read');
-    return true;
-  } catch (e) {
-    debugPrint('❌ [DIRECT] Error: $e');
-    return false;
+      debugPrint('✅ [DIRECT] All notifications marked as read');
+      return true;
+    } catch (e) {
+      debugPrint('❌ [DIRECT] Error: $e');
+      return false;
+    }
   }
-}
 
   /// ✅ RPC: Delete a single notification
   Future<bool> deleteNotification(int notificationId) async {
@@ -539,7 +547,7 @@ Future<bool> _markAllAsReadDirect(String userId) async {
       return result != null && result['success'] == true;
     } catch (e) {
       debugPrint('❌ [RPC] Error deleting notification: $e');
-      
+
       // Fallback
       try {
         await supabase
@@ -569,13 +577,10 @@ Future<bool> _markAllAsReadDirect(String userId) async {
       return result != null && result['success'] == true;
     } catch (e) {
       debugPrint('❌ [RPC] Error clearing notifications: $e');
-      
+
       // Fallback
       try {
-        await supabase
-            .from('notifications')
-            .delete()
-            .eq('user_id', userId);
+        await supabase.from('notifications').delete().eq('user_id', userId);
         return true;
       } catch (innerError) {
         debugPrint('❌ [DIRECT] Clear error: $innerError');
@@ -836,6 +841,8 @@ Future<bool> _markAllAsReadDirect(String userId) async {
     );
   }
 
+  // ============= SPECIAL OFFER NOTIFICATION =============
+
   Future<void> sendSpecialOffer({
     required String customerId,
     required String offerTitle,
@@ -847,18 +854,55 @@ Future<bool> _markAllAsReadDirect(String userId) async {
     final title = '🎁 Special Offer!';
     final body = '$offerTitle: $discountText at $salonName. $offerDescription';
 
-    await sendPushNotification(
-      userId: customerId,
+    // 1. Save to database
+    await _saveNotificationToDatabase(
       title: title,
       body: body,
-      screen: 'offers',
-      bookingId: offerId.toString(),
-      extraData: {
+      type: 'special_offer',
+      data: {
         'offerTitle': offerTitle,
         'discountText': discountText,
         'salonName': salonName,
+        'offerId': offerId,
       },
     );
+
+    // 2. Direct Edge Function call
+    try {
+      final userProfile = await supabase
+          .from('profiles')
+          .select('fcm_token')
+          .eq('id', customerId)
+          .maybeSingle();
+
+      final fcmToken = userProfile?['fcm_token'];
+
+      if (fcmToken == null || fcmToken.toString().isEmpty) {
+        debugPrint('⚠️ No FCM token for user $customerId');
+        return;
+      }
+
+      final result = await supabase.functions.invoke(
+        'send-notification',
+        body: {
+          'token': fcmToken,
+          'title': title,
+          'body': body,
+          'data': {
+            'screen': 'offers',
+            'bookingId': offerId.toString(),
+            'type': 'special_offer',
+            'offerTitle': offerTitle,
+            'discountText': discountText,
+            'salonName': salonName,
+          },
+        },
+      );
+
+      debugPrint('✅ Special offer push notification sent: $result');
+    } catch (e) {
+      debugPrint('❌ Error sending special offer push notification: $e');
+    }
   }
 
   Future<void> sendWaitingListAvailable({
@@ -1088,13 +1132,13 @@ Future<bool> _markAllAsReadDirect(String userId) async {
       _handleMessage(message);
     });
 
-    FirebaseMessaging.instance.getInitialMessage().then(
-      (RemoteMessage? message) {
-        if (message != null) {
-          _handleMessage(message);
-        }
-      },
-    );
+    FirebaseMessaging.instance.getInitialMessage().then((
+      RemoteMessage? message,
+    ) {
+      if (message != null) {
+        _handleMessage(message);
+      }
+    });
   }
 
   Future<void> _showMobileNotification(RemoteMessage message) async {
