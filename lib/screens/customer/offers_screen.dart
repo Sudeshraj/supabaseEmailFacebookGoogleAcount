@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class OffersScreen extends StatefulWidget {
@@ -19,8 +18,8 @@ class _OffersScreenState extends State<OffersScreen> {
   String _errorMessage = '';
   
   // Filter and sort state
-  String _selectedFilter = 'all'; // all, active, expiring, points
-  String _selectedSort = 'newest'; // newest, discount, points
+  String _selectedFilter = 'all';
+  String _selectedSort = 'newest';
   
   @override
   void initState() {
@@ -45,7 +44,6 @@ class _OffersScreenState extends State<OffersScreen> {
         return;
       }
       
-      // Get followed salon IDs
       final followedSalonsResult = await supabase
           .from('salon_followers')
           .select('salon_id')
@@ -66,7 +64,6 @@ class _OffersScreenState extends State<OffersScreen> {
       
       final today = DateTime.now().toIso8601String().split('T')[0];
       
-      // Load offers from followed salons
       final result = await supabase
           .from('offers')
           .select('''
@@ -119,7 +116,6 @@ class _OffersScreenState extends State<OffersScreen> {
   List<Map<String, dynamic>> get _filteredAndSortedOffers {
     List<Map<String, dynamic>> filtered = List.from(_offers);
     
-    // Apply filter
     switch (_selectedFilter) {
       case 'active':
         filtered = filtered.where((offer) {
@@ -143,7 +139,6 @@ class _OffersScreenState extends State<OffersScreen> {
         break;
     }
     
-    // Apply sort
     switch (_selectedSort) {
       case 'newest':
         filtered.sort((a, b) => DateTime.parse(b['valid_from']).compareTo(DateTime.parse(a['valid_from'])));
@@ -215,6 +210,7 @@ class _OffersScreenState extends State<OffersScreen> {
               child: Text(
                 offer['title'],
                 style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                overflow: TextOverflow.ellipsis,
               ),
             ),
           ],
@@ -266,7 +262,14 @@ class _OffersScreenState extends State<OffersScreen> {
           ElevatedButton(
             onPressed: () {
               Navigator.pop(context);
-              _showSnackBar('✅ "${offer['title']}" applied!');
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('✅ "${offer['title']}" applied!'),
+                  backgroundColor: Colors.green,
+                  behavior: SnackBarBehavior.floating,
+                  duration: const Duration(seconds: 2),
+                ),
+              );
               context.push('/customer/booking-flow', extra: {'offer': offer});
             },
             style: ElevatedButton.styleFrom(
@@ -276,17 +279,6 @@ class _OffersScreenState extends State<OffersScreen> {
             child: const Text('Apply Offer'),
           ),
         ],
-      ),
-    );
-  }
-  
-  void _showSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.green,
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 2),
       ),
     );
   }
@@ -306,23 +298,6 @@ class _OffersScreenState extends State<OffersScreen> {
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
     final isMobile = screenWidth < 600;
-    final isTablet = screenWidth >= 600 && screenWidth < 1200;
-    final isDesktop = screenWidth >= 1200;
-    
-    // Responsive grid settings
-    int crossAxisCount = 1;
-    double cardWidth = double.infinity;
-    
-    if (isDesktop) {
-      crossAxisCount = 2;
-      cardWidth = 500;
-    } else if (isTablet) {
-      crossAxisCount = 2;
-      cardWidth = 350;
-    } else {
-      crossAxisCount = 1;
-      cardWidth = double.infinity;
-    }
     
     return Scaffold(
       backgroundColor: Colors.grey[50],
@@ -414,9 +389,7 @@ class _OffersScreenState extends State<OffersScreen> {
                           ),
                           const SizedBox(height: 24),
                           ElevatedButton(
-                            onPressed: () {
-                              Navigator.pop(context);
-                            },
+                            onPressed: () => Navigator.pop(context),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: const Color(0xFFFF6B8B),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -428,7 +401,7 @@ class _OffersScreenState extends State<OffersScreen> {
                     )
                   : Column(
                       children: [
-                        // Filter and Sort Bar
+                        // Filter and Sort Bar - FIXED for mobile
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                           decoration: BoxDecoration(
@@ -444,70 +417,78 @@ class _OffersScreenState extends State<OffersScreen> {
                           child: Row(
                             children: [
                               // Filter dropdown
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 12),
-                                decoration: BoxDecoration(
-                                  border: Border.all(color: Colors.grey[300]!),
-                                  borderRadius: BorderRadius.circular(25),
-                                ),
-                                child: DropdownButtonHideUnderline(
-                                  child: DropdownButton<String>(
-                                    value: _selectedFilter,
-                                    icon: const Icon(Icons.filter_list, size: 18),
-                                    items: const [
-                                      DropdownMenuItem(value: 'all', child: Text('All Offers')),
-                                      DropdownMenuItem(value: 'active', child: Text('Active')),
-                                      DropdownMenuItem(value: 'expiring', child: Text('Expiring Soon')),
-                                      DropdownMenuItem(value: 'points', child: Text('Points Required')),
-                                    ],
-                                    onChanged: (value) {
-                                      if (value != null) {
-                                        setState(() => _selectedFilter = value);
-                                      }
-                                    },
+                              Expanded(
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                                  decoration: BoxDecoration(
+                                    border: Border.all(color: Colors.grey[300]!),
+                                    borderRadius: BorderRadius.circular(25),
+                                  ),
+                                  child: DropdownButtonHideUnderline(
+                                    child: DropdownButton<String>(
+                                      value: _selectedFilter,
+                                      icon: const Icon(Icons.filter_list, size: 18),
+                                      isExpanded: true,
+                                      items: const [
+                                        DropdownMenuItem(value: 'all', child: Text('All Offers')),
+                                        DropdownMenuItem(value: 'active', child: Text('Active')),
+                                        DropdownMenuItem(value: 'expiring', child: Text('Expiring Soon')),
+                                        DropdownMenuItem(value: 'points', child: Text('Points Required')),
+                                      ],
+                                      onChanged: (value) {
+                                        if (value != null) {
+                                          setState(() => _selectedFilter = value);
+                                        }
+                                      },
+                                    ),
                                   ),
                                 ),
                               ),
                               const SizedBox(width: 12),
                               // Sort dropdown
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 12),
-                                decoration: BoxDecoration(
-                                  border: Border.all(color: Colors.grey[300]!),
-                                  borderRadius: BorderRadius.circular(25),
-                                ),
-                                child: DropdownButtonHideUnderline(
-                                  child: DropdownButton<String>(
-                                    value: _selectedSort,
-                                    icon: const Icon(Icons.sort, size: 18),
-                                    items: const [
-                                      DropdownMenuItem(value: 'newest', child: Text('Newest First')),
-                                      DropdownMenuItem(value: 'discount', child: Text('Best Discount')),
-                                      DropdownMenuItem(value: 'points', child: Text('Lowest Points')),
-                                    ],
-                                    onChanged: (value) {
-                                      if (value != null) {
-                                        setState(() => _selectedSort = value);
-                                      }
-                                    },
+                              Expanded(
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                                  decoration: BoxDecoration(
+                                    border: Border.all(color: Colors.grey[300]!),
+                                    borderRadius: BorderRadius.circular(25),
+                                  ),
+                                  child: DropdownButtonHideUnderline(
+                                    child: DropdownButton<String>(
+                                      value: _selectedSort,
+                                      icon: const Icon(Icons.sort, size: 18),
+                                      isExpanded: true,
+                                      items: const [
+                                        DropdownMenuItem(value: 'newest', child: Text('Newest First')),
+                                        DropdownMenuItem(value: 'discount', child: Text('Best Discount')),
+                                        DropdownMenuItem(value: 'points', child: Text('Lowest Points')),
+                                      ],
+                                      onChanged: (value) {
+                                        if (value != null) {
+                                          setState(() => _selectedSort = value);
+                                        }
+                                      },
+                                    ),
                                   ),
                                 ),
                               ),
-                              const Spacer(),
+                              const SizedBox(width: 12),
                               Text(
-                                '${_filteredAndSortedOffers.length} offers',
+                                '${_filteredAndSortedOffers.length}',
                                 style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.grey[500],
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                  color: const Color(0xFFFF6B8B),
                                 ),
                               ),
+                              const Text(' offers', style: TextStyle(fontSize: 12, color: Colors.grey)),
                             ],
                           ),
                         ),
                         
                         const SizedBox(height: 16),
                         
-                        // Offers Grid/List
+                        // Offers List
                         Expanded(
                           child: _filteredAndSortedOffers.isEmpty
                               ? Center(
@@ -520,32 +501,26 @@ class _OffersScreenState extends State<OffersScreen> {
                                         'No offers match your filter',
                                         style: TextStyle(color: Colors.grey[500]),
                                       ),
+                                      const SizedBox(height: 16),
+                                      TextButton(
+                                        onPressed: () {
+                                          setState(() {
+                                            _selectedFilter = 'all';
+                                            _selectedSort = 'newest';
+                                          });
+                                        },
+                                        child: const Text('Clear Filters'),
+                                      ),
                                     ],
                                   ),
                                 )
-                              : Padding(
+                              : ListView.builder(
                                   padding: const EdgeInsets.all(16),
-                                  child: isDesktop || isTablet
-                                      ? GridView.builder(
-                                          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                                            crossAxisCount: crossAxisCount,
-                                            crossAxisSpacing: 16,
-                                            mainAxisSpacing: 16,
-                                            childAspectRatio: isDesktop ? 1.1 : 1.0,
-                                          ),
-                                          itemCount: _filteredAndSortedOffers.length,
-                                          itemBuilder: (context, index) => _buildOfferCard(
-                                            _filteredAndSortedOffers[index],
-                                            isMobile: isMobile,
-                                          ),
-                                        )
-                                      : ListView.builder(
-                                          itemCount: _filteredAndSortedOffers.length,
-                                          itemBuilder: (context, index) => _buildOfferCard(
-                                            _filteredAndSortedOffers[index],
-                                            isMobile: isMobile,
-                                          ),
-                                        ),
+                                  itemCount: _filteredAndSortedOffers.length,
+                                  itemBuilder: (context, index) => _buildOfferCard(
+                                    _filteredAndSortedOffers[index],
+                                    isMobile: isMobile,
+                                  ),
                                 ),
                         ),
                       ],
@@ -559,7 +534,6 @@ class _OffersScreenState extends State<OffersScreen> {
     final salonLogo = salonData != null ? salonData['logo_url'] : null;
     final salonAddress = salonData != null ? salonData['address'] : null;
     
-    final validTo = DateTime.parse(offer['valid_to']);
     final daysLeft = _getDaysLeft(offer['valid_to']);
     final discountColor = _getDiscountColor(offer['discount_type']);
     final discountIcon = _getDiscountIcon(offer['discount_type']);
@@ -592,7 +566,7 @@ class _OffersScreenState extends State<OffersScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header with Salon Info
+            // Header with Salon Info - FIXED: No overflow
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -624,6 +598,7 @@ class _OffersScreenState extends State<OffersScreen> {
                     ),
                   ),
                   const SizedBox(width: 12),
+                  // ✅ FIXED: Expanded widget with proper constraints
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -637,6 +612,8 @@ class _OffersScreenState extends State<OffersScreen> {
                               fontWeight: FontWeight.bold,
                               color: Colors.grey[800],
                             ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                         if (salonAddress != null)
@@ -652,9 +629,10 @@ class _OffersScreenState extends State<OffersScreen> {
                       ],
                     ),
                   ),
-                  // Days left badge
+                  // ✅ FIXED: Status badge with proper sizing
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    constraints: const BoxConstraints(minWidth: 70),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
                       color: statusColor.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(20),
@@ -664,12 +642,15 @@ class _OffersScreenState extends State<OffersScreen> {
                       children: [
                         Icon(Icons.access_time, size: 12, color: statusColor),
                         const SizedBox(width: 4),
-                        Text(
-                          statusText,
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w500,
-                            color: statusColor,
+                        Flexible(
+                          child: Text(
+                            statusText,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                              color: statusColor,
+                            ),
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                       ],
@@ -736,7 +717,7 @@ class _OffersScreenState extends State<OffersScreen> {
                   ),
                   const SizedBox(height: 16),
                   
-                  // Points Required (if any)
+                  // Points Required
                   if ((offer['points_required'] ?? 0) > 0)
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),

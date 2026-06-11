@@ -1,15 +1,12 @@
+import 'dart:async';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_application_1/alertBox/show_logout_conf.dart';
-import 'package:flutter_application_1/main.dart';
 import 'package:flutter_application_1/services/notification_service.dart';
 import 'package:flutter_application_1/services/permission_service.dart';
 import 'package:flutter_application_1/services/permission_manager.dart';
-import 'package:flutter_application_1/services/session_manager.dart';
 import 'package:flutter_application_1/widgets/permission_card.dart';
 import 'package:flutter_application_1/widgets/side_menu.dart';
 import 'package:go_router/go_router.dart';
-import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/timezone_service.dart';
@@ -21,7 +18,8 @@ class CustomerDashboard extends StatefulWidget {
   State<CustomerDashboard> createState() => _CustomerDashboardState();
 }
 
-class _CustomerDashboardState extends State<CustomerDashboard> {
+class _CustomerDashboardState extends State<CustomerDashboard>
+    with WidgetsBindingObserver {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   final NotificationService _notificationService = NotificationService();
@@ -40,7 +38,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
 
   // Booking Statistics
   int _upcomingBookings = 0;
-  int _pendingBookings = 0;
+  int pendingBookings = 0;
   int _completedBookings = 0;
   int _cancelledBookings = 0;
   int _totalSpent = 0;
@@ -62,6 +60,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
 
   // ✅ Notification Unread Count
   int _unreadNotificationCount = 0;
+  bool _isRefreshingCount = false;
 
   // Timezone Variables
   String _userTimezone = '';
@@ -79,6 +78,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _initializeTimezone();
     _loadCustomerData();
     _loadDashboardData();
@@ -91,6 +91,18 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     _checkForUpdates();
+    _checkTimezoneChange();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    // ✅ Refresh unread count when app comes to foreground
+    if (state == AppLifecycleState.resumed) {
+      debugPrint('🔄 App resumed - refreshing notification count');
+      _loadUnreadCount();
+      _loadDashboardData();
+    }
   }
 
   void _checkForUpdates() {
@@ -106,17 +118,18 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
     _searchController.dispose();
     _searchFocusNode.dispose();
     _removeSearchOverlay();
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 
   // ==================== TIMEZONE INITIALIZATION ====================
-  
+
   Future<void> _initializeTimezone() async {
     await TimezoneService.initialize();
-    
+
     final prefs = await SharedPreferences.getInstance();
     final savedTimezone = prefs.getString('cached_timezone');
-    
+
     if (savedTimezone != null && savedTimezone.isNotEmpty) {
       _userTimezone = savedTimezone;
       await TimezoneService.setTimezone(_userTimezone);
@@ -126,9 +139,9 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
       await prefs.setString('cached_timezone', _userTimezone);
       debugPrint('✅ Saved device timezone to cache: $_userTimezone');
     }
-    
+
     _lastTimezone = _userTimezone;
-    
+
     setState(() {
       _isTimezoneLoaded = true;
     });
@@ -136,8 +149,10 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
 
   void _checkTimezoneChange() async {
     final prefs = await SharedPreferences.getInstance();
-    final currentTimezone = prefs.getString('cached_timezone') ?? TimezoneService.getCurrentTimezone();
-    
+    final currentTimezone =
+        prefs.getString('cached_timezone') ??
+        TimezoneService.getCurrentTimezone();
+
     if (_lastTimezone != currentTimezone && _lastTimezone.isNotEmpty) {
       _userTimezone = currentTimezone;
       await TimezoneService.setTimezone(_userTimezone);
@@ -157,47 +172,125 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
   }
 
   // ==================== COMPLETE TIMEZONE PICKER METHODS ====================
-  
+
   String _extractCountryCode(String timezone) {
     final countryMap = {
-      'Asia/Colombo': 'LK', 'Asia/Tokyo': 'JP', 'Asia/Seoul': 'KR', 'Asia/Shanghai': 'CN',
-      'Asia/Hong_Kong': 'HK', 'Asia/Taipei': 'TW', 'Asia/Kolkata': 'IN', 'Asia/Dubai': 'AE',
-      'Asia/Singapore': 'SG', 'Asia/Kuala_Lumpur': 'MY', 'Asia/Bangkok': 'TH', 'Asia/Jakarta': 'ID',
-      'Asia/Manila': 'PH', 'Asia/Ho_Chi_Minh': 'VN', 'Asia/Dhaka': 'BD', 'Asia/Karachi': 'PK',
-      'Asia/Kathmandu': 'NP', 'Asia/Riyadh': 'SA', 'Asia/Kuwait': 'KW', 'Asia/Doha': 'QA',
-      'Europe/London': 'GB', 'Europe/Paris': 'FR', 'Europe/Berlin': 'DE', 'Europe/Rome': 'IT',
-      'Europe/Madrid': 'ES', 'Europe/Amsterdam': 'NL', 'Europe/Zurich': 'CH', 'Europe/Moscow': 'RU',
-      'America/New_York': 'US', 'America/Chicago': 'US', 'America/Denver': 'US', 'America/Los_Angeles': 'US',
-      'America/Toronto': 'CA', 'America/Vancouver': 'CA', 'America/Mexico_City': 'MX', 'America/Sao_Paulo': 'BR',
-      'Australia/Sydney': 'AU', 'Australia/Melbourne': 'AU', 'Australia/Perth': 'AU', 'Australia/Adelaide': 'AU',
-      'Pacific/Auckland': 'NZ', 'Africa/Johannesburg': 'ZA', 'Africa/Cairo': 'EG', 'Africa/Lagos': 'NG',
-      'Africa/Nairobi': 'KE', 'America/Argentina/Buenos_Aires': 'AR', 'America/Santiago': 'CL',
-      'America/Bogota': 'CO', 'America/Lima': 'PE',
+      'Asia/Colombo': 'LK',
+      'Asia/Tokyo': 'JP',
+      'Asia/Seoul': 'KR',
+      'Asia/Shanghai': 'CN',
+      'Asia/Hong_Kong': 'HK',
+      'Asia/Taipei': 'TW',
+      'Asia/Kolkata': 'IN',
+      'Asia/Dubai': 'AE',
+      'Asia/Singapore': 'SG',
+      'Asia/Kuala_Lumpur': 'MY',
+      'Asia/Bangkok': 'TH',
+      'Asia/Jakarta': 'ID',
+      'Asia/Manila': 'PH',
+      'Asia/Ho_Chi_Minh': 'VN',
+      'Asia/Dhaka': 'BD',
+      'Asia/Karachi': 'PK',
+      'Asia/Kathmandu': 'NP',
+      'Asia/Riyadh': 'SA',
+      'Asia/Kuwait': 'KW',
+      'Asia/Doha': 'QA',
+      'Europe/London': 'GB',
+      'Europe/Paris': 'FR',
+      'Europe/Berlin': 'DE',
+      'Europe/Rome': 'IT',
+      'Europe/Madrid': 'ES',
+      'Europe/Amsterdam': 'NL',
+      'Europe/Zurich': 'CH',
+      'Europe/Moscow': 'RU',
+      'America/New_York': 'US',
+      'America/Chicago': 'US',
+      'America/Denver': 'US',
+      'America/Los_Angeles': 'US',
+      'America/Toronto': 'CA',
+      'America/Vancouver': 'CA',
+      'America/Mexico_City': 'MX',
+      'America/Sao_Paulo': 'BR',
+      'Australia/Sydney': 'AU',
+      'Australia/Melbourne': 'AU',
+      'Australia/Perth': 'AU',
+      'Australia/Adelaide': 'AU',
+      'Pacific/Auckland': 'NZ',
+      'Africa/Johannesburg': 'ZA',
+      'Africa/Cairo': 'EG',
+      'Africa/Lagos': 'NG',
+      'Africa/Nairobi': 'KE',
+      'America/Argentina/Buenos_Aires': 'AR',
+      'America/Santiago': 'CL',
+      'America/Bogota': 'CO',
+      'America/Lima': 'PE',
     };
     if (countryMap.containsKey(timezone)) return countryMap[timezone]!;
     for (var entry in countryMap.entries) {
-      if (timezone.contains(entry.key) || entry.key.contains(timezone)) return entry.value;
+      if (timezone.contains(entry.key) || entry.key.contains(timezone)) {
+        return entry.value;
+      }
     }
     return '';
   }
 
   String _getFlagByCountryCode(String countryCode) {
     final flags = {
-      'LK': '🇱🇰', 'JP': '🇯🇵', 'KR': '🇰🇷', 'CN': '🇨🇳', 'HK': '🇭🇰', 'TW': '🇹🇼',
-      'IN': '🇮🇳', 'AE': '🇦🇪', 'SG': '🇸🇬', 'MY': '🇲🇾', 'TH': '🇹🇭', 'ID': '🇮🇩',
-      'PH': '🇵🇭', 'VN': '🇻🇳', 'BD': '🇧🇩', 'PK': '🇵🇰', 'NP': '🇳🇵', 'SA': '🇸🇦',
-      'KW': '🇰🇼', 'QA': '🇶🇦', 'GB': '🇬🇧', 'FR': '🇫🇷', 'DE': '🇩🇪', 'IT': '🇮🇹',
-      'ES': '🇪🇸', 'NL': '🇳🇱', 'CH': '🇨🇭', 'RU': '🇷🇺', 'US': '🇺🇸', 'CA': '🇨🇦',
-      'MX': '🇲🇽', 'BR': '🇧🇷', 'AU': '🇦🇺', 'NZ': '🇳🇿', 'ZA': '🇿🇦', 'EG': '🇪🇬',
-      'NG': '🇳🇬', 'KE': '🇰🇪', 'AR': '🇦🇷', 'CL': '🇨🇱', 'CO': '🇨🇴', 'PE': '🇵🇪',
+      'LK': '🇱🇰',
+      'JP': '🇯🇵',
+      'KR': '🇰🇷',
+      'CN': '🇨🇳',
+      'HK': '🇭🇰',
+      'TW': '🇹🇼',
+      'IN': '🇮🇳',
+      'AE': '🇦🇪',
+      'SG': '🇸🇬',
+      'MY': '🇲🇾',
+      'TH': '🇹🇭',
+      'ID': '🇮🇩',
+      'PH': '🇵🇭',
+      'VN': '🇻🇳',
+      'BD': '🇧🇩',
+      'PK': '🇵🇰',
+      'NP': '🇳🇵',
+      'SA': '🇸🇦',
+      'KW': '🇰🇼',
+      'QA': '🇶🇦',
+      'GB': '🇬🇧',
+      'FR': '🇫🇷',
+      'DE': '🇩🇪',
+      'IT': '🇮🇹',
+      'ES': '🇪🇸',
+      'NL': '🇳🇱',
+      'CH': '🇨🇭',
+      'RU': '🇷🇺',
+      'US': '🇺🇸',
+      'CA': '🇨🇦',
+      'MX': '🇲🇽',
+      'BR': '🇧🇷',
+      'AU': '🇦🇺',
+      'NZ': '🇳🇿',
+      'ZA': '🇿🇦',
+      'EG': '🇪🇬',
+      'NG': '🇳🇬',
+      'KE': '🇰🇪',
+      'AR': '🇦🇷',
+      'CL': '🇨🇱',
+      'CO': '🇨🇴',
+      'PE': '🇵🇪',
     };
     return flags[countryCode] ?? '🌐';
   }
 
   String _getContinentEmoji(String continent) {
     final emojis = {
-      'Asia': '🌏', 'Europe': '🌍', 'Africa': '🌍', 'America': '🌎',
-      'Australia': '🇦🇺', 'Pacific': '🌏', 'UTC': '🌐',
+      'Asia': '🌏',
+      'Europe': '🌍',
+      'Africa': '🌍',
+      'America': '🌎',
+      'Australia': '🇦🇺',
+      'Pacific': '🌏',
+      'UTC': '🌐',
     };
     return emojis[continent] ?? '🌐';
   }
@@ -223,17 +316,21 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
 
   Widget _buildTimezoneTile(String tz, String displayName, String flag) {
     final isSelected = tz == _userTimezone;
-    
+
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 2),
       decoration: BoxDecoration(
-        color: isSelected ? const Color(0xFFFF6B8B).withValues(alpha: 0.1) : null,
+        color: isSelected
+            ? const Color(0xFFFF6B8B).withValues(alpha: 0.1)
+            : null,
         borderRadius: BorderRadius.circular(12),
       ),
       child: ListTile(
         leading: CircleAvatar(
           radius: 20,
-          backgroundColor: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[200],
+          backgroundColor: isSelected
+              ? const Color(0xFFFF6B8B)
+              : Colors.grey[200],
           child: Text(flag, style: const TextStyle(fontSize: 16)),
         ),
         title: Text(
@@ -243,8 +340,15 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
             color: isSelected ? const Color(0xFFFF6B8B) : null,
           ),
         ),
-        subtitle: Text(tz, style: const TextStyle(fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
-        trailing: isSelected ? const Icon(Icons.check_circle, color: Color(0xFFFF6B8B)) : null,
+        subtitle: Text(
+          tz,
+          style: const TextStyle(fontSize: 11),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        trailing: isSelected
+            ? const Icon(Icons.check_circle, color: Color(0xFFFF6B8B))
+            : null,
         onTap: () => Navigator.of(context).pop(tz),
       ),
     );
@@ -254,7 +358,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
     final displayName = _userTimezone.split('/').last.replaceAll('_', ' ');
     final offset = TimezoneService.getUtcOffsetString();
     final flag = TimezoneService.getCurrentFlag();
-    
+
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -270,8 +374,19 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Current: $displayName', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                Text(_userTimezone, style: const TextStyle(fontSize: 10, color: Colors.grey), maxLines: 1, overflow: TextOverflow.ellipsis),
+                Text(
+                  'Current: $displayName',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                  ),
+                ),
+                Text(
+                  _userTimezone,
+                  style: const TextStyle(fontSize: 10, color: Colors.grey),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ],
             ),
           ),
@@ -281,7 +396,14 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
               color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(20),
             ),
-            child: Text(offset, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Color(0xFFFF6B8B))),
+            child: Text(
+              offset,
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 11,
+                color: Color(0xFFFF6B8B),
+              ),
+            ),
           ),
         ],
       ),
@@ -299,13 +421,21 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
               color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: const Icon(Icons.access_time, color: Color(0xFFFF6B8B), size: 28),
+            child: const Icon(
+              Icons.access_time,
+              color: Color(0xFFFF6B8B),
+              size: 28,
+            ),
           ),
           const SizedBox(width: 12),
           const Expanded(
             child: Text(
               'Select Your Timezone',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFFFF6B8B)),
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFFFF6B8B),
+              ),
             ),
           ),
           IconButton(
@@ -320,7 +450,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
   Future<void> _showAdvancedTimezonePicker() async {
     final allTimezones = TimezoneService.getAllAvailableTimezones();
     final continentGroups = _groupTimezonesByContinent(allTimezones);
-    
+
     final List<Map<String, dynamic>> searchableList = [];
     for (var entry in continentGroups.entries) {
       final continent = entry.key;
@@ -328,7 +458,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
         final displayName = tz.split('/').last.replaceAll('_', ' ');
         final countryCode = _extractCountryCode(tz);
         final flag = _getFlagByCountryCode(countryCode);
-        
+
         final searchText = [
           continent.toLowerCase(),
           displayName.toLowerCase(),
@@ -336,7 +466,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
           countryCode.toLowerCase(),
           displayName.toLowerCase(),
         ].join(' ');
-        
+
         searchableList.add({
           'timezone': tz,
           'displayName': displayName,
@@ -346,14 +476,14 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
         });
       }
     }
-    
+
     TextEditingController searchController = TextEditingController();
-    
+
     final result = await showDialog<String>(
       context: context,
       builder: (context) {
         String searchQuery = '';
-        
+
         return StatefulBuilder(
           builder: (context, setDialogState) {
             List<Map<String, dynamic>> filteredList = searchableList;
@@ -363,7 +493,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                   .where((item) => item['searchText'].contains(query))
                   .toList();
             }
-            
+
             Map<String, List<Map<String, dynamic>>> filteredGroups = {};
             for (var item in filteredList) {
               final continent = item['continent'];
@@ -372,9 +502,11 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
               }
               filteredGroups[continent]!.add(item);
             }
-            
+
             return Dialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(24),
+              ),
               child: Container(
                 width: MediaQuery.of(context).size.width * 0.9,
                 height: MediaQuery.of(context).size.height * 0.85,
@@ -394,12 +526,19 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                           });
                         },
                         decoration: InputDecoration(
-                          hintText: '🔍 Search by country, city, or timezone...',
+                          hintText:
+                              '🔍 Search by country, city, or timezone...',
                           hintStyle: TextStyle(color: Colors.grey[400]),
-                          prefixIcon: const Icon(Icons.search, color: Colors.grey),
+                          prefixIcon: const Icon(
+                            Icons.search,
+                            color: Colors.grey,
+                          ),
                           suffixIcon: searchQuery.isNotEmpty
                               ? IconButton(
-                                  icon: const Icon(Icons.clear, color: Colors.grey),
+                                  icon: const Icon(
+                                    Icons.clear,
+                                    color: Colors.grey,
+                                  ),
                                   onPressed: () {
                                     searchController.clear();
                                     setDialogState(() {
@@ -414,7 +553,10 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                           ),
                           filled: true,
                           fillColor: Colors.grey[100],
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 14,
+                          ),
                         ),
                       ),
                     ),
@@ -423,7 +565,10 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                         padding: const EdgeInsets.only(bottom: 8),
                         child: Text(
                           'Found ${filteredList.length} timezone${filteredList.length != 1 ? 's' : ''}',
-                          style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                          ),
                         ),
                       ),
                     Expanded(
@@ -439,22 +584,41 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                                       labelColor: const Color(0xFFFF6B8B),
                                       unselectedLabelColor: Colors.grey,
                                       indicatorColor: const Color(0xFFFF6B8B),
-                                      labelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
-                                      tabs: continentGroups.keys.map((continent) => Tab(text: continent)).toList(),
+                                      labelStyle: const TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 13,
+                                      ),
+                                      tabs: continentGroups.keys
+                                          .map(
+                                            (continent) => Tab(text: continent),
+                                          )
+                                          .toList(),
                                     ),
                                   ),
                                   const SizedBox(height: 8),
                                   Expanded(
                                     child: TabBarView(
-                                      children: continentGroups.values.map((timezones) {
+                                      children: continentGroups.values.map((
+                                        timezones,
+                                      ) {
                                         return ListView.builder(
                                           itemCount: timezones.length,
                                           itemBuilder: (context, index) {
                                             final tz = timezones[index];
-                                            final displayName = tz.split('/').last.replaceAll('_', ' ');
-                                            final countryCode = _extractCountryCode(tz);
-                                            final flag = _getFlagByCountryCode(countryCode);
-                                            return _buildTimezoneTile(tz, displayName, flag);
+                                            final displayName = tz
+                                                .split('/')
+                                                .last
+                                                .replaceAll('_', ' ');
+                                            final countryCode =
+                                                _extractCountryCode(tz);
+                                            final flag = _getFlagByCountryCode(
+                                              countryCode,
+                                            );
+                                            return _buildTimezoneTile(
+                                              tz,
+                                              displayName,
+                                              flag,
+                                            );
                                           },
                                         );
                                       }).toList(),
@@ -464,53 +628,102 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                               ),
                             )
                           : filteredList.isNotEmpty
-                              ? ListView.builder(
-                                  itemCount: filteredGroups.keys.length,
-                                  itemBuilder: (context, index) {
-                                    final continent = filteredGroups.keys.elementAt(index);
-                                    final items = filteredGroups[continent]!;
-                                    return Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Padding(
-                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-                                          child: Row(
-                                            children: [
-                                              Text(_getContinentEmoji(continent), style: const TextStyle(fontSize: 18)),
-                                              const SizedBox(width: 8),
-                                              Text(continent, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                                              Container(
-                                                margin: const EdgeInsets.only(left: 8),
-                                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                                decoration: BoxDecoration(color: Colors.grey[200], borderRadius: BorderRadius.circular(10)),
-                                                child: Text('${items.length}', style: TextStyle(fontSize: 10, color: Colors.grey[600])),
-                                              ),
-                                            ],
+                          ? ListView.builder(
+                              itemCount: filteredGroups.keys.length,
+                              itemBuilder: (context, index) {
+                                final continent = filteredGroups.keys.elementAt(
+                                  index,
+                                );
+                                final items = filteredGroups[continent]!;
+                                return Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 12,
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          Text(
+                                            _getContinentEmoji(continent),
+                                            style: const TextStyle(
+                                              fontSize: 18,
+                                            ),
                                           ),
-                                        ),
-                                        ...items.map((item) => _buildTimezoneTile(
-                                          item['timezone'], 
-                                          item['displayName'], 
-                                          item['flag']
-                                        )),
-                                        if (index != filteredGroups.keys.length - 1) const Divider(),
-                                      ],
-                                    );
-                                  },
-                                )
-                              : Center(
-                                  child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Icon(Icons.search_off, size: 64, color: Colors.grey[400]),
-                                      const SizedBox(height: 16),
-                                      Text('No timezones found', style: TextStyle(fontSize: 16, color: Colors.grey[600])),
-                                      const SizedBox(height: 8),
-                                      Text('Try "Sri Lanka", "Tokyo", "London", or "New York"',
-                                          style: TextStyle(fontSize: 12, color: Colors.grey[500])),
-                                    ],
+                                          const SizedBox(width: 8),
+                                          Text(
+                                            continent,
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 14,
+                                            ),
+                                          ),
+                                          Container(
+                                            margin: const EdgeInsets.only(
+                                              left: 8,
+                                            ),
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 6,
+                                              vertical: 2,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: Colors.grey[200],
+                                              borderRadius:
+                                                  BorderRadius.circular(10),
+                                            ),
+                                            child: Text(
+                                              '${items.length}',
+                                              style: TextStyle(
+                                                fontSize: 10,
+                                                color: Colors.grey[600],
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    ...items.map(
+                                      (item) => _buildTimezoneTile(
+                                        item['timezone'],
+                                        item['displayName'],
+                                        item['flag'],
+                                      ),
+                                    ),
+                                    if (index != filteredGroups.keys.length - 1)
+                                      const Divider(),
+                                  ],
+                                );
+                              },
+                            )
+                          : Center(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.search_off,
+                                    size: 64,
+                                    color: Colors.grey[400],
                                   ),
-                                ),
+                                  const SizedBox(height: 16),
+                                  Text(
+                                    'No timezones found',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      color: Colors.grey[600],
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'Try "Sri Lanka", "Tokyo", "London", or "New York"',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.grey[500],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                     ),
                     const SizedBox(height: 8),
                     _buildCurrentTimezoneInfo(),
@@ -522,7 +735,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
         );
       },
     );
-    
+
     if (result != null && result != _userTimezone) {
       await _applyTimezoneChange(result);
     }
@@ -530,21 +743,23 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
 
   Future<void> _applyTimezoneChange(String newTimezone) async {
     setState(() => _isLoading = true);
-    
+
     try {
       await TimezoneService.setTimezone(newTimezone);
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('cached_timezone', newTimezone);
-      
+
       _userTimezone = newTimezone;
       _lastTimezone = newTimezone;
-      
+
       await _loadDashboardData();
-      
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Timezone changed to ${newTimezone.split('/').last.replaceAll('_', ' ')}'),
+            content: Text(
+              'Timezone changed to ${newTimezone.split('/').last.replaceAll('_', ' ')}',
+            ),
             backgroundColor: Colors.green,
             behavior: SnackBarBehavior.floating,
           ),
@@ -554,7 +769,10 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
       debugPrint('Error changing timezone: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error changing timezone: $e'), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text('Error changing timezone: $e'),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     } finally {
@@ -563,7 +781,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
   }
 
   // ==================== TIMEZONE CONVERSION METHODS ====================
-  
+
   String _convertUtcToLocalTime(String? utcTime, DateTime referenceDate) {
     if (utcTime == null || utcTime.isEmpty) return '--:--';
     try {
@@ -580,15 +798,15 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
     final openTimeUtc = salon['open_time']?.toString() ?? '09:00:00';
     final closeTimeUtc = salon['close_time']?.toString() ?? '18:00:00';
     final referenceDate = DateTime.now();
-    
+
     final openLocal = _convertUtcToLocalTime(openTimeUtc, referenceDate);
     final closeLocal = _convertUtcToLocalTime(closeTimeUtc, referenceDate);
-    
+
     return '$openLocal - $closeLocal';
   }
 
   // ==================== TIMEZONE SELECTOR WIDGET ====================
-  
+
   Widget _buildTimezoneSelector() {
     return GestureDetector(
       onTap: _showAdvancedTimezonePicker,
@@ -609,7 +827,11 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
             const SizedBox(width: 6),
             Text(
               TimezoneService.getTimezoneDisplayName(),
-              style: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w500),
+              style: const TextStyle(
+                fontSize: 13,
+                color: Colors.white,
+                fontWeight: FontWeight.w500,
+              ),
             ),
             const SizedBox(width: 4),
             const Icon(Icons.arrow_drop_down, size: 20, color: Colors.white),
@@ -623,7 +845,11 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                 ),
                 child: Text(
                   'DST',
-                  style: TextStyle(fontSize: 8, color: Colors.amber.shade800, fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    fontSize: 8,
+                    color: Colors.amber.shade800,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
             ],
@@ -634,7 +860,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
   }
 
   // ==================== SEARCH METHODS ====================
-  
+
   void _onSearchTextChanged() {
     final query = _searchController.text.trim();
     if (query.isNotEmpty) {
@@ -722,23 +948,25 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                       child: SizedBox(
                         width: 24,
                         height: 24,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFFF6B8B)),
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Color(0xFFFF6B8B),
+                        ),
                       ),
                     ),
                   )
                 : _searchResults.isEmpty
-                    ? const Padding(
-                        padding: EdgeInsets.all(16),
-                        child: Center(
-                          child: Text('No salons found'),
-                        ),
-                      )
-                    : ListView.builder(
-                        shrinkWrap: true,
-                        physics: const ClampingScrollPhysics(),
-                        itemCount: _searchResults.length,
-                        itemBuilder: (context, index) => _buildSearchResultTile(_searchResults[index]),
-                      ),
+                ? const Padding(
+                    padding: EdgeInsets.all(16),
+                    child: Center(child: Text('No salons found')),
+                  )
+                : ListView.builder(
+                    shrinkWrap: true,
+                    physics: const ClampingScrollPhysics(),
+                    itemCount: _searchResults.length,
+                    itemBuilder: (context, index) =>
+                        _buildSearchResultTile(_searchResults[index]),
+                  ),
           ),
         ),
       ),
@@ -757,9 +985,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          border: Border(
-            bottom: BorderSide(color: Colors.grey[200]!),
-          ),
+          border: Border(bottom: BorderSide(color: Colors.grey[200]!)),
         ),
         child: Row(
           children: [
@@ -779,7 +1005,11 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                         errorBuilder: (context, error, stackTrace) => Center(
                           child: Text(
                             salon['name']?.substring(0, 1) ?? 'S',
-                            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFFFF6B8B)),
+                            style: const TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFFFF6B8B),
+                            ),
                           ),
                         ),
                       ),
@@ -787,7 +1017,11 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                   : Center(
                       child: Text(
                         salon['name']?.substring(0, 1) ?? 'S',
-                        style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFFFF6B8B)),
+                        style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFFFF6B8B),
+                        ),
                       ),
                     ),
             ),
@@ -798,7 +1032,10 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                 children: [
                   Text(
                     salon['name'] ?? 'Salon',
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
                   ),
                   const SizedBox(height: 2),
                   if (salon['address'] != null)
@@ -811,7 +1048,11 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                   const SizedBox(height: 2),
                   Row(
                     children: [
-                      Icon(Icons.access_time, size: 10, color: Colors.grey[500]),
+                      Icon(
+                        Icons.access_time,
+                        size: 10,
+                        color: Colors.grey[500],
+                      ),
                       const SizedBox(width: 2),
                       Text(
                         _getFormattedSalonHours(salon),
@@ -831,11 +1072,19 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.chevron_right, size: 14, color: Color(0xFFFF6B8B)),
+                  const Icon(
+                    Icons.chevron_right,
+                    size: 14,
+                    color: Color(0xFFFF6B8B),
+                  ),
                   const SizedBox(width: 2),
                   Text(
                     'View',
-                    style: TextStyle(fontSize: 11, color: const Color(0xFFFF6B8B), fontWeight: FontWeight.w500),
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: const Color(0xFFFF6B8B),
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                 ],
               ),
@@ -870,7 +1119,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
   }
 
   // ==================== LOAD CUSTOMER DATA ====================
-  
+
   Future<void> _loadCustomerData() async {
     try {
       final user = supabase.auth.currentUser;
@@ -886,7 +1135,10 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
 
       if (profile != null) {
         setState(() {
-          _customerName = profile['full_name'] ?? user.email?.split('@').first ?? 'Guest User';
+          _customerName =
+              profile['full_name'] ??
+              user.email?.split('@').first ??
+              'Guest User';
           _customerImage = profile['avatar_url'];
         });
       } else {
@@ -902,19 +1154,19 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
   }
 
   // ==================== LOAD FOLLOWED SALONS ====================
-  
+
   Future<void> _loadFollowedSalons(String userId) async {
     try {
       setState(() => _isLoadingSalons = true);
-      
-      final result = await supabase
-          .rpc('get_followed_salons_with_counts', params: {
-            'p_customer_id': userId
-          });
-      
+
+      final result = await supabase.rpc(
+        'get_followed_salons_with_counts',
+        params: {'p_customer_id': userId},
+      );
+
       if (result != null && result.isNotEmpty) {
         final List<Map<String, dynamic>> salons = [];
-        
+
         for (final salon in result) {
           salons.add({
             'id': salon['id'],
@@ -928,7 +1180,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
             'booking_count': salon['booking_count'] ?? 0,
           });
         }
-        
+
         if (mounted) {
           setState(() {
             _followedSalons = salons;
@@ -943,7 +1195,6 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
         }
         debugPrint('📭 No followed salons found');
       }
-      
     } catch (e) {
       debugPrint('❌ Error loading followed salons: $e');
       if (mounted) {
@@ -957,31 +1208,31 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
   }
 
   // ==================== LOAD OFFERS FROM FOLLOWED SALONS ====================
-  
+
   Future<List<Map<String, dynamic>>> _loadOffersFromDatabase() async {
     try {
       final user = supabase.auth.currentUser;
       if (user == null) return [];
-      
+
       final followedSalonsResult = await supabase
           .from('salon_followers')
           .select('salon_id')
           .eq('customer_id', user.id);
-      
+
       if (followedSalonsResult.isEmpty) {
         debugPrint('📭 No followed salons found, no offers to show');
         return [];
       }
-      
+
       final List<int> followedSalonIds = [];
       for (var item in followedSalonsResult) {
         followedSalonIds.add(item['salon_id'] as int);
       }
-      
+
       debugPrint('📋 Followed salon IDs: $followedSalonIds');
-      
+
       final today = DateTime.now().toIso8601String().split('T')[0];
-      
+
       final result = await supabase
           .from('offers')
           .select('''
@@ -1008,7 +1259,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
           .gte('valid_to', today)
           .order('created_at', ascending: false)
           .limit(20);
-      
+
       if (result.isNotEmpty) {
         debugPrint('✅ Loaded ${result.length} offers from followed salons');
         return List<Map<String, dynamic>>.from(result);
@@ -1018,31 +1269,77 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
     } catch (e) {
       debugPrint('❌ Error loading offers from followed salons: $e');
     }
-    
+
     return [];
   }
 
   // ==================== LOAD UNREAD NOTIFICATION COUNT ====================
-  
+
   Future<void> _loadUnreadCount() async {
+    // ✅ Prevent multiple concurrent refreshes
+    if (_isRefreshingCount) return;
+
     try {
+      _isRefreshingCount = true;
       final user = supabase.auth.currentUser;
       if (user == null) return;
-      
+
+      // ✅ Try to get from cache first for immediate display
+      final prefs = await SharedPreferences.getInstance();
+      final cachedCount = prefs.getInt('cached_unread_count_${user.id}') ?? 0;
+
+      // Update immediately with cached value
+      if (mounted && _unreadNotificationCount != cachedCount) {
+        setState(() {
+          _unreadNotificationCount = cachedCount;
+        });
+      }
+
+      // ✅ Fetch fresh count from database
       final count = await _notificationService.getUnreadCount(user.id);
-      
-      setState(() {
-        _unreadNotificationCount = count;
-      });
-      
+
+      // ✅ Update cache
+      await prefs.setInt('cached_unread_count_${user.id}', count);
+
+      if (mounted) {
+        setState(() {
+          _unreadNotificationCount = count;
+        });
+      }
+
       debugPrint('📬 Unread notifications: $_unreadNotificationCount');
     } catch (e) {
       debugPrint('❌ Error loading unread count: $e');
+    } finally {
+      _isRefreshingCount = false;
+    }
+  }
+
+  // ✅ Force refresh unread count (called after viewing notifications)
+  Future<void> _refreshUnreadCount() async {
+    try {
+      final user = supabase.auth.currentUser;
+      if (user == null) return;
+
+      final count = await _notificationService.getUnreadCount(user.id);
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt('cached_unread_count_${user.id}', count);
+
+      if (mounted) {
+        setState(() {
+          _unreadNotificationCount = count;
+        });
+      }
+
+      debugPrint('🔄 Refreshed unread count: $_unreadNotificationCount');
+    } catch (e) {
+      debugPrint('❌ Error refreshing unread count: $e');
     }
   }
 
   // ==================== LOAD DASHBOARD DATA ====================
-  
+
   Future<void> _loadDashboardData() async {
     if (!mounted) return;
     setState(() => _isLoading = true);
@@ -1097,10 +1394,11 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
       for (var apt in appointments) {
         final status = apt['status'] as String;
         final isVip = apt['is_vip'] == true;
-        
-        final double price = (apt['price'] as num?)?.toDouble() ?? 
-                             (apt['service_variants']?['price'] as num?)?.toDouble() ?? 
-                             0.0;
+
+        final double price =
+            (apt['price'] as num?)?.toDouble() ??
+            (apt['service_variants']?['price'] as num?)?.toDouble() ??
+            0.0;
 
         if (status == 'confirmed' || status == 'pending') {
           final dateStr = apt['appointment_date'] as String;
@@ -1125,14 +1423,14 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
 
       final favoriteBarbers = await _getFavoriteBarbers(user.id);
       final offers = await _loadOffersFromDatabase();
-      
+
       // ✅ Load unread notification count
       await _loadUnreadCount();
 
       if (mounted) {
         setState(() {
           _upcomingBookings = upcoming;
-          _pendingBookings = pending;
+          pendingBookings = pending;
           _completedBookings = completed;
           _cancelledBookings = cancelled;
           _vipBookings = vip;
@@ -1146,12 +1444,16 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
 
       _hasPermission = await _notificationService.hasPermission();
       if (!_hasPermission) {
-        _showPermissionCard = await _permissionManager.shouldShowPermissionCard('customer_dashboard');
+        _showPermissionCard = await _permissionManager.shouldShowPermissionCard(
+          'customer_dashboard',
+        );
       } else {
         _showPermissionCard = false;
       }
 
-      debugPrint('✅ Dashboard loaded: $upcoming upcoming, ${offers.length} offers, $_unreadNotificationCount unread notifications');
+      debugPrint(
+        '✅ Dashboard loaded: $upcoming upcoming, ${offers.length} offers, $_unreadNotificationCount unread notifications',
+      );
     } catch (e) {
       debugPrint('❌ Error loading dashboard data: $e');
     } finally {
@@ -1160,8 +1462,10 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
   }
 
   // ==================== GET FAVORITE BARBERS ====================
-  
-  Future<List<Map<String, dynamic>>> _getFavoriteBarbers(String customerId) async {
+
+  Future<List<Map<String, dynamic>>> _getFavoriteBarbers(
+    String customerId,
+  ) async {
     try {
       final response = await supabase
           .from('appointments')
@@ -1179,7 +1483,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
       for (var apt in response) {
         final barberId = apt['barber_id'] as String;
         final barberData = apt['profiles'] as Map?;
-        
+
         if (!barberCount.containsKey(barberId)) {
           barberCount[barberId] = {
             'id': barberId,
@@ -1193,13 +1497,13 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
 
       List<Map<String, dynamic>> barbers = barberCount.values.toList();
       barbers.sort((a, b) => (b['count'] as int).compareTo(a['count'] as int));
-      
+
       for (var barber in barbers.take(5)) {
         final reviewsResult = await supabase
             .from('reviews')
             .select('overall_rating')
             .eq('barber_id', barber['id']);
-        
+
         double avgRating = 0;
         if (reviewsResult.isNotEmpty) {
           double total = 0;
@@ -1218,19 +1522,75 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
     }
   }
 
+  // ==================== NOTIFICATION LISTENERS ====================
+
   void _setupNotificationListeners() {
     try {
+      // ✅ Foreground notifications
       FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-        debugPrint('📨 New message: ${message.data}');
+        debugPrint('📨 New foreground message received: ${message.data}');
+
+        // Refresh unread count when new notification arrives
+        _loadUnreadCount();
+
+        // Refresh dashboard data if needed
         final type = message.data['type'];
         if (type == 'booking_confirmed' || type == 'vip_approved') {
           _loadDashboardData();
         }
-        // ✅ Refresh unread count when new notification arrives
+      });
+
+      // ✅ When app is opened from background/terminated state by tapping notification
+      FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+        debugPrint('📱 App opened from notification tap');
         _loadUnreadCount();
+        _handleNotificationTap(message);
+      });
+
+      // ✅ Get initial message when app is launched from terminated state
+      FirebaseMessaging.instance.getInitialMessage().then((message) {
+        if (message != null) {
+          debugPrint('📱 App launched from terminated state with notification');
+          _loadUnreadCount();
+          _handleNotificationTap(message);
+        }
+      });
+
+      // ✅ Listen for token refresh
+      FirebaseMessaging.instance.onTokenRefresh.listen((newToken) {
+        debugPrint('🔄 FCM Token refreshed: $newToken');
+        // Update token in your backend if needed
       });
     } catch (e) {
       debugPrint('❌ Error setting up notification listeners: $e');
+    }
+  }
+
+  // ✅ Handle notification tap
+  void _handleNotificationTap(RemoteMessage message) {
+    try {
+      final type = message.data['type'];
+      final bookingId = message.data['booking_id'];
+
+      debugPrint('🔔 Notification tapped - Type: $type, BookingId: $bookingId');
+
+      // Navigate based on notification type
+      if (type == 'booking_confirmed' || type == 'booking_update') {
+        if (bookingId != null && mounted) {
+          context.push('/customer/booking-details', extra: bookingId);
+        } else {
+          _viewMyBookings();
+        }
+      } else if (type == 'vip_approved' || type == 'vip_update') {
+        _viewVipBookings();
+      } else if (type == 'offer') {
+        _viewAllOffers();
+      } else {
+        _viewNotifications();
+      }
+    } catch (e) {
+      debugPrint('❌ Error handling notification tap: $e');
+      _viewNotifications();
     }
   }
 
@@ -1247,7 +1607,8 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
         context: context,
         action: 'customer_dashboard',
         customTitle: '🔔 Get Booking Updates',
-        customMessage: 'Get instant notifications for booking confirmations, VIP approvals, and special offers',
+        customMessage:
+            'Get instant notifications for booking confirmations, VIP approvals, and special offers',
         onGranted: () async {
           await _permissionManager.markPermissionGranted();
           setState(() {
@@ -1256,7 +1617,10 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
           });
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('✅ Notifications enabled!'), backgroundColor: Colors.green),
+              const SnackBar(
+                content: Text('✅ Notifications enabled!'),
+                backgroundColor: Colors.green,
+              ),
             );
           }
         },
@@ -1264,7 +1628,10 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
           await _permissionManager.markPermissionDenied(permanent: false);
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('You can enable later from settings'), backgroundColor: Colors.orange),
+              const SnackBar(
+                content: Text('You can enable later from settings'),
+                backgroundColor: Colors.orange,
+              ),
             );
           }
         },
@@ -1279,15 +1646,22 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('🔔 Notifications Disabled'),
-        content: const Text('To enable notifications, please go to your device settings.'),
+        content: const Text(
+          'To enable notifications, please go to your device settings.',
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
           ElevatedButton(
             onPressed: () {
               Navigator.pop(context);
               _permissionService.openAppSettings();
             },
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF6B8B)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFFF6B8B),
+            ),
             child: const Text('Open Settings'),
           ),
         ],
@@ -1301,7 +1675,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
   }
 
   // ==================== NAVIGATION METHODS ====================
-  
+
   void _viewMyBookings() {
     context.push('/customer/my-bookings');
   }
@@ -1322,8 +1696,23 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
     context.push('/customer/offers');
   }
 
-  void _viewNotifications() {
-    context.push('/customer/notifications');
+  // ✅ Navigate to notifications and refresh count on return
+  // ✅ Navigate to notifications and refresh count on return
+  Future<void> _viewNotifications() async {
+    debugPrint('🔔 Navigating to notifications page');
+
+    // Navigate and wait for result (true if any notification was marked as read)
+    final result = await context.push('/customer/notifications');
+
+    // Refresh unread count when coming back
+    debugPrint('🔔 Returning from notifications page, refreshing count');
+    await _refreshUnreadCount();
+
+    // Also refresh dashboard data if needed
+    if (result == true) {
+      debugPrint('🔔 Notifications were marked as read, refreshing dashboard');
+      _loadDashboardData();
+    }
   }
 
   void _viewLoyaltyProgram() {
@@ -1336,7 +1725,11 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
 
   void _applyOffer(Map<String, dynamic> offer) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('✅ "${offer['title']}" applied!'), backgroundColor: Colors.green, duration: const Duration(seconds: 2)),
+      SnackBar(
+        content: Text('✅ "${offer['title']}" applied!'),
+        backgroundColor: Colors.green,
+        duration: const Duration(seconds: 2),
+      ),
     );
   }
 
@@ -1352,40 +1745,12 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
     }
   }
 
-  Future<void> _logout(BuildContext context) async {
-    showLogoutConfirmation(
-      context,
-      onLogoutConfirmed: () async {
-        if (!mounted) return;
-        showDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (context) => const Center(child: CircularProgressIndicator(color: Color(0xFFFF6B8B))),
-        );
-        try {
-          await SessionManager.logoutForContinue();
-          appState.refreshState();
-          if (context.mounted) {
-            Navigator.pop(context);
-            context.go('/');
-          }
-        } catch (e) {
-          if (context.mounted) {
-            Navigator.pop(context);
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Logout failed: $e'), backgroundColor: Colors.red),
-            );
-          }
-        }
-      },
-    );
-  }
-
   // ==================== WIDGET BUILDERS ====================
-  
+
   Widget _buildHorizontalSalonCard(Map<String, dynamic> salon) {
-    final hasLogo = salon['logo_url'] != null && salon['logo_url'].toString().isNotEmpty;
-    
+    final hasLogo =
+        salon['logo_url'] != null && salon['logo_url'].toString().isNotEmpty;
+
     return GestureDetector(
       onTap: () => _navigateToSalonProfile(salon),
       child: Container(
@@ -1419,20 +1784,23 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                           height: 100,
                           width: double.infinity,
                           fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) => Container(
-                            height: 100,
-                            color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
-                            child: Center(
-                              child: Text(
-                                salon['name'][0].toUpperCase(),
-                                style: const TextStyle(
-                                  fontSize: 40,
-                                  fontWeight: FontWeight.bold,
-                                  color: Color(0xFFFF6B8B),
+                          errorBuilder: (context, error, stackTrace) =>
+                              Container(
+                                height: 100,
+                                color: const Color(
+                                  0xFFFF6B8B,
+                                ).withValues(alpha: 0.1),
+                                child: Center(
+                                  child: Text(
+                                    salon['name'][0].toUpperCase(),
+                                    style: const TextStyle(
+                                      fontSize: 40,
+                                      fontWeight: FontWeight.bold,
+                                      color: Color(0xFFFF6B8B),
+                                    ),
+                                  ),
                                 ),
                               ),
-                            ),
-                          ),
                         )
                       : Container(
                           height: 100,
@@ -1453,7 +1821,10 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                   top: 8,
                   right: 8,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.black.withValues(alpha: 0.6),
                       borderRadius: BorderRadius.circular(12),
@@ -1465,7 +1836,10 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                         const SizedBox(width: 4),
                         Text(
                           '${salon['follower_count']}',
-                          style: const TextStyle(fontSize: 10, color: Colors.white),
+                          style: const TextStyle(
+                            fontSize: 10,
+                            color: Colors.white,
+                          ),
                         ),
                       ],
                     ),
@@ -1485,19 +1859,29 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                       children: [
                         Text(
                           salon['name'],
-                          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                          ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
                         const SizedBox(height: 4),
                         Row(
                           children: [
-                            Icon(Icons.location_on, size: 10, color: Colors.grey[400]),
+                            Icon(
+                              Icons.location_on,
+                              size: 10,
+                              color: Colors.grey[400],
+                            ),
                             const SizedBox(width: 2),
                             Expanded(
                               child: Text(
                                 salon['address'],
-                                style: TextStyle(fontSize: 10, color: Colors.grey[500]),
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: Colors.grey[500],
+                                ),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               ),
@@ -1510,7 +1894,10 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
                             color: Colors.green.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(8),
@@ -1518,11 +1905,18 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(Icons.content_cut, size: 8, color: Colors.green[700]),
+                              Icon(
+                                Icons.content_cut,
+                                size: 8,
+                                color: Colors.green[700],
+                              ),
                               const SizedBox(width: 2),
                               Text(
                                 '${salon['booking_count']}',
-                                style: TextStyle(fontSize: 9, color: Colors.green[700]),
+                                style: TextStyle(
+                                  fontSize: 9,
+                                  color: Colors.green[700],
+                                ),
                               ),
                             ],
                           ),
@@ -1530,10 +1924,16 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                         Container(
                           padding: const EdgeInsets.all(4),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                            color: const Color(
+                              0xFFFF6B8B,
+                            ).withValues(alpha: 0.1),
                             shape: BoxShape.circle,
                           ),
-                          child: const Icon(Icons.arrow_forward_ios, size: 12, color: Color(0xFFFF6B8B)),
+                          child: const Icon(
+                            Icons.arrow_forward_ios,
+                            size: 12,
+                            color: Color(0xFFFF6B8B),
+                          ),
                         ),
                       ],
                     ),
@@ -1556,12 +1956,15 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
           child: SizedBox(
             width: 32,
             height: 32,
-            child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFFF6B8B)),
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: Color(0xFFFF6B8B),
+            ),
           ),
         ),
       );
     }
-    
+
     if (_followedSalons.isEmpty) {
       return Container(
         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
@@ -1598,17 +2001,14 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
             const SizedBox(height: 8),
             Text(
               'Follow your favorite salons to see them here',
-              style: TextStyle(
-                fontSize: 14,
-                color: Colors.grey[500],
-              ),
+              style: TextStyle(fontSize: 14, color: Colors.grey[500]),
               textAlign: TextAlign.center,
             ),
           ],
         ),
       );
     }
-    
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1621,7 +2021,9 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                 height: 20,
                 decoration: const BoxDecoration(
                   color: Color(0xFFFF6B8B),
-                  borderRadius: BorderRadius.horizontal(right: Radius.circular(4)),
+                  borderRadius: BorderRadius.horizontal(
+                    right: Radius.circular(4),
+                  ),
                 ),
               ),
               const SizedBox(width: 8),
@@ -1640,7 +2042,8 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
             padding: const EdgeInsets.symmetric(horizontal: 16),
             itemCount: _followedSalons.length,
             physics: const BouncingScrollPhysics(),
-            itemBuilder: (context, index) => _buildHorizontalSalonCard(_followedSalons[index]),
+            itemBuilder: (context, index) =>
+                _buildHorizontalSalonCard(_followedSalons[index]),
           ),
         ),
       ],
@@ -1654,13 +2057,19 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
         icon: const Icon(Icons.calendar_today, size: 18, color: Colors.white),
         label: const Text(
           'Book Now',
-          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.white),
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: Colors.white,
+          ),
         ),
         style: ElevatedButton.styleFrom(
           backgroundColor: const Color(0xFFFF6B8B),
           foregroundColor: Colors.white,
           padding: const EdgeInsets.symmetric(vertical: 14),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
           elevation: 0,
         ),
       ),
@@ -1674,12 +2083,18 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
         icon: const Icon(Icons.star, size: 18, color: Colors.amber),
         label: const Text(
           'VIP Booking',
-          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.amber),
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: Colors.amber,
+          ),
         ),
         style: OutlinedButton.styleFrom(
           side: const BorderSide(color: Colors.amber, width: 1.5),
           padding: const EdgeInsets.symmetric(vertical: 14),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
         ),
       ),
     );
@@ -1693,35 +2108,50 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
     );
   }
 
-  // ✅ Notification Icon with Unread Count Badge
+  // ✅ FIXED: Notification Icon with Proper Click Handling and Badge
   Widget _buildNotificationIcon() {
     return Stack(
       clipBehavior: Clip.none,
       children: [
+        // ✅ Main IconButton with proper onPressed
         IconButton(
-          icon: const Icon(Icons.notifications_outlined),
-          onPressed: _viewNotifications,
+          icon: const Icon(Icons.notifications_outlined, color: Colors.white),
+          onPressed: () {
+            debugPrint('🔔 Notification icon clicked!');
+            _viewNotifications();
+          },
           tooltip: 'Notifications',
+          splashRadius: 24,
+          iconSize: 24,
         ),
+        // ✅ Badge with unread count - also clickable
         if (_unreadNotificationCount > 0)
           Positioned(
             right: 8,
             top: 8,
-            child: Container(
-              padding: const EdgeInsets.all(2),
-              decoration: const BoxDecoration(
-                color: Colors.red,
-                shape: BoxShape.circle,
-              ),
-              constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
-              child: Text(
-                _unreadNotificationCount > 99 ? '99+' : '$_unreadNotificationCount',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
+            child: GestureDetector(
+              onTap: () {
+                debugPrint('🔔 Notification badge clicked!');
+                _viewNotifications();
+              },
+              child: Container(
+                padding: const EdgeInsets.all(2),
+                decoration: const BoxDecoration(
+                  color: Colors.red,
+                  shape: BoxShape.circle,
                 ),
-                textAlign: TextAlign.center,
+                constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+                child: Text(
+                  _unreadNotificationCount > 99
+                      ? '99+'
+                      : '$_unreadNotificationCount',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
               ),
             ),
           ),
@@ -1731,7 +2161,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
 
   Widget _buildProfilePhoto() {
     final hasImage = _customerImage != null && _customerImage!.isNotEmpty;
-    
+
     return GestureDetector(
       onTap: _openDrawer,
       child: Container(
@@ -1742,7 +2172,9 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
           backgroundImage: hasImage ? NetworkImage(_customerImage!) : null,
           child: !hasImage
               ? Text(
-                  _customerName.isNotEmpty ? _customerName[0].toUpperCase() : 'U',
+                  _customerName.isNotEmpty
+                      ? _customerName[0].toUpperCase()
+                      : 'U',
                   style: const TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
@@ -1769,7 +2201,9 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
           ],
         ),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0xFFFF6B8B).withValues(alpha: 0.1)),
+        border: Border.all(
+          color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+        ),
         boxShadow: [
           BoxShadow(
             color: Colors.grey.withValues(alpha: 0.05),
@@ -1789,7 +2223,11 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                   color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Icon(Icons.analytics, color: Color(0xFFFF6B8B), size: 24),
+                child: const Icon(
+                  Icons.analytics,
+                  color: Color(0xFFFF6B8B),
+                  size: 24,
+                ),
               ),
               const SizedBox(width: 12),
               const Text(
@@ -1801,9 +2239,30 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
           const SizedBox(height: 20),
           Row(
             children: [
-              Expanded(child: _buildActivityItem(icon: Icons.check_circle, label: 'Completed', value: '$_completedBookings', color: Colors.green)),
-              Expanded(child: _buildActivityItem(icon: Icons.cancel, label: 'Cancelled', value: '$_cancelledBookings', color: Colors.red)),
-              Expanded(child: _buildActivityItem(icon: Icons.star, label: 'VIP', value: '$_vipBookings', color: Colors.amber)),
+              Expanded(
+                child: _buildActivityItem(
+                  icon: Icons.check_circle,
+                  label: 'Completed',
+                  value: '$_completedBookings',
+                  color: Colors.green,
+                ),
+              ),
+              Expanded(
+                child: _buildActivityItem(
+                  icon: Icons.cancel,
+                  label: 'Cancelled',
+                  value: '$_cancelledBookings',
+                  color: Colors.red,
+                ),
+              ),
+              Expanded(
+                child: _buildActivityItem(
+                  icon: Icons.star,
+                  label: 'VIP',
+                  value: '$_vipBookings',
+                  color: Colors.amber,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 16),
@@ -1811,9 +2270,30 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
           const SizedBox(height: 16),
           Row(
             children: [
-              Expanded(child: _buildActivityItem(icon: Icons.currency_rupee, label: 'Total Spent', value: 'Rs. $_totalSpent', color: Colors.purple)),
-              Expanded(child: _buildActivityItem(icon: Icons.card_giftcard, label: 'Points', value: '$_loyaltyPoints', color: Colors.blue)),
-              Expanded(child: _buildActivityItem(icon: Icons.calendar_today, label: 'Upcoming', value: '$_upcomingBookings', color: Colors.orange)),
+              Expanded(
+                child: _buildActivityItem(
+                  icon: Icons.currency_rupee,
+                  label: 'Total Spent',
+                  value: 'Rs. $_totalSpent',
+                  color: Colors.purple,
+                ),
+              ),
+              Expanded(
+                child: _buildActivityItem(
+                  icon: Icons.card_giftcard,
+                  label: 'Points',
+                  value: '$_loyaltyPoints',
+                  color: Colors.blue,
+                ),
+              ),
+              Expanded(
+                child: _buildActivityItem(
+                  icon: Icons.calendar_today,
+                  label: 'Upcoming',
+                  value: '$_upcomingBookings',
+                  color: Colors.orange,
+                ),
+              ),
             ],
           ),
         ],
@@ -1821,14 +2301,23 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
     );
   }
 
-  Widget _buildActivityItem({required IconData icon, required String label, required String value, required Color color}) {
+  Widget _buildActivityItem({
+    required IconData icon,
+    required String label,
+    required String value,
+    required Color color,
+  }) {
     return Column(
       children: [
         Icon(icon, color: color, size: 22),
         const SizedBox(height: 6),
         Text(
           value,
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: color),
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: color,
+          ),
         ),
         Text(
           label,
@@ -1843,10 +2332,10 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
     final salonData = offer['salons'];
     final salonName = salonData != null ? salonData['name'] : 'Special Offer';
     final salonLogo = salonData != null ? salonData['logo_url'] : null;
-    
+
     final validTo = DateTime.parse(offer['valid_to']);
     final daysLeft = validTo.difference(DateTime.now()).inDays;
-    
+
     String discountText = '';
     if (offer['discount_type'] == 'percentage') {
       discountText = '${offer['discount_value']}% OFF';
@@ -1855,7 +2344,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
     } else {
       discountText = 'FREE SERVICE';
     }
-    
+
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
@@ -1879,11 +2368,17 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
               children: [
                 CircleAvatar(
                   radius: 22,
-                  backgroundColor: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
-                  backgroundImage: salonLogo != null ? NetworkImage(salonLogo) : null,
+                  backgroundColor: const Color(
+                    0xFFFF6B8B,
+                  ).withValues(alpha: 0.1),
+                  backgroundImage: salonLogo != null
+                      ? NetworkImage(salonLogo)
+                      : null,
                   child: salonLogo == null
                       ? Text(
-                          salonName.isNotEmpty ? salonName[0].toUpperCase() : 'S',
+                          salonName.isNotEmpty
+                              ? salonName[0].toUpperCase()
+                              : 'S',
                           style: const TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
@@ -1907,22 +2402,35 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                       const SizedBox(height: 2),
                       Row(
                         children: [
-                          Icon(Icons.access_time, size: 12, color: Colors.grey[400]),
+                          Icon(
+                            Icons.access_time,
+                            size: 12,
+                            color: Colors.grey[400],
+                          ),
                           const SizedBox(width: 4),
                           Text(
                             daysLeft <= 0 ? 'Expired' : '$daysLeft days left',
                             style: TextStyle(
                               fontSize: 11,
-                              color: daysLeft <= 3 ? Colors.red : Colors.grey[500],
+                              color: daysLeft <= 3
+                                  ? Colors.red
+                                  : Colors.grey[500],
                             ),
                           ),
                           if ((offer['points_required'] ?? 0) > 0) ...[
                             const SizedBox(width: 8),
-                            Icon(Icons.star, size: 12, color: Colors.amber.shade600),
+                            Icon(
+                              Icons.star,
+                              size: 12,
+                              color: Colors.amber.shade600,
+                            ),
                             const SizedBox(width: 4),
                             Text(
                               '${offer['points_required']} pts',
-                              style: TextStyle(fontSize: 11, color: Colors.amber.shade700),
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.amber.shade700,
+                              ),
                             ),
                           ],
                         ],
@@ -1931,7 +2439,10 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                   ),
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
                       colors: [Colors.amber.shade400, Colors.orange.shade500],
@@ -1950,9 +2461,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
               ],
             ),
           ),
-          
           Divider(color: Colors.grey[200], height: 1),
-          
           Padding(
             padding: const EdgeInsets.all(12),
             child: Column(
@@ -1975,7 +2484,6 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                
                 Row(
                   children: [
                     Expanded(
@@ -1998,7 +2506,10 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                       style: OutlinedButton.styleFrom(
                         foregroundColor: Colors.grey[600],
                         side: BorderSide(color: Colors.grey[300]!),
-                        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
+                        padding: const EdgeInsets.symmetric(
+                          vertical: 10,
+                          horizontal: 16,
+                        ),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(25),
                         ),
@@ -2015,7 +2526,13 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
     );
   }
 
-  Widget _buildStatCard(String title, String value, IconData icon, Color color, VoidCallback onTap) {
+  Widget _buildStatCard(
+    String title,
+    String value,
+    IconData icon,
+    Color color,
+    VoidCallback onTap,
+  ) {
     return Expanded(
       child: GestureDetector(
         onTap: onTap,
@@ -2032,7 +2549,11 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
               const SizedBox(height: 4),
               Text(
                 value,
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: color),
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: color,
+                ),
               ),
               Text(
                 title,
@@ -2047,7 +2568,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
   }
 
   // ==================== MAIN BUILD METHOD ====================
-  
+
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
@@ -2067,9 +2588,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
             tooltip: 'Menu',
             iconSize: 28,
           ),
-          actions: [
-            _buildProfilePhoto(),
-          ],
+          actions: [_buildProfilePhoto()],
         ),
         body: const Center(
           child: Column(
@@ -2100,7 +2619,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
         actions: [
           _buildTimezoneSelector(),
           _buildOffersButton(),
-          _buildNotificationIcon(),  // ✅ Notification Icon with Badge
+          _buildNotificationIcon(),
           _buildProfilePhoto(),
         ],
         bottom: PreferredSize(
@@ -2118,7 +2637,9 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                 style: const TextStyle(color: Colors.white),
                 decoration: InputDecoration(
                   hintText: '🔍 Search for salons...',
-                  hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.7)),
+                  hintStyle: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.7),
+                  ),
                   prefixIcon: const Icon(Icons.search, color: Colors.white),
                   suffixIcon: _searchController.text.isNotEmpty
                       ? GestureDetector(
@@ -2133,7 +2654,8 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                   contentPadding: const EdgeInsets.symmetric(vertical: 12),
                 ),
                 onTap: () {
-                  if (_searchController.text.isNotEmpty && _searchResults.isNotEmpty) {
+                  if (_searchController.text.isNotEmpty &&
+                      _searchResults.isNotEmpty) {
                     _showSearchOverlay();
                   }
                 },
@@ -2155,7 +2677,9 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
           _hideSearchResults();
         },
         child: _isLoading
-            ? const Center(child: CircularProgressIndicator(color: Color(0xFFFF6B8B)))
+            ? const Center(
+                child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+              )
             : RefreshIndicator(
                 onRefresh: _loadDashboardData,
                 color: const Color(0xFFFF6B8B),
@@ -2168,16 +2692,13 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                           onEnable: _enableNotifications,
                           onNotNow: _handleNotNow,
                           title: '🔔 Get Booking Updates',
-                          message: 'Get instant notifications for booking confirmations, VIP approvals, and special offers',
+                          message:
+                              'Get instant notifications for booking confirmations, VIP approvals, and special offers',
                           compact: false,
                         ),
-                      
                       const SizedBox(height: 8),
-                      
                       _buildFollowedSalonsSection(),
-                      
                       const SizedBox(height: 20),
-                      
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16),
                         child: Row(
@@ -2188,67 +2709,109 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                           ],
                         ),
                       ),
-                      
                       const SizedBox(height: 20),
-                      
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16),
                         child: Row(
                           children: [
-                            _buildStatCard('Upcoming', '$_upcomingBookings', Icons.calendar_today, Colors.blue, _viewMyBookings),
+                            _buildStatCard(
+                              'Upcoming',
+                              '$_upcomingBookings',
+                              Icons.calendar_today,
+                              Colors.blue,
+                              _viewMyBookings,
+                            ),
                             const SizedBox(width: 12),
-                            _buildStatCard('VIP', '$_vipBookings', Icons.star, Colors.amber, _viewVipBookings),
+                            _buildStatCard(
+                              'VIP',
+                              '$_vipBookings',
+                              Icons.star,
+                              Colors.amber,
+                              _viewVipBookings,
+                            ),
                             const SizedBox(width: 12),
-                            _buildStatCard('Points', '$_loyaltyPoints', Icons.card_giftcard, Colors.green, _viewLoyaltyProgram),
+                            _buildStatCard(
+                              'Points',
+                              '$_loyaltyPoints',
+                              Icons.card_giftcard,
+                              Colors.green,
+                              _viewLoyaltyProgram,
+                            ),
                           ],
                         ),
                       ),
-                      
                       const SizedBox(height: 20),
-                      
                       if (_pendingVipBookings > 0)
                         Container(
-                          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          margin: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 8,
+                          ),
                           padding: const EdgeInsets.all(16),
                           decoration: BoxDecoration(
-                            gradient: LinearGradient(colors: [Colors.amber.shade300, Colors.amber.shade600], begin: Alignment.topLeft, end: Alignment.bottomRight),
+                            gradient: LinearGradient(
+                              colors: [
+                                Colors.amber.shade300,
+                                Colors.amber.shade600,
+                              ],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            ),
                             borderRadius: BorderRadius.circular(16),
                           ),
                           child: Row(
                             children: [
                               Container(
                                 padding: const EdgeInsets.all(12),
-                                decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), shape: BoxShape.circle),
-                                child: const Icon(Icons.star, color: Colors.white, size: 28),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.2),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  Icons.star,
+                                  color: Colors.white,
+                                  size: 28,
+                                ),
                               ),
                               const SizedBox(width: 16),
                               Expanded(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    const Text('VIP Request Pending', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                                    const Text(
+                                      'VIP Request Pending',
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.white,
+                                      ),
+                                    ),
                                     Text(
                                       '$_pendingVipBookings VIP booking${_pendingVipBookings != 1 ? 's' : ''} waiting for approval',
-                                      style: TextStyle(fontSize: 14, color: Colors.white.withValues(alpha: 0.9)),
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        color: Colors.white.withValues(
+                                          alpha: 0.9,
+                                        ),
+                                      ),
                                     ),
                                   ],
                                 ),
                               ),
                               ElevatedButton(
                                 onPressed: _viewVipBookings,
-                                style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.amber.shade700),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.white,
+                                  foregroundColor: Colors.amber.shade700,
+                                ),
                                 child: const Text('View'),
                               ),
                             ],
                           ),
                         ),
-                      
                       const SizedBox(height: 20),
-                      
                       _buildActivitySummaryCard(),
-                      
                       const SizedBox(height: 20),
-                      
                       if (_offers.isNotEmpty) ...[
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -2259,13 +2822,18 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                                 height: 20,
                                 decoration: const BoxDecoration(
                                   color: Color(0xFFFF6B8B),
-                                  borderRadius: BorderRadius.horizontal(right: Radius.circular(4)),
+                                  borderRadius: BorderRadius.horizontal(
+                                    right: Radius.circular(4),
+                                  ),
                                 ),
                               ),
                               const SizedBox(width: 8),
                               const Text(
                                 'Latest Offers',
-                                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
                               const Spacer(),
                               TextButton(
@@ -2276,9 +2844,13 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                           ),
                         ),
                         const SizedBox(height: 8),
-                        ..._offers.map((offer) => _buildFacebookStyleOfferPost(offer, _offers.indexOf(offer))),
+                        ..._offers.map(
+                          (offer) => _buildFacebookStyleOfferPost(
+                            offer,
+                            _offers.indexOf(offer),
+                          ),
+                        ),
                       ],
-                      
                       if (_favoriteBarbers.isNotEmpty) ...[
                         const SizedBox(height: 20),
                         Padding(
@@ -2290,13 +2862,18 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                                 height: 20,
                                 decoration: const BoxDecoration(
                                   color: Color(0xFFFF6B8B),
-                                  borderRadius: BorderRadius.horizontal(right: Radius.circular(4)),
+                                  borderRadius: BorderRadius.horizontal(
+                                    right: Radius.circular(4),
+                                  ),
                                 ),
                               ),
                               const SizedBox(width: 8),
                               const Text(
                                 'Favorite Barbers',
-                                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
                               const Spacer(),
                               TextButton(
@@ -2322,36 +2899,73 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                                 decoration: BoxDecoration(
                                   color: Colors.white,
                                   borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: Colors.grey.shade200),
-                                  boxShadow: [BoxShadow(color: Colors.grey.withValues(alpha: 0.1), blurRadius: 4)],
+                                  border: Border.all(
+                                    color: Colors.grey.shade200,
+                                  ),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.grey.withValues(alpha: 0.1),
+                                      blurRadius: 4,
+                                    ),
+                                  ],
                                 ),
                                 child: Column(
                                   children: [
                                     CircleAvatar(
                                       radius: 35,
-                                      backgroundColor: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
-                                      backgroundImage: barber['avatar'] != null ? NetworkImage(barber['avatar']) : null,
+                                      backgroundColor: const Color(
+                                        0xFFFF6B8B,
+                                      ).withValues(alpha: 0.1),
+                                      backgroundImage: barber['avatar'] != null
+                                          ? NetworkImage(barber['avatar'])
+                                          : null,
                                       child: barber['avatar'] == null
-                                          ? Text(barber['name'][0].toUpperCase(), 
-                                              style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Color(0xFFFF6B8B)))
+                                          ? Text(
+                                              barber['name'][0].toUpperCase(),
+                                              style: const TextStyle(
+                                                fontSize: 28,
+                                                fontWeight: FontWeight.bold,
+                                                color: Color(0xFFFF6B8B),
+                                              ),
+                                            )
                                           : null,
                                     ),
                                     const SizedBox(height: 8),
-                                    Text(barber['name'], 
-                                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600), 
-                                      maxLines: 1, 
-                                      overflow: TextOverflow.ellipsis),
+                                    Text(
+                                      barber['name'],
+                                      style: const TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
                                     const SizedBox(height: 4),
                                     Row(
-                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
                                       children: [
-                                        const Icon(Icons.star, color: Colors.amber, size: 14),
+                                        const Icon(
+                                          Icons.star,
+                                          color: Colors.amber,
+                                          size: 14,
+                                        ),
                                         const SizedBox(width: 2),
-                                        Text(barber['rating'].toStringAsFixed(1), 
-                                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                                        Text(
+                                          barber['rating'].toStringAsFixed(1),
+                                          style: const TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
                                         const SizedBox(width: 4),
-                                        Text('(${barber['count']} cuts)', 
-                                          style: TextStyle(fontSize: 10, color: Colors.grey[500])),
+                                        Text(
+                                          '(${barber['count']} cuts)',
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            color: Colors.grey[500],
+                                          ),
+                                        ),
                                       ],
                                     ),
                                     const SizedBox(height: 8),
@@ -2360,12 +2974,25 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                                       child: OutlinedButton(
                                         onPressed: _bookAppointment,
                                         style: OutlinedButton.styleFrom(
-                                          foregroundColor: const Color(0xFFFF6B8B),
-                                          side: const BorderSide(color: Color(0xFFFF6B8B)),
-                                          padding: const EdgeInsets.symmetric(vertical: 6),
-                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                          foregroundColor: const Color(
+                                            0xFFFF6B8B,
+                                          ),
+                                          side: const BorderSide(
+                                            color: Color(0xFFFF6B8B),
+                                          ),
+                                          padding: const EdgeInsets.symmetric(
+                                            vertical: 6,
+                                          ),
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius: BorderRadius.circular(
+                                              8,
+                                            ),
+                                          ),
                                         ),
-                                        child: const Text('Book', style: TextStyle(fontSize: 12)),
+                                        child: const Text(
+                                          'Book',
+                                          style: TextStyle(fontSize: 12),
+                                        ),
                                       ),
                                     ),
                                   ],
@@ -2375,7 +3002,6 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                           ),
                         ),
                       ],
-                      
                       const SizedBox(height: 20),
                     ],
                   ),

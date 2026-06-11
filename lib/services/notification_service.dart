@@ -44,8 +44,7 @@ class NotificationService {
   }
 
   // ============= MAIN INITIALIZATION =============
-  Future<void> init() async {    
-
+  Future<void> init() async {
     if (isWeb) {
       await _initWebNotifications();
     } else {
@@ -57,16 +56,15 @@ class NotificationService {
   }
 
   // ============= WEB INIT =============
-  Future<void> _initWebNotifications() async {  
-
+  Future<void> _initWebNotifications() async {
     try {
       String? token = await _firebaseMessaging.getToken(vapidKey: _webVapidKey);
 
-      if (token != null) {      
+      if (token != null) {
         await _saveTokenToSupabase(token);
       }
 
-      _firebaseMessaging.onTokenRefresh.listen((newToken) {     
+      _firebaseMessaging.onTokenRefresh.listen((newToken) {
         _saveTokenToSupabase(newToken);
       });
 
@@ -77,32 +75,32 @@ class NotificationService {
   }
 
   // ============= MOBILE INIT =============
-  Future<void> _initMobileNotifications() async {  
+  Future<void> _initMobileNotifications() async {
     await _initLocalNotifications();
   }
 
   // ============= WEB MESSAGE LISTENERS =============
   void _setupWebMessageListeners() {
-    FirebaseMessaging.onMessage.listen((RemoteMessage message) {    
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       _handleWebForegroundMessage(message);
     });
 
-    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {     
+    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
       _handleMessage(message);
     });
 
-    FirebaseMessaging.instance.getInitialMessage().then((
-      RemoteMessage? message,
-    ) {
-      if (message != null) {      
-        _handleMessage(message);
-      }
-    });
+    FirebaseMessaging.instance.getInitialMessage().then(
+      (RemoteMessage? message) {
+        if (message != null) {
+          _handleMessage(message);
+        }
+      },
+    );
   }
 
   void _handleWebForegroundMessage(RemoteMessage message) {
     RemoteNotification? notification = message.notification;
-    if (notification != null) {    
+    if (notification != null) {
       _saveNotificationToDatabase(
         title: notification.title ?? 'Notification',
         body: notification.body ?? '',
@@ -130,7 +128,6 @@ class NotificationService {
       const InitializationSettings initializationSettings =
           InitializationSettings(android: androidSettings, iOS: iosSettings);
 
-      // ✅ FIXED: Use callback methods directly
       await _localNotifications.initialize(
         settings: initializationSettings,
         onDidReceiveNotificationResponse: (NotificationResponse response) {
@@ -144,14 +141,11 @@ class NotificationService {
       if (isAndroid) {
         await _createAndroidNotificationChannel();
       }
-
-    
     } catch (e) {
       debugPrint('❌ Local notifications init error: $e');
     }
   }
 
-  // ✅ FIXED: Static method for background
   @pragma('vm:entry-point')
   static void _handleBackgroundNotificationResponse(
     NotificationResponse response,
@@ -179,7 +173,6 @@ class NotificationService {
           AndroidFlutterLocalNotificationsPlugin
         >()
         ?.createNotificationChannel(channel);
-  
   }
 
   // ============= PERMISSION METHODS =============
@@ -259,7 +252,6 @@ class NotificationService {
   }
 
   Future<void> saveTokenManually() async {
-  
     String? token = await getToken();
     if (token != null) {
       await _saveTokenToSupabase(token);
@@ -274,7 +266,7 @@ class NotificationService {
       await _saveTokenToSupabase(token);
     }
 
-    _firebaseMessaging.onTokenRefresh.listen((newToken) {    
+    _firebaseMessaging.onTokenRefresh.listen((newToken) {
       _saveTokenToSupabase(newToken);
     });
   }
@@ -300,7 +292,7 @@ class NotificationService {
             'updated_at': DateTime.now().toIso8601String(),
           })
           .eq('id', user.id);
-    
+
       await _clearStoredToken();
     } catch (e) {
       debugPrint('❌ Error saving to Supabase: $e');
@@ -321,7 +313,7 @@ class NotificationService {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('pending_fcm_token', token);
-      await prefs.setString('pending_platform', platformName);     
+      await prefs.setString('pending_platform', platformName);
     } catch (e) {
       debugPrint('❌ Error storing token locally: $e');
     }
@@ -344,7 +336,7 @@ class NotificationService {
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('pending_fcm_token');
 
-      if (token != null) {       
+      if (token != null) {
         await _saveTokenToSupabase(token);
       }
     } catch (e) {
@@ -352,7 +344,7 @@ class NotificationService {
     }
   }
 
-  // ============= DATABASE OPERATIONS (USING RPC) =============
+  // ============= DATABASE OPERATIONS USING RPC =============
 
   /// Save notification to database
   Future<void> _saveNotificationToDatabase({
@@ -374,19 +366,19 @@ class NotificationService {
         'is_read': false,
         'created_at': DateTime.now().toIso8601String(),
       });
-     
     } catch (e) {
       debugPrint('❌ Error saving notification to database: $e');
     }
   }
 
-  /// Get unread notification count using database function
+  /// ✅ RPC: Get unread notification count
   Future<int> getUnreadCount(String userId) async {
     try {
       final result = await supabase.rpc(
         'get_unread_notification_count',
         params: {'p_user_id': userId},
       );
+      debugPrint('📬 Unread count for $userId: $result');
       return result ?? 0;
     } catch (e) {
       debugPrint('❌ Error getting unread count: $e');
@@ -394,7 +386,7 @@ class NotificationService {
     }
   }
 
-  /// Get all notifications using database function
+  /// ✅ RPC: Get all notifications for user
   Future<List<Map<String, dynamic>>> getNotifications(String userId) async {
     try {
       final result = await supabase.rpc(
@@ -403,8 +395,10 @@ class NotificationService {
       );
 
       if (result != null && result.isNotEmpty) {
+        debugPrint('✅ Loaded ${result.length} notifications for user $userId');
         return List<Map<String, dynamic>>.from(result);
       }
+      debugPrint('📭 No notifications found for user $userId');
       return [];
     } catch (e) {
       debugPrint('❌ Error getting notifications: $e');
@@ -412,54 +406,181 @@ class NotificationService {
     }
   }
 
-  /// Mark notification as read
-  Future<void> markAsRead(int notificationId) async {
+  /// ✅ RPC: Mark notification as read (UPDATED - RELIABLE VERSION)
+  Future<bool> markAsRead(int notificationId) async {
     try {
-      await supabase
-          .from('notifications')
-          .update({
-            'is_read': true,
-            'updated_at': DateTime.now().toIso8601String(),
-          })
-          .eq('id', notificationId);
-     
+      final user = supabase.auth.currentUser;
+      if (user == null) {
+        debugPrint('❌ No user logged in - cannot mark as read');
+        return false;
+      }
+
+      debugPrint('🔍 [RPC] Marking notification $notificationId as read for user ${user.id}');
+
+      // ✅ Call RPC function
+      final result = await supabase.rpc(
+        'mark_notification_as_read',
+        params: {'p_notification_id': notificationId},
+      );
+
+      debugPrint('✅ [RPC] mark_notification_as_read result: $result');
+
+      if (result != null && result['success'] == true) {
+        debugPrint('✅ Successfully marked notification $notificationId as read');
+        return true;
+      } else {
+        debugPrint('⚠️ [RPC] Failed to mark as read: $result');
+        return false;
+      }
     } catch (e) {
-      debugPrint('❌ Error marking as read: $e');
+      debugPrint('❌ [RPC] Error marking as read: $e');
+      
+      // ✅ Fallback: Direct update if RPC fails
+      return await _markAsReadDirect(notificationId);
     }
   }
 
-  /// Mark all notifications as read
-  Future<void> markAllAsRead(String userId) async {
-    try {
-      await supabase
-          .from('notifications')
-          .update({
-            'is_read': true,
-            'updated_at': DateTime.now().toIso8601String(),
-          })
-          .eq('user_id', userId)
-          .eq('is_read', false);
+  /// ✅ Fallback method: Direct update without RPC
+/// ✅ Fallback method: Direct update without RPC (NO updated_at)
+Future<bool> _markAsReadDirect(int notificationId) async {
+  try {
+    final user = supabase.auth.currentUser;
+    if (user == null) return false;
+
+    debugPrint('🔍 [DIRECT] Attempting direct update for notification $notificationId');
+
+    // ✅ Remove updated_at - it doesn't exist in your table
+    final result = await supabase
+        .from('notifications')
+        .update({
+          'is_read': true,
+          // 'updated_at': DateTime.now().toIso8601String(), // ❌ REMOVE THIS LINE
+        })
+        .eq('id', notificationId)
+        .eq('user_id', user.id)
+        .select();
+
+    debugPrint('✅ [DIRECT] Update result: $result');
     
+    if (result.isNotEmpty) {
+      final isNowRead = result[0]['is_read'] == true;
+      debugPrint('✅ [DIRECT] Notification is_read: $isNowRead');
+      return isNowRead;
+    }
+    
+    return false;
+  } catch (e) {
+    debugPrint('❌ [DIRECT] Error: $e');
+    return false;
+  }
+}
+
+  /// ✅ RPC: Mark all notifications as read
+  Future<bool> markAllAsRead(String userId) async {
+    try {
+      debugPrint('🔍 [RPC] Marking all notifications as read for user $userId');
+
+      final result = await supabase.rpc(
+        'mark_all_notifications_as_read',
+        params: {'p_user_id': userId},
+      );
+
+      debugPrint('✅ [RPC] mark_all_notifications_as_read result: $result');
+
+      if (result != null && result['success'] == true) {
+        debugPrint('✅ Successfully marked all notifications as read');
+        return true;
+      } else {
+        debugPrint('⚠️ [RPC] Failed to mark all as read: $result');
+        return await _markAllAsReadDirect(userId);
+      }
     } catch (e) {
-      debugPrint('❌ Error marking all as read: $e');
+      debugPrint('❌ [RPC] Error marking all as read: $e');
+      return await _markAllAsReadDirect(userId);
     }
   }
 
-  /// Delete a single notification
-  Future<void> deleteNotification(int notificationId) async {
+  /// ✅ Fallback: Direct update for mark all as read
+Future<bool> _markAllAsReadDirect(String userId) async {
+  try {
+    debugPrint('🔍 [DIRECT] Marking all notifications as read for user $userId');
+
+    await supabase
+        .from('notifications')
+        .update({
+          'is_read': true,
+          // 'updated_at': DateTime.now().toIso8601String(), // ❌ REMOVE THIS LINE
+        })
+        .eq('user_id', userId)
+        .eq('is_read', false);
+
+    debugPrint('✅ [DIRECT] All notifications marked as read');
+    return true;
+  } catch (e) {
+    debugPrint('❌ [DIRECT] Error: $e');
+    return false;
+  }
+}
+
+  /// ✅ RPC: Delete a single notification
+  Future<bool> deleteNotification(int notificationId) async {
     try {
-      await supabase.from('notifications').delete().eq('id', notificationId);     
+      final user = supabase.auth.currentUser;
+      if (user == null) return false;
+
+      debugPrint('🔍 [RPC] Deleting notification $notificationId');
+
+      final result = await supabase.rpc(
+        'delete_notification',
+        params: {'p_notification_id': notificationId},
+      );
+
+      debugPrint('✅ [RPC] delete_notification result: $result');
+      return result != null && result['success'] == true;
     } catch (e) {
-      debugPrint('❌ Error deleting notification: $e');
+      debugPrint('❌ [RPC] Error deleting notification: $e');
+      
+      // Fallback
+      try {
+        await supabase
+            .from('notifications')
+            .delete()
+            .eq('id', notificationId)
+            .eq('user_id', supabase.auth.currentUser!.id);
+        return true;
+      } catch (innerError) {
+        debugPrint('❌ [DIRECT] Delete error: $innerError');
+        return false;
+      }
     }
   }
 
-  /// Clear all notifications for a user
-  Future<void> clearAllNotifications(String userId) async {
+  /// ✅ RPC: Clear all notifications for a user
+  Future<bool> clearAllNotifications(String userId) async {
     try {
-      await supabase.from('notifications').delete().eq('user_id', userId);      
+      debugPrint('🔍 [RPC] Clearing all notifications for user $userId');
+
+      final result = await supabase.rpc(
+        'clear_all_notifications',
+        params: {'p_user_id': userId},
+      );
+
+      debugPrint('✅ [RPC] clear_all_notifications result: $result');
+      return result != null && result['success'] == true;
     } catch (e) {
-      debugPrint('❌ Error clearing notifications: $e');
+      debugPrint('❌ [RPC] Error clearing notifications: $e');
+      
+      // Fallback
+      try {
+        await supabase
+            .from('notifications')
+            .delete()
+            .eq('user_id', userId);
+        return true;
+      } catch (innerError) {
+        debugPrint('❌ [DIRECT] Clear error: $innerError');
+        return false;
+      }
     }
   }
 
@@ -482,7 +603,6 @@ class NotificationService {
         type: _getNotificationType(screen),
         data: {'screen': screen, 'bookingId': bookingId, ...?extraData},
       );
-   
     } catch (e) {
       debugPrint('❌ Push notification error: $e');
     }
@@ -503,7 +623,6 @@ class NotificationService {
 
   // ============= NOTIFICATION SENDING METHODS =============
 
-  /// Send appointment confirmation notification
   Future<void> sendAppointmentConfirmed({
     required String customerId,
     required String bookingNumber,
@@ -535,7 +654,6 @@ class NotificationService {
     );
   }
 
-  /// Send appointment reminder notification
   Future<void> sendAppointmentReminder({
     required String customerId,
     required String bookingNumber,
@@ -562,7 +680,6 @@ class NotificationService {
     );
   }
 
-  /// Send appointment reassigned notification
   Future<void> sendAppointmentReassigned({
     required String customerId,
     required String newBarberName,
@@ -588,7 +705,6 @@ class NotificationService {
     );
   }
 
-  /// Send appointment moved notification
   Future<void> sendAppointmentMoved({
     required String customerId,
     required String newDate,
@@ -616,7 +732,6 @@ class NotificationService {
     );
   }
 
-  /// Send appointment cancelled notification
   Future<void> sendAppointmentCancelled({
     required String customerId,
     required String reason,
@@ -642,7 +757,6 @@ class NotificationService {
     );
   }
 
-  /// Send VIP booking approved notification
   Future<void> sendVipBookingApproved({
     required String customerId,
     required String eventType,
@@ -670,7 +784,6 @@ class NotificationService {
     );
   }
 
-  /// Send VIP booking pending notification
   Future<void> sendVipBookingPending({
     required String customerId,
     required String eventType,
@@ -696,7 +809,6 @@ class NotificationService {
     );
   }
 
-  /// Send VIP booking rejected notification
   Future<void> sendVipBookingRejected({
     required String customerId,
     required String eventType,
@@ -724,7 +836,6 @@ class NotificationService {
     );
   }
 
-  /// Send special offer notification
   Future<void> sendSpecialOffer({
     required String customerId,
     required String offerTitle,
@@ -750,7 +861,6 @@ class NotificationService {
     );
   }
 
-  /// Send waiting list available notification
   Future<void> sendWaitingListAvailable({
     required String customerId,
     required String appointmentDate,
@@ -778,7 +888,6 @@ class NotificationService {
     );
   }
 
-  /// Send next appointment alert (for customers in queue)
   Future<void> sendNextAppointmentAlert({
     required String customerId,
     required int queuePosition,
@@ -804,7 +913,6 @@ class NotificationService {
     );
   }
 
-  /// Send leave request notification to owner
   Future<void> sendLeaveRequestToOwner({
     required String ownerId,
     required String barberName,
@@ -832,7 +940,6 @@ class NotificationService {
     );
   }
 
-  /// Send overflow notification (salon closing soon)
   Future<void> sendOverflowNotification({
     required String customerId,
     required int appointmentId,
@@ -858,7 +965,6 @@ class NotificationService {
     );
   }
 
-  /// Send review reminder notification
   Future<void> sendReviewReminder({
     required String customerId,
     required int appointmentId,
@@ -879,7 +985,6 @@ class NotificationService {
     );
   }
 
-  /// Send birthday greeting notification
   Future<void> sendBirthdayGreeting({
     required String customerId,
     required String customerName,
@@ -899,7 +1004,6 @@ class NotificationService {
     );
   }
 
-  /// Send loyalty points earned notification
   Future<void> sendLoyaltyPointsEarned({
     required String customerId,
     required int points,
@@ -924,7 +1028,6 @@ class NotificationService {
     );
   }
 
-  /// Send generic notification
   Future<void> sendGenericNotification({
     required String customerId,
     required String title,
@@ -942,8 +1045,6 @@ class NotificationService {
     );
   }
 
-  /// ✅ Generic appointment notification (Legacy support)
-  /// මෙය ඔබගේ පැරණි code එකේ තිබුණු function එකයි - නිවැරදි ස්ථානයට ගෙන ඇත
   Future<void> sendAppointmentNotification({
     required String customerId,
     required String title,
@@ -962,7 +1063,7 @@ class NotificationService {
 
   // ============= MESSAGE HANDLING =============
   void _setupMessageListeners() {
-    FirebaseMessaging.onMessage.listen((RemoteMessage message) {    
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       // Save to database
       _saveNotificationToDatabase(
         title: message.notification?.title ?? 'Notification',
@@ -983,17 +1084,17 @@ class NotificationService {
       );
     }
 
-    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {     
+    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
       _handleMessage(message);
     });
 
-    FirebaseMessaging.instance.getInitialMessage().then((
-      RemoteMessage? message,
-    ) {
-      if (message != null) {      
-        _handleMessage(message);
-      }
-    });
+    FirebaseMessaging.instance.getInitialMessage().then(
+      (RemoteMessage? message) {
+        if (message != null) {
+          _handleMessage(message);
+        }
+      },
+    );
   }
 
   Future<void> _showMobileNotification(RemoteMessage message) async {
@@ -1034,13 +1135,11 @@ class NotificationService {
         notificationDetails: platformChannelSpecifics,
         payload: jsonEncode(message.data),
       );
-    
     } catch (e) {
       debugPrint('❌ Show notification error: $e');
     }
   }
 
-  // ✅ Returns int directly (NOT Color object)
   Color _getNotificationColor(String type) {
     switch (type) {
       case 'appointment_confirmed':
@@ -1122,12 +1221,11 @@ class NotificationService {
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
- 
+
   final notificationService = NotificationService();
   if (!notificationService.isWeb) {
     await notificationService._showMobileNotification(message);
 
-    // ✅ FIXED: Get user ID from message data (not from auth)
     final userId = message.data['userId'];
     if (userId != null && userId.isNotEmpty) {
       final supabase = Supabase.instance.client;
@@ -1140,7 +1238,6 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
         'is_read': false,
         'created_at': DateTime.now().toIso8601String(),
       });
-     
     }
   }
 }
