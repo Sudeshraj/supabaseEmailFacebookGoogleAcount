@@ -58,7 +58,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   List<Map<String, dynamic>> _followedSalons = [];
   bool _isLoadingSalons = false;
 
-  // ✅ Notification Unread Count
+  // Notification Unread Count
   int _unreadNotificationCount = 0;
   bool _isRefreshingCount = false;
 
@@ -97,7 +97,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
-    // ✅ Refresh unread count when app comes to foreground
     if (state == AppLifecycleState.resumed) {
       debugPrint('🔄 App resumed - refreshing notification count');
       _loadUnreadCount();
@@ -171,7 +170,152 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     return month > 3 && month < 11;
   }
 
-  // ==================== COMPLETE TIMEZONE PICKER METHODS ====================
+  // ==================== PARSE DATE SAFELY (FIXED) ====================
+
+  DateTime _parseDateSafely(String dateStr) {
+    String processedStr = dateStr;
+    if (!dateStr.contains('T') && dateStr.length == 10) {
+      processedStr = '${dateStr}T00:00:00Z';
+    }
+    return DateTime.parse(processedStr).toUtc();
+  }
+
+  // ==================== CHECK OFFER ACTIVE (FIXED) ====================
+
+  bool _isOfferActive(Map<String, dynamic> offer) {
+    try {
+      final validFromUtc = _parseDateSafely(offer['valid_from']);
+      final validToUtc = _parseDateSafely(offer['valid_to']);
+
+      final nowUtc = DateTime.now().toUtc();
+      final todayUtcMidnight = DateTime.utc(
+        nowUtc.year,
+        nowUtc.month,
+        nowUtc.day,
+      );
+      final validFromUtcMidnight = DateTime.utc(
+        validFromUtc.year,
+        validFromUtc.month,
+        validFromUtc.day,
+      );
+      final validToUtcMidnight = DateTime.utc(
+        validToUtc.year,
+        validToUtc.month,
+        validToUtc.day,
+      );
+
+      return !validFromUtcMidnight.isAfter(todayUtcMidnight) &&
+          validToUtcMidnight.isAfter(todayUtcMidnight);
+    } catch (e) {
+      debugPrint('Error checking offer active: $e');
+      return false;
+    }
+  }
+
+  // ==================== GET DAYS LEFT (FIXED) ====================
+
+  int _getDaysLeft(String validToUtc) {
+    try {
+      final utcDate = _parseDateSafely(validToUtc);
+      final nowUtc = DateTime.now().toUtc();
+      final todayUtcMidnight = DateTime.utc(
+        nowUtc.year,
+        nowUtc.month,
+        nowUtc.day,
+      );
+      final validToUtcMidnight = DateTime.utc(
+        utcDate.year,
+        utcDate.month,
+        utcDate.day,
+      );
+      return validToUtcMidnight.difference(todayUtcMidnight).inDays;
+    } catch (e) {
+      debugPrint('Error calculating days left: $e');
+      return -1;
+    }
+  }
+
+  // ==================== TIMEZONE CONVERSION METHODS ====================
+
+  String _convertUtcToLocalTime(String? utcTime, DateTime referenceDate) {
+    if (utcTime == null || utcTime.isEmpty) return '--:--';
+    try {
+      String timeStr = utcTime;
+      if (timeStr.length > 5) timeStr = timeStr.substring(0, 5);
+      return TimezoneService.utcToLocalTime(timeStr, referenceDate);
+    } catch (e) {
+      debugPrint('Error converting time: $e');
+      return utcTime.length > 5 ? utcTime.substring(0, 5) : utcTime;
+    }
+  }
+
+  String _getFormattedSalonHours(Map<String, dynamic> salon) {
+    final openTimeUtc = salon['open_time']?.toString() ?? '09:00:00';
+    final closeTimeUtc = salon['close_time']?.toString() ?? '18:00:00';
+    final referenceDate = DateTime.now();
+
+    final openLocal = _convertUtcToLocalTime(openTimeUtc, referenceDate);
+    final closeLocal = _convertUtcToLocalTime(closeTimeUtc, referenceDate);
+
+    return '$openLocal - $closeLocal';
+  }
+
+  // ==================== TIMEZONE SELECTOR WIDGET ====================
+
+  Widget _buildTimezoneSelector() {
+    return GestureDetector(
+      onTap: _showAdvancedTimezonePicker,
+      child: Container(
+        margin: const EdgeInsets.only(right: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.2),
+          borderRadius: BorderRadius.circular(25),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              TimezoneService.getCurrentFlag(),
+              style: const TextStyle(fontSize: 16),
+            ),
+            const SizedBox(width: 6),
+            Text(
+              TimezoneService.getTimezoneDisplayName(),
+              style: const TextStyle(
+                fontSize: 13,
+                color: Colors.white,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            const SizedBox(width: 4),
+            const Icon(Icons.arrow_drop_down, size: 20, color: Colors.white),
+            if (_isDST()) ...[
+              const SizedBox(width: 4),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.amber.shade100,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  'DST',
+                  style: TextStyle(
+                    fontSize: 8,
+                    color: Colors.amber.shade800,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ==================== TIMEZONE PICKER METHODS ====================
+  // (Keeping existing timezone picker methods - too long to repeat but they work)
 
   String _extractCountryCode(String timezone) {
     final countryMap = {
@@ -780,85 +924,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     }
   }
 
-  // ==================== TIMEZONE CONVERSION METHODS ====================
-
-  String _convertUtcToLocalTime(String? utcTime, DateTime referenceDate) {
-    if (utcTime == null || utcTime.isEmpty) return '--:--';
-    try {
-      String timeStr = utcTime;
-      if (timeStr.length > 5) timeStr = timeStr.substring(0, 5);
-      return TimezoneService.utcToLocalTime(timeStr, referenceDate);
-    } catch (e) {
-      debugPrint('Error converting time: $e');
-      return utcTime.length > 5 ? utcTime.substring(0, 5) : utcTime;
-    }
-  }
-
-  String _getFormattedSalonHours(Map<String, dynamic> salon) {
-    final openTimeUtc = salon['open_time']?.toString() ?? '09:00:00';
-    final closeTimeUtc = salon['close_time']?.toString() ?? '18:00:00';
-    final referenceDate = DateTime.now();
-
-    final openLocal = _convertUtcToLocalTime(openTimeUtc, referenceDate);
-    final closeLocal = _convertUtcToLocalTime(closeTimeUtc, referenceDate);
-
-    return '$openLocal - $closeLocal';
-  }
-
-  // ==================== TIMEZONE SELECTOR WIDGET ====================
-
-  Widget _buildTimezoneSelector() {
-    return GestureDetector(
-      onTap: _showAdvancedTimezonePicker,
-      child: Container(
-        margin: const EdgeInsets.only(right: 8),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.2),
-          borderRadius: BorderRadius.circular(25),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              TimezoneService.getCurrentFlag(),
-              style: const TextStyle(fontSize: 16),
-            ),
-            const SizedBox(width: 6),
-            Text(
-              TimezoneService.getTimezoneDisplayName(),
-              style: const TextStyle(
-                fontSize: 13,
-                color: Colors.white,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            const SizedBox(width: 4),
-            const Icon(Icons.arrow_drop_down, size: 20, color: Colors.white),
-            if (_isDST()) ...[
-              const SizedBox(width: 4),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Colors.amber.shade100,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  'DST',
-                  style: TextStyle(
-                    fontSize: 8,
-                    color: Colors.amber.shade800,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
   // ==================== SEARCH METHODS ====================
 
   void _onSearchTextChanged() {
@@ -1276,7 +1341,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   // ==================== LOAD UNREAD NOTIFICATION COUNT ====================
 
   Future<void> _loadUnreadCount() async {
-    // ✅ Prevent multiple concurrent refreshes
     if (_isRefreshingCount) return;
 
     try {
@@ -1284,21 +1348,17 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       final user = supabase.auth.currentUser;
       if (user == null) return;
 
-      // ✅ Try to get from cache first for immediate display
       final prefs = await SharedPreferences.getInstance();
       final cachedCount = prefs.getInt('cached_unread_count_${user.id}') ?? 0;
 
-      // Update immediately with cached value
       if (mounted && _unreadNotificationCount != cachedCount) {
         setState(() {
           _unreadNotificationCount = cachedCount;
         });
       }
 
-      // ✅ Fetch fresh count from database
       final count = await _notificationService.getUnreadCount(user.id);
 
-      // ✅ Update cache
       await prefs.setInt('cached_unread_count_${user.id}', count);
 
       if (mounted) {
@@ -1315,7 +1375,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     }
   }
 
-  // ✅ Force refresh unread count (called after viewing notifications)
   Future<void> _refreshUnreadCount() async {
     try {
       final user = supabase.auth.currentUser;
@@ -1424,7 +1483,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       final favoriteBarbers = await _getFavoriteBarbers(user.id);
       final offers = await _loadOffersFromDatabase();
 
-      // ✅ Load unread notification count
       await _loadUnreadCount();
 
       if (mounted) {
@@ -1526,28 +1584,22 @@ class _CustomerDashboardState extends State<CustomerDashboard>
 
   void _setupNotificationListeners() {
     try {
-      // ✅ Foreground notifications
       FirebaseMessaging.onMessage.listen((RemoteMessage message) {
         debugPrint('📨 New foreground message received: ${message.data}');
-
-        // Refresh unread count when new notification arrives
         _loadUnreadCount();
 
-        // Refresh dashboard data if needed
         final type = message.data['type'];
         if (type == 'booking_confirmed' || type == 'vip_approved') {
           _loadDashboardData();
         }
       });
 
-      // ✅ When app is opened from background/terminated state by tapping notification
       FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
         debugPrint('📱 App opened from notification tap');
         _loadUnreadCount();
         _handleNotificationTap(message);
       });
 
-      // ✅ Get initial message when app is launched from terminated state
       FirebaseMessaging.instance.getInitialMessage().then((message) {
         if (message != null) {
           debugPrint('📱 App launched from terminated state with notification');
@@ -1556,17 +1608,14 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         }
       });
 
-      // ✅ Listen for token refresh
       FirebaseMessaging.instance.onTokenRefresh.listen((newToken) {
         debugPrint('🔄 FCM Token refreshed: $newToken');
-        // Update token in your backend if needed
       });
     } catch (e) {
       debugPrint('❌ Error setting up notification listeners: $e');
     }
   }
 
-  // ✅ Handle notification tap
   void _handleNotificationTap(RemoteMessage message) {
     try {
       final type = message.data['type'];
@@ -1574,7 +1623,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
 
       debugPrint('🔔 Notification tapped - Type: $type, BookingId: $bookingId');
 
-      // Navigate based on notification type
       if (type == 'booking_confirmed' || type == 'booking_update') {
         if (bookingId != null && mounted) {
           context.push('/customer/booking-details', extra: bookingId);
@@ -1696,19 +1744,14 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     context.push('/customer/offers');
   }
 
-  // ✅ Navigate to notifications and refresh count on return
-  // ✅ Navigate to notifications and refresh count on return
   Future<void> _viewNotifications() async {
     debugPrint('🔔 Navigating to notifications page');
 
-    // Navigate and wait for result (true if any notification was marked as read)
     final result = await context.push('/customer/notifications');
 
-    // Refresh unread count when coming back
     debugPrint('🔔 Returning from notifications page, refreshing count');
     await _refreshUnreadCount();
 
-    // Also refresh dashboard data if needed
     if (result == true) {
       debugPrint('🔔 Notifications were marked as read, refreshing dashboard');
       _loadDashboardData();
@@ -1723,14 +1766,294 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     context.push('/customer/favorites');
   }
 
-  void _applyOffer(Map<String, dynamic> offer) {
+  // ==================== 🔥 FIXED: APPLY OFFER METHOD ====================
+
+  void _showSnackBar(String message, Color color) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('✅ "${offer['title']}" applied!'),
-        backgroundColor: Colors.green,
-        duration: const Duration(seconds: 2),
+        content: Text(message),
+        backgroundColor: color,
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 3),
       ),
     );
+  }
+
+  Future<void> _applyOffer(Map<String, dynamic> offer) async {
+    try {
+      // 1. CHECK LOGIN
+      final user = supabase.auth.currentUser;
+      if (user == null) {
+        if (mounted) {
+          _showSnackBar('Please login to apply offers', Colors.orange);
+          context.push('/login');
+        }
+        return;
+      }
+
+      // 2. CHECK OFFER VALIDITY (FIXED)
+      if (!_isOfferActive(offer)) {
+        if (mounted) {
+          _showSnackBar('This offer has expired', Colors.red);
+        }
+        return;
+      }
+
+      // 3. CHECK POINTS REQUIREMENT
+      final pointsRequired = offer['points_required'] ?? 0;
+      if (pointsRequired > 0) {
+        final loyaltyResult = await supabase
+            .from('customer_loyalty')
+            .select('current_points')
+            .eq('customer_id', user.id)
+            .maybeSingle();
+
+        final userPoints = loyaltyResult?['current_points'] ?? 0;
+        if (userPoints < pointsRequired) {
+          if (mounted) {
+            _showSnackBar(
+              'You need $pointsRequired points to apply this offer',
+              Colors.orange,
+            );
+          }
+          return;
+        }
+      }
+
+      // 4. CHECK USAGE LIMIT
+      final usageLimit = offer['usage_limit'];
+      final usedCount = offer['used_count'] ?? 0;
+      if (usageLimit != null && usedCount >= usageLimit) {
+        if (mounted) {
+          _showSnackBar('This offer has reached its usage limit', Colors.red);
+        }
+        return;
+      }
+
+      // 5. CHECK IF ALREADY APPLIED
+      final existingOffer = await supabase
+          .from('customer_offers')
+          .select('id, status')
+          .eq('customer_id', user.id)
+          .eq('offer_id', offer['id'])
+          .maybeSingle();
+
+      if (existingOffer != null) {
+        if (existingOffer['status'] == 'active') {
+          if (mounted) {
+            _showSnackBar('You have already applied this offer', Colors.orange);
+          }
+          return;
+        } else if (existingOffer['status'] == 'used') {
+          if (mounted) {
+            _showSnackBar('You have already used this offer', Colors.red);
+          }
+          return;
+        }
+      }
+
+      if (!mounted) return;
+
+      // 6. SHOW CONFIRMATION DIALOG
+      final confirmed = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext dialogContext) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          title: Row(
+            children: [
+              Text(
+                _getDiscountIcon(offer['discount_type']),
+                style: const TextStyle(fontSize: 28),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  offer['title'],
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(offer['description'] ?? ''),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: _getDiscountColor(
+                    offer['discount_type'],
+                  ).withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Center(
+                  child: Text(
+                    _getDiscountText(offer),
+                    style: TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                      color: _getDiscountColor(offer['discount_type']),
+                    ),
+                  ),
+                ),
+              ),
+              if (pointsRequired > 0) ...[
+                const SizedBox(height: 12),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.star, color: Colors.amber, size: 20),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Requires $pointsRequired loyalty points',
+                      style: const TextStyle(fontSize: 14),
+                    ),
+                  ],
+                ),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                if (mounted) {
+                  Navigator.pop(dialogContext, false);
+                }
+              },
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                if (mounted) {
+                  Navigator.pop(dialogContext, true);
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFFF6B8B),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: const Text('Apply Offer'),
+            ),
+          ],
+        ),
+      );
+
+      if (!mounted) return;
+      if (confirmed != true) return;
+
+      // 7. SAVE TO customer_offers TABLE
+      await supabase.from('customer_offers').insert({
+        'customer_id': user.id,
+        'offer_id': offer['id'],
+        'claimed_at': DateTime.now().toIso8601String(),
+        'expires_at': offer['valid_to'],
+        'status': 'active',
+      });
+
+      // 8. UPDATE OFFER USAGE COUNT
+      await supabase
+          .from('offers')
+          .update({'used_count': (usedCount + 1)})
+          .eq('id', offer['id']);
+
+      // 9. DEDUCT POINTS IF REQUIRED
+      if (pointsRequired > 0) {
+        final loyaltyResult = await supabase
+            .from('customer_loyalty')
+            .select('current_points')
+            .eq('customer_id', user.id)
+            .maybeSingle();
+
+        final currentPoints = loyaltyResult?['current_points'] ?? 0;
+        final newPoints = currentPoints - pointsRequired;
+
+        await supabase
+            .from('customer_loyalty')
+            .update({
+              'current_points': newPoints,
+              'updated_at': DateTime.now().toIso8601String(),
+            })
+            .eq('customer_id', user.id);
+
+        await supabase.from('loyalty_transactions').insert({
+          'customer_id': user.id,
+          'points': -pointsRequired,
+          'type': 'redeem',
+          'source': 'offer',
+          'reference_id': offer['id'].toString(),
+          'description':
+              'Redeemed $pointsRequired points for ${offer['title']}',
+          'created_at': DateTime.now().toIso8601String(),
+        });
+      }
+
+      // 10. SHOW SUCCESS MESSAGE
+      if (mounted) {
+        _showSnackBar(
+          '✅ "${offer['title']}" applied successfully!',
+          Colors.green,
+        );
+      }
+
+      // 11. NAVIGATE TO BOOKING FLOW WITH OFFER
+      if (mounted) {
+        context.push('/customer/booking-flow', extra: {'offer': offer});
+      }
+    } catch (e) {
+      debugPrint('Error applying offer: $e');
+      if (mounted) {
+        _showSnackBar('Error applying offer. Please try again.', Colors.red);
+      }
+    }
+  }
+
+  String _getDiscountText(Map<String, dynamic> offer) {
+    if (offer['discount_type'] == 'percentage') {
+      return '${offer['discount_value']}% OFF';
+    } else if (offer['discount_type'] == 'fixed') {
+      return 'Rs. ${offer['discount_value']} OFF';
+    } else {
+      return 'FREE SERVICE';
+    }
+  }
+
+  String _getDiscountIcon(String? discountType) {
+    switch (discountType) {
+      case 'percentage':
+        return '💰';
+      case 'fixed':
+        return '💵';
+      case 'free_service':
+        return '🎁';
+      default:
+        return '🏷️';
+    }
+  }
+
+  Color _getDiscountColor(String? discountType) {
+    switch (discountType) {
+      case 'percentage':
+        return const Color(0xFFFF6B8B);
+      case 'fixed':
+        return Colors.green.shade600;
+      case 'free_service':
+        return Colors.purple.shade600;
+      default:
+        return Colors.orange.shade600;
+    }
   }
 
   void _openDrawer() {
@@ -2108,12 +2431,10 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     );
   }
 
-  // ✅ FIXED: Notification Icon with Proper Click Handling and Badge
   Widget _buildNotificationIcon() {
     return Stack(
       clipBehavior: Clip.none,
       children: [
-        // ✅ Main IconButton with proper onPressed
         IconButton(
           icon: const Icon(Icons.notifications_outlined, color: Colors.white),
           onPressed: () {
@@ -2124,7 +2445,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
           splashRadius: 24,
           iconSize: 24,
         ),
-        // ✅ Badge with unread count - also clickable
         if (_unreadNotificationCount > 0)
           Positioned(
             right: 8,
@@ -2328,22 +2648,22 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     );
   }
 
+  // ==================== FACEBOOK STYLE OFFER POST (UPDATED WITH FIXED APPLY) ====================
+
   Widget _buildFacebookStyleOfferPost(Map<String, dynamic> offer, int index) {
     final salonData = offer['salons'];
     final salonName = salonData != null ? salonData['name'] : 'Special Offer';
     final salonLogo = salonData != null ? salonData['logo_url'] : null;
 
-    final validTo = DateTime.parse(offer['valid_to']);
-    final daysLeft = validTo.difference(DateTime.now()).inDays;
+    final daysLeft = _getDaysLeft(offer['valid_to']);
+    final discountColor = _getDiscountColor(offer['discount_type']);
+    final discountText = _getDiscountText(offer);
 
-    String discountText = '';
-    if (offer['discount_type'] == 'percentage') {
-      discountText = '${offer['discount_value']}% OFF';
-    } else if (offer['discount_type'] == 'fixed') {
-      discountText = 'Rs. ${offer['discount_value']} OFF';
-    } else {
-      discountText = 'FREE SERVICE';
-    }
+    if (daysLeft < 0) {
+    } else if (daysLeft == 0) {
+    } else if (daysLeft <= 3) {
+    } else if (daysLeft <= 7) {
+    } else {}
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -2487,17 +2807,20 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                 Row(
                   children: [
                     Expanded(
-                      child: OutlinedButton(
+                      child: ElevatedButton(
                         onPressed: () => _applyOffer(offer),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: const Color(0xFFFF6B8B),
-                          side: const BorderSide(color: Color(0xFFFF6B8B)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: discountColor,
+                          foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 10),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(25),
                           ),
                         ),
-                        child: const Text('Apply Offer'),
+                        child: const Text(
+                          'Apply Offer',
+                          style: TextStyle(fontWeight: FontWeight.w600),
+                        ),
                       ),
                     ),
                     const SizedBox(width: 12),
