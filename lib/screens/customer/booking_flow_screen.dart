@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:go_router/go_router.dart';
 import '../../services/timezone_service.dart';
 
 class BookingFlowScreen extends StatefulWidget {
@@ -66,7 +67,15 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   bool _isInitialized = false;
 
   // ============================================
-  // TIMEZONE VARIABLES (UPDATED)
+  // 🆕 OFFER RELATED VARIABLES
+  // ============================================
+  Map<String, dynamic>? _appliedOffer;
+  double _discountAmount = 0;
+  double _originalTotalPrice = 0;
+  double _finalTotalPrice = 0;
+
+  // ============================================
+  // TIMEZONE VARIABLES
   // ============================================
   String _userTimezone = '';
   String _lastTimezone = '';
@@ -91,16 +100,96 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     _initialize();
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _checkTimezoneChange();
+    _checkForOffer();
+  }
+
   // ============================================
-  // TIMEZONE INITIALIZATION (UPDATED)
+  // 🆕 CHECK FOR OFFER FROM NAVIGATION
+  // ============================================
+  
+  void _checkForOffer() {
+    final extra = GoRouterState.of(context).extra as Map<String, dynamic>?;
+    if (extra != null && extra.containsKey('offer')) {
+      final offer = extra['offer'] as Map<String, dynamic>;
+      if (_appliedOffer == null) {
+        _appliedOffer = offer;
+        _calculateDiscount();
+        debugPrint('🎁 Offer applied: ${offer['title']}');
+      }
+    }
+  }
+
+  // ============================================
+  // 🆕 DISCOUNT CALCULATION METHODS
+  // ============================================
+  
+  void _calculateDiscount() {
+    if (_appliedOffer == null) return;
+    
+    _originalTotalPrice = _calculateTotalPrice();
+    
+    final discountType = _appliedOffer!['discount_type'];
+    final discountValue = _appliedOffer!['discount_value'];
+    
+    if (discountType == 'percentage') {
+      _discountAmount = _originalTotalPrice * (discountValue / 100);
+    } else if (discountType == 'fixed') {
+      _discountAmount = discountValue.toDouble();
+    } else if (discountType == 'free_service') {
+      _discountAmount = _originalTotalPrice;
+    }
+    
+    _finalTotalPrice = _originalTotalPrice - _discountAmount;
+    if (_finalTotalPrice < 0) _finalTotalPrice = 0;
+    
+    debugPrint('💰 Discount calculated: $_discountAmount, Final: $_finalTotalPrice');
+  }
+  
+  void _updateTotalAndDiscount() {
+    _originalTotalPrice = _calculateTotalPrice();
+    _calculateDiscount();
+  }
+  
+  double _getDisplayTotalPrice() {
+    if (_appliedOffer != null && _discountAmount > 0) {
+      return _finalTotalPrice;
+    }
+    return _calculateTotalPrice();
+  }
+  
+  String _getDiscountText() {
+    if (_appliedOffer == null) return '';
+    if (_appliedOffer!['discount_type'] == 'percentage') {
+      return '${_appliedOffer!['discount_value']}% OFF';
+    } else if (_appliedOffer!['discount_type'] == 'fixed') {
+      return 'Rs. ${_appliedOffer!['discount_value']} OFF';
+    } else {
+      return 'FREE SERVICE';
+    }
+  }
+  
+  void _removeOffer() {
+    setState(() {
+      _appliedOffer = null;
+      _discountAmount = 0;
+      _finalTotalPrice = 0;
+      _originalTotalPrice = 0;
+    });
+    debugPrint('🎁 Offer removed');
+  }
+
+  // ============================================
+  // TIMEZONE INITIALIZATION
   // ============================================
   
   Future<void> _initialize() async {
     await TimezoneService.initialize();
     
     final prefs = await SharedPreferences.getInstance();
-    
-    // ✅ Use 'cached_timezone' for consistency with other screens
     _userTimezone = prefs.getString('cached_timezone') ?? TimezoneService.getCurrentTimezone();
     await TimezoneService.setTimezone(_userTimezone);
     
@@ -113,16 +202,8 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     _initializeScreen();
   }
 
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _checkTimezoneChange();
-  }
-
   void _checkTimezoneChange() async {
     final prefs = await SharedPreferences.getInstance();
-    
-    // ✅ Use 'cached_timezone' for consistency
     final currentTimezone = prefs.getString('cached_timezone') ?? TimezoneService.getCurrentTimezone();
     
     if (_lastTimezone != currentTimezone && _lastTimezone.isNotEmpty) {
@@ -218,10 +299,15 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       _isSameAsCustomer = true;
       _duplicateError = null;
       _slotErrorMessage = null;
+      // 🆕 Reset offer
+      _appliedOffer = null;
+      _discountAmount = 0;
+      _originalTotalPrice = 0;
+      _finalTotalPrice = 0;
     });
   }
 
-  // ==================== TIMEZONE DISPLAY (Flag only) ====================
+  // ==================== TIMEZONE DISPLAY ====================
   
   Widget _buildTimezoneFlag() {
     return Container(
@@ -787,6 +873,69 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         }),
       );
     }
+    _updateTotalAndDiscount();
+  }
+
+  // 🆕 Build Offer Banner Widget
+  Widget _buildOfferBanner() {
+    if (_appliedOffer == null) return const SizedBox.shrink();
+    
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.green.shade50,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.green.shade300),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: Colors.green.shade100,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(Icons.local_offer, color: Colors.green.shade700, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '🎉 Offer Applied!',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.green.shade700,
+                  ),
+                ),
+                Text(
+                  _appliedOffer!['title'],
+                  style: TextStyle(fontSize: 12, color: Colors.green.shade600),
+                ),
+                Text(
+                  'Save ${_getDiscountText()}',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                    color: Colors.green.shade600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed: _removeOffer,
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.green.shade700,
+            ),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildServiceSelectionStep() {
@@ -837,6 +986,8 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
             ],
           ),
         ),
+        // 🆕 Offer Banner
+        _buildOfferBanner(),
         if (_selectedServices.isNotEmpty)
           Container(
             padding: const EdgeInsets.all(14),
@@ -880,13 +1031,30 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                       .toList(),
                 ),
                 const SizedBox(height: 8),
-                Text(
-                  'Total: ${_calculateTotalDuration()} min | Rs. ${_calculateTotalPrice().toStringAsFixed(2)}',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: _primaryColor,
-                  ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    if (_discountAmount > 0)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 12),
+                        child: Text(
+                          'Original: Rs. ${_originalTotalPrice.toStringAsFixed(2)}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                            decoration: TextDecoration.lineThrough,
+                          ),
+                        ),
+                      ),
+                    Text(
+                      'Total: ${_calculateTotalDuration()} min | Rs. ${_getDisplayTotalPrice().toStringAsFixed(2)}',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: _primaryColor,
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -1124,9 +1292,38 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                       color: isSelected ? _primaryColor : _textDark,
                     ),
                   ),
-                  Text(
-                    'Rs. ${variant['price']} • ${variant['duration']} min',
-                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                  Row(
+                    children: [
+                      if (_discountAmount > 0 && isSelected)
+                        Text(
+                          'Rs. ${variant['price']}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[500],
+                            decoration: TextDecoration.lineThrough,
+                          ),
+                        ),
+                      if (_discountAmount > 0 && isSelected)
+                        const SizedBox(width: 8),
+                      Text(
+                        'Rs. ${_getDiscountedPrice(variant['price'])}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: _discountAmount > 0 && isSelected
+                              ? Colors.green.shade700
+                              : Colors.grey[600],
+                          fontWeight:
+                              _discountAmount > 0 && isSelected
+                                  ? FontWeight.w500
+                                  : FontWeight.normal,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '• ${variant['duration']} min',
+                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -1150,6 +1347,20 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         ),
       ),
     );
+  }
+  
+  double _getDiscountedPrice(double originalPrice) {
+    if (_appliedOffer == null) return originalPrice;
+    final discountType = _appliedOffer!['discount_type'];
+    final discountValue = _appliedOffer!['discount_value'];
+    if (discountType == 'percentage') {
+      return originalPrice * (1 - discountValue / 100);
+    } else if (discountType == 'fixed') {
+      return (originalPrice - discountValue).clamp(0, double.infinity);
+    } else if (discountType == 'free_service') {
+      return 0;
+    }
+    return originalPrice;
   }
 
   IconData _getServiceIcon(String? name) {
@@ -1238,7 +1449,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '${_calculateTotalDuration()} min total • Rs. ${_calculateTotalPrice().toStringAsFixed(2)}',
+                      '${_calculateTotalDuration()} min total • Rs. ${_getDisplayTotalPrice().toStringAsFixed(2)}',
                       style: TextStyle(fontSize: 13, color: Colors.grey[600]),
                     ),
                   ],
@@ -1686,7 +1897,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                           ),
                         ),
                         Text(
-                          '${_calculateTotalDuration()} min service',
+                          '${_calculateTotalDuration()} min service • Rs. ${_getDisplayTotalPrice().toStringAsFixed(2)}',
                           style: TextStyle(
                             fontSize: 13,
                             color: Colors.grey[600],
@@ -2453,8 +2664,11 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                       ),
                     ),
                     Text(
-                      '${_calculateTotalDuration()} min service',
-                      style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+                      '${_calculateTotalDuration()} min service • Rs. ${_getDisplayTotalPrice().toStringAsFixed(2)}',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Colors.grey[600],
+                      ),
                     ),
                   ],
                 ),
@@ -2667,7 +2881,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     final travelTimeUsed = slot['travel_time_used'] ?? 0;
     final salonWillExtend = slot['salon_will_extend'] ?? false;
     final extensionMinutes = slot['extension_minutes'] ?? 0;
-    final needsSelector = slot['needs_travel_selector'] ?? false;
 
     return Card(
       margin: const EdgeInsets.all(16),
@@ -2788,14 +3001,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                     ),
                   ),
                 ),
-              if (needsSelector && travelTimeUsed == 0)
-                Padding(
-                  padding: const EdgeInsets.only(top: 12),
-                  child: Text(
-                    '👇 Select travel time below to adjust your slot',
-                    style: TextStyle(fontSize: 13, color: Colors.grey[600]),
-                  ),
-                ),
             ],
           ),
         ),
@@ -2866,7 +3071,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     final barberRating =
         (_selectedBarber!['avg_rating'] as num?)?.toStringAsFixed(1) ?? 'New';
     final totalDuration = _calculateTotalDuration();
-    final totalPrice = _calculateTotalPrice().toStringAsFixed(2);
+    final totalPrice = _getDisplayTotalPrice();
 
     return Column(
       children: [
@@ -2923,19 +3128,39 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                 _buildConfirmationTile(
                   Icons.content_cut,
                   'Services (${_selectedServices.length})',
-                  '$totalDuration min • Rs. $totalPrice',
+                  '$totalDuration min',
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    children: _selectedServices
-                        .map(
-                          (s) => Text(
-                            '• ${s['name']}',
-                            style: const TextStyle(fontSize: 13),
+                    children: [
+                      ..._selectedServices
+                          .map(
+                            (s) => Text(
+                              '• ${s['name']}',
+                              style: const TextStyle(fontSize: 13),
+                            ),
                           ),
-                        )
-                        .toList(),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Total: Rs. ${_calculateTotalPrice().toStringAsFixed(2)}',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.grey[800],
+                        ),
+                      ),
+                    ],
                   ),
                 ),
+                // 🆕 Offer Discount Section
+                if (_appliedOffer != null && _discountAmount > 0) ...[
+                  const SizedBox(height: 12),
+                  _buildConfirmationTile(
+                    Icons.local_offer,
+                    'Discount Applied',
+                    '- Rs. ${_discountAmount.toStringAsFixed(2)}',
+                    _appliedOffer!['title'],
+                  ),
+                ],
                 const SizedBox(height: 12),
                 _buildConfirmationTile(
                   Icons.person,
@@ -2973,6 +3198,15 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                       '',
                     ),
                   ),
+                const SizedBox(height: 12),
+                _buildConfirmationTile(
+                  Icons.attach_money,
+                  'Final Amount',
+                  'Rs. ${totalPrice.toStringAsFixed(2)}',
+                  _discountAmount > 0
+                      ? 'Saved Rs. ${_discountAmount.toStringAsFixed(2)}'
+                      : '',
+                ),
               ],
             ),
           ),
@@ -3100,39 +3334,59 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     ),
   );
 
-  Future<void> _confirmBooking() async {
+Future<void> _confirmBooking() async {
+  // ✅ Store mounted check at beginning
+  if (!mounted) return;
+  
+  setState(() => _isBooking = true);
+
+  try {
+    final user = supabase.auth.currentUser;
+    if (user == null) throw Exception('Please login');
+
+    final result = await supabase.rpc(
+      'create_new_appointment_advanced',
+      params: {
+        'p_customer_id': user.id,
+        'p_salon_id': _selectedSalon!['id'],
+        'p_barber_id': _selectedBarber!['id'],
+        'p_service_id': _selectedServices.first['id'],
+        'p_variant_id': _selectedServices.first['variant_id'],
+        'p_appointment_date': DateFormat('yyyy-MM-dd').format(_selectedDate!),
+        'p_utc_start_time': _selectedSlot!['utc_start_time'],
+        'p_utc_end_time': _selectedSlot!['utc_end_time'],
+        'p_child_name': _getChildNameForBooking(),
+        'p_travel_time_minutes': _selectedSlot!['travel_time_used'] ?? 0,
+        'p_notes': _selectedServices.length > 1
+            ? 'Combined: ${_selectedServices.map((s) => s['name']).join(", ")}'
+            : null,
+        'p_is_vip': false,
+        'p_vip_booking_id': null,
+        'p_confirm_overflow': true,
+      },
+    );
+
+    // ✅ Check mounted after async operation
     if (!mounted) return;
-    setState(() => _isBooking = true);
 
-    try {
-      final user = supabase.auth.currentUser;
-      if (user == null) throw Exception('Please login');
+    if (result['success'] == true) {
+      // Update offer status if offer was applied
+      if (_appliedOffer != null) {
+        await supabase
+            .from('customer_offers')
+            .update({
+              'status': 'used',
+              'used_at': DateTime.now().toIso8601String(),
+            })
+            .eq('customer_id', user.id)
+            .eq('offer_id', _appliedOffer!['id']);
+      }
 
-      final result = await supabase.rpc(
-        'create_new_appointment_advanced',
-        params: {
-          'p_customer_id': user.id,
-          'p_salon_id': _selectedSalon!['id'],
-          'p_barber_id': _selectedBarber!['id'],
-          'p_service_id': _selectedServices.first['id'],
-          'p_variant_id': _selectedServices.first['variant_id'],
-          'p_appointment_date': DateFormat('yyyy-MM-dd').format(_selectedDate!),
-          'p_utc_start_time': _selectedSlot!['utc_start_time'],
-          'p_utc_end_time': _selectedSlot!['utc_end_time'],
-          'p_child_name': _getChildNameForBooking(),
-          'p_travel_time_minutes': _selectedSlot!['travel_time_used'] ?? 0,
-          'p_notes': _selectedServices.length > 1
-              ? 'Combined: ${_selectedServices.map((s) => s['name']).join(", ")}'
-              : null,
-          'p_is_vip': false,
-          'p_vip_booking_id': null,
-          'p_confirm_overflow': true,
-        },
-      );
-
+      // ✅ Check mounted again after second async operation
       if (!mounted) return;
 
-      if (result['success'] == true) {
+      // ✅ Use mounted check for ScaffoldMessenger and Navigator
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
@@ -3142,23 +3396,31 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           ),
         );
         Navigator.pop(context, true);
-      } else {
-        throw Exception(result['message'] ?? 'Booking failed');
       }
-    } catch (e) {
+    } else {
+      throw Exception(result['message'] ?? 'Booking failed');
+    }
+  } catch (e) {
+    // ✅ Check mounted before updating UI
+    if (mounted) {
       setState(() {
         _isBooking = false;
         _slotErrorMessage =
             'Booking failed: ${e.toString().replaceFirst('Exception: ', '')}';
         _currentStep = 5;
       });
+      
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed: $e'), backgroundColor: Colors.red),
       );
-    } finally {
-      if (mounted) setState(() => _isBooking = false);
+    }
+  } finally {
+    // ✅ Check mounted before final state update
+    if (mounted) {
+      setState(() => _isBooking = false);
     }
   }
+}
 
   // ==================== MAIN BUILD METHOD ====================
   
