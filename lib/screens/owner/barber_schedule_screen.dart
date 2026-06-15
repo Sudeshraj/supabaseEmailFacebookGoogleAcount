@@ -32,11 +32,8 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   // TIMEZONE VARIABLES
   // ============================================
   String _salonTimezone = '';
-  String _userTimezone = '';
-  
-  // Salon default times (UTC from database)
-  String? _salonOpenTimeUtc;
-  String? _salonCloseTimeUtc;
+  String _userTimezone = ''; 
+ 
   
   // Salon default times (Local for display)
   TimeOfDay? _salonOpenTimeLocal;
@@ -172,13 +169,11 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
         
         final openTimeStr = salonResponse['open_time'] as String?;
         if (openTimeStr != null) {
-          _salonOpenTimeUtc = openTimeStr;
           _salonOpenTimeLocal = _utcToLocalTimeOfDay(openTimeStr, _salonTimezone);
         }
 
         final closeTimeStr = salonResponse['close_time'] as String?;
         if (closeTimeStr != null) {
-          _salonCloseTimeUtc = closeTimeStr;
           _salonCloseTimeLocal = _utcToLocalTimeOfDay(closeTimeStr, _salonTimezone);
         }        
       
