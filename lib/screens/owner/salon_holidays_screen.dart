@@ -84,11 +84,8 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
   DateTime _utcToLocalDate(String utcDateStr) {
     try {
       final utcDateTime = DateTime.parse(utcDateStr);
-      // Use TimezoneService for accurate conversion to user's local timezone
-      final localDateTime = TimezoneService.utcToLocalDateTime(
-        '12:00',
-        utcDateTime,
-      );
+      // ✅ FIXED: Use utcToLocalDateTimeForDate instead of deprecated method
+      final localDateTime = TimezoneService.utcToLocalDateTimeForDate('12:00:00', utcDateTime);
       return DateTime(
         localDateTime.year,
         localDateTime.month,
@@ -448,7 +445,7 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
-                  '🌍 Your Timezone: $_getTimezoneDisplay()',
+                  '🌍 Your Timezone: ${_getTimezoneDisplay()}',
                   style: const TextStyle(fontSize: 13, color: Colors.blueGrey),
                 ),
               ),
@@ -1009,11 +1006,7 @@ class _AddEditHolidayDialogState extends State<_AddEditHolidayDialog> {
   DateTime _utcToLocalDate(String utcDateStr) {
     try {
       final utcDateTime = DateTime.parse(utcDateStr);
-      // Use TimezoneService for accurate conversion to user's local timezone
-      final localDateTime = TimezoneService.utcToLocalDateTime(
-        '12:00',
-        utcDateTime,
-      );
+      final localDateTime = TimezoneService.utcToLocalDateTimeForDate('12:00:00', utcDateTime);
       return DateTime(
         localDateTime.year,
         localDateTime.month,
@@ -1189,11 +1182,16 @@ class _AddEditHolidayDialogState extends State<_AddEditHolidayDialog> {
                     const SizedBox(height: 8),
                     GestureDetector(
                       onTap: () async {
+                        // ✅ FIX: Get today's date (without time)
+                        final now = DateTime.now();
+                        final today = DateTime(now.year, now.month, now.day);
+                        
+                        // ✅ FIX: Only allow today and future dates
                         final date = await showDatePicker(
                           context: context,
-                          initialDate: _selectedLocalDate ?? DateTime.now(),
-                          firstDate: DateTime(2020),
-                          lastDate: DateTime(2030),
+                          initialDate: _selectedLocalDate ?? today,
+                          firstDate: today,  // ✅ Cannot select past dates
+                          lastDate: DateTime.now().add(const Duration(days: 365)), // Next 365 days
                         );
                         if (date != null) {
                           setState(() {

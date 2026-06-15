@@ -51,7 +51,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     super.dispose();
   }
 
-  // ==================== CORRECT TIMEZONE HELPER METHODS ====================
+  // ==================== CORRECT TIMEZONE HELPER METHODS (USING TimezoneService) ====================
 
   /// Convert local date to UTC date string for DB storage
   String _localDateToUtcDateString(DateTime localDate) {
@@ -72,8 +72,16 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
   DateTime _utcDateStringToLocalDate(String utcDateStr) {
     try {
       final utcDateTime = DateTime.parse(utcDateStr);
-      final localDateTime = TimezoneService.utcToLocalDateTime('12:00', utcDateTime);
-      return DateTime(localDateTime.year, localDateTime.month, localDateTime.day);
+      // Use TimezoneService to convert UTC to local
+      final localDateTime = TimezoneService.utcToLocalDateTimeForDate(
+        '12:00:00',
+        utcDateTime,
+      );
+      return DateTime(
+        localDateTime.year,
+        localDateTime.month,
+        localDateTime.day,
+      );
     } catch (e) {
       debugPrint('❌ Error converting UTC date to local: $e');
       return DateTime.now();
@@ -85,11 +93,11 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     return '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
   }
 
-  /// Get display time from UTC time string
+  /// Get display time from UTC time string using TimezoneService
   String _getDisplayTime(String? utcTimeStr) {
     if (utcTimeStr == null || utcTimeStr.isEmpty) return '';
     try {
-      return TimezoneService.utcToLocalTime(utcTimeStr, DateTime.now());
+      return TimezoneService.utcToLocalTimeRecurring(utcTimeStr);
     } catch (e) {
       debugPrint('❌ Error getting display time: $e');
       return utcTimeStr;
@@ -99,8 +107,18 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
   /// Format date for display (e.g., "Jan 15, 2024")
   String _formatDateForDisplay(DateTime date) {
     final months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
     return '${months[date.month - 1]} ${date.day}, ${date.year}';
   }
@@ -122,11 +140,11 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     }
   }
 
-  /// Format time from UTC string for display
+  /// Format time from UTC string for display using TimezoneService
   String _formatTimeForDisplayFromUtc(String? timeStr) {
     if (timeStr == null) return '';
     try {
-      return TimezoneService.utcToLocalTime(timeStr, DateTime.now());
+      return TimezoneService.utcToLocalTimeRecurring(timeStr);
     } catch (e) {
       debugPrint('Error formatting time from UTC: $e');
       return timeStr;
@@ -142,7 +160,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
   bool _isHoliday(String utcDateStr) {
     final localDate = _utcDateStringToLocalDate(utcDateStr);
     final localDateStr = _formatDateForDb(localDate);
-    
+
     return _holidays.any((h) {
       final holidayLocalDate = _utcDateStringToLocalDate(h['holiday_date']);
       final holidayLocalStr = _formatDateForDb(holidayLocalDate);
@@ -154,15 +172,12 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
   String? _getHolidayName(String utcDateStr) {
     final localDate = _utcDateStringToLocalDate(utcDateStr);
     final localDateStr = _formatDateForDb(localDate);
-    
-    final holiday = _holidays.firstWhere(
-      (h) {
-        final holidayLocalDate = _utcDateStringToLocalDate(h['holiday_date']);
-        final holidayLocalStr = _formatDateForDb(holidayLocalDate);
-        return holidayLocalStr == localDateStr;
-      },
-      orElse: () => {},
-    );
+
+    final holiday = _holidays.firstWhere((h) {
+      final holidayLocalDate = _utcDateStringToLocalDate(h['holiday_date']);
+      final holidayLocalStr = _formatDateForDb(holidayLocalDate);
+      return holidayLocalStr == localDateStr;
+    }, orElse: () => {});
     return holiday['name'];
   }
 
@@ -375,7 +390,8 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
             await _notificationService.sendAppointmentNotification(
               customerId: customerId,
               title: 'Appointment Reassigned',
-              body: 'Your appointment has been reassigned to ${availableBarber['name']}.',
+              body:
+                  'Your appointment has been reassigned to ${availableBarber['name']}.',
               data: {
                 'type': 'reassigned',
                 'barber_name': availableBarber['name'],
@@ -390,7 +406,8 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
           await _notificationService.sendAppointmentNotification(
             customerId: customerId,
             title: 'Appointment Moved to Tomorrow',
-            body: 'Your appointment has been moved to ${_formatDateForDisplay(newLocalDate)} at 9:00 AM (Queue #1).',
+            body:
+                'Your appointment has been moved to ${_formatDateForDisplay(newLocalDate)} at 9:00 AM (Queue #1).',
             data: {'type': 'moved', 'new_date': newDate},
           );
           break;
@@ -415,7 +432,8 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
 
   Future<int> _getAppointmentPriority(Map<String, dynamic> appointment) async {
     try {
-      if (appointment['is_vip'] == true && appointment['vip_booking_id'] != null) {
+      if (appointment['is_vip'] == true &&
+          appointment['vip_booking_id'] != null) {
         final vipBooking = await supabase
             .from('vip_bookings')
             .select('vip_type_id')
@@ -621,11 +639,14 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
             'end_time': endTime,
             'queue_number': queueNumber,
             'status': 'confirmed',
-            'notes': 'Moved from ${appointment['appointment_date']} due to barber leave',
+            'notes':
+                'Moved from ${appointment['appointment_date']} due to barber leave',
           })
           .eq('id', appointment['id']);
 
-      debugPrint('✅ Appointment moved to $nextUtcDateStr at 09:00 AM (Queue #$queueNumber)');
+      debugPrint(
+        '✅ Appointment moved to $nextUtcDateStr at 09:00 AM (Queue #$queueNumber)',
+      );
       return nextUtcDateStr;
     } catch (e) {
       debugPrint('❌ Error moving to next day: $e');
@@ -701,7 +722,8 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
         }
 
         if (existing['is_vip'] == newAppointment['is_vip']) {
-          if (newAppointment['start_time'].compareTo(existing['start_time']) < 0) {
+          if (newAppointment['start_time'].compareTo(existing['start_time']) <
+              0) {
             newQueueNumber = existing['queue_number'];
             break;
           }
@@ -817,7 +839,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       }
 
       final affectedAppointments = await appointmentsQuery;
-    
+
       if (!mounted) return;
       Navigator.pop(context);
 
@@ -855,7 +877,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       if (failedCount > 0) {
         message += '$failedCount appointments failed.';
       }
-      
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(message),
@@ -947,7 +969,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
         leaveData,
       );
     }
-    
+
     reasonController.dispose();
   }
 
@@ -1075,14 +1097,18 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     );
   }
 
+  // ==================== DATE FILTER (FIXED: Only future dates) ====================
   Widget _buildDateFilter() {
     return GestureDetector(
       onTap: () async {
+        final now = DateTime.now();
+        final today = DateTime(now.year, now.month, now.day);
+
         final date = await showDatePicker(
           context: context,
-          initialDate: _selectedLocalDate ?? DateTime.now(),
-          firstDate: DateTime(2020),
-          lastDate: DateTime(2030),
+          initialDate: _selectedLocalDate ?? today,
+          firstDate: today, // ✅ FIXED: Cannot select past dates
+          lastDate: now.add(const Duration(days: 365)),
         );
         if (date != null && mounted) {
           setState(() => _selectedLocalDate = date);
@@ -1516,9 +1542,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       body: Column(
         children: [
           _buildFiltersSection(isWeb, padding),
-          Expanded(
-            child: _buildMainContent(isWeb, padding),
-          ),
+          Expanded(child: _buildMainContent(isWeb, padding)),
         ],
       ),
       floatingActionButton: FloatingActionButton(
@@ -1703,30 +1727,21 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
             Container(width: 1, height: 40, color: Colors.grey[300]),
             _buildStatItem(
               'Pending',
-              _leaves
-                  .where((l) => l['status'] == 'pending')
-                  .length
-                  .toString(),
+              _leaves.where((l) => l['status'] == 'pending').length.toString(),
               Icons.pending,
               Colors.orange,
             ),
             Container(width: 1, height: 40, color: Colors.grey[300]),
             _buildStatItem(
               'Approved',
-              _leaves
-                  .where((l) => l['status'] == 'approved')
-                  .length
-                  .toString(),
+              _leaves.where((l) => l['status'] == 'approved').length.toString(),
               Icons.check_circle,
               Colors.green,
             ),
             Container(width: 1, height: 40, color: Colors.grey[300]),
             _buildStatItem(
               'Rejected',
-              _leaves
-                  .where((l) => l['status'] == 'rejected')
-                  .length
-                  .toString(),
+              _leaves.where((l) => l['status'] == 'rejected').length.toString(),
               Icons.cancel,
               Colors.red,
             ),
@@ -1745,13 +1760,48 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       ),
       child: const Row(
         children: [
-          Expanded(flex: 2, child: Text('Barber', style: TextStyle(fontWeight: FontWeight.bold))),
-          Expanded(flex: 2, child: Text('Date', style: TextStyle(fontWeight: FontWeight.bold))),
-          Expanded(flex: 2, child: Text('Type', style: TextStyle(fontWeight: FontWeight.bold))),
-          Expanded(flex: 2, child: Text('Time', style: TextStyle(fontWeight: FontWeight.bold))),
-          Expanded(flex: 3, child: Text('Reason', style: TextStyle(fontWeight: FontWeight.bold))),
-          Expanded(flex: 1, child: Text('Status', style: TextStyle(fontWeight: FontWeight.bold), textAlign: TextAlign.center)),
-          Expanded(flex: 3, child: Text('Actions', style: TextStyle(fontWeight: FontWeight.bold), textAlign: TextAlign.center)),
+          Expanded(
+            flex: 2,
+            child: Text(
+              'Barber',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+          Expanded(
+            flex: 2,
+            child: Text('Date', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+          Expanded(
+            flex: 2,
+            child: Text('Type', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+          Expanded(
+            flex: 2,
+            child: Text('Time', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+          Expanded(
+            flex: 3,
+            child: Text(
+              'Reason',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+          Expanded(
+            flex: 1,
+            child: Text(
+              'Status',
+              style: TextStyle(fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+          ),
+          Expanded(
+            flex: 3,
+            child: Text(
+              'Actions',
+              style: TextStyle(fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+          ),
         ],
       ),
     );
@@ -1798,7 +1848,9 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
               children: [
                 CircleAvatar(
                   radius: 16,
-                  backgroundColor: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                  backgroundColor: const Color(
+                    0xFFFF6B8B,
+                  ).withValues(alpha: 0.1),
                   backgroundImage: profile['avatar_url'] != null
                       ? NetworkImage(profile['avatar_url'])
                       : null,
@@ -1861,10 +1913,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
           ),
           Expanded(
             flex: 2,
-            child: Text(
-              timeDisplay,
-              style: const TextStyle(fontSize: 12),
-            ),
+            child: Text(timeDisplay, style: const TextStyle(fontSize: 12)),
           ),
           Expanded(
             flex: 3,
@@ -1873,10 +1922,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
               children: [
                 Text(
                   reason,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey[700],
-                  ),
+                  style: TextStyle(fontSize: 12, color: Colors.grey[700]),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -1969,9 +2015,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Column(
         children: [
           ListTile(
@@ -2021,10 +2065,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
                     const SizedBox(width: 4),
                     Text(
                       leaveDate,
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: Colors.grey[800],
-                      ),
+                      style: TextStyle(fontSize: 13, color: Colors.grey[800]),
                     ),
                   ],
                 ),
@@ -2049,10 +2090,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
                     const SizedBox(width: 4),
                     Text(
                       _getLeaveTypeName(leaveType),
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: Colors.grey[800],
-                      ),
+                      style: TextStyle(fontSize: 13, color: Colors.grey[800]),
                     ),
                     const SizedBox(width: 8),
                     if (timeDisplay.isNotEmpty)
@@ -2234,18 +2272,17 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
   void _parseSalonHours() {
     if (widget.salonOpenTimeUtc != null) {
       try {
-        final localOpenTimeStr = TimezoneService.utcToLocalTime(
+        final localOpenTimeStr = TimezoneService.utcToLocalTimeRecurring(
           widget.salonOpenTimeUtc!,
-          DateTime.now(),
         );
         final openParts = localOpenTimeStr.split(' ');
         final timeParts = openParts[0].split(':');
         final period = openParts[1];
-        
+
         int hour = int.parse(timeParts[0]);
         if (period == 'PM' && hour != 12) hour += 12;
         if (period == 'AM' && hour == 12) hour = 0;
-        
+
         _minLocalTime = TimeOfDay(hour: hour, minute: int.parse(timeParts[1]));
         _startLocalTime = _minLocalTime!;
       } catch (e) {
@@ -2255,18 +2292,17 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
 
     if (widget.salonCloseTimeUtc != null) {
       try {
-        final localCloseTimeStr = TimezoneService.utcToLocalTime(
+        final localCloseTimeStr = TimezoneService.utcToLocalTimeRecurring(
           widget.salonCloseTimeUtc!,
-          DateTime.now(),
         );
         final timeParts = localCloseTimeStr.split(' ');
         final hourMinute = timeParts[0].split(':');
         final period = timeParts[1];
-        
+
         int hour = int.parse(hourMinute[0]);
         if (period == 'PM' && hour != 12) hour += 12;
         if (period == 'AM' && hour == 12) hour = 0;
-        
+
         _maxLocalTime = TimeOfDay(hour: hour, minute: int.parse(hourMinute[1]));
         _endLocalTime = _maxLocalTime!;
       } catch (e) {
@@ -2286,7 +2322,10 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
     if (leave['leave_date'] != null) {
       try {
         final utcDate = DateTime.parse(leave['leave_date']);
-        _selectedLocalDate = TimezoneService.utcToLocalDateTime('12:00', utcDate);
+        _selectedLocalDate = TimezoneService.utcToLocalDateTimeForDate(
+          '12:00:00',
+          utcDate,
+        );
         _checkHoliday(_selectedLocalDate!);
       } catch (e) {
         debugPrint('Error parsing leave_date: $e');
@@ -2295,15 +2334,13 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
 
     if (leave['start_time'] != null && leave['end_time'] != null) {
       try {
-        final localStartStr = TimezoneService.utcToLocalTime(
+        final localStartStr = TimezoneService.utcToLocalTimeRecurring(
           leave['start_time'],
-          _selectedLocalDate ?? DateTime.now(),
         );
-        final localEndStr = TimezoneService.utcToLocalTime(
+        final localEndStr = TimezoneService.utcToLocalTimeRecurring(
           leave['end_time'],
-          _selectedLocalDate ?? DateTime.now(),
         );
-        
+
         _startLocalTime = _parseTimeString(localStartStr);
         _endLocalTime = _parseTimeString(localEndStr);
       } catch (e) {
@@ -2316,27 +2353,24 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
     final parts = timeStr.split(' ');
     final hourMinute = parts[0].split(':');
     final period = parts[1];
-    
+
     int hour = int.parse(hourMinute[0]);
     if (period == 'PM' && hour != 12) hour += 12;
     if (period == 'AM' && hour == 12) hour = 0;
-    
+
     return TimeOfDay(hour: hour, minute: int.parse(hourMinute[1]));
   }
 
   void _checkHoliday(DateTime localDate) {
-    final localDateStr = 
+    final localDateStr =
         '${localDate.year.toString().padLeft(4, '0')}-${localDate.month.toString().padLeft(2, '0')}-${localDate.day.toString().padLeft(2, '0')}';
 
-    final holiday = widget.holidays.firstWhere(
-      (h) {
-        final holidayLocalDate = _utcDateStringToLocalDate(h['holiday_date']);
-        final holidayLocalStr = 
-            '${holidayLocalDate.year.toString().padLeft(4, '0')}-${holidayLocalDate.month.toString().padLeft(2, '0')}-${holidayLocalDate.day.toString().padLeft(2, '0')}';
-        return holidayLocalStr == localDateStr;
-      },
-      orElse: () => {},
-    );
+    final holiday = widget.holidays.firstWhere((h) {
+      final holidayLocalDate = _utcDateStringToLocalDate(h['holiday_date']);
+      final holidayLocalStr =
+          '${holidayLocalDate.year.toString().padLeft(4, '0')}-${holidayLocalDate.month.toString().padLeft(2, '0')}-${holidayLocalDate.day.toString().padLeft(2, '0')}';
+      return holidayLocalStr == localDateStr;
+    }, orElse: () => {});
 
     setState(() {
       _isHoliday = holiday.isNotEmpty;
@@ -2357,8 +2391,15 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
   DateTime _utcDateStringToLocalDate(String utcDateStr) {
     try {
       final utcDateTime = DateTime.parse(utcDateStr);
-      final localDateTime = TimezoneService.utcToLocalDateTime('12:00', utcDateTime);
-      return DateTime(localDateTime.year, localDateTime.month, localDateTime.day);
+      final localDateTime = TimezoneService.utcToLocalDateTimeForDate(
+        '12:00:00',
+        utcDateTime,
+      );
+      return DateTime(
+        localDateTime.year,
+        localDateTime.month,
+        localDateTime.day,
+      );
     } catch (e) {
       debugPrint('Error converting UTC date to local: $e');
       return DateTime.now();
@@ -2368,7 +2409,9 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
   String _localDateToUtcDateString(DateTime localDate) {
     try {
       final utcDateTime = DateTime.utc(
-        localDate.year, localDate.month, localDate.day,
+        localDate.year,
+        localDate.month,
+        localDate.day,
       );
       return '${utcDateTime.year.toString().padLeft(4, '0')}-${utcDateTime.month.toString().padLeft(2, '0')}-${utcDateTime.day.toString().padLeft(2, '0')}';
     } catch (e) {
@@ -2379,12 +2422,9 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
 
   String _localTimeToUtcTimeString(TimeOfDay localTime, DateTime localDate) {
     try {
-      final localDateTime = DateTime(
-        localDate.year, localDate.month, localDate.day,
-        localTime.hour, localTime.minute,
-      );
-      final timeString = '${localTime.hour.toString().padLeft(2, '0')}:${localTime.minute.toString().padLeft(2, '0')}';
-      return TimezoneService.localToUtcTime(timeString, localDateTime);
+      final timeString =
+          '${localTime.hour.toString().padLeft(2, '0')}:${localTime.minute.toString().padLeft(2, '0')}';
+      return TimezoneService.localToUtcTimeRecurring(timeString);
     } catch (e) {
       debugPrint('Error converting local time to UTC: $e');
       return '${localTime.hour.toString().padLeft(2, '0')}:${localTime.minute.toString().padLeft(2, '0')}:00';
@@ -2487,19 +2527,12 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
       ),
       child: Row(
         children: [
-          Icon(
-            Icons.error_outline,
-            color: Colors.red,
-            size: 20,
-          ),
+          Icon(Icons.error_outline, color: Colors.red, size: 20),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
               _errorMessage!,
-              style: TextStyle(
-                color: Colors.red,
-                fontSize: 13,
-              ),
+              style: TextStyle(color: Colors.red, fontSize: 13),
             ),
           ),
         ],
@@ -2519,9 +2552,7 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
         DropdownButtonFormField<String>(
           initialValue: _selectedBarberId,
           decoration: InputDecoration(
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-            ),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
             contentPadding: const EdgeInsets.symmetric(
               horizontal: 12,
               vertical: 8,
@@ -2547,26 +2578,24 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
     );
   }
 
+  // ==================== DATE SELECTOR (FIXED: Only future dates) ====================
   Widget _buildDateSelector() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'Date',
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
+        const Text('Date', style: TextStyle(fontWeight: FontWeight.bold)),
         const SizedBox(height: 8),
         GestureDetector(
           onTap: () async {
+            // ✅ FIX: Get today's date (without time)
+            final now = DateTime.now();
+            final today = DateTime(now.year, now.month, now.day);
+
             final date = await showDatePicker(
               context: context,
-              initialDate: _selectedLocalDate ?? DateTime.now(),
-              firstDate: DateTime.now().subtract(
-                const Duration(days: 30),
-              ),
-              lastDate: DateTime.now().add(
-                const Duration(days: 365),
-              ),
+              initialDate: _selectedLocalDate ?? today,
+              firstDate: today, // ✅ Cannot select past dates
+              lastDate: now.add(const Duration(days: 365)),
             );
             if (date != null && mounted) {
               setState(() {
@@ -2577,10 +2606,7 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
             }
           },
           child: Container(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 12,
-              vertical: 12,
-            ),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
             decoration: BoxDecoration(
               border: Border.all(
                 color: _isHoliday && !_isEditMode
@@ -2609,7 +2635,9 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
                     children: [
                       Text(
                         _selectedLocalDate != null
-                            ? DateFormat('EEEE, MMM d, yyyy').format(_selectedLocalDate!)
+                            ? DateFormat(
+                                'EEEE, MMM d, yyyy',
+                              ).format(_selectedLocalDate!)
                             : 'Select date',
                         style: TextStyle(
                           color: _selectedLocalDate != null
@@ -2620,9 +2648,7 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
                               : FontWeight.normal,
                         ),
                       ),
-                      if (_isHoliday &&
-                          !_isEditMode &&
-                          _holidayName != null)
+                      if (_isHoliday && !_isEditMode && _holidayName != null)
                         Padding(
                           padding: const EdgeInsets.only(top: 4),
                           child: Text(
@@ -2657,20 +2683,13 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
         ),
         child: Row(
           children: [
-            Icon(
-              Icons.info_outline,
-              size: 16,
-              color: Colors.orange,
-            ),
+            Icon(Icons.info_outline, size: 16, color: Colors.orange),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
                 'The salon is closed on this day due to holiday. '
                 'Leave requests on holidays are not allowed.',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.orange,
-                ),
+                style: TextStyle(fontSize: 12, color: Colors.orange),
               ),
             ),
           ],
@@ -2683,26 +2702,43 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'Leave Type',
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
+        const Text('Leave Type', style: TextStyle(fontWeight: FontWeight.bold)),
         const SizedBox(height: 8),
         Wrap(
           spacing: 8,
           runSpacing: 8,
           children: [
-            _buildTypeChip('Full Day', 'full_day', Icons.calendar_month, Colors.purple),
-            _buildTypeChip('Half Day', 'half_day', Icons.access_time, Colors.blue),
+            _buildTypeChip(
+              'Full Day',
+              'full_day',
+              Icons.calendar_month,
+              Colors.purple,
+            ),
+            _buildTypeChip(
+              'Half Day',
+              'half_day',
+              Icons.access_time,
+              Colors.blue,
+            ),
             _buildTypeChip('Emergency', 'emergency', Icons.warning, Colors.red),
-            _buildTypeChip('Short Leave', 'short_leave', Icons.timer, Colors.green),
+            _buildTypeChip(
+              'Short Leave',
+              'short_leave',
+              Icons.timer,
+              Colors.green,
+            ),
           ],
         ),
       ],
     );
   }
 
-  Widget _buildTypeChip(String label, String value, IconData icon, Color color) {
+  Widget _buildTypeChip(
+    String label,
+    String value,
+    IconData icon,
+    Color color,
+  ) {
     final isSelected = _leaveType == value;
     return FilterChip(
       label: Row(
@@ -2743,7 +2779,8 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 8),
-        if (_minLocalTime != null && _maxLocalTime != null) _buildSalonHoursInfo(),
+        if (_minLocalTime != null && _maxLocalTime != null)
+          _buildSalonHoursInfo(),
         Container(
           margin: const EdgeInsets.only(bottom: 8),
           child: Row(
@@ -2796,19 +2833,12 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
       ),
       child: Row(
         children: [
-          Icon(
-            Icons.info,
-            size: 16,
-            color: Colors.blue,
-          ),
+          Icon(Icons.info, size: 16, color: Colors.blue),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
               'Salon hours: ${_formatTimeOfDay(_minLocalTime!)} - ${_formatTimeOfDay(_maxLocalTime!)}',
-              style: TextStyle(
-                fontSize: 12,
-                color: Colors.blue,
-              ),
+              style: TextStyle(fontSize: 12, color: Colors.blue),
             ),
           ),
         ],
@@ -2816,7 +2846,11 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
     );
   }
 
-  Widget _buildInfoCard({required IconData icon, required Color color, required String message}) {
+  Widget _buildInfoCard({
+    required IconData icon,
+    required Color color,
+    required String message,
+  }) {
     return Container(
       padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
@@ -2825,20 +2859,10 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
       ),
       child: Row(
         children: [
-          Icon(
-            icon,
-            size: 16,
-            color: color,
-          ),
+          Icon(icon, size: 16, color: color),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(
-              message,
-              style: TextStyle(
-                fontSize: 12,
-                color: color,
-              ),
-            ),
+            child: Text(message, style: TextStyle(fontSize: 12, color: color)),
           ),
         ],
       ),
@@ -2857,7 +2881,9 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
           initialTime: time,
           builder: (context, child) {
             return MediaQuery(
-              data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: false),
+              data: MediaQuery.of(
+                context,
+              ).copyWith(alwaysUse24HourFormat: false),
               child: child!,
             );
           },
@@ -2894,19 +2920,14 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'Reason',
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
+        const Text('Reason', style: TextStyle(fontWeight: FontWeight.bold)),
         const SizedBox(height: 8),
         TextField(
           controller: _reasonController,
           maxLines: 3,
           decoration: InputDecoration(
             hintText: 'Enter reason for leave',
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-            ),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
           ),
         ),
       ],
@@ -2933,19 +2954,17 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
           ),
           const SizedBox(width: 12),
           ElevatedButton(
-            onPressed: _selectedBarberId != null &&
-                _selectedLocalDate != null &&
-                !_isLoading &&
-                (!_isHoliday || _isEditMode)
+            onPressed:
+                _selectedBarberId != null &&
+                    _selectedLocalDate != null &&
+                    !_isLoading &&
+                    (!_isHoliday || _isEditMode)
                 ? _saveLeave
                 : null,
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFFFF6B8B),
               foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(
-                horizontal: 24,
-                vertical: 12,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
             ),
             child: _isLoading
                 ? const SizedBox(
@@ -3071,10 +3090,16 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
 
       String? startTimeUtc;
       String? endTimeUtc;
-      
+
       if (_leaveType == 'half_day' || _leaveType == 'short_leave') {
-        startTimeUtc = _localTimeToUtcTimeString(_startLocalTime, _selectedLocalDate!);
-        endTimeUtc = _localTimeToUtcTimeString(_endLocalTime, _selectedLocalDate!);
+        startTimeUtc = _localTimeToUtcTimeString(
+          _startLocalTime,
+          _selectedLocalDate!,
+        );
+        endTimeUtc = _localTimeToUtcTimeString(
+          _endLocalTime,
+          _selectedLocalDate!,
+        );
       }
 
       Map<String, dynamic> leaveData = {

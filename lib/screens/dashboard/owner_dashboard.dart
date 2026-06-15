@@ -14,6 +14,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/timezone_service.dart';
 
+// ✅ Add route observer
+final RouteObserver<ModalRoute<void>> routeObserver = RouteObserver<ModalRoute<void>>();
+
 class OwnerDashboard extends StatefulWidget {
   const OwnerDashboard({super.key});
 
@@ -22,7 +25,7 @@ class OwnerDashboard extends StatefulWidget {
 }
 
 class _OwnerDashboardState extends State<OwnerDashboard>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, RouteAware {  // ✅ Added RouteAware
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   final NotificationService _notificationService = NotificationService();
@@ -89,20 +92,24 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _checkForUpdates();
+    // ✅ Subscribe to route changes
+    final route = ModalRoute.of(context);
+    if (route is PageRoute) {
+      routeObserver.subscribe(this, route);
+    }
   }
 
-  // ✅ Auto refresh when coming back to dashboard
-  void _checkForUpdates() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && !_isLoading) {
-        _loadAllData();
-      }
-    });
+  // ✅ Called when user comes back from child screen
+  @override
+  void didPopNext() {
+    debugPrint('🔄 Dashboard: Returning from child screen, refreshing data');
+    _refreshAllData();
   }
 
   @override
   void dispose() {
+    // ✅ Unsubscribe from route changes
+    routeObserver.unsubscribe(this);
     _pulseCtrl.dispose();
     super.dispose();
   }
@@ -1230,7 +1237,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         elevation: 0,
         centerTitle: isWeb,
         leading: IconButton(icon: const Icon(Icons.menu), onPressed: _openDrawer, tooltip: 'Menu'),
-        // ✅ Refresh button removed
       ),
       drawer: SideMenu(userRole: 'owner', userName: _userName, userEmail: _userEmail, profileImageUrl: _profileImageUrl, onMenuItemSelected: () => _refreshAllData()),
       body: _isLoading

@@ -2,30 +2,30 @@ import 'dart:io' show Platform, File;
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:path/path.dart' as path;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
-import 'package:path/path.dart' as path;
 import 'package:image_cropper/image_cropper.dart';
-import 'package:timezone/timezone.dart' as tz;
 import '../../services/timezone_service.dart';
 
 // ==================== ENHANCED TIME PICKER ====================
-class _EnhancedTimePicker extends StatefulWidget {
+class EnhancedTimePicker extends StatefulWidget {
   final TimeOfDay? initialTime;
   final ValueChanged<TimeOfDay> onTimeSelected;
 
-  const _EnhancedTimePicker({
+  const EnhancedTimePicker({
+    super.key,
     required this.initialTime,
     required this.onTimeSelected,
   });
 
   @override
-  State<_EnhancedTimePicker> createState() => _EnhancedTimePickerState();
+  State<EnhancedTimePicker> createState() => _EnhancedTimePickerState();
 }
 
-class _EnhancedTimePickerState extends State<_EnhancedTimePicker> {
+class _EnhancedTimePickerState extends State<EnhancedTimePicker> {
   late int _selectedHour;
   late int _selectedMinute;
   late String _selectedPeriod;
@@ -113,6 +113,7 @@ class _EnhancedTimePickerState extends State<_EnhancedTimePicker> {
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 20),
+
             Container(
               padding: const EdgeInsets.symmetric(vertical: 16),
               decoration: BoxDecoration(
@@ -168,6 +169,7 @@ class _EnhancedTimePickerState extends State<_EnhancedTimePicker> {
               ),
             ),
             const SizedBox(height: 20),
+
             Row(
               children: [
                 _buildScrollPicker(
@@ -192,7 +194,9 @@ class _EnhancedTimePickerState extends State<_EnhancedTimePicker> {
                 ),
               ],
             ),
+
             const SizedBox(height: 24),
+
             Row(
               children: [
                 Expanded(
@@ -298,13 +302,14 @@ class _EnhancedTimePickerState extends State<_EnhancedTimePicker> {
 }
 
 // ==================== TIME PICKER FIELD ====================
-class _TimePickerField extends StatefulWidget {
+class TimePickerField extends StatefulWidget {
   final String label;
   final TimeOfDay? initialTime;
   final ValueChanged<TimeOfDay> onTimeSelected;
   final bool isRequired;
 
-  const _TimePickerField({
+  const TimePickerField({
+    super.key,
     required this.label,
     this.initialTime,
     required this.onTimeSelected,
@@ -312,10 +317,10 @@ class _TimePickerField extends StatefulWidget {
   });
 
   @override
-  State<_TimePickerField> createState() => _TimePickerFieldState();
+  State<TimePickerField> createState() => _TimePickerFieldState();
 }
 
-class _TimePickerFieldState extends State<_TimePickerField> {
+class _TimePickerFieldState extends State<TimePickerField> {
   TimeOfDay? _selectedTime;
 
   @override
@@ -336,7 +341,7 @@ class _TimePickerFieldState extends State<_TimePickerField> {
   Future<void> _showTimePicker() async {
     final result = await showDialog<TimeOfDay>(
       context: context,
-      builder: (context) => _EnhancedTimePicker(
+      builder: (context) => EnhancedTimePicker(
         initialTime: _selectedTime,
         onTimeSelected: (time) {},
       ),
@@ -407,7 +412,7 @@ class _TimePickerFieldState extends State<_TimePickerField> {
   }
 }
 
-// ==================== MAIN SCREEN ====================
+// ==================== MAIN CREATE SALON SCREEN ====================
 class CreateSalonScreen extends StatefulWidget {
   const CreateSalonScreen({super.key});
 
@@ -500,6 +505,16 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
   final supabase = Supabase.instance.client;
   final picker = ImagePicker();
 
+  // ==================== TIMEZONE FUNCTIONS (Direct TimezoneService Calls) ====================
+  
+  /// Get timezone display string using TimezoneService
+  String _getTimezoneDisplay() {
+    if (_salonTimezone.isEmpty) {
+      return 'Loading timezone...';
+    }
+    return TimezoneService.getFullTimezoneDisplay();
+  }
+
   @override
   void initState() {
     super.initState();
@@ -521,7 +536,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
         TimezoneService.getCurrentTimezone();
 
     if (_userTimezone.isNotEmpty && _userTimezone != currentTimezone) {
-      // Timezone changed - reload display times
       setState(() {
         _userTimezone = currentTimezone;
         _refreshDisplayTimes();
@@ -531,37 +545,31 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
 
   // Refresh all displayed times when timezone changes
   void _refreshDisplayTimes() {
-    // Convert UTC stored times back to new local timezone
     if (_openTimeUtc.isNotEmpty) {
-      _openTimeLocal = _utcTimeStringToLocalTimeOfDay(_openTimeUtc);
-      _closeTimeLocal = _utcTimeStringToLocalTimeOfDay(_closeTimeUtc);
+      _openTimeLocal = TimezoneService.utcToTimeOfDayWithTimezone(_openTimeUtc, _salonTimezone);
+      _closeTimeLocal = TimezoneService.utcToTimeOfDayWithTimezone(_closeTimeUtc, _salonTimezone);
     }
     setState(() {});
   }
 
   Future<void> _initializeWithTimezone() async {
-    // Initialize TimezoneService first
     await TimezoneService.initialize();
 
     final prefs = await SharedPreferences.getInstance();
 
-    // Get user's device timezone (cached from previous or new)
     String cachedUserTimezone = prefs.getString('user_timezone') ?? '';
 
     if (cachedUserTimezone.isEmpty) {
-      // First time - get from device
       _userTimezone = TimezoneService.getCurrentTimezone();
       await prefs.setString('user_timezone', _userTimezone);
     } else {
       _userTimezone = cachedUserTimezone;
-      // Ensure TimezoneService uses this timezone
       await TimezoneService.setTimezone(_userTimezone);
     }
 
     // Salon timezone - same as user's current location
     _salonTimezone = _userTimezone;
 
-    // Initialize business hours
     _initializeBusinessHours();
 
     setState(() {
@@ -576,94 +584,17 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     const defaultOpenLocal = TimeOfDay(hour: 9, minute: 0);
     const defaultCloseLocal = TimeOfDay(hour: 18, minute: 0);
 
-    // Convert to UTC for database storage
-    _openTimeUtc = _localTimeOfDayToUtcTimeString(defaultOpenLocal);
-    _closeTimeUtc = _localTimeOfDayToUtcTimeString(defaultCloseLocal);
-
     // Store local times for display
     _openTimeLocal = defaultOpenLocal;
     _closeTimeLocal = defaultCloseLocal;
-  }
-
-  // ==================== TIMEZONE CONVERSION METHODS ====================
-
-  /// Convert LOCAL TimeOfDay to UTC time string for database
-  String _localTimeOfDayToUtcTimeString(TimeOfDay localTime) {
-    try {
-      // Get current date
-      final now = DateTime.now();
-
-      // Create local DateTime using the salon's timezone
-      final location = tz.getLocation(_salonTimezone);
-      final localTZDateTime = tz.TZDateTime(
-        location,
-        now.year,
-        now.month,
-        now.day,
-        localTime.hour,
-        localTime.minute,
-      );
-
-      // Convert to UTC
-      final utcDateTime = localTZDateTime.toUtc();
-
-      // Return time portion only
-      return '${utcDateTime.hour.toString().padLeft(2, '0')}:${utcDateTime.minute.toString().padLeft(2, '0')}:00';
-    } catch (e) {
-      debugPrint('Error converting local to UTC: $e');
-      // Fallback: simple conversion without timezone
-      final int offsetHours = TimezoneService.getUtcOffsetHours();
-      int utcHour = localTime.hour - offsetHours;
-      utcHour = ((utcHour % 24) + 24) % 24;
-      return '${utcHour.toString().padLeft(2, '0')}:${localTime.minute.toString().padLeft(2, '0')}:00';
-    }
-  }
-
-  /// Convert UTC time string (from database) to LOCAL TimeOfDay for display
-  TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
-    try {
-      // Parse UTC time
-      final parts = utcTimeString.split(':');
-      final int utcHour = int.parse(parts[0]);
-      final int utcMinute = int.parse(parts[1]);
-
-      // Get current date
-      final now = DateTime.now();
-
-      // Create UTC DateTime
-      final utcDateTime = DateTime.utc(
-        now.year,
-        now.month,
-        now.day,
-        utcHour,
-        utcMinute,
-      );
-
-      // Convert to user's local timezone
-      final location = tz.getLocation(_userTimezone);
-      final localDateTime = tz.TZDateTime.from(utcDateTime, location);
-
-      return TimeOfDay(hour: localDateTime.hour, minute: localDateTime.minute);
-    } catch (e) {
-      debugPrint('Error converting UTC to local: $e');
-
-      // Fallback: simple conversion
-      try {
-        final parts = utcTimeString.split(':');
-        final int utcHour = int.parse(parts[0]);
-        final int utcMinute = int.parse(parts[1]);
-        final offsetHours = TimezoneService.getUtcOffsetHours();
-        final localHour = ((utcHour + offsetHours) % 24 + 24) % 24;
-        return TimeOfDay(hour: localHour, minute: utcMinute);
-      } catch (fallbackError) {
-        return const TimeOfDay(hour: 9, minute: 0);
-      }
-    }
-  }
-
-  /// Get current timezone display string
-  String _getTimezoneDisplay() {
-    return '${TimezoneService.getCurrentFlag()} ${TimezoneService.getTimezoneDisplayName()} (${TimezoneService.getUtcOffsetString()})';
+    
+    // Convert to UTC for database storage using TimezoneService (DST-SAFE)
+    _openTimeUtc = TimezoneService.timeOfDayToUtcWithTimezone(defaultOpenLocal, _salonTimezone);
+    _closeTimeUtc = TimezoneService.timeOfDayToUtcWithTimezone(defaultCloseLocal, _salonTimezone);
+    
+    debugPrint('✅ Business hours initialized: Local=${_openTimeLocal.format(context)} - ${_closeTimeLocal.format(context)}');
+    debugPrint('✅ UTC hours for DB: $_openTimeUtc - $_closeTimeUtc');
+    debugPrint('✅ Salon timezone: $_salonTimezone');
   }
 
   @override
@@ -2417,6 +2348,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
             _coverWebBytes = bytes;
             _coverFile = null;
           });
+        } else {
           final croppedFile = await ImageCropper().cropImage(
             sourcePath: pickedFile.path,
             aspectRatio: const CropAspectRatio(ratioX: 16, ratioY: 9),
@@ -2594,30 +2526,30 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
             Row(
               children: [
                 Expanded(
-                  child: _TimePickerField(
+                  child: TimePickerField(
                     label: 'Open Time',
                     initialTime: _openTimeLocal,
                     isRequired: true,
                     onTimeSelected: (time) {
                       setState(() {
                         _openTimeLocal = time;
-                        // Convert local to UTC when user selects
-                        _openTimeUtc = _localTimeOfDayToUtcTimeString(time);
+                        _openTimeUtc = TimezoneService.timeOfDayToUtcWithTimezone(time, _salonTimezone);
+                        debugPrint('✅ Open time updated: Local=${_openTimeLocal.format(context)}, UTC=$_openTimeUtc');
                       });
                     },
                   ),
                 ),
                 const SizedBox(width: 16),
                 Expanded(
-                  child: _TimePickerField(
+                  child: TimePickerField(
                     label: 'Close Time',
                     initialTime: _closeTimeLocal,
                     isRequired: true,
                     onTimeSelected: (time) {
                       setState(() {
                         _closeTimeLocal = time;
-                        // Convert local to UTC when user selects
-                        _closeTimeUtc = _localTimeOfDayToUtcTimeString(time);
+                        _closeTimeUtc = TimezoneService.timeOfDayToUtcWithTimezone(time, _salonTimezone);
+                        debugPrint('✅ Close time updated: Local=${_closeTimeLocal.format(context)}, UTC=$_closeTimeUtc');
                       });
                     },
                   ),
@@ -2625,6 +2557,26 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
               ],
             ),
             const SizedBox(height: 12),
+            // Show UTC info for transparency
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.grey[100],
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.info_outline, size: 14, color: Colors.grey),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Times are stored in UTC. Your local time: ${_openTimeLocal.format(context)} - ${_closeTimeLocal.format(context)}',
+                      style: const TextStyle(fontSize: 10, color: Colors.grey),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),
@@ -2697,6 +2649,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
         'user_timezone': userTimezone,
       };
 
+      // ✅ Use UTC times from TimezoneService (already converted)
       final salonData = {
         'name': _nameController.text.trim(),
         'address': _addressController.text.trim().isEmpty
@@ -2714,12 +2667,18 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
             : _descriptionController.text.trim(),
         'logo_url': logoUrl,
         'cover_url': coverUrl,
-        'open_time': _openTimeUtc, // UTC time from conversion
-        'close_time': _closeTimeUtc, // UTC time from conversion
-        // 'timezone': _salonTimezone,     // Salon's timezone
+        'open_time': _openTimeUtc,
+        'close_time': _closeTimeUtc,
+        'timezone': _salonTimezone,
         'extra_data': extraData,
         'is_active': true,
       };
+
+      debugPrint('📝 Creating salon with data:');
+      debugPrint('   Name: ${salonData['name']}');
+      debugPrint('   Timezone: ${salonData['timezone']}');
+      debugPrint('   Open Time UTC: ${salonData['open_time']}');
+      debugPrint('   Close Time UTC: ${salonData['close_time']}');
 
       final response = await supabase
           .from('salons')
@@ -2728,6 +2687,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
           .single();
       final salonId = response['id'] as int;
 
+      debugPrint('✅ Salon created with ID: $salonId');
+
+      // Insert selected genders
       for (int i = 0; i < _selectedGenderIds.length; i++) {
         final genderId = _selectedGenderIds[i];
         final gender = _globalGenders.firstWhere((g) => g['id'] == genderId);
@@ -2738,7 +2700,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
           'is_active': true,
         });
       }
+      debugPrint('✅ Added ${_selectedGenderIds.length} genders');
 
+      // Insert age categories
       for (var ageCat in _addedAgeCategories) {
         await supabase.from('salon_age_categories').insert({
           'salon_id': salonId,
@@ -2749,7 +2713,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
           'is_active': ageCat['is_active'],
         });
       }
+      debugPrint('✅ Added ${_addedAgeCategories.length} age categories');
 
+      // Insert service categories
       for (var serviceCat in _addedServiceCategories) {
         await supabase.from('salon_categories').insert({
           'salon_id': salonId,
@@ -2761,6 +2727,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
           'is_active': serviceCat['is_active'],
         });
       }
+      debugPrint('✅ Added ${_addedServiceCategories.length} service categories');
 
       if (!mounted) return;
 
@@ -2770,17 +2737,19 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
         message:
             "${_nameController.text.trim()} created successfully.\n\n"
             "📍 Salon Timezone: ${_getTimezoneDisplay()}\n"
-            "🕐 Salon Hours (Local): ${_openTimeLocal.format(context)} - ${_closeTimeLocal.format(context)}\n"
+            "🕐 Business Hours (Local): ${_openTimeLocal.format(context)} - ${_closeTimeLocal.format(context)}\n"
+            "🕐 Business Hours (UTC): $_openTimeUtc - $_closeTimeUtc\n"
             "✅ ${_selectedGenderIds.length} genders selected\n"
             "✅ ${_addedAgeCategories.length} age categories added\n"
             "✅ ${_addedServiceCategories.length} service categories added\n\n"
-            "💡 Tip: Times will automatically adjust to your local timezone when viewing",
+            "💡 Tip: All times are stored in UTC. When you view them, they will automatically adjust to your local timezone.",
         isError: false,
       );
 
       if (!mounted) return;
       Navigator.pop(context, true);
     } catch (e) {
+      debugPrint('❌ Error creating salon: $e');
       _showSnackBar('Error: $e', Colors.red);
     } finally {
       if (mounted) setState(() => _isLoading = false);

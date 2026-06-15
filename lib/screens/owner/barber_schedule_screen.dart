@@ -3,7 +3,6 @@ import 'package:intl/intl.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:timezone/timezone.dart' as tz;
 import '../../services/timezone_service.dart';
 
 class BarberScheduleScreen extends StatefulWidget {
@@ -34,7 +33,6 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   String _salonTimezone = '';
   String _userTimezone = ''; 
  
-  
   // Salon default times (Local for display)
   TimeOfDay? _salonOpenTimeLocal;
   TimeOfDay? _salonCloseTimeLocal;
@@ -79,61 +77,17 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   }
 
   // ============================================
-  // UTC TO LOCAL CONVERSION FUNCTIONS
+  // TIMEZONE CONVERSION USING TimezoneService ONLY
   // ============================================
   
-  /// Convert UTC time string to Local TimeOfDay using salon's timezone
-  TimeOfDay? _utcToLocalTimeOfDay(String? utcTime, String timezone) {
-    if (utcTime == null || utcTime.isEmpty) return null;
-    try {
-      final parts = utcTime.split(':');
-      final utcHour = int.parse(parts[0]);
-      final utcMinute = int.parse(parts[1]);
-      
-      final now = DateTime.now();
-      final utcDateTime = DateTime.utc(now.year, now.month, now.day, utcHour, utcMinute);
-      final location = tz.getLocation(timezone);
-      final localDateTime = tz.TZDateTime.from(utcDateTime, location);
-      
-      debugPrint('🔄 UTC to Local: $utcTime UTC → ${localDateTime.hour}:${localDateTime.minute} ($timezone)');
-      
-      return TimeOfDay(hour: localDateTime.hour, minute: localDateTime.minute);
-    } catch (e) {
-      debugPrint('Error converting UTC to local: $e');
-      // Fallback: simple conversion
-      final parts = utcTime.split(':');
-      final utcHour = int.parse(parts[0]);
-      final utcMinute = int.parse(parts[1]);
-      final offsetHours = TimezoneService.getUtcOffsetHours();
-      int localHour = utcHour + offsetHours;
-      if (localHour >= 24) localHour -= 24;
-      if (localHour < 0) localHour += 24;
-      return TimeOfDay(hour: localHour, minute: utcMinute);
-    }
-  }
-
-  /// Format UTC time to local display string
+  /// Convert UTC time string to Local display string
   String _formatUtcToLocalTime(String? utcTime) {
     if (utcTime == null || utcTime.isEmpty) return '--:--';
-    
-    // If we have salon timezone, use it for accurate conversion
-    if (_salonTimezone.isNotEmpty) {
-      final localTimeOfDay = _utcToLocalTimeOfDay(utcTime, _salonTimezone);
-      if (localTimeOfDay != null) {
-        final hour = localTimeOfDay.hour == 0 
-            ? 12 
-            : (localTimeOfDay.hour > 12 ? localTimeOfDay.hour - 12 : localTimeOfDay.hour);
-        final minute = localTimeOfDay.minute.toString().padLeft(2, '0');
-        final period = localTimeOfDay.hour >= 12 ? 'PM' : 'AM';
-        return '$hour:$minute $period';
-      }
-    }
-    
-    // Fallback: use TimezoneService
     try {
-      return TimezoneService.utcToLocalTime(utcTime, DateTime.now());
+      return TimezoneService.utcToLocalTimeRecurring(utcTime);
     } catch (e) {
-      // Simple fallback without timezone
+      debugPrint('Error formatting time: $e');
+      // Simple fallback
       final parts = utcTime.split(':');
       final hour = int.parse(parts[0]);
       final minute = int.parse(parts[1]);
@@ -144,8 +98,13 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   }
 
 
+  /// Convert UTC time string to Local TimeOfDay
+  TimeOfDay _utcToLocalTimeOfDay(String utcTime) {
+    return TimezoneService.utcToTimeOfDayWithTimezone(utcTime, _salonTimezone);
+  }
+
   String _getTimezoneDisplay() {
-    return '${TimezoneService.getCurrentFlag()} ${TimezoneService.getTimezoneDisplayName()} (${TimezoneService.getUtcOffsetString()})';
+    return TimezoneService.getFullTimezoneDisplay();
   }
 
   // ============================================
@@ -169,14 +128,13 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
         
         final openTimeStr = salonResponse['open_time'] as String?;
         if (openTimeStr != null) {
-          _salonOpenTimeLocal = _utcToLocalTimeOfDay(openTimeStr, _salonTimezone);
+          _salonOpenTimeLocal = _utcToLocalTimeOfDay(openTimeStr);
         }
 
         final closeTimeStr = salonResponse['close_time'] as String?;
         if (closeTimeStr != null) {
-          _salonCloseTimeLocal = _utcToLocalTimeOfDay(closeTimeStr, _salonTimezone);
+          _salonCloseTimeLocal = _utcToLocalTimeOfDay(closeTimeStr);
         }        
-      
       }
     } catch (e) {
       debugPrint('Error loading salon times: $e');
@@ -930,7 +888,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                '⏰ Times shown in: $_getTimezoneDisplay()',
+                '⏰ Times shown in: ${_getTimezoneDisplay()}',
                 style: const TextStyle(fontSize: 12, color: Colors.grey),
               ),
             ),
@@ -1747,23 +1705,7 @@ class _AddSpecialScheduleDialogState extends State<_AddSpecialScheduleDialog> {
   }
 
   String _localTimeToUtc(TimeOfDay localTime) {
-    try {
-      final now = DateTime.now();
-      final location = tz.getLocation(widget.salonTimezone);
-      final localTZDateTime = tz.TZDateTime(
-        location,
-        now.year, now.month, now.day,
-        localTime.hour, localTime.minute,
-      );
-      final utcDateTime = localTZDateTime.toUtc();
-      return '${utcDateTime.hour.toString().padLeft(2, '0')}:${utcDateTime.minute.toString().padLeft(2, '0')}:00';
-    } catch (e) {
-      final offsetHours = TimezoneService.getUtcOffsetHours();
-      int utcHour = localTime.hour - offsetHours;
-      if (utcHour < 0) utcHour += 24;
-      if (utcHour >= 24) utcHour -= 24;
-      return '${utcHour.toString().padLeft(2, '0')}:${localTime.minute.toString().padLeft(2, '0')}:00';
-    }
+    return TimezoneService.timeOfDayToUtcWithTimezone(localTime, widget.salonTimezone);
   }
 
   @override
@@ -2009,23 +1951,7 @@ class _AddSpecialBreakDialogState extends State<_AddSpecialBreakDialog> {
   bool _isLoading = false;
 
   String _localTimeToUtc(TimeOfDay localTime) {
-    try {
-      final now = DateTime.now();
-      final location = tz.getLocation(widget.salonTimezone);
-      final localTZDateTime = tz.TZDateTime(
-        location,
-        now.year, now.month, now.day,
-        localTime.hour, localTime.minute,
-      );
-      final utcDateTime = localTZDateTime.toUtc();
-      return '${utcDateTime.hour.toString().padLeft(2, '0')}:${utcDateTime.minute.toString().padLeft(2, '0')}:00';
-    } catch (e) {
-      final offsetHours = TimezoneService.getUtcOffsetHours();
-      int utcHour = localTime.hour - offsetHours;
-      if (utcHour < 0) utcHour += 24;
-      if (utcHour >= 24) utcHour -= 24;
-      return '${utcHour.toString().padLeft(2, '0')}:${localTime.minute.toString().padLeft(2, '0')}:00';
-    }
+    return TimezoneService.timeOfDayToUtcWithTimezone(localTime, widget.salonTimezone);
   }
 
   @override
@@ -2204,55 +2130,17 @@ class _EditSpecialScheduleDialogState extends State<_EditSpecialScheduleDialog> 
   bool _isLoading = false;
   final supabase = Supabase.instance.client;
 
-  TimeOfDay _utcToLocalTimeOfDay(String utcTime) {
-    try {
-      final parts = utcTime.split(':');
-      final utcHour = int.parse(parts[0]);
-      final utcMinute = int.parse(parts[1]);
-      final now = DateTime.now();
-      final utcDateTime = DateTime.utc(now.year, now.month, now.day, utcHour, utcMinute);
-      final location = tz.getLocation(widget.salonTimezone);
-      final localDateTime = tz.TZDateTime.from(utcDateTime, location);
-      return TimeOfDay(hour: localDateTime.hour, minute: localDateTime.minute);
-    } catch (e) {
-      final parts = utcTime.split(':');
-      final utcHour = int.parse(parts[0]);
-      final utcMinute = int.parse(parts[1]);
-      final offsetHours = TimezoneService.getUtcOffsetHours();
-      int localHour = utcHour + offsetHours;
-      if (localHour >= 24) localHour -= 24;
-      if (localHour < 0) localHour += 24;
-      return TimeOfDay(hour: localHour, minute: utcMinute);
-    }
-  }
-
-  String _localTimeToUtc(TimeOfDay localTime) {
-    try {
-      final now = DateTime.now();
-      final location = tz.getLocation(widget.salonTimezone);
-      final localTZDateTime = tz.TZDateTime(
-        location,
-        now.year, now.month, now.day,
-        localTime.hour, localTime.minute,
-      );
-      final utcDateTime = localTZDateTime.toUtc();
-      return '${utcDateTime.hour.toString().padLeft(2, '0')}:${utcDateTime.minute.toString().padLeft(2, '0')}:00';
-    } catch (e) {
-      final offsetHours = TimezoneService.getUtcOffsetHours();
-      int utcHour = localTime.hour - offsetHours;
-      if (utcHour < 0) utcHour += 24;
-      if (utcHour >= 24) utcHour -= 24;
-      return '${utcHour.toString().padLeft(2, '0')}:${localTime.minute.toString().padLeft(2, '0')}:00';
-    }
-  }
-
   @override
   void initState() {
     super.initState();
-    _startTime = _utcToLocalTimeOfDay(widget.schedule['start_time']);
-    _endTime = _utcToLocalTimeOfDay(widget.schedule['end_time']);
+    _startTime = TimezoneService.utcToTimeOfDayWithTimezone(widget.schedule['start_time'], widget.salonTimezone);
+    _endTime = TimezoneService.utcToTimeOfDayWithTimezone(widget.schedule['end_time'], widget.salonTimezone);
     _isWorking = widget.schedule['is_working'] ?? true;
     _reasonController.text = widget.schedule['reason'] ?? '';
+  }
+
+  String _localTimeToUtc(TimeOfDay localTime) {
+    return TimezoneService.timeOfDayToUtcWithTimezone(localTime, widget.salonTimezone);
   }
 
   @override
@@ -2408,54 +2296,16 @@ class _EditSpecialBreakDialogState extends State<_EditSpecialBreakDialog> {
   bool _isLoading = false;
   final supabase = Supabase.instance.client;
 
-  TimeOfDay _utcToLocalTimeOfDay(String utcTime) {
-    try {
-      final parts = utcTime.split(':');
-      final utcHour = int.parse(parts[0]);
-      final utcMinute = int.parse(parts[1]);
-      final now = DateTime.now();
-      final utcDateTime = DateTime.utc(now.year, now.month, now.day, utcHour, utcMinute);
-      final location = tz.getLocation(widget.salonTimezone);
-      final localDateTime = tz.TZDateTime.from(utcDateTime, location);
-      return TimeOfDay(hour: localDateTime.hour, minute: localDateTime.minute);
-    } catch (e) {
-      final parts = utcTime.split(':');
-      final utcHour = int.parse(parts[0]);
-      final utcMinute = int.parse(parts[1]);
-      final offsetHours = TimezoneService.getUtcOffsetHours();
-      int localHour = utcHour + offsetHours;
-      if (localHour >= 24) localHour -= 24;
-      if (localHour < 0) localHour += 24;
-      return TimeOfDay(hour: localHour, minute: utcMinute);
-    }
-  }
-
-  String _localTimeToUtc(TimeOfDay localTime) {
-    try {
-      final now = DateTime.now();
-      final location = tz.getLocation(widget.salonTimezone);
-      final localTZDateTime = tz.TZDateTime(
-        location,
-        now.year, now.month, now.day,
-        localTime.hour, localTime.minute,
-      );
-      final utcDateTime = localTZDateTime.toUtc();
-      return '${utcDateTime.hour.toString().padLeft(2, '0')}:${utcDateTime.minute.toString().padLeft(2, '0')}:00';
-    } catch (e) {
-      final offsetHours = TimezoneService.getUtcOffsetHours();
-      int utcHour = localTime.hour - offsetHours;
-      if (utcHour < 0) utcHour += 24;
-      if (utcHour >= 24) utcHour -= 24;
-      return '${utcHour.toString().padLeft(2, '0')}:${localTime.minute.toString().padLeft(2, '0')}:00';
-    }
-  }
-
   @override
   void initState() {
     super.initState();
-    _startTime = _utcToLocalTimeOfDay(widget.breakItem['start_time']);
-    _endTime = _utcToLocalTimeOfDay(widget.breakItem['end_time']);
+    _startTime = TimezoneService.utcToTimeOfDayWithTimezone(widget.breakItem['start_time'], widget.salonTimezone);
+    _endTime = TimezoneService.utcToTimeOfDayWithTimezone(widget.breakItem['end_time'], widget.salonTimezone);
     _selectedBreakType = widget.breakItem['break_type'] ?? 'lunch';
+  }
+
+  String _localTimeToUtc(TimeOfDay localTime) {
+    return TimezoneService.timeOfDayToUtcWithTimezone(localTime, widget.salonTimezone);
   }
 
   @override
@@ -2627,23 +2477,7 @@ class _AddBreakDialogState extends State<_AddBreakDialog> {
   }
 
   String _localTimeToUtc(TimeOfDay localTime) {
-    try {
-      final now = DateTime.now();
-      final location = tz.getLocation(widget.salonTimezone);
-      final localTZDateTime = tz.TZDateTime(
-        location,
-        now.year, now.month, now.day,
-        localTime.hour, localTime.minute,
-      );
-      final utcDateTime = localTZDateTime.toUtc();
-      return '${utcDateTime.hour.toString().padLeft(2, '0')}:${utcDateTime.minute.toString().padLeft(2, '0')}:00';
-    } catch (e) {
-      final offsetHours = TimezoneService.getUtcOffsetHours();
-      int utcHour = localTime.hour - offsetHours;
-      if (utcHour < 0) utcHour += 24;
-      if (utcHour >= 24) utcHour -= 24;
-      return '${utcHour.toString().padLeft(2, '0')}:${localTime.minute.toString().padLeft(2, '0')}:00';
-    }
+    return TimezoneService.timeOfDayToUtcWithTimezone(localTime, widget.salonTimezone);
   }
 
   @override
@@ -2836,54 +2670,16 @@ class _EditBreakDialogState extends State<_EditBreakDialog> {
     5: 'Friday', 6: 'Saturday', 7: 'Sunday',
   };
 
-  TimeOfDay _utcToLocalTimeOfDay(String utcTime) {
-    try {
-      final parts = utcTime.split(':');
-      final utcHour = int.parse(parts[0]);
-      final utcMinute = int.parse(parts[1]);
-      final now = DateTime.now();
-      final utcDateTime = DateTime.utc(now.year, now.month, now.day, utcHour, utcMinute);
-      final location = tz.getLocation(widget.salonTimezone);
-      final localDateTime = tz.TZDateTime.from(utcDateTime, location);
-      return TimeOfDay(hour: localDateTime.hour, minute: localDateTime.minute);
-    } catch (e) {
-      final parts = utcTime.split(':');
-      final utcHour = int.parse(parts[0]);
-      final utcMinute = int.parse(parts[1]);
-      final offsetHours = TimezoneService.getUtcOffsetHours();
-      int localHour = utcHour + offsetHours;
-      if (localHour >= 24) localHour -= 24;
-      if (localHour < 0) localHour += 24;
-      return TimeOfDay(hour: localHour, minute: utcMinute);
-    }
-  }
-
-  String _localTimeToUtc(TimeOfDay localTime) {
-    try {
-      final now = DateTime.now();
-      final location = tz.getLocation(widget.salonTimezone);
-      final localTZDateTime = tz.TZDateTime(
-        location,
-        now.year, now.month, now.day,
-        localTime.hour, localTime.minute,
-      );
-      final utcDateTime = localTZDateTime.toUtc();
-      return '${utcDateTime.hour.toString().padLeft(2, '0')}:${utcDateTime.minute.toString().padLeft(2, '0')}:00';
-    } catch (e) {
-      final offsetHours = TimezoneService.getUtcOffsetHours();
-      int utcHour = localTime.hour - offsetHours;
-      if (utcHour < 0) utcHour += 24;
-      if (utcHour >= 24) utcHour -= 24;
-      return '${utcHour.toString().padLeft(2, '0')}:${localTime.minute.toString().padLeft(2, '0')}:00';
-    }
-  }
-
   @override
   void initState() {
     super.initState();
-    _startTime = _utcToLocalTimeOfDay(widget.breakItem['start_time']);
-    _endTime = _utcToLocalTimeOfDay(widget.breakItem['end_time']);
+    _startTime = TimezoneService.utcToTimeOfDayWithTimezone(widget.breakItem['start_time'], widget.salonTimezone);
+    _endTime = TimezoneService.utcToTimeOfDayWithTimezone(widget.breakItem['end_time'], widget.salonTimezone);
     _selectedBreakType = widget.breakItem['break_type'] ?? 'lunch';
+  }
+
+  String _localTimeToUtc(TimeOfDay localTime) {
+    return TimezoneService.timeOfDayToUtcWithTimezone(localTime, widget.salonTimezone);
   }
 
   @override
@@ -3050,23 +2846,7 @@ class _AddScheduleDialogState extends State<_AddScheduleDialog> {
   }
 
   String _localTimeToUtc(TimeOfDay localTime) {
-    try {
-      final now = DateTime.now();
-      final location = tz.getLocation(widget.salonTimezone);
-      final localTZDateTime = tz.TZDateTime(
-        location,
-        now.year, now.month, now.day,
-        localTime.hour, localTime.minute,
-      );
-      final utcDateTime = localTZDateTime.toUtc();
-      return '${utcDateTime.hour.toString().padLeft(2, '0')}:${utcDateTime.minute.toString().padLeft(2, '0')}:00';
-    } catch (e) {
-      final offsetHours = TimezoneService.getUtcOffsetHours();
-      int utcHour = localTime.hour - offsetHours;
-      if (utcHour < 0) utcHour += 24;
-      if (utcHour >= 24) utcHour -= 24;
-      return '${utcHour.toString().padLeft(2, '0')}:${localTime.minute.toString().padLeft(2, '0')}:00';
-    }
+    return TimezoneService.timeOfDayToUtcWithTimezone(localTime, widget.salonTimezone);
   }
 
   @override
@@ -3262,54 +3042,16 @@ class _EditScheduleDialogState extends State<_EditScheduleDialog> {
   bool _isLoading = false;
   final supabase = Supabase.instance.client;
 
-  TimeOfDay _utcToLocalTimeOfDay(String utcTime) {
-    try {
-      final parts = utcTime.split(':');
-      final utcHour = int.parse(parts[0]);
-      final utcMinute = int.parse(parts[1]);
-      final now = DateTime.now();
-      final utcDateTime = DateTime.utc(now.year, now.month, now.day, utcHour, utcMinute);
-      final location = tz.getLocation(widget.salonTimezone);
-      final localDateTime = tz.TZDateTime.from(utcDateTime, location);
-      return TimeOfDay(hour: localDateTime.hour, minute: localDateTime.minute);
-    } catch (e) {
-      final parts = utcTime.split(':');
-      final utcHour = int.parse(parts[0]);
-      final utcMinute = int.parse(parts[1]);
-      final offsetHours = TimezoneService.getUtcOffsetHours();
-      int localHour = utcHour + offsetHours;
-      if (localHour >= 24) localHour -= 24;
-      if (localHour < 0) localHour += 24;
-      return TimeOfDay(hour: localHour, minute: utcMinute);
-    }
-  }
-
-  String _localTimeToUtc(TimeOfDay localTime) {
-    try {
-      final now = DateTime.now();
-      final location = tz.getLocation(widget.salonTimezone);
-      final localTZDateTime = tz.TZDateTime(
-        location,
-        now.year, now.month, now.day,
-        localTime.hour, localTime.minute,
-      );
-      final utcDateTime = localTZDateTime.toUtc();
-      return '${utcDateTime.hour.toString().padLeft(2, '0')}:${utcDateTime.minute.toString().padLeft(2, '0')}:00';
-    } catch (e) {
-      final offsetHours = TimezoneService.getUtcOffsetHours();
-      int utcHour = localTime.hour - offsetHours;
-      if (utcHour < 0) utcHour += 24;
-      if (utcHour >= 24) utcHour -= 24;
-      return '${utcHour.toString().padLeft(2, '0')}:${localTime.minute.toString().padLeft(2, '0')}:00';
-    }
-  }
-
   @override
   void initState() {
     super.initState();
-    _startTime = _utcToLocalTimeOfDay(widget.schedule['start_time']);
-    _endTime = _utcToLocalTimeOfDay(widget.schedule['end_time']);
+    _startTime = TimezoneService.utcToTimeOfDayWithTimezone(widget.schedule['start_time'], widget.salonTimezone);
+    _endTime = TimezoneService.utcToTimeOfDayWithTimezone(widget.schedule['end_time'], widget.salonTimezone);
     _isWorking = widget.schedule['is_working'] ?? true;
+  }
+
+  String _localTimeToUtc(TimeOfDay localTime) {
+    return TimezoneService.timeOfDayToUtcWithTimezone(localTime, widget.salonTimezone);
   }
 
   @override
@@ -3449,7 +3191,6 @@ class _TimePickerField extends StatefulWidget {
   final String label;
   final TimeOfDay? initialTime;
   final ValueChanged<TimeOfDay> onTimeSelected;
- 
 
   const _TimePickerField({
     required this.label,

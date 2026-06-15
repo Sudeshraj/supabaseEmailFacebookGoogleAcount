@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:flutter_native_timezone/flutter_native_timezone.dart';
@@ -12,7 +12,7 @@ class TimezoneService {
   static int _utcOffsetHours = 5;
   static int _utcOffsetMinutes = 30;
 
-  // ==================== COUNTRY TIMEZONES MAP (Original style - with more countries) ====================
+  // ==================== COUNTRY TIMEZONES MAP ====================
   static final Map<String, List<Map<String, String>>> countryTimezones = {
     'LK': [{'name': 'Sri Lanka', 'timezone': 'Asia/Colombo', 'offset': '+5:30', 'flag': '🇱🇰'}],
     'US': [
@@ -116,15 +116,13 @@ class TimezoneService {
     }
   }
 
-  // ==================== VALIDATION (Original map-based + fallback) ====================
+  // ==================== VALIDATION ====================
   static bool _isValidTimezone(String timezone) {
-    // First check in countryTimezones map
     for (var entry in countryTimezones.entries) {
       for (var tz in entry.value) {
         if (tz['timezone'] == timezone) return true;
       }
     }
-    // If not found, try package validation
     try {
       tz.getLocation(timezone);
       return true;
@@ -195,7 +193,7 @@ class TimezoneService {
     }
   }
 
-  // ==================== PUBLIC METHODS (Original functions) ====================
+  // ==================== PUBLIC GETTERS ====================
   
   static String getTimezoneFlag() {
     for (var entry in countryTimezones.entries) {
@@ -208,16 +206,48 @@ class TimezoneService {
     return '🌍';
   }
 
-  static String getCurrentFlag() {
-    return getTimezoneFlag();
+  static String getCurrentFlag() => getTimezoneFlag();
+  static String getCurrentTimezone() => _currentTimezone;
+  static String getCurrentCountryCode() => _currentCountryCode;
+  static String getCurrentCountryName() => _currentCountryName;
+  static int getUtcOffsetHours() => _utcOffsetHours;
+  static int getUtcOffsetMinutes() => _utcOffsetMinutes;
+  static String getTimezoneDisplayName() => _currentCountryName;
+  
+  static String getUtcOffsetString() {
+    final sign = _utcOffsetHours >= 0 ? '+' : '';
+    final hours = _utcOffsetHours.abs();
+    final minutes = _utcOffsetMinutes.abs();
+    return 'UTC$sign$hours:${minutes.toString().padLeft(2, '0')}';
+  }
+  
+  static String getFullTimezoneDisplay() {
+    return '${getTimezoneFlag()} ${getTimezoneDisplayName()} (${getUtcOffsetString()})';
   }
 
-  static String getFlagByCountryCode(String countryCode) {
-    final timezones = countryTimezones[countryCode];
-    if (timezones != null && timezones.isNotEmpty) {
-      return timezones.first['flag']!;
+  static Future<void> setTimezone(String timezone) async {
+    if (!_isValidTimezone(timezone)) {
+      debugPrint('❌ Invalid timezone: $timezone');
+      return;
     }
-    return '🌍';
+    
+    _currentTimezone = timezone;
+    await _applyTimezone(timezone);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('cached_timezone', timezone);
+    debugPrint('✏️ User changed timezone to: $timezone');
+  }
+
+  static Future<void> clearCachedTimezone() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('cached_timezone');
+    debugPrint('🗑️ Cached timezone cleared');
+  }
+
+  static Future<void> refreshTimezone() async {
+    await clearCachedTimezone();
+    await _loadTimezone();
+    debugPrint('🔄 Timezone refreshed');
   }
 
   static List<Map<String, String>> getTimezonesForCountry(String countryCode) {
@@ -242,51 +272,179 @@ class TimezoneService {
     return tz.timeZoneDatabase.locations.keys.toList();
   }
 
-  static Future<void> clearCachedTimezone() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('cached_timezone');
-    debugPrint('🗑️ Cached timezone cleared');
-  }
+  // ==================== DST-SAFE CONVERSIONS (WITH CURRENT TIMEZONE) ====================
+  
+  /// Convert UTC time to LOCAL DateTime using REFERENCE DATE (No DST issues)
+  /// Use this for: barber schedules, lunch breaks, recurring events
+  static DateTime utcToLocalDateTimeRecurring(String utcTime) {
+    try {
+      String timeStr = utcTime;
+      if (timeStr.length > 5) timeStr = timeStr.substring(0, 5);
+      final parts = timeStr.split(':');
+      int utcHour = int.parse(parts[0]);
+      int utcMinute = int.parse(parts[1]);
 
-  static Future<void> refreshTimezone() async {
-    await clearCachedTimezone();
-    await _loadTimezone();
-    debugPrint('🔄 Timezone refreshed');
-  }
-
-  static Future<void> setTimezone(String timezone) async {
-    if (!_isValidTimezone(timezone)) {
-      debugPrint('❌ Invalid timezone: $timezone');
-      return;
+      final referenceDate = DateTime(2024, 1, 1);
+      
+      final utcDateTime = DateTime.utc(
+        referenceDate.year,
+        referenceDate.month,
+        referenceDate.day,
+        utcHour,
+        utcMinute,
+      );
+      
+      final location = tz.getLocation(_currentTimezone);
+      final localDateTime = tz.TZDateTime.from(utcDateTime, location);
+      return localDateTime;
+    } catch (e) {
+      debugPrint('❌ Error in utcToLocalDateTimeRecurring: $e');
+      return DateTime(2024, 1, 1, 0, 0);
     }
-    
-    _currentTimezone = timezone;
-    await _applyTimezone(timezone);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('cached_timezone', timezone);
-    debugPrint('✏️ User changed timezone to: $timezone');
   }
 
-  static String getCurrentTimezone() => _currentTimezone;
-  static String getCurrentCountryCode() => _currentCountryCode;
-  static String getCurrentCountryName() => _currentCountryName;
-  static int getUtcOffsetHours() => _utcOffsetHours;
-  static int getUtcOffsetMinutes() => _utcOffsetMinutes;
-  static String getTimezoneDisplayName() => _currentCountryName;
-  
-  static String getUtcOffsetString() {
-    final sign = _utcOffsetHours >= 0 ? '+' : '';
-    final hours = _utcOffsetHours.abs();
-    final minutes = _utcOffsetMinutes.abs();
-    return 'UTC$sign$hours:${minutes.toString().padLeft(2, '0')}';
-  }
-  
-  static String getFullTimezoneDisplay() {
-    return '${getTimezoneFlag()} ${getTimezoneDisplayName()} (${getUtcOffsetString()})';
+  /// Convert UTC time to LOCAL time string (For recurring schedules)
+  static String utcToLocalTimeRecurring(String utcTime) {
+    try {
+      final localDateTime = utcToLocalDateTimeRecurring(utcTime);
+      final period = localDateTime.hour >= 12 ? 'PM' : 'AM';
+      final displayHour = localDateTime.hour % 12 == 0 ? 12 : localDateTime.hour % 12;
+      return '$displayHour:${localDateTime.minute.toString().padLeft(2, '0')} $period';
+    } catch (e) {
+      debugPrint('❌ Error in utcToLocalTimeRecurring: $e');
+      return utcTime;
+    }
   }
 
-  // ==================== UTC TO LOCAL ====================
-  static DateTime utcToLocalDateTime(String utcTime, DateTime selectedDate) {
+  /// Convert LOCAL time to UTC time using REFERENCE DATE (For recurring schedules)
+  static String localToUtcTimeRecurring(String localTime) {
+    try {
+      bool is12Hour = localTime.contains('AM') || localTime.contains('PM');
+      
+      int hour = 0, minute = 0;
+      if (is12Hour) {
+        final timeParts = localTime.split(' ');
+        final hourMinute = timeParts[0].split(':');
+        final period = timeParts[1];
+        hour = int.parse(hourMinute[0]);
+        minute = int.parse(hourMinute[1]);
+        if (period == 'PM' && hour != 12) hour += 12;
+        if (period == 'AM' && hour == 12) hour = 0;
+      } else {
+        final parts = localTime.split(':');
+        hour = int.parse(parts[0]);
+        minute = int.parse(parts[1]);
+      }
+      
+      final location = tz.getLocation(_currentTimezone);
+      
+      final referenceDate = DateTime(2024, 1, 1);
+      
+      final localDateTime = tz.TZDateTime(
+        location,
+        referenceDate.year,
+        referenceDate.month,
+        referenceDate.day,
+        hour,
+        minute,
+      );
+      
+      final utcDateTime = localDateTime.toUtc();
+      return '${utcDateTime.hour.toString().padLeft(2, '0')}:${utcDateTime.minute.toString().padLeft(2, '0')}:00';
+    } catch (e) {
+      debugPrint('❌ Error in localToUtcTimeRecurring: $e');
+      return localTime;
+    }
+  }
+
+  // ==================== DST-SAFE CONVERSIONS (WITH CUSTOM TIMEZONE) ====================
+  
+  /// Convert UTC time to LOCAL DateTime using REFERENCE DATE with custom timezone
+  static DateTime utcToLocalDateTimeRecurringWithTimezone(String utcTime, String timezone) {
+    try {
+      String timeStr = utcTime;
+      if (timeStr.length > 5) timeStr = timeStr.substring(0, 5);
+      final parts = timeStr.split(':');
+      int utcHour = int.parse(parts[0]);
+      int utcMinute = int.parse(parts[1]);
+
+      final referenceDate = DateTime(2024, 1, 1);
+      
+      final utcDateTime = DateTime.utc(
+        referenceDate.year,
+        referenceDate.month,
+        referenceDate.day,
+        utcHour,
+        utcMinute,
+      );
+      
+      final location = tz.getLocation(timezone);
+      final localDateTime = tz.TZDateTime.from(utcDateTime, location);
+      return localDateTime;
+    } catch (e) {
+      debugPrint('❌ Error in utcToLocalDateTimeRecurringWithTimezone: $e');
+      return DateTime(2024, 1, 1, 0, 0);
+    }
+  }
+
+  /// Convert UTC time to LOCAL time string (For recurring schedules) with custom timezone
+  static String utcToLocalTimeRecurringWithTimezone(String utcTime, String timezone) {
+    try {
+      final localDateTime = utcToLocalDateTimeRecurringWithTimezone(utcTime, timezone);
+      final period = localDateTime.hour >= 12 ? 'PM' : 'AM';
+      final displayHour = localDateTime.hour % 12 == 0 ? 12 : localDateTime.hour % 12;
+      return '$displayHour:${localDateTime.minute.toString().padLeft(2, '0')} $period';
+    } catch (e) {
+      debugPrint('❌ Error in utcToLocalTimeRecurringWithTimezone: $e');
+      return utcTime;
+    }
+  }
+
+  /// Convert LOCAL time to UTC time using REFERENCE DATE with custom timezone
+  static String localToUtcTimeRecurringWithTimezone(String localTime, String timezone) {
+    try {
+      bool is12Hour = localTime.contains('AM') || localTime.contains('PM');
+      
+      int hour = 0, minute = 0;
+      if (is12Hour) {
+        final timeParts = localTime.split(' ');
+        final hourMinute = timeParts[0].split(':');
+        final period = timeParts[1];
+        hour = int.parse(hourMinute[0]);
+        minute = int.parse(hourMinute[1]);
+        if (period == 'PM' && hour != 12) hour += 12;
+        if (period == 'AM' && hour == 12) hour = 0;
+      } else {
+        final parts = localTime.split(':');
+        hour = int.parse(parts[0]);
+        minute = int.parse(parts[1]);
+      }
+      
+      final location = tz.getLocation(timezone);
+      
+      final referenceDate = DateTime(2024, 1, 1);
+      
+      final localDateTime = tz.TZDateTime(
+        location,
+        referenceDate.year,
+        referenceDate.month,
+        referenceDate.day,
+        hour,
+        minute,
+      );
+      
+      final utcDateTime = localDateTime.toUtc();
+      return '${utcDateTime.hour.toString().padLeft(2, '0')}:${utcDateTime.minute.toString().padLeft(2, '0')}:00';
+    } catch (e) {
+      debugPrint('❌ Error in localToUtcTimeRecurringWithTimezone: $e');
+      return localTime;
+    }
+  }
+
+  // ==================== DST-SAFE CONVERSIONS FOR SPECIFIC DATES ====================
+  
+  /// Convert UTC time to LOCAL DateTime using SPECIFIC DATE (For appointments)
+  static DateTime utcToLocalDateTimeForDate(String utcTime, DateTime specificDate) {
     try {
       String timeStr = utcTime;
       if (timeStr.length > 5) timeStr = timeStr.substring(0, 5);
@@ -295,47 +453,37 @@ class TimezoneService {
       int utcMinute = int.parse(parts[1]);
 
       final utcDateTime = DateTime.utc(
-        selectedDate.year, selectedDate.month, selectedDate.day,
-        utcHour, utcMinute,
+        specificDate.year,
+        specificDate.month,
+        specificDate.day,
+        utcHour,
+        utcMinute,
       );
       
       final location = tz.getLocation(_currentTimezone);
       final localDateTime = tz.TZDateTime.from(utcDateTime, location);
       return localDateTime;
     } catch (e) {
-      debugPrint('❌ Error in utcToLocalDateTime: $e');
-      return selectedDate;
+      debugPrint('❌ Error in utcToLocalDateTimeForDate: $e');
+      return specificDate;
     }
   }
 
-  static String utcToLocalTime(String utcTime, DateTime date) {
+  /// Convert UTC time to LOCAL time string (For specific date appointments)
+  static String utcToLocalTimeForDate(String utcTime, DateTime date) {
     try {
-      final localDateTime = utcToLocalDateTime(utcTime, date);
+      final localDateTime = utcToLocalDateTimeForDate(utcTime, date);
       final period = localDateTime.hour >= 12 ? 'PM' : 'AM';
       final displayHour = localDateTime.hour % 12 == 0 ? 12 : localDateTime.hour % 12;
       return '$displayHour:${localDateTime.minute.toString().padLeft(2, '0')} $period';
     } catch (e) {
-      debugPrint('❌ Error in utcToLocalTime: $e');
+      debugPrint('❌ Error in utcToLocalTimeForDate: $e');
       return utcTime;
     }
   }
 
-  static Map<String, int> getLocalHourMinute(String utcTime, DateTime selectedDate) {
-    try {
-      final localDateTime = utcToLocalDateTime(utcTime, selectedDate);
-      return {
-        'hour': localDateTime.hour,
-        'minute': localDateTime.minute,
-        'dayOffset': localDateTime.day - selectedDate.day,
-      };
-    } catch (e) {
-      debugPrint('❌ Error in getLocalHourMinute: $e');
-      return {'hour': 0, 'minute': 0, 'dayOffset': 0};
-    }
-  }
-
-  // ==================== LOCAL TO UTC ====================
-  static String localToUtcTime(String localTime, DateTime selectedDate) {
+  /// Convert LOCAL time to UTC time using SPECIFIC DATE (For appointments)
+  static String localToUtcTimeForDate(String localTime, DateTime selectedDate) {
     try {
       bool is12Hour = localTime.contains('AM') || localTime.contains('PM');
       
@@ -357,15 +505,177 @@ class TimezoneService {
       final location = tz.getLocation(_currentTimezone);
       final localDateTime = tz.TZDateTime(
         location,
-        selectedDate.year, selectedDate.month, selectedDate.day,
-        hour, minute,
+        selectedDate.year,
+        selectedDate.month,
+        selectedDate.day,
+        hour,
+        minute,
       );
       
       final utcDateTime = localDateTime.toUtc();
       return '${utcDateTime.hour.toString().padLeft(2, '0')}:${utcDateTime.minute.toString().padLeft(2, '0')}:00';
     } catch (e) {
-      debugPrint('❌ Error in localToUtcTime: $e');
+      debugPrint('❌ Error in localToUtcTimeForDate: $e');
       return localTime;
     }
+  }
+
+  // ==================== DST-SAFE CONVERSIONS FOR SPECIFIC DATES WITH CUSTOM TIMEZONE ====================
+  
+  /// Convert UTC time to LOCAL DateTime using SPECIFIC DATE with custom timezone
+  static DateTime utcToLocalDateTimeForDateWithTimezone(String utcTime, DateTime specificDate, String timezone) {
+    try {
+      String timeStr = utcTime;
+      if (timeStr.length > 5) timeStr = timeStr.substring(0, 5);
+      final parts = timeStr.split(':');
+      int utcHour = int.parse(parts[0]);
+      int utcMinute = int.parse(parts[1]);
+
+      final utcDateTime = DateTime.utc(
+        specificDate.year,
+        specificDate.month,
+        specificDate.day,
+        utcHour,
+        utcMinute,
+      );
+      
+      final location = tz.getLocation(timezone);
+      final localDateTime = tz.TZDateTime.from(utcDateTime, location);
+      return localDateTime;
+    } catch (e) {
+      debugPrint('❌ Error in utcToLocalDateTimeForDateWithTimezone: $e');
+      return specificDate;
+    }
+  }
+
+  /// Convert UTC time to LOCAL time string with custom timezone
+  static String utcToLocalTimeForDateWithTimezone(String utcTime, DateTime date, String timezone) {
+    try {
+      final localDateTime = utcToLocalDateTimeForDateWithTimezone(utcTime, date, timezone);
+      final period = localDateTime.hour >= 12 ? 'PM' : 'AM';
+      final displayHour = localDateTime.hour % 12 == 0 ? 12 : localDateTime.hour % 12;
+      return '$displayHour:${localDateTime.minute.toString().padLeft(2, '0')} $period';
+    } catch (e) {
+      debugPrint('❌ Error in utcToLocalTimeForDateWithTimezone: $e');
+      return utcTime;
+    }
+  }
+
+  /// Convert LOCAL time to UTC time with custom timezone
+  static String localToUtcTimeForDateWithTimezone(String localTime, DateTime selectedDate, String timezone) {
+    try {
+      bool is12Hour = localTime.contains('AM') || localTime.contains('PM');
+      
+      int hour = 0, minute = 0;
+      if (is12Hour) {
+        final timeParts = localTime.split(' ');
+        final hourMinute = timeParts[0].split(':');
+        final period = timeParts[1];
+        hour = int.parse(hourMinute[0]);
+        minute = int.parse(hourMinute[1]);
+        if (period == 'PM' && hour != 12) hour += 12;
+        if (period == 'AM' && hour == 12) hour = 0;
+      } else {
+        final parts = localTime.split(':');
+        hour = int.parse(parts[0]);
+        minute = int.parse(parts[1]);
+      }
+      
+      final location = tz.getLocation(timezone);
+      final localDateTime = tz.TZDateTime(
+        location,
+        selectedDate.year,
+        selectedDate.month,
+        selectedDate.day,
+        hour,
+        minute,
+      );
+      
+      final utcDateTime = localDateTime.toUtc();
+      return '${utcDateTime.hour.toString().padLeft(2, '0')}:${utcDateTime.minute.toString().padLeft(2, '0')}:00';
+    } catch (e) {
+      debugPrint('❌ Error in localToUtcTimeForDateWithTimezone: $e');
+      return localTime;
+    }
+  }
+
+  // ==================== TIME CONVERSION FOR TimeOfDay ====================
+  
+  /// Convert TimeOfDay to UTC time string (using current timezone)
+  static String timeOfDayToUtc(TimeOfDay localTime) {
+    final timeString = '${localTime.hour.toString().padLeft(2, '0')}:${localTime.minute.toString().padLeft(2, '0')}';
+    return localToUtcTimeRecurring(timeString);
+  }
+
+  /// Convert TimeOfDay to UTC time string with custom timezone
+  static String timeOfDayToUtcWithTimezone(TimeOfDay localTime, String timezone) {
+    final timeString = '${localTime.hour.toString().padLeft(2, '0')}:${localTime.minute.toString().padLeft(2, '0')}';
+    return localToUtcTimeRecurringWithTimezone(timeString, timezone);
+  }
+
+  /// Convert UTC time string to TimeOfDay (using current timezone)
+  static TimeOfDay utcToTimeOfDay(String utcTime) {
+    final localDateTime = utcToLocalDateTimeRecurring(utcTime);
+    return TimeOfDay(hour: localDateTime.hour, minute: localDateTime.minute);
+  }
+
+  /// Convert UTC time string to TimeOfDay with custom timezone
+  static TimeOfDay utcToTimeOfDayWithTimezone(String utcTime, String timezone) {
+    final localDateTime = utcToLocalDateTimeRecurringWithTimezone(utcTime, timezone);
+    return TimeOfDay(hour: localDateTime.hour, minute: localDateTime.minute);
+  }
+
+  // ==================== GET LOCAL HOUR MINUTE ====================
+  
+  /// Get local hour/minute for recurring schedules
+  static Map<String, int> getLocalHourMinuteRecurring(String utcTime) {
+    try {
+      final localDateTime = utcToLocalDateTimeRecurring(utcTime);
+      return {
+        'hour': localDateTime.hour,
+        'minute': localDateTime.minute,
+        'dayOffset': 0,
+      };
+    } catch (e) {
+      debugPrint('❌ Error in getLocalHourMinuteRecurring: $e');
+      return {'hour': 0, 'minute': 0, 'dayOffset': 0};
+    }
+  }
+
+  /// Get local hour/minute for specific date
+  static Map<String, int> getLocalHourMinuteForDate(String utcTime, DateTime selectedDate) {
+    try {
+      final localDateTime = utcToLocalDateTimeForDate(utcTime, selectedDate);
+      return {
+        'hour': localDateTime.hour,
+        'minute': localDateTime.minute,
+        'dayOffset': localDateTime.day - selectedDate.day,
+      };
+    } catch (e) {
+      debugPrint('❌ Error in getLocalHourMinuteForDate: $e');
+      return {'hour': 0, 'minute': 0, 'dayOffset': 0};
+    }
+  }
+
+  // ==================== BACKWARD COMPATIBILITY (DEPRECATED METHODS) ====================
+  
+  @Deprecated('Use utcToLocalDateTimeRecurring() for recurring schedules or utcToLocalDateTimeForDate() for appointments')
+  static DateTime utcToLocalDateTime(String utcTime, DateTime selectedDate) {
+    return utcToLocalDateTimeForDate(utcTime, selectedDate);
+  }
+
+  @Deprecated('Use utcToLocalTimeRecurring() for recurring schedules or utcToLocalTimeForDate() for appointments')
+  static String utcToLocalTime(String utcTime, DateTime date) {
+    return utcToLocalTimeForDate(utcTime, date);
+  }
+
+  @Deprecated('Use getLocalHourMinuteRecurring() or getLocalHourMinuteForDate()')
+  static Map<String, int> getLocalHourMinute(String utcTime, DateTime selectedDate) {
+    return getLocalHourMinuteForDate(utcTime, selectedDate);
+  }
+
+  @Deprecated('Use localToUtcTimeRecurring() for recurring schedules or localToUtcTimeForDate() for appointments')
+  static String localToUtcTime(String localTime, DateTime selectedDate) {
+    return localToUtcTimeForDate(localTime, selectedDate);
   }
 }

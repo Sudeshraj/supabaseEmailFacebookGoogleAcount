@@ -8,7 +8,6 @@ import 'package:path/path.dart' as path;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:image_cropper/image_cropper.dart';
-import 'package:timezone/timezone.dart' as tz;
 import '../../services/timezone_service.dart';
 
 // ==================== ENHANCED TIME PICKER ====================
@@ -522,6 +521,16 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   final supabase = Supabase.instance.client;
   final picker = ImagePicker();
 
+  // ==================== DST-SAFE TIMEZONE CONVERSION USING TimezoneService ====================
+  
+  /// Get timezone display string using TimezoneService
+  String _getTimezoneDisplay() {
+    if (_salonTimezone.isEmpty) {
+      return 'Loading timezone...';
+    }
+    return TimezoneService.getFullTimezoneDisplay();
+  }
+
   @override
   void initState() {
     super.initState();
@@ -570,79 +579,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   }
 
   // ============================================
-  // CORRECT TIMEZONE CONVERSIONS
-  // ============================================
-
-  /// Convert UTC time string (from database) to LOCAL TimeOfDay for display
-  TimeOfDay _utcToLocalTime(String utcTimeStr, String salonTimezone) {
-    try {
-      final parts = utcTimeStr.split(':');
-      final utcHour = int.parse(parts[0]);
-      final utcMinute = int.parse(parts[1]);
-
-      final now = DateTime.now();
-      final utcDateTime = DateTime.utc(
-        now.year,
-        now.month,
-        now.day,
-        utcHour,
-        utcMinute,
-      );
-
-      // Use salon's timezone for conversion
-      final location = tz.getLocation(salonTimezone);
-      final localDateTime = tz.TZDateTime.from(utcDateTime, location);
-
-      return TimeOfDay(hour: localDateTime.hour, minute: localDateTime.minute);
-    } catch (e) {
-      debugPrint('Error converting UTC to local: $e');
-      // Fallback: simple conversion
-      final parts = utcTimeStr.split(':');
-      final utcHour = int.parse(parts[0]);
-      final utcMinute = int.parse(parts[1]);
-      final offsetHours = TimezoneService.getUtcOffsetHours();
-      int localHour = utcHour + offsetHours;
-      if (localHour >= 24) localHour -= 24;
-      if (localHour < 0) localHour += 24;
-      return TimeOfDay(hour: localHour, minute: utcMinute);
-    }
-  }
-
-  /// Convert LOCAL TimeOfDay to UTC time string for database
-  String _localTimeToUtc(TimeOfDay localTime, String salonTimezone) {
-    try {
-      final now = DateTime.now();
-      final location = tz.getLocation(salonTimezone);
-
-      final localTZDateTime = tz.TZDateTime(
-        location,
-        now.year,
-        now.month,
-        now.day,
-        localTime.hour,
-        localTime.minute,
-      );
-
-      final utcDateTime = localTZDateTime.toUtc();
-
-      return '${utcDateTime.hour.toString().padLeft(2, '0')}:${utcDateTime.minute.toString().padLeft(2, '0')}:00';
-    } catch (e) {
-      debugPrint('Error converting local to UTC: $e');
-      // Fallback: simple conversion
-      final offsetHours = TimezoneService.getUtcOffsetHours();
-      int utcHour = localTime.hour - offsetHours;
-      if (utcHour < 0) utcHour += 24;
-      if (utcHour >= 24) utcHour -= 24;
-      return '${utcHour.toString().padLeft(2, '0')}:${localTime.minute.toString().padLeft(2, '0')}:00';
-    }
-  }
-
-  /// Get timezone display string with flag
-  String _getTimezoneDisplay() {
-    return '${TimezoneService.getCurrentFlag()} ${TimezoneService.getTimezoneDisplayName()} (${TimezoneService.getUtcOffsetString()})';
-  }
-
-  // ============================================
   // LOAD ALL DATA
   // ============================================
 
@@ -658,7 +594,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       await _loadSalonData();
       await _loadSalonSelections();
     } catch (e) {
-      debugPrint('Error loading data: $e');
+      debugPrint('❌ Error loading data: $e');
       setState(() {
         _hasErrorLoadingData = true;
       });
@@ -710,7 +646,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         _hasErrorLoadingData = false;
       });
     } catch (e) {
-      debugPrint('Error loading global data: $e');
+      debugPrint('❌ Error loading global data: $e');
       rethrow;
     }
   }
@@ -733,27 +669,29 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       _currentCoverUrl = response['cover_url'];
 
       // ✅ IMPORTANT: Get salon's timezone from database
-      _salonTimezone =
-          response['timezone'] ?? TimezoneService.getCurrentTimezone();
+      _salonTimezone = response['timezone'] ?? TimezoneService.getCurrentTimezone();
 
-      // ✅ Load and convert times using salon's timezone
+      // ✅ Load and convert times using salon's timezone (DST-SAFE via TimezoneService)
       if (response['open_time'] != null) {
         _openTimeUtc = response['open_time'] as String;
-        _openTimeLocal = _utcToLocalTime(_openTimeUtc, _salonTimezone);
+        _openTimeLocal = TimezoneService.utcToTimeOfDayWithTimezone(_openTimeUtc, _salonTimezone);
       } else {
         _openTimeLocal = const TimeOfDay(hour: 9, minute: 0);
-        _openTimeUtc = _localTimeToUtc(_openTimeLocal!, _salonTimezone);
+        _openTimeUtc = TimezoneService.timeOfDayToUtcWithTimezone(_openTimeLocal!, _salonTimezone);
       }
 
       if (response['close_time'] != null) {
         _closeTimeUtc = response['close_time'] as String;
-        _closeTimeLocal = _utcToLocalTime(_closeTimeUtc, _salonTimezone);
+        _closeTimeLocal = TimezoneService.utcToTimeOfDayWithTimezone(_closeTimeUtc, _salonTimezone);
       } else {
         _closeTimeLocal = const TimeOfDay(hour: 18, minute: 0);
-        _closeTimeUtc = _localTimeToUtc(_closeTimeLocal!, _salonTimezone);
+        _closeTimeUtc = TimezoneService.timeOfDayToUtcWithTimezone(_closeTimeLocal!, _salonTimezone);
       }
+      
+     
+      
     } catch (e) {
-      debugPrint('Error loading salon: $e');
+      debugPrint('❌ Error loading salon: $e');
       rethrow;
     }
   }
@@ -825,7 +763,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         }
       });
     } catch (e) {
-      debugPrint('Error loading salon selections: $e');
+      debugPrint('❌ Error loading salon selections: $e');
     }
   }
 
@@ -1063,7 +1001,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         }
       }
     } catch (e) {
-      debugPrint('Error picking logo: $e');
+      debugPrint('❌ Error picking logo: $e');
       _showSnackBar('Error picking logo', Colors.red);
     }
   }
@@ -1108,7 +1046,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         }
       }
     } catch (e) {
-      debugPrint('Error: $e');
+      debugPrint('❌ Error: $e');
       _showSnackBar('Error taking photo', Colors.red);
     }
   }
@@ -1162,7 +1100,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         }
       }
     } catch (e) {
-      debugPrint('Error picking cover: $e');
+      debugPrint('❌ Error picking cover: $e');
       _showSnackBar('Error picking cover', Colors.red);
     }
   }
@@ -1207,7 +1145,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         }
       }
     } catch (e) {
-      debugPrint('Error: $e');
+      debugPrint('❌ Error: $e');
       _showSnackBar('Error taking photo', Colors.red);
     }
   }
@@ -1245,6 +1183,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       }
       return _currentLogoUrl;
     } catch (e) {
+      debugPrint('❌ Error uploading logo: $e');
       return _currentLogoUrl;
     } finally {
       if (mounted) setState(() => _isUploadingLogo = false);
@@ -1276,6 +1215,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       }
       return _currentCoverUrl;
     } catch (e) {
+      debugPrint('❌ Error uploading cover: $e');
       return _currentCoverUrl;
     } finally {
       if (mounted) setState(() => _isUploadingCover = false);
@@ -1335,9 +1275,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       final logoUrl = await _uploadLogo();
       final coverUrl = await _uploadCover();
 
-      // ✅ IMPORTANT: Convert local times to UTC using salon's timezone
-      final openTimeUtc = _localTimeToUtc(_openTimeLocal!, _salonTimezone);
-      final closeTimeUtc = _localTimeToUtc(_closeTimeLocal!, _salonTimezone);
+      // ✅ IMPORTANT: Convert local times to UTC using salon's timezone (DST-SAFE via TimezoneService)
+      final openTimeUtc = TimezoneService.timeOfDayToUtcWithTimezone(_openTimeLocal!, _salonTimezone);
+      final closeTimeUtc = TimezoneService.timeOfDayToUtcWithTimezone(_closeTimeLocal!, _salonTimezone);
+
 
       final updateData = {
         'name': _nameController.text.trim(),
@@ -1435,6 +1376,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       if (!mounted) return;
       Navigator.pop(context, true);
     } catch (e) {
+      debugPrint('❌ Error updating salon: $e');
       _showSnackBar('Error: $e', Colors.red);
     } finally {
       if (mounted) setState(() => _isSaving = false);
@@ -1546,7 +1488,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
           if (mounted) Navigator.pop(context, true);
         }
       } catch (e) {
-        debugPrint('Error deleting salon: $e');
+        debugPrint('❌ Error deleting salon: $e');
         if (mounted) _showSnackBar('Error deleting salon', Colors.red);
       } finally {
         if (mounted) setState(() => _isDeleting = false);
@@ -3030,7 +2972,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   }
 
   // ============================================
-  // BUSINESS HOURS CARD (UPDATED WITH UTC DISPLAY)
+  // BUSINESS HOURS CARD (UPDATED WITH UTC INFO)
   // ============================================
 
   Widget _buildBusinessHoursCard() {
@@ -3071,8 +3013,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                     onTimeSelected: (time) {
                       setState(() {
                         _openTimeLocal = time;
-                        // Update UTC when local changes
-                        _openTimeUtc = _localTimeToUtc(time, _salonTimezone);
+                        _openTimeUtc = TimezoneService.timeOfDayToUtcWithTimezone(time, _salonTimezone);
+                        debugPrint('✅ Open time updated: Local=${_openTimeLocal!.format(context)}, UTC=$_openTimeUtc');
                       });
                     },
                   ),
@@ -3086,8 +3028,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                     onTimeSelected: (time) {
                       setState(() {
                         _closeTimeLocal = time;
-                        // Update UTC when local changes
-                        _closeTimeUtc = _localTimeToUtc(time, _salonTimezone);
+                        _closeTimeUtc = TimezoneService.timeOfDayToUtcWithTimezone(time, _salonTimezone);
+                        debugPrint('✅ Close time updated: Local=${_closeTimeLocal!.format(context)}, UTC=$_closeTimeUtc');
                       });
                     },
                   ),
@@ -3095,6 +3037,26 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               ],
             ),
             const SizedBox(height: 12),
+            // Show UTC info for transparency
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.grey[100],
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.info_outline, size: 14, color: Colors.grey),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Times are stored in UTC. Your local time: ${_openTimeLocal?.format(context)} - ${_closeTimeLocal?.format(context)}',
+                      style: const TextStyle(fontSize: 10, color: Colors.grey),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),

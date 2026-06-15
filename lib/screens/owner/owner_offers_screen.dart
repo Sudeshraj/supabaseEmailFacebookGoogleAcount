@@ -73,14 +73,15 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
   }
   
   // ============================================
-  // TIMEZONE HELPER METHODS
+  // TIMEZONE HELPER METHODS (FIXED)
   // ============================================
   
   /// Convert UTC date string to local date for display
   DateTime _utcToLocalDate(String utcDateStr) {
     try {
       final utcDateTime = DateTime.parse(utcDateStr);
-      final localDateTime = TimezoneService.utcToLocalDateTime('12:00', utcDateTime);
+      // ✅ FIXED: Use utcToLocalDateTimeForDate instead of deprecated method
+      final localDateTime = TimezoneService.utcToLocalDateTimeForDate('12:00:00', utcDateTime);
       return DateTime(localDateTime.year, localDateTime.month, localDateTime.day);
     } catch (e) {
       debugPrint('Error converting UTC to local: $e');
@@ -637,12 +638,6 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
     if (remaining <= 3) return Colors.orange;
     return Colors.green;
   }
-  
-  // ============================================
-  // TIMEZONE INFO WIDGET (NEW)
-  // ============================================
-  
-
   
   @override
   Widget build(BuildContext context) {
