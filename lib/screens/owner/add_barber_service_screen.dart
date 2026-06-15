@@ -263,8 +263,7 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
       setState(() {
         _services = processedServices;
       });
-
-      debugPrint('✅ Loaded ${processedServices.length} services');
+    
     } catch (e) {
       debugPrint('❌ Error loading services: $e');
       if (mounted) {

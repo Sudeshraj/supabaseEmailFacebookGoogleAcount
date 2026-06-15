@@ -817,9 +817,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       }
 
       final affectedAppointments = await appointmentsQuery;
-
-      debugPrint('📋 Found ${affectedAppointments.length} appointments to handle');
-
+    
       if (!mounted) return;
       Navigator.pop(context);
 

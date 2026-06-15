@@ -69,9 +69,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
       _isTimezoneLoaded = true;
     });
     
-    debugPrint('✅ User timezone: $_userTimezone');
-    
-    await _loadSalonAndOffers();
+      await _loadSalonAndOffers();
   }
   
   // ============================================
@@ -394,10 +392,8 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
           offerId: offer['id'],
           salonName: _currentSalonName ?? 'Salon',
         );
-      }
-      
-      debugPrint('✅ Sent notifications to ${followers.length} followers');
-      
+      }      
+          
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

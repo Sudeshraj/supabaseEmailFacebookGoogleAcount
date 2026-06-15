@@ -45,7 +45,7 @@ class _EnhancedTimePickerState extends State<EnhancedTimePicker> {
     if (widget.initialTime != null) {
       final hour24 = widget.initialTime!.hour;
       final minute = widget.initialTime!.minute;
-      
+
       if (hour24 == 0) {
         _selectedHour = 12;
         _selectedPeriod = 'AM';
@@ -87,7 +87,7 @@ class _EnhancedTimePickerState extends State<EnhancedTimePicker> {
     } else {
       hour24 = _selectedHour == 12 ? 12 : _selectedHour + 12;
     }
-    
+
     final selectedTime = TimeOfDay(hour: hour24, minute: _selectedMinute);
     widget.onTimeSelected(selectedTime);
     Navigator.of(context).pop(selectedTime);
@@ -100,7 +100,7 @@ class _EnhancedTimePickerState extends State<EnhancedTimePicker> {
   @override
   Widget build(BuildContext context) {
     final isMobile = MediaQuery.of(context).size.width < 600;
-    
+
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
       child: Container(
@@ -109,9 +109,12 @@ class _EnhancedTimePickerState extends State<EnhancedTimePicker> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('Select Time', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const Text(
+              'Select Time',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 20),
-            
+
             Container(
               padding: const EdgeInsets.symmetric(vertical: 16),
               decoration: BoxDecoration(
@@ -123,33 +126,51 @@ class _EnhancedTimePickerState extends State<EnhancedTimePicker> {
                 children: [
                   Text(
                     _selectedHour.toString().padLeft(2, '0'),
-                    style: const TextStyle(fontSize: 48, fontWeight: FontWeight.bold, color: Color(0xFFFF6B8B)),
+                    style: const TextStyle(
+                      fontSize: 48,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFFFF6B8B),
+                    ),
                   ),
                   const Text(
                     ':',
-                    style: TextStyle(fontSize: 48, fontWeight: FontWeight.bold, color: Color(0xFFFF6B8B)),
+                    style: TextStyle(
+                      fontSize: 48,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFFFF6B8B),
+                    ),
                   ),
                   Text(
                     _selectedMinute.toString().padLeft(2, '0'),
-                    style: const TextStyle(fontSize: 48, fontWeight: FontWeight.bold, color: Color(0xFFFF6B8B)),
+                    style: const TextStyle(
+                      fontSize: 48,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFFFF6B8B),
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.grey[200],
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Text(
                       _selectedPeriod,
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                 ],
               ),
             ),
             const SizedBox(height: 20),
-            
+
             Row(
               children: [
                 _buildScrollPicker(
@@ -174,9 +195,9 @@ class _EnhancedTimePickerState extends State<EnhancedTimePicker> {
                 ),
               ],
             ),
-            
+
             const SizedBox(height: 24),
-            
+
             Row(
               children: [
                 Expanded(
@@ -203,7 +224,13 @@ class _EnhancedTimePickerState extends State<EnhancedTimePicker> {
                         borderRadius: BorderRadius.circular(12),
                       ),
                     ),
-                    child: const Text('OK', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    child: const Text(
+                      'OK',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                   ),
                 ),
               ],
@@ -255,8 +282,12 @@ class _EnhancedTimePickerState extends State<EnhancedTimePicker> {
                       item.toString(),
                       style: TextStyle(
                         fontSize: 20,
-                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                        color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[800],
+                        fontWeight: isSelected
+                            ? FontWeight.bold
+                            : FontWeight.normal,
+                        color: isSelected
+                            ? const Color(0xFFFF6B8B)
+                            : Colors.grey[800],
                       ),
                     ),
                   );
@@ -300,7 +331,9 @@ class _TimePickerFieldState extends State<TimePickerField> {
   }
 
   String _formatTimeForDisplay(TimeOfDay time) {
-    final hour = time.hour == 0 ? 12 : (time.hour > 12 ? time.hour - 12 : time.hour);
+    final hour = time.hour == 0
+        ? 12
+        : (time.hour > 12 ? time.hour - 12 : time.hour);
     final minute = time.minute.toString().padLeft(2, '0');
     final period = time.hour >= 12 ? 'PM' : 'AM';
     return '$hour:$minute $period';
@@ -314,7 +347,7 @@ class _TimePickerFieldState extends State<TimePickerField> {
         onTimeSelected: (time) {},
       ),
     );
-    
+
     if (result != null) {
       setState(() {
         _selectedTime = result;
@@ -351,7 +384,9 @@ class _TimePickerFieldState extends State<TimePickerField> {
                 Icon(
                   Icons.access_time,
                   size: 20,
-                  color: _selectedTime != null ? const Color(0xFFFF6B8B) : Colors.grey[400],
+                  color: _selectedTime != null
+                      ? const Color(0xFFFF6B8B)
+                      : Colors.grey[400],
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -362,7 +397,9 @@ class _TimePickerFieldState extends State<TimePickerField> {
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w500,
-                      color: _selectedTime != null ? Colors.black : Colors.grey[500],
+                      color: _selectedTime != null
+                          ? Colors.black
+                          : Colors.grey[500],
                     ),
                   ),
                 ),
@@ -413,29 +450,38 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   // AGE CATEGORY SECTION
   // ============================================
   final List<Map<String, dynamic>> _addedAgeCategories = [];
-  final TextEditingController _ageCategoryDisplayNameController = TextEditingController();
-  final TextEditingController _ageCategoryMinAgeController = TextEditingController();
-  final TextEditingController _ageCategoryMaxAgeController = TextEditingController();
+  final TextEditingController _ageCategoryDisplayNameController =
+      TextEditingController();
+  final TextEditingController _ageCategoryMinAgeController =
+      TextEditingController();
+  final TextEditingController _ageCategoryMaxAgeController =
+      TextEditingController();
   List<Map<String, dynamic>> _globalAgeCategories = [];
 
   // ============================================
   // SERVICE CATEGORY SECTION
   // ============================================
   final List<Map<String, dynamic>> _addedServiceCategories = [];
-  final TextEditingController _serviceCategoryDisplayNameController = TextEditingController();
-  final TextEditingController _serviceCategoryDescriptionController = TextEditingController();
+  final TextEditingController _serviceCategoryDisplayNameController =
+      TextEditingController();
+  final TextEditingController _serviceCategoryDescriptionController =
+      TextEditingController();
   String _selectedIcon = 'content_cut';
   Color _selectedColor = const Color(0xFFFF6B8B);
   List<Map<String, dynamic>> _globalCategories = [];
 
-  final List<Map<String, dynamic>> _iconList = [  
+  final List<Map<String, dynamic>> _iconList = [
     {'name': 'face', 'icon': Icons.face, 'label': 'Face'},
-    {'name': 'face_retouching_natural', 'icon': Icons.face_retouching_natural, 'label': 'Beard'},
+    {
+      'name': 'face_retouching_natural',
+      'icon': Icons.face_retouching_natural,
+      'label': 'Beard',
+    },
     {'name': 'spa', 'icon': Icons.spa, 'label': 'Spa'},
     {'name': 'handshake', 'icon': Icons.handshake, 'label': 'Nails'},
-    {'name': 'palette', 'icon': Icons.palette, 'label': 'Makeup'},   
+    {'name': 'palette', 'icon': Icons.palette, 'label': 'Makeup'},
     {'name': 'shower', 'icon': Icons.shower, 'label': 'Shower'},
-    {'name': 'masks', 'icon': Icons.masks, 'label': 'Masks'},   
+    {'name': 'masks', 'icon': Icons.masks, 'label': 'Masks'},
     {'name': 'spa_outlined', 'icon': Icons.spa_outlined, 'label': 'Wellness'},
   ];
 
@@ -456,15 +502,15 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   // ============================================
   String _userTimezone = '';
   String _salonTimezone = '';
-  
+
   // Business hours - UTC for database
   String _openTimeUtc = '';
   String _closeTimeUtc = '';
-  
+
   // Business hours - Local for display
   TimeOfDay? _openTimeLocal;
   TimeOfDay? _closeTimeLocal;
-  
+
   bool _isTimezoneLoaded = false;
   bool _isLoadingGlobalData = false;
   bool _hasErrorLoadingData = false;
@@ -502,15 +548,17 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   // ============================================
   // TIMEZONE INITIALIZATION
   // ============================================
-  
+
   Future<void> _initializeWithTimezone() async {
     await TimezoneService.initialize();
 
     final prefs = await SharedPreferences.getInstance();
-    
+
     // Get user's timezone
-    _userTimezone = prefs.getString('user_timezone') ?? TimezoneService.getCurrentTimezone();
-    
+    _userTimezone =
+        prefs.getString('user_timezone') ??
+        TimezoneService.getCurrentTimezone();
+
     // Ensure TimezoneService uses this timezone
     await TimezoneService.setTimezone(_userTimezone);
 
@@ -524,23 +572,27 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   // ============================================
   // CORRECT TIMEZONE CONVERSIONS
   // ============================================
-  
+
   /// Convert UTC time string (from database) to LOCAL TimeOfDay for display
   TimeOfDay _utcToLocalTime(String utcTimeStr, String salonTimezone) {
     try {
       final parts = utcTimeStr.split(':');
       final utcHour = int.parse(parts[0]);
       final utcMinute = int.parse(parts[1]);
-      
+
       final now = DateTime.now();
-      final utcDateTime = DateTime.utc(now.year, now.month, now.day, utcHour, utcMinute);
-      
+      final utcDateTime = DateTime.utc(
+        now.year,
+        now.month,
+        now.day,
+        utcHour,
+        utcMinute,
+      );
+
       // Use salon's timezone for conversion
       final location = tz.getLocation(salonTimezone);
       final localDateTime = tz.TZDateTime.from(utcDateTime, location);
-      
-      debugPrint('🔄 UTC to Local: $utcTimeStr UTC → ${localDateTime.hour}:${localDateTime.minute} ($salonTimezone)');
-      
+
       return TimeOfDay(hour: localDateTime.hour, minute: localDateTime.minute);
     } catch (e) {
       debugPrint('Error converting UTC to local: $e');
@@ -561,17 +613,18 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     try {
       final now = DateTime.now();
       final location = tz.getLocation(salonTimezone);
-      
+
       final localTZDateTime = tz.TZDateTime(
         location,
-        now.year, now.month, now.day,
-        localTime.hour, localTime.minute,
+        now.year,
+        now.month,
+        now.day,
+        localTime.hour,
+        localTime.minute,
       );
-      
+
       final utcDateTime = localTZDateTime.toUtc();
-      
-      debugPrint('🔄 Local to UTC: ${localTime.hour}:${localTime.minute} ($salonTimezone) → ${utcDateTime.hour}:${utcDateTime.minute} UTC');
-      
+
       return '${utcDateTime.hour.toString().padLeft(2, '0')}:${utcDateTime.minute.toString().padLeft(2, '0')}:00';
     } catch (e) {
       debugPrint('Error converting local to UTC: $e');
@@ -592,14 +645,14 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   // ============================================
   // LOAD ALL DATA
   // ============================================
-  
+
   Future<void> _loadAllData() async {
     setState(() {
       _isLoading = true;
       _isLoadingGlobalData = true;
       _hasErrorLoadingData = false;
     });
-    
+
     try {
       await _loadGlobalData();
       await _loadSalonData();
@@ -610,7 +663,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         _hasErrorLoadingData = true;
       });
       if (mounted) {
-        _showSnackBar('Error loading data. Please check your connection.', Colors.red);
+        _showSnackBar(
+          'Error loading data. Please check your connection.',
+          Colors.red,
+        );
       }
     } finally {
       if (mounted) {
@@ -630,29 +686,29 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
           .eq('is_active', true)
           .order('display_order')
           .timeout(const Duration(seconds: 15));
-          
+
       final ageCategories = await supabase
           .from('age_categories')
           .select('id, display_name, min_age, max_age, display_order')
           .eq('is_active', true)
           .order('display_order')
           .timeout(const Duration(seconds: 15));
-          
+
       final categories = await supabase
           .from('categories')
-          .select('id, display_name, description, icon_name, color, display_order')
+          .select(
+            'id, display_name, description, icon_name, color, display_order',
+          )
           .eq('is_active', true)
           .order('display_order')
           .timeout(const Duration(seconds: 15));
-          
+
       setState(() {
         _globalGenders = List<Map<String, dynamic>>.from(genders);
         _globalAgeCategories = List<Map<String, dynamic>>.from(ageCategories);
         _globalCategories = List<Map<String, dynamic>>.from(categories);
         _hasErrorLoadingData = false;
       });
-      
-      debugPrint('✅ Global data loaded');
     } catch (e) {
       debugPrint('Error loading global data: $e');
       rethrow;
@@ -675,9 +731,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
 
       _currentLogoUrl = response['logo_url'];
       _currentCoverUrl = response['cover_url'];
-      
+
       // ✅ IMPORTANT: Get salon's timezone from database
-      _salonTimezone = response['timezone'] ?? TimezoneService.getCurrentTimezone();
+      _salonTimezone =
+          response['timezone'] ?? TimezoneService.getCurrentTimezone();
 
       // ✅ Load and convert times using salon's timezone
       if (response['open_time'] != null) {
@@ -695,11 +752,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         _closeTimeLocal = const TimeOfDay(hour: 18, minute: 0);
         _closeTimeUtc = _localTimeToUtc(_closeTimeLocal!, _salonTimezone);
       }
-      
-      debugPrint('✅ Salon data loaded. Salon timezone: $_salonTimezone, User timezone: $_userTimezone');
-      debugPrint('✅ Open time: UTC=$_openTimeUtc, Local=${_openTimeLocal?.hour}:${_openTimeLocal?.minute}');
-      debugPrint('✅ Close time: UTC=$_closeTimeUtc, Local=${_closeTimeLocal?.hour}:${_closeTimeLocal?.minute}');
-      
     } catch (e) {
       debugPrint('Error loading salon: $e');
       rethrow;
@@ -772,8 +824,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
           });
         }
       });
-
-      debugPrint('✅ Selections loaded');
     } catch (e) {
       debugPrint('Error loading salon selections: $e');
     }
@@ -782,14 +832,16 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   // ============================================
   // VALIDATION FUNCTIONS
   // ============================================
-  
+
   void _validatePhone(String value) {
     setState(() {
       if (value.isEmpty) {
         _isPhoneValid = true;
       } else {
         final cleaned = value.replaceAll(RegExp(r'[^0-9]'), '');
-        if (cleaned.length >= 9 && cleaned.length <= 10 && cleaned.startsWith('0')) {
+        if (cleaned.length >= 9 &&
+            cleaned.length <= 10 &&
+            cleaned.startsWith('0')) {
           _isPhoneValid = true;
         } else {
           _isPhoneValid = false;
@@ -803,7 +855,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       if (value.isEmpty) {
         _isEmailValid = true;
       } else {
-        final emailRegex = RegExp(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$');
+        final emailRegex = RegExp(
+          r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
+        );
         _isEmailValid = emailRegex.hasMatch(value);
       }
     });
@@ -829,7 +883,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
 
       final minAge = int.tryParse(_ageCategoryMinAgeController.text.trim());
       final maxAge = int.tryParse(_ageCategoryMaxAgeController.text.trim());
-      
+
       if (minAge != null && maxAge != null) {
         _isAgeRangeValid = minAge <= maxAge;
       } else {
@@ -841,25 +895,27 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   // ============================================
   // AGE CATEGORY FUNCTIONS
   // ============================================
-  
+
   void _autoFillAgeCategory(Map<String, dynamic> selected) {
     setState(() {
-      _ageCategoryDisplayNameController.text = selected['display_name']?.toString() ?? '';
+      _ageCategoryDisplayNameController.text =
+          selected['display_name']?.toString() ?? '';
       _ageCategoryMinAgeController.text = (selected['min_age'] ?? 0).toString();
-      _ageCategoryMaxAgeController.text = (selected['max_age'] ?? 100).toString();
+      _ageCategoryMaxAgeController.text = (selected['max_age'] ?? 100)
+          .toString();
       _validateAgeFields();
     });
   }
 
   void _addAgeCategory() {
     _validateAgeFields();
-    
+
     final displayName = _ageCategoryDisplayNameController.text.trim();
     final minAgeStr = _ageCategoryMinAgeController.text.trim();
     final maxAgeStr = _ageCategoryMaxAgeController.text.trim();
     final minAge = int.tryParse(minAgeStr);
     final maxAge = int.tryParse(maxAgeStr);
-    
+
     if (displayName.isEmpty) {
       _showSnackBar('Age category display name is required', Colors.orange);
       return;
@@ -900,7 +956,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       _isMaxAgeValid = true;
       _isAgeRangeValid = true;
     });
-    _showSnackBar('Age category added', Colors.green);
   }
 
   void _removeAgeCategory(int index) {
@@ -913,13 +968,15 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   // ============================================
   // SERVICE CATEGORY FUNCTIONS
   // ============================================
-  
+
   void _autoFillServiceCategory(Map<String, dynamic> selected) {
     setState(() {
-      _serviceCategoryDisplayNameController.text = selected['display_name']?.toString() ?? '';
-      _serviceCategoryDescriptionController.text = selected['description']?.toString() ?? '';
+      _serviceCategoryDisplayNameController.text =
+          selected['display_name']?.toString() ?? '';
+      _serviceCategoryDescriptionController.text =
+          selected['description']?.toString() ?? '';
       _selectedIcon = selected['icon_name']?.toString() ?? 'content_cut';
-      
+
       String colorStr = selected['color']?.toString() ?? '#FF6B8B';
       if (colorStr.startsWith('#')) {
         _selectedColor = Color(int.parse('0xFF${colorStr.substring(1)}'));
@@ -952,7 +1009,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       _serviceCategoryDisplayNameController.clear();
       _serviceCategoryDescriptionController.clear();
     });
-    _showSnackBar('Service category added', Colors.green);
   }
 
   void _removeServiceCategory(int index) {
@@ -965,7 +1021,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   // ============================================
   // IMAGE FUNCTIONS
   // ============================================
-  
+
   Future<void> _pickLogo() async {
     try {
       final XFile? pickedFile = await picker.pickImage(
@@ -974,7 +1030,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         maxHeight: 800,
         imageQuality: 85,
       );
-      
+
       if (pickedFile != null) {
         if (kIsWeb) {
           final bytes = await pickedFile.readAsBytes();
@@ -982,7 +1038,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             _logoWebBytes = bytes;
             _logoFile = null;
           });
-          _showSnackBar('Logo selected', Colors.green);
         } else {
           final croppedFile = await ImageCropper().cropImage(
             sourcePath: pickedFile.path,
@@ -995,19 +1050,15 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 initAspectRatio: CropAspectRatioPreset.square,
                 lockAspectRatio: true,
               ),
-              IOSUiSettings(
-                title: 'Crop Logo',
-                aspectRatioLockEnabled: true,
-              ),
+              IOSUiSettings(title: 'Crop Logo', aspectRatioLockEnabled: true),
             ],
           );
-          
+
           if (croppedFile != null) {
             setState(() {
               _logoFile = File(croppedFile.path);
               _logoWebBytes = null;
             });
-            _showSnackBar('Logo cropped', Colors.green);
           }
         }
       }
@@ -1025,7 +1076,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         maxHeight: 800,
         imageQuality: 85,
       );
-      
+
       if (pickedFile != null) {
         if (kIsWeb) {
           final bytes = await pickedFile.readAsBytes();
@@ -1033,7 +1084,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             _logoWebBytes = bytes;
             _logoFile = null;
           });
-          _showSnackBar('Logo captured', Colors.green);
         } else {
           final croppedFile = await ImageCropper().cropImage(
             sourcePath: pickedFile.path,
@@ -1045,19 +1095,15 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 toolbarWidgetColor: Colors.white,
                 lockAspectRatio: true,
               ),
-              IOSUiSettings(
-                title: 'Crop Logo',
-                aspectRatioLockEnabled: true,
-              ),
+              IOSUiSettings(title: 'Crop Logo', aspectRatioLockEnabled: true),
             ],
           );
-          
+
           if (croppedFile != null) {
             setState(() {
               _logoFile = File(croppedFile.path);
               _logoWebBytes = null;
             });
-            _showSnackBar('Logo captured and cropped', Colors.green);
           }
         }
       }
@@ -1073,7 +1119,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       _logoWebBytes = null;
       _currentLogoUrl = null;
     });
-    _showSnackBar('Logo removed', Colors.red);
   }
 
   Future<void> _pickCover() async {
@@ -1084,7 +1129,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         maxHeight: 1080,
         imageQuality: 85,
       );
-      
+
       if (pickedFile != null) {
         if (kIsWeb) {
           final bytes = await pickedFile.readAsBytes();
@@ -1092,7 +1137,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             _coverWebBytes = bytes;
             _coverFile = null;
           });
-          _showSnackBar('Cover selected', Colors.green);
         } else {
           final croppedFile = await ImageCropper().cropImage(
             sourcePath: pickedFile.path,
@@ -1105,19 +1149,15 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 initAspectRatio: CropAspectRatioPreset.ratio16x9,
                 lockAspectRatio: true,
               ),
-              IOSUiSettings(
-                title: 'Crop Cover',
-                aspectRatioLockEnabled: true,
-              ),
+              IOSUiSettings(title: 'Crop Cover', aspectRatioLockEnabled: true),
             ],
           );
-          
+
           if (croppedFile != null) {
             setState(() {
               _coverFile = File(croppedFile.path);
               _coverWebBytes = null;
             });
-            _showSnackBar('Cover cropped', Colors.green);
           }
         }
       }
@@ -1135,7 +1175,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         maxHeight: 1080,
         imageQuality: 85,
       );
-      
+
       if (pickedFile != null) {
         if (kIsWeb) {
           final bytes = await pickedFile.readAsBytes();
@@ -1143,7 +1183,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             _coverWebBytes = bytes;
             _coverFile = null;
           });
-          _showSnackBar('Cover captured', Colors.green);
         } else {
           final croppedFile = await ImageCropper().cropImage(
             sourcePath: pickedFile.path,
@@ -1155,19 +1194,15 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 toolbarWidgetColor: Colors.white,
                 lockAspectRatio: true,
               ),
-              IOSUiSettings(
-                title: 'Crop Cover',
-                aspectRatioLockEnabled: true,
-              ),
+              IOSUiSettings(title: 'Crop Cover', aspectRatioLockEnabled: true),
             ],
           );
-          
+
           if (croppedFile != null) {
             setState(() {
               _coverFile = File(croppedFile.path);
               _coverWebBytes = null;
             });
-            _showSnackBar('Cover captured and cropped', Colors.green);
           }
         }
       }
@@ -1183,7 +1218,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       _coverWebBytes = null;
       _currentCoverUrl = null;
     });
-    _showSnackBar('Cover removed', Colors.red);
   }
 
   Future<String?> _uploadLogo() async {
@@ -1196,13 +1230,17 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       if (kIsWeb && _logoWebBytes != null) {
         fileName = 'logo_${DateTime.now().millisecondsSinceEpoch}.png';
         final filePath = 'salons/$userId/$fileName';
-        await supabase.storage.from('salon-images').uploadBinary(filePath, _logoWebBytes!);
+        await supabase.storage
+            .from('salon-images')
+            .uploadBinary(filePath, _logoWebBytes!);
         return supabase.storage.from('salon-images').getPublicUrl(filePath);
       } else if (_logoFile != null) {
         final fileExt = path.extension(_logoFile!.path);
         fileName = 'logo_${DateTime.now().millisecondsSinceEpoch}$fileExt';
         final filePath = 'salons/$userId/$fileName';
-        await supabase.storage.from('salon-images').upload(filePath, _logoFile!);
+        await supabase.storage
+            .from('salon-images')
+            .upload(filePath, _logoFile!);
         return supabase.storage.from('salon-images').getPublicUrl(filePath);
       }
       return _currentLogoUrl;
@@ -1223,13 +1261,17 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       if (kIsWeb && _coverWebBytes != null) {
         fileName = 'cover_${DateTime.now().millisecondsSinceEpoch}.png';
         final filePath = 'salons/$userId/$fileName';
-        await supabase.storage.from('salon-images').uploadBinary(filePath, _coverWebBytes!);
+        await supabase.storage
+            .from('salon-images')
+            .uploadBinary(filePath, _coverWebBytes!);
         return supabase.storage.from('salon-images').getPublicUrl(filePath);
       } else if (_coverFile != null) {
         final fileExt = path.extension(_coverFile!.path);
         fileName = 'cover_${DateTime.now().millisecondsSinceEpoch}$fileExt';
         final filePath = 'salons/$userId/$fileName';
-        await supabase.storage.from('salon-images').upload(filePath, _coverFile!);
+        await supabase.storage
+            .from('salon-images')
+            .upload(filePath, _coverFile!);
         return supabase.storage.from('salon-images').getPublicUrl(filePath);
       }
       return _currentCoverUrl;
@@ -1243,22 +1285,26 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   // ============================================
   // UPDATE SALON
   // ============================================
-  
+
   Future<void> _updateSalon() async {
     if (!_formKey.currentState!.validate()) return;
 
     final phone = _phoneController.text.trim();
     if (phone.isNotEmpty) {
       final cleaned = phone.replaceAll(RegExp(r'[^0-9]'), '');
-      if (cleaned.length < 9 || cleaned.length > 10 || !cleaned.startsWith('0')) {
+      if (cleaned.length < 9 ||
+          cleaned.length > 10 ||
+          !cleaned.startsWith('0')) {
         _showSnackBar('Please enter a valid phone number', Colors.orange);
         return;
       }
     }
-    
+
     final email = _emailController.text.trim();
     if (email.isNotEmpty) {
-      final emailRegex = RegExp(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$');
+      final emailRegex = RegExp(
+        r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
+      );
       if (!emailRegex.hasMatch(email)) {
         _showSnackBar('Please enter a valid email address', Colors.orange);
         return;
@@ -1295,10 +1341,18 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
 
       final updateData = {
         'name': _nameController.text.trim(),
-        'address': _addressController.text.trim().isEmpty ? null : _addressController.text.trim(),
-        'phone': _phoneController.text.trim().isEmpty ? null : _phoneController.text.trim(),
-        'email': _emailController.text.trim().isEmpty ? null : _emailController.text.trim(),
-        'description': _descriptionController.text.trim().isEmpty ? null : _descriptionController.text.trim(),
+        'address': _addressController.text.trim().isEmpty
+            ? null
+            : _addressController.text.trim(),
+        'phone': _phoneController.text.trim().isEmpty
+            ? null
+            : _phoneController.text.trim(),
+        'email': _emailController.text.trim().isEmpty
+            ? null
+            : _emailController.text.trim(),
+        'description': _descriptionController.text.trim().isEmpty
+            ? null
+            : _descriptionController.text.trim(),
         'logo_url': logoUrl,
         'cover_url': coverUrl,
         'open_time': openTimeUtc,
@@ -1309,12 +1363,15 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       await supabase.from('salons').update(updateData).eq('id', widget.salonId);
 
       // Update genders
-      await supabase.from('salon_genders').delete().eq('salon_id', widget.salonId);
-      
+      await supabase
+          .from('salon_genders')
+          .delete()
+          .eq('salon_id', widget.salonId);
+
       for (int i = 0; i < _selectedGenderIds.length; i++) {
         final genderId = _selectedGenderIds[i];
         final gender = _globalGenders.firstWhere((g) => g['id'] == genderId);
-        
+
         await supabase.from('salon_genders').insert({
           'salon_id': widget.salonId,
           'display_name': gender['display_name'],
@@ -1324,8 +1381,11 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       }
 
       // Update age categories
-      await supabase.from('salon_age_categories').delete().eq('salon_id', widget.salonId);
-      
+      await supabase
+          .from('salon_age_categories')
+          .delete()
+          .eq('salon_id', widget.salonId);
+
       for (var ageCat in _addedAgeCategories) {
         await supabase.from('salon_age_categories').insert({
           'salon_id': widget.salonId,
@@ -1338,8 +1398,11 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       }
 
       // Update service categories
-      await supabase.from('salon_categories').delete().eq('salon_id', widget.salonId);
-      
+      await supabase
+          .from('salon_categories')
+          .delete()
+          .eq('salon_id', widget.salonId);
+
       for (var serviceCat in _addedServiceCategories) {
         await supabase.from('salon_categories').insert({
           'salon_id': widget.salonId,
@@ -1357,7 +1420,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       await showCustomAlert(
         context: context,
         title: "✅ Salon Updated!",
-        message: "${_nameController.text.trim()} has been updated successfully.\n\n"
+        message:
+            "${_nameController.text.trim()} has been updated successfully.\n\n"
             "📍 Salon Timezone: ${_getTimezoneDisplay()}\n"
             "🕐 UTC Time: $openTimeUtc - $closeTimeUtc\n"
             "🕐 Local Time: ${_openTimeLocal!.format(context)} - ${_closeTimeLocal!.format(context)}\n\n"
@@ -1370,7 +1434,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
 
       if (!mounted) return;
       Navigator.pop(context, true);
-      
     } catch (e) {
       _showSnackBar('Error: $e', Colors.red);
     } finally {
@@ -1381,7 +1444,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   // ============================================
   // DELETE SALON
   // ============================================
-  
+
   Future<void> _deleteSalon() async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -1391,7 +1454,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
           children: [
             Icon(Icons.warning_amber_rounded, color: Colors.red, size: 28),
             SizedBox(width: 12),
-            Text('Delete Salon', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            Text(
+              'Delete Salon',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
           ],
         ),
         content: Column(
@@ -1412,18 +1478,35 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               child: const Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('⚠️ This will also delete:', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.red)),
+                  Text(
+                    '⚠️ This will also delete:',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.red,
+                    ),
+                  ),
                   SizedBox(height: 8),
                   Text('• All appointments', style: TextStyle(fontSize: 13)),
                   Text('• All services', style: TextStyle(fontSize: 13)),
                   Text('• All barbers', style: TextStyle(fontSize: 13)),
                   Text('• All reviews', style: TextStyle(fontSize: 13)),
-                  Text('• All service variants', style: TextStyle(fontSize: 13)),
+                  Text(
+                    '• All service variants',
+                    style: TextStyle(fontSize: 13),
+                  ),
                 ],
               ),
             ),
             const SizedBox(height: 16),
-            const Text('This action cannot be undone!', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: Colors.red)),
+            const Text(
+              'This action cannot be undone!',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+                color: Colors.red,
+              ),
+            ),
           ],
         ),
         actions: [
@@ -1438,7 +1521,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
             ),
-            child: const Text('Delete Permanently', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            child: const Text(
+              'Delete Permanently',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
           ),
         ],
       ),
@@ -1452,7 +1538,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('✅ Salon deleted successfully'), backgroundColor: Colors.green),
+            const SnackBar(
+              content: Text('✅ Salon deleted successfully'),
+              backgroundColor: Colors.green,
+            ),
           );
           if (mounted) Navigator.pop(context, true);
         }
@@ -1468,7 +1557,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   // ============================================
   // WIDGETS
   // ============================================
-  
+
   Widget _buildTimezoneInfoCard() {
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
@@ -1482,7 +1571,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               children: [
                 Text(
                   _getTimezoneDisplay(),
-                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
               ],
             ),
@@ -1501,7 +1593,12 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     );
   }
 
-  Widget _buildErrorCard(String title, IconData icon, Color color, VoidCallback onRetry) {
+  Widget _buildErrorCard(
+    String title,
+    IconData icon,
+    Color color,
+    VoidCallback onRetry,
+  ) {
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
       elevation: 2,
@@ -1521,13 +1618,22 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                   child: Icon(icon, color: color),
                 ),
                 const SizedBox(width: 12),
-                Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
                 const Spacer(),
                 const Icon(Icons.error_outline, color: Colors.red),
               ],
             ),
             const SizedBox(height: 12),
-            const Text('Failed to load data', style: TextStyle(color: Colors.red)),
+            const Text(
+              'Failed to load data',
+              style: TextStyle(color: Colors.red),
+            ),
             const SizedBox(height: 8),
             SizedBox(
               width: double.infinity,
@@ -1539,7 +1645,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                   backgroundColor: color,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 10),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                 ),
               ),
             ),
@@ -1567,9 +1675,16 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               child: Icon(icon, color: color),
             ),
             const SizedBox(width: 12),
-            Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            Text(
+              title,
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
             const Spacer(),
-            const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+            const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
           ],
         ),
       ),
@@ -1595,9 +1710,14 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
           labelText: label,
           hintText: hint,
           prefixIcon: Icon(icon, color: Colors.grey),
-          errorText: !isValid && controller.text.isNotEmpty ? 'Enter a valid number (0-150)' : null,
+          errorText: !isValid && controller.text.isNotEmpty
+              ? 'Enter a valid number (0-150)'
+              : null,
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: 10,
+          ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
             borderSide: const BorderSide(color: Color(0xFFFF6B8B), width: 2),
@@ -1627,7 +1747,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   }) {
     final screenWidth = MediaQuery.of(context).size.width;
     final isDesktop = screenWidth > 800;
-    
+
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
       elevation: 2,
@@ -1650,24 +1770,34 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 const SizedBox(width: 12),
                 Text(
                   title,
-                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 const Spacer(),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: color.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
                     '${addedItems.length} items',
-                    style: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.w500),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: color,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 16),
-            
+
             if (isDesktop)
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1686,7 +1816,11 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                         children: [
                           Row(
                             children: [
-                              const Icon(Icons.add_circle_outline, size: 20, color: Colors.green),
+                              const Icon(
+                                Icons.add_circle_outline,
+                                size: 20,
+                                color: Colors.green,
+                              ),
                               const SizedBox(width: 8),
                               Text(
                                 'Add New $title',
@@ -1710,7 +1844,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: color,
                                 foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(vertical: 10),
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 10,
+                                ),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(8),
                                 ),
@@ -1722,7 +1858,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                     ),
                   ),
                   const SizedBox(width: 16),
-                  
+
                   Expanded(
                     flex: 1,
                     child: Container(
@@ -1737,7 +1873,11 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                         children: [
                           Row(
                             children: [
-                              const Icon(Icons.list, size: 20, color: Colors.blue),
+                              const Icon(
+                                Icons.list,
+                                size: 20,
+                                color: Colors.blue,
+                              ),
                               const SizedBox(width: 8),
                               Text(
                                 'Added $title',
@@ -1761,7 +1901,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                                   ),
                                   child: const Text(
                                     'Clear All',
-                                    style: TextStyle(fontSize: 12, color: Colors.red),
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.red,
+                                    ),
                                   ),
                                 ),
                             ],
@@ -1777,15 +1920,25 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                               child: Center(
                                 child: Column(
                                   children: [
-                                    Icon(Icons.inbox, size: 40, color: Colors.grey[400]),
+                                    Icon(
+                                      Icons.inbox,
+                                      size: 40,
+                                      color: Colors.grey[400],
+                                    ),
                                     const SizedBox(height: 8),
                                     Text(
                                       'No $title added yet',
-                                      style: TextStyle(color: Colors.grey[500], fontSize: 12),
+                                      style: TextStyle(
+                                        color: Colors.grey[500],
+                                        fontSize: 12,
+                                      ),
                                     ),
                                     Text(
                                       'Use the form on the left to add',
-                                      style: TextStyle(color: Colors.grey[400], fontSize: 10),
+                                      style: TextStyle(
+                                        color: Colors.grey[400],
+                                        fontSize: 10,
+                                      ),
                                     ),
                                   ],
                                 ),
@@ -1796,23 +1949,36 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                               shrinkWrap: true,
                               physics: const NeverScrollableScrollPhysics(),
                               itemCount: addedItems.length,
-                              separatorBuilder: (context, index) => const Divider(height: 1),
+                              separatorBuilder: (context, index) =>
+                                  const Divider(height: 1),
                               itemBuilder: (context, index) {
                                 final item = addedItems[index];
                                 return ListTile(
                                   leading: CircleAvatar(
-                                    backgroundColor: color.withValues(alpha: 0.1),
+                                    backgroundColor: color.withValues(
+                                      alpha: 0.1,
+                                    ),
                                     child: Text(
                                       '${index + 1}',
-                                      style: TextStyle(fontSize: 12, color: color),
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: color,
+                                      ),
                                     ),
                                   ),
                                   title: Text(
                                     itemDisplayName(item),
-                                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w500,
+                                    ),
                                   ),
                                   trailing: IconButton(
-                                    icon: const Icon(Icons.delete_outline, size: 20, color: Colors.red),
+                                    icon: const Icon(
+                                      Icons.delete_outline,
+                                      size: 20,
+                                      color: Colors.red,
+                                    ),
                                     onPressed: () => onRemove(index),
                                   ),
                                   dense: true,
@@ -1841,11 +2007,19 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                       children: [
                         Row(
                           children: [
-                            const Icon(Icons.add_circle_outline, size: 20, color: Colors.green),
+                            const Icon(
+                              Icons.add_circle_outline,
+                              size: 20,
+                              color: Colors.green,
+                            ),
                             const SizedBox(width: 8),
                             Text(
                               'Add New $title',
-                              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: color),
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: color,
+                              ),
                             ),
                           ],
                         ),
@@ -1862,7 +2036,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                               backgroundColor: color,
                               foregroundColor: Colors.white,
                               padding: const EdgeInsets.symmetric(vertical: 10),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
                             ),
                           ),
                         ),
@@ -1870,7 +2046,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                     ),
                   ),
                   const SizedBox(height: 16),
-                  
+
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
@@ -1883,11 +2059,19 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                       children: [
                         Row(
                           children: [
-                            const Icon(Icons.list, size: 20, color: Colors.blue),
+                            const Icon(
+                              Icons.list,
+                              size: 20,
+                              color: Colors.blue,
+                            ),
                             const SizedBox(width: 8),
                             Text(
                               'Added $title',
-                              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: color),
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: color,
+                              ),
                             ),
                             const Spacer(),
                             if (addedItems.isNotEmpty)
@@ -1903,7 +2087,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                                 ),
                                 child: const Text(
                                   'Clear All',
-                                  style: TextStyle(fontSize: 12, color: Colors.red),
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.red,
+                                  ),
                                 ),
                               ),
                           ],
@@ -1919,10 +2106,26 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                             child: Center(
                               child: Column(
                                 children: [
-                                  Icon(Icons.inbox, size: 40, color: Colors.grey[400]),
+                                  Icon(
+                                    Icons.inbox,
+                                    size: 40,
+                                    color: Colors.grey[400],
+                                  ),
                                   const SizedBox(height: 8),
-                                  Text('No $title added yet', style: TextStyle(color: Colors.grey[500], fontSize: 12)),
-                                  Text('Tap + button to add', style: TextStyle(color: Colors.grey[400], fontSize: 10)),
+                                  Text(
+                                    'No $title added yet',
+                                    style: TextStyle(
+                                      color: Colors.grey[500],
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                  Text(
+                                    'Tap + button to add',
+                                    style: TextStyle(
+                                      color: Colors.grey[400],
+                                      fontSize: 10,
+                                    ),
+                                  ),
                                 ],
                               ),
                             ),
@@ -1932,17 +2135,34 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                             shrinkWrap: true,
                             physics: const NeverScrollableScrollPhysics(),
                             itemCount: addedItems.length,
-                            separatorBuilder: (context, index) => const Divider(height: 1),
+                            separatorBuilder: (context, index) =>
+                                const Divider(height: 1),
                             itemBuilder: (context, index) {
                               final item = addedItems[index];
                               return ListTile(
                                 leading: CircleAvatar(
                                   backgroundColor: color.withValues(alpha: 0.1),
-                                  child: Text('${index + 1}', style: TextStyle(fontSize: 12, color: color)),
+                                  child: Text(
+                                    '${index + 1}',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: color,
+                                    ),
+                                  ),
                                 ),
-                                title: Text(itemDisplayName(item), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+                                title: Text(
+                                  itemDisplayName(item),
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
                                 trailing: IconButton(
-                                  icon: const Icon(Icons.delete_outline, size: 20, color: Colors.red),
+                                  icon: const Icon(
+                                    Icons.delete_outline,
+                                    size: 20,
+                                    color: Colors.red,
+                                  ),
                                   onPressed: () => onRemove(index),
                                 ),
                                 dense: true,
@@ -1965,17 +2185,17 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     if (_isLoadingGlobalData) {
       return _buildLoadingCard('Genders', Icons.people, Colors.blue);
     }
-    
+
     if (_hasErrorLoadingData && _globalGenders.isEmpty) {
       return _buildErrorCard('Genders', Icons.people, Colors.blue, () {
         _loadAllData();
       });
     }
-    
+
     if (_globalGenders.isEmpty) {
       return const SizedBox.shrink();
     }
-    
+
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
       elevation: 2,
@@ -2004,7 +2224,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 if (_selectedGenderIds.isNotEmpty)
                   TextButton(
                     onPressed: () => setState(() => _selectedGenderIds.clear()),
-                    child: const Text('Clear All', style: TextStyle(color: Colors.red)),
+                    child: const Text(
+                      'Clear All',
+                      style: TextStyle(color: Colors.red),
+                    ),
                   ),
               ],
             ),
@@ -2021,7 +2244,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 final id = gender['id'] as int;
                 final isSelected = _selectedGenderIds.contains(id);
                 final displayName = gender['display_name'] as String;
-                
+
                 return FilterChip(
                   label: Text(displayName),
                   selected: isSelected,
@@ -2041,10 +2264,14 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                   checkmarkColor: Colors.blue,
                   labelStyle: TextStyle(
                     color: isSelected ? Colors.blue : Colors.grey[700],
-                    fontWeight: isSelected ? FontWeight.w500 : FontWeight.normal,
+                    fontWeight: isSelected
+                        ? FontWeight.w500
+                        : FontWeight.normal,
                   ),
                   shape: StadiumBorder(
-                    side: BorderSide(color: isSelected ? Colors.blue : Colors.grey[300]!),
+                    side: BorderSide(
+                      color: isSelected ? Colors.blue : Colors.grey[300]!,
+                    ),
                   ),
                 );
               }).toList(),
@@ -2053,14 +2280,21 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               Padding(
                 padding: const EdgeInsets.only(top: 12),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.blue.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
                     '${_selectedGenderIds.length} gender${_selectedGenderIds.length > 1 ? 's' : ''} selected',
-                    style: const TextStyle(fontSize: 12, color: Colors.blue, fontWeight: FontWeight.w500),
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Colors.blue,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                 ),
               ),
@@ -2072,22 +2306,32 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
 
   Widget _buildAgeCategorySection() {
     if (_isLoadingGlobalData) {
-      return _buildLoadingCard('Age Categories', Icons.calendar_today, Colors.green);
+      return _buildLoadingCard(
+        'Age Categories',
+        Icons.calendar_today,
+        Colors.green,
+      );
     }
-    
+
     if (_hasErrorLoadingData && _globalAgeCategories.isEmpty) {
-      return _buildErrorCard('Age Categories', Icons.calendar_today, Colors.green, () {
-        _loadAllData();
-      });
+      return _buildErrorCard(
+        'Age Categories',
+        Icons.calendar_today,
+        Colors.green,
+        () {
+          _loadAllData();
+        },
+      );
     }
-    
+
     return _buildSplitViewSection(
       title: 'Age Categories',
       icon: Icons.calendar_today,
       color: Colors.green,
       addedItems: _addedAgeCategories,
       onRemove: _removeAgeCategory,
-      itemDisplayName: (item) => '${item['display_name']} (${item['min_age']}-${item['max_age']})',
+      itemDisplayName: (item) =>
+          '${item['display_name']} (${item['min_age']}-${item['max_age']})',
       formFields: Column(
         children: [
           _buildSuggestionField(
@@ -2095,7 +2339,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             label: 'Display Name *',
             hint: 'e.g., Child, Teen, Adult, Senior',
             icon: Icons.visibility,
-            suggestions: _globalAgeCategories.map((a) => a['display_name'] as String).toList(),
+            suggestions: _globalAgeCategories
+                .map((a) => a['display_name'] as String)
+                .toList(),
             onSelected: (String value) {
               final selected = _globalAgeCategories.firstWhere(
                 (a) => a['display_name'] == value,
@@ -2156,13 +2402,18 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     if (_isLoadingGlobalData) {
       return _buildLoadingCard('Main Services', Icons.category, Colors.orange);
     }
-    
+
     if (_hasErrorLoadingData && _globalCategories.isEmpty) {
-      return _buildErrorCard('Main Services', Icons.category, Colors.orange, () {
-        _loadAllData();
-      });
+      return _buildErrorCard(
+        'Main Services',
+        Icons.category,
+        Colors.orange,
+        () {
+          _loadAllData();
+        },
+      );
     }
-    
+
     return _buildSplitViewSection(
       title: 'Main Services',
       icon: Icons.category,
@@ -2177,7 +2428,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             label: 'Service Name *',
             hint: 'e.g., Hair, Skin, Nails, Grooming',
             icon: Icons.category,
-            suggestions: _globalCategories.map((c) => c['display_name'] as String).toList(),
+            suggestions: _globalCategories
+                .map((c) => c['display_name'] as String)
+                .toList(),
             onSelected: (String value) {
               final selected = _globalCategories.firstWhere(
                 (c) => c['display_name'] == value,
@@ -2208,7 +2461,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('Icon', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+        const Text(
+          'Icon',
+          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+        ),
         const SizedBox(height: 8),
         SizedBox(
           height: 70,
@@ -2218,17 +2474,22 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             itemBuilder: (context, index) {
               final iconItem = _iconList[index];
               final isSelected = _selectedIcon == iconItem['name'];
-              
+
               return GestureDetector(
-                onTap: () => setState(() => _selectedIcon = iconItem['name'] as String),
+                onTap: () =>
+                    setState(() => _selectedIcon = iconItem['name'] as String),
                 child: Container(
                   width: 60,
                   margin: const EdgeInsets.only(right: 8),
                   decoration: BoxDecoration(
-                    color: isSelected ? const Color(0xFFFF6B8B).withValues(alpha: 0.1) : Colors.grey[100],
+                    color: isSelected
+                        ? const Color(0xFFFF6B8B).withValues(alpha: 0.1)
+                        : Colors.grey[100],
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
-                      color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[300]!,
+                      color: isSelected
+                          ? const Color(0xFFFF6B8B)
+                          : Colors.grey[300]!,
                       width: isSelected ? 1.5 : 1,
                     ),
                   ),
@@ -2238,14 +2499,18 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                       Icon(
                         iconItem['icon'] as IconData,
                         size: 24,
-                        color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[600],
+                        color: isSelected
+                            ? const Color(0xFFFF6B8B)
+                            : Colors.grey[600],
                       ),
                       const SizedBox(height: 4),
                       Text(
                         iconItem['label'] as String,
                         style: TextStyle(
                           fontSize: 9,
-                          color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[600],
+                          color: isSelected
+                              ? const Color(0xFFFF6B8B)
+                              : Colors.grey[600],
                         ),
                         textAlign: TextAlign.center,
                         maxLines: 1,
@@ -2264,15 +2529,24 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
 
   Widget _buildColorPicker() {
     final List<Color> colorOptions = [
-      const Color(0xFFFF6B8B), const Color(0xFF4CAF50), const Color(0xFF2196F3),
-      const Color(0xFFFF9800), const Color(0xFF9C27B0), const Color(0xFFF44336),
-      const Color(0xFF00BCD4), const Color(0xFF795548), const Color(0xFF607D8B),
+      const Color(0xFFFF6B8B),
+      const Color(0xFF4CAF50),
+      const Color(0xFF2196F3),
+      const Color(0xFFFF9800),
+      const Color(0xFF9C27B0),
+      const Color(0xFFF44336),
+      const Color(0xFF00BCD4),
+      const Color(0xFF795548),
+      const Color(0xFF607D8B),
     ];
-    
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('Color', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+        const Text(
+          'Color',
+          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+        ),
         const SizedBox(height: 8),
         Wrap(
           spacing: 8,
@@ -2287,10 +2561,23 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 decoration: BoxDecoration(
                   color: color,
                   shape: BoxShape.circle,
-                  border: isSelected ? Border.all(color: Colors.white, width: 2) : null,
-                  boxShadow: isSelected ? [BoxShadow(color: color.withValues(alpha: 0.5), blurRadius: 4)] : null,
+                  border: isSelected
+                      ? Border.all(color: Colors.white, width: 2)
+                      : null,
+                  boxShadow: isSelected
+                      ? [
+                          BoxShadow(
+                            color: color.withValues(alpha: 0.5),
+                            blurRadius: 4,
+                          ),
+                        ]
+                      : null,
                 ),
-                child: isSelected ? const Center(child: Icon(Icons.check, color: Colors.white, size: 14)) : null,
+                child: isSelected
+                    ? const Center(
+                        child: Icon(Icons.check, color: Colors.white, size: 14),
+                      )
+                    : null,
               ),
             );
           }).toList(),
@@ -2313,40 +2600,61 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       padding: const EdgeInsets.only(bottom: 8),
       child: Autocomplete<String>(
         optionsBuilder: (TextEditingValue textEditingValue) {
-          if (textEditingValue.text.isEmpty) return const Iterable<String>.empty();
-          return suggestions.where((option) =>
-              option.toLowerCase().contains(textEditingValue.text.toLowerCase()));
+          if (textEditingValue.text.isEmpty) {
+            return const Iterable<String>.empty();
+          }
+          return suggestions.where(
+            (option) => option.toLowerCase().contains(
+              textEditingValue.text.toLowerCase(),
+            ),
+          );
         },
         onSelected: (String selection) {
           onSelected(selection);
           controller.text = selection;
         },
-        fieldViewBuilder: (context, textController, focusNode, onFieldSubmitted) {
-          if (textController.text != controller.text) textController.text = controller.text;
-          controller.addListener(() {
-            if (textController.text != controller.text) textController.text = controller.text;
-          });
-          
-          return TextFormField(
-            controller: textController,
-            focusNode: focusNode,
-            keyboardType: keyboardType,
-            maxLines: maxLines,
-            decoration: InputDecoration(
-              labelText: label,
-              hintText: hint,
-              prefixIcon: Icon(icon, color: Colors.grey),
-              suffixIcon: const Icon(Icons.arrow_drop_down, color: Colors.grey),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-                borderSide: const BorderSide(color: Color(0xFFFF6B8B), width: 2),
-              ),
-            ),
-            onChanged: (value) => controller.text = value,
-          );
-        },
+        fieldViewBuilder:
+            (context, textController, focusNode, onFieldSubmitted) {
+              if (textController.text != controller.text) {
+                textController.text = controller.text;
+              }
+              controller.addListener(() {
+                if (textController.text != controller.text) {
+                  textController.text = controller.text;
+                }
+              });
+
+              return TextFormField(
+                controller: textController,
+                focusNode: focusNode,
+                keyboardType: keyboardType,
+                maxLines: maxLines,
+                decoration: InputDecoration(
+                  labelText: label,
+                  hintText: hint,
+                  prefixIcon: Icon(icon, color: Colors.grey),
+                  suffixIcon: const Icon(
+                    Icons.arrow_drop_down,
+                    color: Colors.grey,
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(
+                      color: Color(0xFFFF6B8B),
+                      width: 2,
+                    ),
+                  ),
+                ),
+                onChanged: (value) => controller.text = value,
+              );
+            },
       ),
     );
   }
@@ -2378,10 +2686,13 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
           errorText: isPhone && !_isPhoneValid && controller.text.isNotEmpty
               ? 'Enter valid phone number (e.g., 0771234567)'
               : isEmail && !_isEmailValid && controller.text.isNotEmpty
-                  ? 'Enter valid email address'
-                  : null,
+              ? 'Enter valid email address'
+              : null,
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: 10,
+          ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
             borderSide: const BorderSide(color: Color(0xFFFF6B8B), width: 2),
@@ -2402,11 +2713,11 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   // ============================================
   // IMAGE SECTION WIDGETS
   // ============================================
-  
+
   Widget _buildCoverSection() {
     final screenWidth = MediaQuery.of(context).size.width;
     final isDesktop = screenWidth > 800;
-    
+
     return Container(
       height: isDesktop ? 250 : 180,
       width: double.infinity,
@@ -2421,32 +2732,53 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               decoration: BoxDecoration(
                 color: Colors.grey[200],
                 borderRadius: BorderRadius.circular(16),
-                image: (_coverFile != null || _coverWebBytes != null || _currentCoverUrl != null)
-                    ? DecorationImage(image: _getCoverImageProvider(), fit: BoxFit.cover)
+                image:
+                    (_coverFile != null ||
+                        _coverWebBytes != null ||
+                        _currentCoverUrl != null)
+                    ? DecorationImage(
+                        image: _getCoverImageProvider(),
+                        fit: BoxFit.cover,
+                      )
                     : null,
               ),
-              child: (_coverFile == null && _coverWebBytes == null && _currentCoverUrl == null)
+              child:
+                  (_coverFile == null &&
+                      _coverWebBytes == null &&
+                      _currentCoverUrl == null)
                   ? Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.add_photo_alternate, size: isDesktop ? 48 : 36, color: Colors.grey[400]),
+                          Icon(
+                            Icons.add_photo_alternate,
+                            size: isDesktop ? 48 : 36,
+                            color: Colors.grey[400],
+                          ),
                           const SizedBox(height: 8),
-                          Text('Tap to add cover photo', style: TextStyle(color: Colors.grey[600])),
+                          Text(
+                            'Tap to add cover photo',
+                            style: TextStyle(color: Colors.grey[600]),
+                          ),
                         ],
                       ),
                     )
                   : null,
             ),
           ),
-          if (_coverFile != null || _coverWebBytes != null || _currentCoverUrl != null)
+          if (_coverFile != null ||
+              _coverWebBytes != null ||
+              _currentCoverUrl != null)
             Positioned(
               bottom: 12,
               right: 12,
               child: GestureDetector(
                 onTap: () => _showCoverSourceDialog(),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.black.withValues(alpha: 0.6),
                     borderRadius: BorderRadius.circular(20),
@@ -2456,7 +2788,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                     children: [
                       const Icon(Icons.edit, size: 14, color: Colors.white),
                       const SizedBox(width: 4),
-                      Text('Edit', style: TextStyle(color: Colors.white, fontSize: 12)),
+                      Text(
+                        'Edit',
+                        style: TextStyle(color: Colors.white, fontSize: 12),
+                      ),
                     ],
                   ),
                 ),
@@ -2481,7 +2816,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   Widget _buildLogoSeparate() {
     final screenWidth = MediaQuery.of(context).size.width;
     final isDesktop = screenWidth > 800;
-    
+
     return Container(
       margin: const EdgeInsets.only(left: 16, top: 0, bottom: 16),
       child: GestureDetector(
@@ -2493,34 +2828,71 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             color: Colors.white,
             shape: BoxShape.circle,
             boxShadow: [
-              BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 8, offset: const Offset(0, 2)),
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.2),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
             ],
-            image: (_logoFile != null || _logoWebBytes != null || _currentLogoUrl != null)
-                ? DecorationImage(image: _getLogoImageProvider(), fit: BoxFit.cover)
+            image:
+                (_logoFile != null ||
+                    _logoWebBytes != null ||
+                    _currentLogoUrl != null)
+                ? DecorationImage(
+                    image: _getLogoImageProvider(),
+                    fit: BoxFit.cover,
+                  )
                 : null,
           ),
-          child: (_logoFile == null && _logoWebBytes == null && _currentLogoUrl == null)
+          child:
+              (_logoFile == null &&
+                  _logoWebBytes == null &&
+                  _currentLogoUrl == null)
               ? Container(
-                  decoration: BoxDecoration(color: Colors.grey[300], shape: BoxShape.circle),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[300],
+                    shape: BoxShape.circle,
+                  ),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.add_a_photo, size: isDesktop ? 30 : 24, color: Colors.grey[600]),
+                      Icon(
+                        Icons.add_a_photo,
+                        size: isDesktop ? 30 : 24,
+                        color: Colors.grey[600],
+                      ),
                       SizedBox(height: isDesktop ? 4 : 2),
-                      Text('Add Logo', style: TextStyle(fontSize: isDesktop ? 10 : 8, color: Colors.grey[600])),
+                      Text(
+                        'Add Logo',
+                        style: TextStyle(
+                          fontSize: isDesktop ? 10 : 8,
+                          color: Colors.grey[600],
+                        ),
+                      ),
                     ],
                   ),
                 )
               : Stack(
                   children: [
-                    const CircleAvatar(backgroundColor: Colors.transparent, radius: 50),
+                    const CircleAvatar(
+                      backgroundColor: Colors.transparent,
+                      radius: 50,
+                    ),
                     Positioned(
                       bottom: 0,
                       right: 0,
                       child: Container(
                         padding: const EdgeInsets.all(4),
-                        decoration: BoxDecoration(color: const Color(0xFFFF6B8B), shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2)),
-                        child: const Icon(Icons.edit, size: 14, color: Colors.white),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFF6B8B),
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 2),
+                        ),
+                        child: const Icon(
+                          Icons.edit,
+                          size: 14,
+                          color: Colors.white,
+                        ),
                       ),
                     ),
                   ],
@@ -2544,28 +2916,53 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   void _showLogoSourceDialog() {
     showModalBottomSheet(
       context: context,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
       builder: (context) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Padding(padding: EdgeInsets.all(16), child: Text('Add Logo', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                'Add Logo',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+            ),
             const Divider(),
             ListTile(
-              leading: const Icon(Icons.photo_library, color: Color(0xFFFF6B8B)),
+              leading: const Icon(
+                Icons.photo_library,
+                color: Color(0xFFFF6B8B),
+              ),
               title: const Text('Choose from Gallery'),
-              onTap: () { Navigator.pop(context); _pickLogo(); },
+              onTap: () {
+                Navigator.pop(context);
+                _pickLogo();
+              },
             ),
             ListTile(
               leading: const Icon(Icons.camera_alt, color: Color(0xFFFF6B8B)),
               title: const Text('Take a Photo'),
-              onTap: () { Navigator.pop(context); _takeLogoPhoto(); },
+              onTap: () {
+                Navigator.pop(context);
+                _takeLogoPhoto();
+              },
             ),
-            if (_logoFile != null || _logoWebBytes != null || _currentLogoUrl != null)
+            if (_logoFile != null ||
+                _logoWebBytes != null ||
+                _currentLogoUrl != null)
               ListTile(
                 leading: const Icon(Icons.delete, color: Colors.red),
-                title: const Text('Remove Logo', style: TextStyle(color: Colors.red)),
-                onTap: () { Navigator.pop(context); _removeLogo(); },
+                title: const Text(
+                  'Remove Logo',
+                  style: TextStyle(color: Colors.red),
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  _removeLogo();
+                },
               ),
             const SizedBox(height: 12),
           ],
@@ -2577,28 +2974,53 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   void _showCoverSourceDialog() {
     showModalBottomSheet(
       context: context,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
       builder: (context) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Padding(padding: EdgeInsets.all(16), child: Text('Add Cover Photo', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                'Add Cover Photo',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+            ),
             const Divider(),
             ListTile(
-              leading: const Icon(Icons.photo_library, color: Color(0xFFFF6B8B)),
+              leading: const Icon(
+                Icons.photo_library,
+                color: Color(0xFFFF6B8B),
+              ),
               title: const Text('Choose from Gallery'),
-              onTap: () { Navigator.pop(context); _pickCover(); },
+              onTap: () {
+                Navigator.pop(context);
+                _pickCover();
+              },
             ),
             ListTile(
               leading: const Icon(Icons.camera_alt, color: Color(0xFFFF6B8B)),
               title: const Text('Take a Photo'),
-              onTap: () { Navigator.pop(context); _takeCoverPhoto(); },
+              onTap: () {
+                Navigator.pop(context);
+                _takeCoverPhoto();
+              },
             ),
-            if (_coverFile != null || _coverWebBytes != null || _currentCoverUrl != null)
+            if (_coverFile != null ||
+                _coverWebBytes != null ||
+                _currentCoverUrl != null)
               ListTile(
                 leading: const Icon(Icons.delete, color: Colors.red),
-                title: const Text('Remove Cover', style: TextStyle(color: Colors.red)),
-                onTap: () { Navigator.pop(context); _removeCover(); },
+                title: const Text(
+                  'Remove Cover',
+                  style: TextStyle(color: Colors.red),
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  _removeCover();
+                },
               ),
             const SizedBox(height: 12),
           ],
@@ -2610,7 +3032,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   // ============================================
   // BUSINESS HOURS CARD (UPDATED WITH UTC DISPLAY)
   // ============================================
-  
+
   Widget _buildBusinessHoursCard() {
     return Card(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -2632,7 +3054,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               ),
               child: Text(
                 _getTimezoneDisplay(),
-                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
               ),
             ),
             const SizedBox(height: 16),
@@ -2670,51 +3095,20 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               ],
             ),
             const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.grey[50],
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Column(
-                children: [
-                  Row(
-                    children: [
-                      Icon(Icons.info_outline, size: 16, color: Colors.grey[600]),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Times are saved in UTC and will be displayed in your local timezone',
-                          style: TextStyle(fontSize: 11, color: Colors.grey[600]),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      Icon(Icons.cloud_queue, size: 16, color: Colors.grey[600]),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'UTC Time (Database): $_openTimeUtc - $_closeTimeUtc',
-                          style: TextStyle(fontSize: 11, color: Colors.grey[500], fontFamily: 'monospace'),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
           ],
         ),
       ),
     );
   }
-  
+
   void _showSnackBar(String msg, Color color) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), backgroundColor: color, behavior: SnackBarBehavior.floating, duration: const Duration(seconds: 2)),
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: color,
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+      ),
     );
   }
 
@@ -2722,7 +3116,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
     final isDesktop = screenWidth > 800;
-    
+
     if (!_isTimezoneLoaded) {
       return Scaffold(
         appBar: AppBar(
@@ -2735,7 +3129,11 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              SizedBox(width: 40, height: 40, child: CircularProgressIndicator()),
+              SizedBox(
+                width: 40,
+                height: 40,
+                child: CircularProgressIndicator(),
+              ),
               SizedBox(height: 16),
               Text('Loading timezone...'),
             ],
@@ -2743,7 +3141,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         ),
       );
     }
-    
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Edit Salon'),
@@ -2760,12 +3158,16 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         ],
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: Color(0xFFFF6B8B)))
+          ? const Center(
+              child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+            )
           : Container(
               color: Colors.grey[50],
               child: Center(
                 child: Container(
-                  constraints: BoxConstraints(maxWidth: isDesktop ? 1200 : double.infinity),
+                  constraints: BoxConstraints(
+                    maxWidth: isDesktop ? 1200 : double.infinity,
+                  ),
                   child: SingleChildScrollView(
                     padding: EdgeInsets.all(isDesktop ? 32 : 16),
                     child: Form(
@@ -2775,96 +3177,191 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                           _buildCoverSection(),
                           Transform.translate(
                             offset: const Offset(16, -40),
-                            child: Align(alignment: Alignment.topLeft, child: _buildLogoSeparate()),
+                            child: Align(
+                              alignment: Alignment.topLeft,
+                              child: _buildLogoSeparate(),
+                            ),
                           ),
                           const SizedBox(height: 16),
-                          
+
                           _buildTimezoneInfoCard(),
                           const SizedBox(height: 16),
-                          
+
                           // Basic Info Card
                           Card(
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
                             child: Padding(
                               padding: const EdgeInsets.all(16),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const Text('Basic Information', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                                  const Text(
+                                    'Basic Information',
+                                    style: TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
                                   const SizedBox(height: 16),
-                                  _buildTextField(controller: _nameController, label: 'Salon Name *', hint: 'Enter salon name', icon: Icons.store),
+                                  _buildTextField(
+                                    controller: _nameController,
+                                    label: 'Salon Name *',
+                                    hint: 'Enter salon name',
+                                    icon: Icons.store,
+                                  ),
                                   const SizedBox(height: 12),
-                                  _buildTextField(controller: _addressController, label: 'Address', hint: 'Enter address', icon: Icons.location_on, maxLines: 2),
+                                  _buildTextField(
+                                    controller: _addressController,
+                                    label: 'Address',
+                                    hint: 'Enter address',
+                                    icon: Icons.location_on,
+                                    maxLines: 2,
+                                  ),
                                   const SizedBox(height: 12),
-                                  _buildTextField(controller: _descriptionController, label: 'Description', hint: 'Tell about your salon', icon: Icons.description, maxLines: 3),
+                                  _buildTextField(
+                                    controller: _descriptionController,
+                                    label: 'Description',
+                                    hint: 'Tell about your salon',
+                                    icon: Icons.description,
+                                    maxLines: 3,
+                                  ),
                                 ],
                               ),
                             ),
                           ),
                           const SizedBox(height: 16),
-                          
+
                           // Contact Info Card
                           Card(
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
                             child: Padding(
                               padding: const EdgeInsets.all(16),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const Text('Contact Information', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                                  const Text(
+                                    'Contact Information',
+                                    style: TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
                                   const SizedBox(height: 16),
-                                  _buildTextField(controller: _phoneController, label: 'Phone Number', hint: 'Enter phone number (e.g., 0771234567)', icon: Icons.phone, keyboardType: TextInputType.phone, isPhone: true),
+                                  _buildTextField(
+                                    controller: _phoneController,
+                                    label: 'Phone Number',
+                                    hint:
+                                        'Enter phone number (e.g., 0771234567)',
+                                    icon: Icons.phone,
+                                    keyboardType: TextInputType.phone,
+                                    isPhone: true,
+                                  ),
                                   const SizedBox(height: 12),
-                                  _buildTextField(controller: _emailController, label: 'Email Address', hint: 'Enter email address (e.g., salon@example.com)', icon: Icons.email, keyboardType: TextInputType.emailAddress, isEmail: true),
+                                  _buildTextField(
+                                    controller: _emailController,
+                                    label: 'Email Address',
+                                    hint:
+                                        'Enter email address (e.g., salon@example.com)',
+                                    icon: Icons.email,
+                                    keyboardType: TextInputType.emailAddress,
+                                    isEmail: true,
+                                  ),
                                   const SizedBox(height: 8),
-                                  Text('Phone and email are optional but recommended', style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+                                  Text(
+                                    'Phone and email are optional but recommended',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.grey[500],
+                                    ),
+                                  ),
                                 ],
                               ),
                             ),
                           ),
                           const SizedBox(height: 16),
-                          
+
                           _buildBusinessHoursCard(),
                           const SizedBox(height: 16),
-                          
+
                           _buildServiceCategorySection(),
                           _buildAgeCategorySection(),
                           _buildGenderSelection(),
-                          
+
                           const SizedBox(height: 24),
-                          
+
                           // Action Buttons
                           Row(
                             children: [
                               Expanded(
                                 child: OutlinedButton(
-                                  onPressed: _isSaving ? null : () => Navigator.pop(context),
+                                  onPressed: _isSaving
+                                      ? null
+                                      : () => Navigator.pop(context),
                                   style: OutlinedButton.styleFrom(
                                     foregroundColor: Colors.grey[700],
                                     side: BorderSide(color: Colors.grey[300]!),
-                                    padding: const EdgeInsets.symmetric(vertical: 14),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 14,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
                                   ),
-                                  child: const Text('Cancel', style: TextStyle(fontSize: 16)),
+                                  child: const Text(
+                                    'Cancel',
+                                    style: TextStyle(fontSize: 16),
+                                  ),
                                 ),
                               ),
                               const SizedBox(width: 16),
                               Expanded(
                                 child: ElevatedButton(
-                                  onPressed: (_isSaving || _isUploadingLogo || _isUploadingCover) ? null : _updateSalon,
+                                  onPressed:
+                                      (_isSaving ||
+                                          _isUploadingLogo ||
+                                          _isUploadingCover)
+                                      ? null
+                                      : _updateSalon,
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: const Color(0xFFFF6B8B),
                                     foregroundColor: Colors.white,
-                                    padding: const EdgeInsets.symmetric(vertical: 14),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 14,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
                                   ),
-                                  child: _isSaving || _isUploadingLogo || _isUploadingCover
-                                      ? const Row(mainAxisSize: MainAxisSize.min, children: [
-                                          SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)),
-                                          SizedBox(width: 8),
-                                          Text('Saving...'),
-                                        ])
-                                      : const Text('Save Changes', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                                  child:
+                                      _isSaving ||
+                                          _isUploadingLogo ||
+                                          _isUploadingCover
+                                      ? const Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            SizedBox(
+                                              height: 20,
+                                              width: 20,
+                                              child: CircularProgressIndicator(
+                                                color: Colors.white,
+                                                strokeWidth: 2,
+                                              ),
+                                            ),
+                                            SizedBox(width: 8),
+                                            Text('Saving...'),
+                                          ],
+                                        )
+                                      : const Text(
+                                          'Save Changes',
+                                          style: TextStyle(
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
                                 ),
                               ),
                             ],

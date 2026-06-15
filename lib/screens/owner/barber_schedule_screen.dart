@@ -180,11 +180,8 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
         if (closeTimeStr != null) {
           _salonCloseTimeUtc = closeTimeStr;
           _salonCloseTimeLocal = _utcToLocalTimeOfDay(closeTimeStr, _salonTimezone);
-        }
-        
-        debugPrint('✅ Salon timezone: $_salonTimezone');
-        debugPrint('✅ Open time: UTC=$_salonOpenTimeUtc, Local=${_salonOpenTimeLocal?.hour}:${_salonOpenTimeLocal?.minute}');
-        debugPrint('✅ Close time: UTC=$_salonCloseTimeUtc, Local=${_salonCloseTimeLocal?.hour}:${_salonCloseTimeLocal?.minute}');
+        }        
+      
       }
     } catch (e) {
       debugPrint('Error loading salon times: $e');
@@ -256,8 +253,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
       if (_barbers.isNotEmpty) {
         await _loadAllDataForBarbers(salonIdInt);
       }
-
-      debugPrint('Loaded ${_barbers.length} barbers');
+     
     } catch (e) {
       debugPrint('Error loading schedules: $e');
       if (mounted) {

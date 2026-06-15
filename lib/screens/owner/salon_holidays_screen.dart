@@ -21,7 +21,7 @@ class SalonHolidaysScreen extends StatefulWidget {
 
 class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
   final supabase = Supabase.instance.client;
-  
+
   List<Map<String, dynamic>> _holidays = [];
   bool _isLoading = true;
   bool _isDeleting = false;
@@ -48,10 +48,12 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
     await TimezoneService.initialize();
 
     final prefs = await SharedPreferences.getInstance();
-    
+
     // Get user's timezone
-    _userTimezone = prefs.getString('user_timezone') ?? TimezoneService.getCurrentTimezone();
-    
+    _userTimezone =
+        prefs.getString('user_timezone') ??
+        TimezoneService.getCurrentTimezone();
+
     // Load salon's timezone from database
     await _loadSalonTimezone();
 
@@ -69,10 +71,9 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
           .select('timezone')
           .eq('id', widget.salonId)
           .single();
-      
-      _salonTimezone = response['timezone'] ?? TimezoneService.getCurrentTimezone();
-      debugPrint('✅ Salon timezone: $_salonTimezone');
-      debugPrint('✅ User timezone: $_userTimezone');
+
+      _salonTimezone =
+          response['timezone'] ?? TimezoneService.getCurrentTimezone();
     } catch (e) {
       debugPrint('❌ Error loading salon timezone: $e');
       _salonTimezone = TimezoneService.getCurrentTimezone();
@@ -84,8 +85,15 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
     try {
       final utcDateTime = DateTime.parse(utcDateStr);
       // Use TimezoneService for accurate conversion to user's local timezone
-      final localDateTime = TimezoneService.utcToLocalDateTime('12:00', utcDateTime);
-      return DateTime(localDateTime.year, localDateTime.month, localDateTime.day);
+      final localDateTime = TimezoneService.utcToLocalDateTime(
+        '12:00',
+        utcDateTime,
+      );
+      return DateTime(
+        localDateTime.year,
+        localDateTime.month,
+        localDateTime.day,
+      );
     } catch (e) {
       debugPrint('❌ Error converting UTC to local: $e');
       // Fallback: simple conversion
@@ -93,7 +101,6 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
       return DateTime(utcDateTime.year, utcDateTime.month, utcDateTime.day);
     }
   }
-
 
   /// Format date for display
   String _formatDateForDisplay(String utcDateStr) {
@@ -125,24 +132,24 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
   }
 
   // ==================== LOAD HOLIDAYS ====================
-  
+
   Future<void> _loadHolidays() async {
     if (!_isTimezoneLoaded) return;
-    
+
     setState(() => _isLoading = true);
-    
+
     try {
       final response = await supabase
           .from('salon_holidays')
           .select()
           .eq('salon_id', widget.salonId)
           .order('holiday_date', ascending: false);
-      
+
       setState(() {
         _holidays = List<Map<String, dynamic>>.from(response);
         _isLoading = false;
       });
-      
+
       debugPrint('✅ Loaded ${_holidays.length} holidays');
     } catch (e) {
       debugPrint('❌ Error loading holidays: $e');
@@ -154,7 +161,7 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
   }
 
   // ==================== ADD HOLIDAY ====================
-  
+
   Future<void> _addHoliday() async {
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
@@ -172,7 +179,7 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
   }
 
   // ==================== EDIT HOLIDAY ====================
-  
+
   Future<void> _editHoliday(Map<String, dynamic> holiday) async {
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
@@ -191,29 +198,27 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
   }
 
   // ==================== DELETE SELECTED HOLIDAYS ====================
-  
+
   Future<void> _deleteSelectedHolidays() async {
     if (_selectedForDelete.isEmpty) return;
 
     final confirm = await showCustomAlert(
       context: context,
       title: "Delete Holidays",
-      message: "Are you sure you want to delete ${_selectedForDelete.length} selected holiday(s)?",
+      message:
+          "Are you sure you want to delete ${_selectedForDelete.length} selected holiday(s)?",
       isError: true,
       showCancelButton: true,
     );
 
     if (confirm == true) {
       setState(() => _isDeleting = true);
-      
+
       try {
         for (int id in _selectedForDelete) {
-          await supabase
-              .from('salon_holidays')
-              .delete()
-              .eq('id', id);
+          await supabase.from('salon_holidays').delete().eq('id', id);
         }
-        
+
         _loadHolidays();
         setState(() {
           _selectedForDelete.clear();
@@ -230,7 +235,7 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
   }
 
   // ==================== DELETE SINGLE HOLIDAY ====================
-  
+
   Future<void> _deleteHoliday(Map<String, dynamic> holiday) async {
     final confirm = await showCustomAlert(
       context: context,
@@ -242,11 +247,8 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
 
     if (confirm == true) {
       try {
-        await supabase
-            .from('salon_holidays')
-            .delete()
-            .eq('id', holiday['id']);
-        
+        await supabase.from('salon_holidays').delete().eq('id', holiday['id']);
+
         _loadHolidays();
         _showSnackBar('Holiday deleted successfully', Colors.green);
       } catch (e) {
@@ -256,7 +258,7 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
   }
 
   // ==================== SELECTION METHODS ====================
-  
+
   void _toggleSelectMode() {
     setState(() {
       _isSelectMode = !_isSelectMode;
@@ -296,7 +298,7 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
   }
 
   // ==================== UI BUILDERS ====================
-  
+
   @override
   Widget build(BuildContext context) {
     final isWeb = _isWeb;
@@ -313,7 +315,11 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              SizedBox(width: 40, height: 40, child: CircularProgressIndicator()),
+              SizedBox(
+                width: 40,
+                height: 40,
+                child: CircularProgressIndicator(),
+              ),
               SizedBox(height: 16),
               Text('Loading timezone...'),
             ],
@@ -370,12 +376,14 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
         ],
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: Color(0xFFFF6B8B)))
+          ? const Center(
+              child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+            )
           : _holidays.isEmpty
-              ? _buildEmptyState(isWeb)
-              : isWeb
-                  ? _buildWebView()
-                  : _buildMobileView(),
+          ? _buildEmptyState(isWeb)
+          : isWeb
+          ? _buildWebView()
+          : _buildMobileView(),
     );
   }
 
@@ -415,9 +423,13 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
     );
   }
 
-  Widget _buildWebView() { 
-    final upcomingCount = _holidays.where((h) => !_isPastHoliday(h['holiday_date'])).length;
-    final pastCount = _holidays.where((h) => _isPastHoliday(h['holiday_date'])).length;
+  Widget _buildWebView() {
+    final upcomingCount = _holidays
+        .where((h) => !_isPastHoliday(h['holiday_date']))
+        .length;
+    final pastCount = _holidays
+        .where((h) => _isPastHoliday(h['holiday_date']))
+        .length;
 
     return Column(
       children: [
@@ -461,13 +473,28 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
           ),
           child: Row(
             children: [
-              _buildStatCard('Total Holidays', _holidays.length.toString(), Icons.event, const Color(0xFFFF6B8B)),
-              _buildStatCard('Upcoming', upcomingCount.toString(), Icons.upcoming, Colors.green),
-              _buildStatCard('Past', pastCount.toString(), Icons.history, Colors.grey),
+              _buildStatCard(
+                'Total Holidays',
+                _holidays.length.toString(),
+                Icons.event,
+                const Color(0xFFFF6B8B),
+              ),
+              _buildStatCard(
+                'Upcoming',
+                upcomingCount.toString(),
+                Icons.upcoming,
+                Colors.green,
+              ),
+              _buildStatCard(
+                'Past',
+                pastCount.toString(),
+                Icons.history,
+                Colors.grey,
+              ),
             ],
           ),
         ),
-        
+
         // Table Header
         Container(
           margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -478,8 +505,7 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
           ),
           child: Row(
             children: [
-              if (_isSelectMode)
-                const SizedBox(width: 50),
+              if (_isSelectMode) const SizedBox(width: 50),
               Expanded(
                 flex: 2,
                 child: const Text(
@@ -520,7 +546,7 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
             ],
           ),
         ),
-        
+
         // Holidays List
         Expanded(
           child: ListView.builder(
@@ -530,16 +556,16 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
               final holiday = _holidays[index];
               final isSelected = _selectedForDelete.contains(holiday['id']);
               final isPast = _isPastHoliday(holiday['holiday_date']);
-              
+
               return Container(
                 margin: const EdgeInsets.only(bottom: 8),
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: isSelected 
+                  color: isSelected
                       ? Colors.red.withValues(alpha: 0.05)
                       : isPast
-                          ? Colors.grey.withValues(alpha: 0.05)
-                          : Colors.white,
+                      ? Colors.grey.withValues(alpha: 0.05)
+                      : Colors.white,
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(
                     color: isSelected ? Colors.red : Colors.grey[200]!,
@@ -563,7 +589,9 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
                         _formatDateForDisplay(holiday['holiday_date']),
                         style: TextStyle(
                           color: isPast ? Colors.grey[600] : Colors.black,
-                          decoration: isPast ? TextDecoration.lineThrough : null,
+                          decoration: isPast
+                              ? TextDecoration.lineThrough
+                              : null,
                         ),
                       ),
                     ),
@@ -593,8 +621,16 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
                       flex: 1,
                       child: Center(
                         child: holiday['is_recurring'] == true
-                            ? const Icon(Icons.repeat, color: Colors.orange, size: 20)
-                            : const Icon(Icons.event, color: Colors.grey, size: 20),
+                            ? const Icon(
+                                Icons.repeat,
+                                color: Colors.orange,
+                                size: 20,
+                              )
+                            : const Icon(
+                                Icons.event,
+                                color: Colors.grey,
+                                size: 20,
+                              ),
                       ),
                     ),
                     Expanded(
@@ -603,12 +639,20 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           IconButton(
-                            icon: const Icon(Icons.edit, color: Colors.blue, size: 20),
+                            icon: const Icon(
+                              Icons.edit,
+                              color: Colors.blue,
+                              size: 20,
+                            ),
                             onPressed: () => _editHoliday(holiday),
                             tooltip: 'Edit',
                           ),
                           IconButton(
-                            icon: const Icon(Icons.delete, color: Colors.red, size: 20),
+                            icon: const Icon(
+                              Icons.delete,
+                              color: Colors.red,
+                              size: 20,
+                            ),
                             onPressed: () => _deleteHoliday(holiday),
                             tooltip: 'Delete',
                           ),
@@ -626,10 +670,14 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
   }
 
   // ==================== MOBILE VIEW ====================
-  
+
   Widget _buildMobileView() {
-    final upcomingCount = _holidays.where((h) => !_isPastHoliday(h['holiday_date'])).length;
-    final pastCount = _holidays.where((h) => _isPastHoliday(h['holiday_date'])).length;
+    final upcomingCount = _holidays
+        .where((h) => !_isPastHoliday(h['holiday_date']))
+        .length;
+    final pastCount = _holidays
+        .where((h) => _isPastHoliday(h['holiday_date']))
+        .length;
 
     return Column(
       children: [
@@ -663,11 +711,26 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 12),
           child: Row(
             children: [
-              _buildMobileStatCard('Total', _holidays.length.toString(), Icons.event, const Color(0xFFFF6B8B)),
+              _buildMobileStatCard(
+                'Total',
+                _holidays.length.toString(),
+                Icons.event,
+                const Color(0xFFFF6B8B),
+              ),
               const SizedBox(width: 8),
-              _buildMobileStatCard('Upcoming', upcomingCount.toString(), Icons.upcoming, Colors.green),
+              _buildMobileStatCard(
+                'Upcoming',
+                upcomingCount.toString(),
+                Icons.upcoming,
+                Colors.green,
+              ),
               const SizedBox(width: 8),
-              _buildMobileStatCard('Past', pastCount.toString(), Icons.history, Colors.grey),
+              _buildMobileStatCard(
+                'Past',
+                pastCount.toString(),
+                Icons.history,
+                Colors.grey,
+              ),
             ],
           ),
         ),
@@ -683,7 +746,7 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
               final holiday = _holidays[index];
               final isPast = _isPastHoliday(holiday['holiday_date']);
               final isSelected = _selectedForDelete.contains(holiday['id']);
-              
+
               return Card(
                 margin: const EdgeInsets.only(bottom: 12),
                 shape: RoundedRectangleBorder(
@@ -694,13 +757,18 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     ListTile(
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
                       leading: CircleAvatar(
-                        backgroundColor: isPast 
-                            ? Colors.grey[300] 
+                        backgroundColor: isPast
+                            ? Colors.grey[300]
                             : const Color(0xFFFF6B8B).withValues(alpha: 0.1),
                         child: Icon(
-                          holiday['is_recurring'] == true ? Icons.repeat : Icons.event,
+                          holiday['is_recurring'] == true
+                              ? Icons.repeat
+                              : Icons.event,
                           color: isPast ? Colors.grey : const Color(0xFFFF6B8B),
                           size: 20,
                         ),
@@ -710,7 +778,9 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
                         style: TextStyle(
                           fontWeight: FontWeight.w600,
                           fontSize: 15,
-                          decoration: isPast ? TextDecoration.lineThrough : null,
+                          decoration: isPast
+                              ? TextDecoration.lineThrough
+                              : null,
                           color: isPast ? Colors.grey[600] : Colors.black,
                         ),
                         maxLines: 1,
@@ -724,16 +794,21 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
                             _formatDateForDisplay(holiday['holiday_date']),
                             style: TextStyle(
                               fontSize: 12,
-                              color: isPast ? Colors.grey[500] : Colors.grey[700],
+                              color: isPast
+                                  ? Colors.grey[500]
+                                  : Colors.grey[700],
                             ),
                           ),
-                          if (holiday['description'] != null && holiday['description'].toString().isNotEmpty) ...[
+                          if (holiday['description'] != null &&
+                              holiday['description'].toString().isNotEmpty) ...[
                             const SizedBox(height: 4),
                             Text(
                               holiday['description'],
                               style: TextStyle(
                                 fontSize: 11,
-                                color: isPast ? Colors.grey[500] : Colors.grey[600],
+                                color: isPast
+                                    ? Colors.grey[500]
+                                    : Colors.grey[600],
                               ),
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
@@ -745,14 +820,22 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           IconButton(
-                            icon: const Icon(Icons.edit, color: Colors.blue, size: 20),
+                            icon: const Icon(
+                              Icons.edit,
+                              color: Colors.blue,
+                              size: 20,
+                            ),
                             onPressed: () => _editHoliday(holiday),
                             padding: EdgeInsets.zero,
                             constraints: const BoxConstraints(),
                           ),
                           const SizedBox(width: 4),
                           IconButton(
-                            icon: const Icon(Icons.delete, color: Colors.red, size: 20),
+                            icon: const Icon(
+                              Icons.delete,
+                              color: Colors.red,
+                              size: 20,
+                            ),
                             onPressed: () => _deleteHoliday(holiday),
                             padding: EdgeInsets.zero,
                             constraints: const BoxConstraints(),
@@ -763,7 +846,10 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
                     // Selection mode checkbox at bottom
                     if (_isSelectMode)
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
                         decoration: BoxDecoration(
                           color: Colors.grey[50],
                           borderRadius: const BorderRadius.only(
@@ -777,7 +863,8 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
                               value: isSelected,
                               onChanged: (_) => _toggleSelection(holiday['id']),
                               activeColor: const Color(0xFFFF6B8B),
-                              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              materialTapTargetSize:
+                                  MaterialTapTargetSize.shrinkWrap,
                             ),
                             const Text(
                               'Select for deletion',
@@ -796,9 +883,14 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
     );
   }
 
-  Widget _buildStatCard(String title, String value, IconData icon, Color color) {
+  Widget _buildStatCard(
+    String title,
+    String value,
+    IconData icon,
+    Color color,
+  ) {
     final isWeb = _isWeb;
-    
+
     return Expanded(
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 8),
@@ -821,7 +913,10 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
             ),
             Text(
               title,
-              style: TextStyle(fontSize: isWeb ? 12 : 10, color: Colors.grey[600]),
+              style: TextStyle(
+                fontSize: isWeb ? 12 : 10,
+                color: Colors.grey[600],
+              ),
             ),
           ],
         ),
@@ -829,7 +924,12 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
     );
   }
 
-  Widget _buildMobileStatCard(String title, String value, IconData icon, Color color) {
+  Widget _buildMobileStatCard(
+    String title,
+    String value,
+    IconData icon,
+    Color color,
+  ) {
     return Expanded(
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 10),
@@ -881,7 +981,7 @@ class _AddEditHolidayDialog extends StatefulWidget {
 
 class _AddEditHolidayDialogState extends State<_AddEditHolidayDialog> {
   final supabase = Supabase.instance.client;
-  
+
   DateTime? _selectedLocalDate;
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _descriptionController = TextEditingController();
@@ -904,14 +1004,21 @@ class _AddEditHolidayDialogState extends State<_AddEditHolidayDialog> {
   }
 
   // ==================== CORRECT UTC/LOCAL CONVERSIONS ====================
-  
+
   /// Convert UTC date string to local date for display
   DateTime _utcToLocalDate(String utcDateStr) {
     try {
       final utcDateTime = DateTime.parse(utcDateStr);
       // Use TimezoneService for accurate conversion to user's local timezone
-      final localDateTime = TimezoneService.utcToLocalDateTime('12:00', utcDateTime);
-      return DateTime(localDateTime.year, localDateTime.month, localDateTime.day);
+      final localDateTime = TimezoneService.utcToLocalDateTime(
+        '12:00',
+        utcDateTime,
+      );
+      return DateTime(
+        localDateTime.year,
+        localDateTime.month,
+        localDateTime.day,
+      );
     } catch (e) {
       debugPrint('Error converting UTC to local: $e');
       final utcDateTime = DateTime.parse(utcDateStr);
@@ -941,8 +1048,10 @@ class _AddEditHolidayDialogState extends State<_AddEditHolidayDialog> {
     _nameController.text = holiday['name'] ?? '';
     _descriptionController.text = holiday['description'] ?? '';
     _isRecurring = holiday['is_recurring'] ?? false;
-    
-    debugPrint('📅 Loading holiday - UTC: ${holiday['holiday_date']} → Local: ${DateFormat('yyyy-MM-dd').format(_selectedLocalDate!)}');
+
+    debugPrint(
+      '📅 Loading holiday - UTC: ${holiday['holiday_date']} → Local: ${DateFormat('yyyy-MM-dd').format(_selectedLocalDate!)}',
+    );
   }
 
   @override
@@ -1002,12 +1111,19 @@ class _AddEditHolidayDialogState extends State<_AddEditHolidayDialog> {
                       ),
                       child: Row(
                         children: [
-                          const Icon(Icons.access_time, size: 16, color: Colors.blue),
+                          const Icon(
+                            Icons.access_time,
+                            size: 16,
+                            color: Colors.blue,
+                          ),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
                               'Your Timezone: ${TimezoneService.getTimezoneDisplayName()}',
-                              style: const TextStyle(fontSize: 11, color: Colors.blueGrey),
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: Colors.blueGrey,
+                              ),
                             ),
                           ),
                         ],
@@ -1058,7 +1174,10 @@ class _AddEditHolidayDialogState extends State<_AddEditHolidayDialog> {
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8),
                         ),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 12,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 16),
@@ -1099,7 +1218,9 @@ class _AddEditHolidayDialogState extends State<_AddEditHolidayDialog> {
                             Expanded(
                               child: Text(
                                 _selectedLocalDate != null
-                                    ? DateFormat('EEEE, MMM d, yyyy').format(_selectedLocalDate!)
+                                    ? DateFormat(
+                                        'EEEE, MMM d, yyyy',
+                                      ).format(_selectedLocalDate!)
                                     : 'Select date',
                                 style: TextStyle(
                                   color: _selectedLocalDate != null
@@ -1127,7 +1248,10 @@ class _AddEditHolidayDialogState extends State<_AddEditHolidayDialog> {
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8),
                         ),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 12,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 16),
@@ -1212,8 +1336,10 @@ class _AddEditHolidayDialogState extends State<_AddEditHolidayDialog> {
     try {
       // Convert local date to UTC for database storage
       final utcDateStr = _localDateToUtcDateString(_selectedLocalDate!);
-      
-      debugPrint('📅 Saving holiday - Local: ${DateFormat('yyyy-MM-dd').format(_selectedLocalDate!)} → UTC: $utcDateStr');
+
+      debugPrint(
+        '📅 Saving holiday - Local: ${DateFormat('yyyy-MM-dd').format(_selectedLocalDate!)} → UTC: $utcDateStr',
+      );
 
       final holidayData = {
         'salon_id': widget.salonId,

@@ -456,7 +456,11 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
 
   final List<Map<String, dynamic>> _iconList = [
     {'name': 'face', 'icon': Icons.face, 'label': 'Face'},
-    {'name': 'face_retouching_natural', 'icon': Icons.face_retouching_natural, 'label': 'Beard'},
+    {
+      'name': 'face_retouching_natural',
+      'icon': Icons.face_retouching_natural,
+      'label': 'Beard',
+    },
     {'name': 'spa', 'icon': Icons.spa, 'label': 'Spa'},
     {'name': 'handshake', 'icon': Icons.handshake, 'label': 'Nails'},
     {'name': 'palette', 'icon': Icons.palette, 'label': 'Makeup'},
@@ -477,11 +481,11 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
   // Business hours - Store in UTC for database
   String _openTimeUtc = '';
   String _closeTimeUtc = '';
-  
+
   // Business hours - Display in local time
   TimeOfDay _openTimeLocal = const TimeOfDay(hour: 9, minute: 0);
   TimeOfDay _closeTimeLocal = const TimeOfDay(hour: 18, minute: 0);
-  
+
   // Timezone management
   String _userTimezone = '';
   String _salonTimezone = '';
@@ -489,7 +493,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
   bool _isLoadingGlobalData = false;
   bool _hasErrorLoadingData = false;
   bool _isLoading = false;
-  
 
   final _formKey = GlobalKey<FormState>();
   bool get _isWeb => MediaQuery.of(context).size.width > 800;
@@ -503,18 +506,20 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     _ageCategoryMinAgeController.text = '0';
     _ageCategoryMaxAgeController.text = '100';
     _initializeWithTimezone();
-    
+
     // Listen to timezone changes (when user changes in settings)
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkTimezoneChanges();
     });
   }
-  
+
   // Check if timezone changed in settings
   Future<void> _checkTimezoneChanges() async {
     final prefs = await SharedPreferences.getInstance();
-    final currentTimezone = prefs.getString('user_timezone') ?? TimezoneService.getCurrentTimezone();
-    
+    final currentTimezone =
+        prefs.getString('user_timezone') ??
+        TimezoneService.getCurrentTimezone();
+
     if (_userTimezone.isNotEmpty && _userTimezone != currentTimezone) {
       // Timezone changed - reload display times
       setState(() {
@@ -523,7 +528,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
       });
     }
   }
-  
+
   // Refresh all displayed times when timezone changes
   void _refreshDisplayTimes() {
     // Convert UTC stored times back to new local timezone
@@ -537,12 +542,12 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
   Future<void> _initializeWithTimezone() async {
     // Initialize TimezoneService first
     await TimezoneService.initialize();
-    
+
     final prefs = await SharedPreferences.getInstance();
-    
+
     // Get user's device timezone (cached from previous or new)
     String cachedUserTimezone = prefs.getString('user_timezone') ?? '';
-    
+
     if (cachedUserTimezone.isEmpty) {
       // First time - get from device
       _userTimezone = TimezoneService.getCurrentTimezone();
@@ -552,104 +557,110 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
       // Ensure TimezoneService uses this timezone
       await TimezoneService.setTimezone(_userTimezone);
     }
-    
+
     // Salon timezone - same as user's current location
     _salonTimezone = _userTimezone;
-    
+
     // Initialize business hours
     _initializeBusinessHours();
-    
+
     setState(() {
       _isTimezoneLoaded = true;
     });
-    
+
     await _loadGlobalData();
   }
-  
+
   void _initializeBusinessHours() {
     // Set default times in LOCAL timezone (9:00 AM and 6:00 PM)
     const defaultOpenLocal = TimeOfDay(hour: 9, minute: 0);
     const defaultCloseLocal = TimeOfDay(hour: 18, minute: 0);
-    
+
     // Convert to UTC for database storage
     _openTimeUtc = _localTimeOfDayToUtcTimeString(defaultOpenLocal);
     _closeTimeUtc = _localTimeOfDayToUtcTimeString(defaultCloseLocal);
-    
+
     // Store local times for display
     _openTimeLocal = defaultOpenLocal;
     _closeTimeLocal = defaultCloseLocal;
   }
-  
+
   // ==================== TIMEZONE CONVERSION METHODS ====================
 
-/// Convert LOCAL TimeOfDay to UTC time string for database
-String _localTimeOfDayToUtcTimeString(TimeOfDay localTime) {
-  try {
-    // Get current date
-    final now = DateTime.now();
-    
-    // Create local DateTime using the salon's timezone
-    final location = tz.getLocation(_salonTimezone);
-    final localTZDateTime = tz.TZDateTime(
-      location,
-      now.year, now.month, now.day,
-      localTime.hour, localTime.minute,
-    );
-    
-    // Convert to UTC
-    final utcDateTime = localTZDateTime.toUtc();
-    
-    // Return time portion only
-    return '${utcDateTime.hour.toString().padLeft(2, '0')}:${utcDateTime.minute.toString().padLeft(2, '0')}:00';
-  } catch (e) {
-    debugPrint('Error converting local to UTC: $e');
-    // Fallback: simple conversion without timezone
-    final int offsetHours = TimezoneService.getUtcOffsetHours();
-    int utcHour = localTime.hour - offsetHours;
-    utcHour = ((utcHour % 24) + 24) % 24;
-    return '${utcHour.toString().padLeft(2, '0')}:${localTime.minute.toString().padLeft(2, '0')}:00';
-  }
-}
-
-/// Convert UTC time string (from database) to LOCAL TimeOfDay for display
-TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
-  try {
-    // Parse UTC time
-    final parts = utcTimeString.split(':');
-    final int utcHour = int.parse(parts[0]);
-    final int utcMinute = int.parse(parts[1]);
-    
-    // Get current date
-    final now = DateTime.now();
-    
-    // Create UTC DateTime
-    final utcDateTime = DateTime.utc(
-      now.year, now.month, now.day,
-      utcHour, utcMinute,
-    );
-    
-    // Convert to user's local timezone
-    final location = tz.getLocation(_userTimezone);
-    final localDateTime = tz.TZDateTime.from(utcDateTime, location);
-    
-    return TimeOfDay(hour: localDateTime.hour, minute: localDateTime.minute);
-  } catch (e) {
-    debugPrint('Error converting UTC to local: $e');
-    
-    // Fallback: simple conversion
+  /// Convert LOCAL TimeOfDay to UTC time string for database
+  String _localTimeOfDayToUtcTimeString(TimeOfDay localTime) {
     try {
+      // Get current date
+      final now = DateTime.now();
+
+      // Create local DateTime using the salon's timezone
+      final location = tz.getLocation(_salonTimezone);
+      final localTZDateTime = tz.TZDateTime(
+        location,
+        now.year,
+        now.month,
+        now.day,
+        localTime.hour,
+        localTime.minute,
+      );
+
+      // Convert to UTC
+      final utcDateTime = localTZDateTime.toUtc();
+
+      // Return time portion only
+      return '${utcDateTime.hour.toString().padLeft(2, '0')}:${utcDateTime.minute.toString().padLeft(2, '0')}:00';
+    } catch (e) {
+      debugPrint('Error converting local to UTC: $e');
+      // Fallback: simple conversion without timezone
+      final int offsetHours = TimezoneService.getUtcOffsetHours();
+      int utcHour = localTime.hour - offsetHours;
+      utcHour = ((utcHour % 24) + 24) % 24;
+      return '${utcHour.toString().padLeft(2, '0')}:${localTime.minute.toString().padLeft(2, '0')}:00';
+    }
+  }
+
+  /// Convert UTC time string (from database) to LOCAL TimeOfDay for display
+  TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
+    try {
+      // Parse UTC time
       final parts = utcTimeString.split(':');
       final int utcHour = int.parse(parts[0]);
       final int utcMinute = int.parse(parts[1]);
-      final offsetHours = TimezoneService.getUtcOffsetHours();
-      final localHour = ((utcHour + offsetHours) % 24 + 24) % 24;
-      return TimeOfDay(hour: localHour, minute: utcMinute);
-    } catch (fallbackError) {
-      return const TimeOfDay(hour: 9, minute: 0);
+
+      // Get current date
+      final now = DateTime.now();
+
+      // Create UTC DateTime
+      final utcDateTime = DateTime.utc(
+        now.year,
+        now.month,
+        now.day,
+        utcHour,
+        utcMinute,
+      );
+
+      // Convert to user's local timezone
+      final location = tz.getLocation(_userTimezone);
+      final localDateTime = tz.TZDateTime.from(utcDateTime, location);
+
+      return TimeOfDay(hour: localDateTime.hour, minute: localDateTime.minute);
+    } catch (e) {
+      debugPrint('Error converting UTC to local: $e');
+
+      // Fallback: simple conversion
+      try {
+        final parts = utcTimeString.split(':');
+        final int utcHour = int.parse(parts[0]);
+        final int utcMinute = int.parse(parts[1]);
+        final offsetHours = TimezoneService.getUtcOffsetHours();
+        final localHour = ((utcHour + offsetHours) % 24 + 24) % 24;
+        return TimeOfDay(hour: localHour, minute: utcMinute);
+      } catch (fallbackError) {
+        return const TimeOfDay(hour: 9, minute: 0);
+      }
     }
   }
-}
-  
+
   /// Get current timezone display string
   String _getTimezoneDisplay() {
     return '${TimezoneService.getCurrentFlag()} ${TimezoneService.getTimezoneDisplayName()} (${TimezoneService.getUtcOffsetString()})';
@@ -693,7 +704,9 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
 
       final categories = await supabase
           .from('categories')
-          .select('id, display_name, description, icon_name, color, display_order')
+          .select(
+            'id, display_name, description, icon_name, color, display_order',
+          )
           .eq('is_active', true)
           .order('display_order')
           .timeout(const Duration(seconds: 15));
@@ -709,7 +722,10 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
         _hasErrorLoadingData = true;
       });
       if (mounted) {
-        _showSnackBar('Failed to load data. Please check your internet connection.', Colors.red);
+        _showSnackBar(
+          'Failed to load data. Please check your internet connection.',
+          Colors.red,
+        );
       }
     } finally {
       if (mounted) {
@@ -727,7 +743,9 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
         _isPhoneValid = true;
       } else {
         final cleaned = value.replaceAll(RegExp(r'[^0-9]'), '');
-        if (cleaned.length >= 9 && cleaned.length <= 10 && cleaned.startsWith('0')) {
+        if (cleaned.length >= 9 &&
+            cleaned.length <= 10 &&
+            cleaned.startsWith('0')) {
           _isPhoneValid = true;
         } else {
           _isPhoneValid = false;
@@ -741,7 +759,9 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
       if (value.isEmpty) {
         _isEmailValid = true;
       } else {
-        final emailRegex = RegExp(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$');
+        final emailRegex = RegExp(
+          r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
+        );
         _isEmailValid = emailRegex.hasMatch(value);
       }
     });
@@ -767,7 +787,7 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
 
       final minAge = int.tryParse(_ageCategoryMinAgeController.text.trim());
       final maxAge = int.tryParse(_ageCategoryMaxAgeController.text.trim());
-      
+
       if (minAge != null && maxAge != null) {
         _isAgeRangeValid = minAge <= maxAge;
       } else {
@@ -779,16 +799,18 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
   // ==================== AGE CATEGORY ====================
   void _autoFillAgeCategory(Map<String, dynamic> selected) {
     setState(() {
-      _ageCategoryDisplayNameController.text = selected['display_name']?.toString() ?? '';
+      _ageCategoryDisplayNameController.text =
+          selected['display_name']?.toString() ?? '';
       _ageCategoryMinAgeController.text = (selected['min_age'] ?? 0).toString();
-      _ageCategoryMaxAgeController.text = (selected['max_age'] ?? 100).toString();
+      _ageCategoryMaxAgeController.text = (selected['max_age'] ?? 100)
+          .toString();
       _validateAgeFields();
     });
   }
 
   void _addAgeCategory() {
     _validateAgeFields();
-    
+
     final displayName = _ageCategoryDisplayNameController.text.trim();
     final minAgeStr = _ageCategoryMinAgeController.text.trim();
     final maxAgeStr = _ageCategoryMaxAgeController.text.trim();
@@ -799,27 +821,27 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
       _showSnackBar('Age category display name is required', Colors.orange);
       return;
     }
-    
+
     if (minAgeStr.isEmpty || maxAgeStr.isEmpty) {
       _showSnackBar('Both min age and max age are required', Colors.orange);
       return;
     }
-    
+
     if (minAge == null || maxAge == null) {
       _showSnackBar('Please enter valid numbers for age range', Colors.orange);
       return;
     }
-    
+
     if (minAge < 0 || minAge > 150 || maxAge < 0 || maxAge > 150) {
       _showSnackBar('Age must be between 0 and 150', Colors.orange);
       return;
     }
-    
+
     if (minAge > maxAge) {
       _showSnackBar('Min age cannot be greater than max age', Colors.orange);
       return;
     }
-    
+
     if (_addedAgeCategories.any((a) => a['display_name'] == displayName)) {
       _showSnackBar('This age category is already added', Colors.orange);
       return;
@@ -840,7 +862,6 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
       _isMaxAgeValid = true;
       _isAgeRangeValid = true;
     });
-    _showSnackBar('Age category added', Colors.green);
   }
 
   void _removeAgeCategory(int index) {
@@ -853,8 +874,10 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
   // ==================== SERVICE CATEGORY ====================
   void _autoFillServiceCategory(Map<String, dynamic> selected) {
     setState(() {
-      _serviceCategoryDisplayNameController.text = selected['display_name']?.toString() ?? '';
-      _serviceCategoryDescriptionController.text = selected['description']?.toString() ?? '';
+      _serviceCategoryDisplayNameController.text =
+          selected['display_name']?.toString() ?? '';
+      _serviceCategoryDescriptionController.text =
+          selected['description']?.toString() ?? '';
       _selectedIcon = selected['icon_name']?.toString() ?? 'content_cut';
 
       String colorStr = selected['color']?.toString() ?? '#FF6B8B';
@@ -903,13 +926,13 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
     if (_isLoadingGlobalData) {
       return _buildLoadingCard('Genders', Icons.people, Colors.blue);
     }
-    
+
     if (_hasErrorLoadingData && _globalGenders.isEmpty) {
       return _buildErrorCard('Genders', Icons.people, Colors.blue, () {
         _loadGlobalData();
       });
     }
-    
+
     if (_globalGenders.isEmpty) {
       return const SizedBox.shrink();
     }
@@ -942,7 +965,10 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
                 if (_selectedGenderIds.isNotEmpty)
                   TextButton(
                     onPressed: () => setState(() => _selectedGenderIds.clear()),
-                    child: const Text('Clear All', style: TextStyle(color: Colors.red)),
+                    child: const Text(
+                      'Clear All',
+                      style: TextStyle(color: Colors.red),
+                    ),
                   ),
               ],
             ),
@@ -979,10 +1005,14 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
                   checkmarkColor: Colors.blue,
                   labelStyle: TextStyle(
                     color: isSelected ? Colors.blue : Colors.grey[700],
-                    fontWeight: isSelected ? FontWeight.w500 : FontWeight.normal,
+                    fontWeight: isSelected
+                        ? FontWeight.w500
+                        : FontWeight.normal,
                   ),
                   shape: StadiumBorder(
-                    side: BorderSide(color: isSelected ? Colors.blue : Colors.grey[300]!),
+                    side: BorderSide(
+                      color: isSelected ? Colors.blue : Colors.grey[300]!,
+                    ),
                   ),
                 );
               }).toList(),
@@ -991,14 +1021,21 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
               Padding(
                 padding: const EdgeInsets.only(top: 12),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.blue.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
                     '${_selectedGenderIds.length} gender${_selectedGenderIds.length > 1 ? 's' : ''} selected',
-                    style: const TextStyle(fontSize: 12, color: Colors.blue, fontWeight: FontWeight.w500),
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Colors.blue,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                 ),
               ),
@@ -1008,7 +1045,12 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
     );
   }
 
-  Widget _buildErrorCard(String title, IconData icon, Color color, VoidCallback onRetry) {
+  Widget _buildErrorCard(
+    String title,
+    IconData icon,
+    Color color,
+    VoidCallback onRetry,
+  ) {
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
       elevation: 2,
@@ -1028,13 +1070,22 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
                   child: Icon(icon, color: color),
                 ),
                 const SizedBox(width: 12),
-                Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
                 const Spacer(),
                 const Icon(Icons.error_outline, color: Colors.red),
               ],
             ),
             const SizedBox(height: 12),
-            const Text('Failed to load data', style: TextStyle(color: Colors.red)),
+            const Text(
+              'Failed to load data',
+              style: TextStyle(color: Colors.red),
+            ),
             const SizedBox(height: 8),
             SizedBox(
               width: double.infinity,
@@ -1046,7 +1097,9 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
                   backgroundColor: color,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 10),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                 ),
               ),
             ),
@@ -1074,9 +1127,16 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
               child: Icon(icon, color: color),
             ),
             const SizedBox(width: 12),
-            Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            Text(
+              title,
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
             const Spacer(),
-            const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+            const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
           ],
         ),
       ),
@@ -1102,9 +1162,14 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
           labelText: label,
           hintText: hint,
           prefixIcon: Icon(icon, color: Colors.grey),
-          errorText: !isValid && controller.text.isNotEmpty ? 'Enter a valid number (0-150)' : null,
+          errorText: !isValid && controller.text.isNotEmpty
+              ? 'Enter a valid number (0-150)'
+              : null,
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: 10,
+          ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
             borderSide: const BorderSide(color: Color(0xFFFF6B8B), width: 2),
@@ -1155,15 +1220,31 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
                   child: Icon(icon, color: color),
                 ),
                 const SizedBox(width: 12),
-                Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
                 const Spacer(),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: color.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(20),
                   ),
-                  child: Text('${addedItems.length} items', style: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.w500)),
+                  child: Text(
+                    '${addedItems.length} items',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: color,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -1187,9 +1268,20 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
                         children: [
                           Row(
                             children: [
-                              const Icon(Icons.add_circle_outline, size: 20, color: Colors.green),
+                              const Icon(
+                                Icons.add_circle_outline,
+                                size: 20,
+                                color: Colors.green,
+                              ),
                               const SizedBox(width: 8),
-                              Text('Add New $title', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: color)),
+                              Text(
+                                'Add New $title',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: color,
+                                ),
+                              ),
                             ],
                           ),
                           const SizedBox(height: 12),
@@ -1204,8 +1296,12 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: color,
                                 foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(vertical: 10),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 10,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
                               ),
                             ),
                           ),
@@ -1228,15 +1324,36 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
                         children: [
                           Row(
                             children: [
-                              const Icon(Icons.list, size: 20, color: Colors.blue),
+                              const Icon(
+                                Icons.list,
+                                size: 20,
+                                color: Colors.blue,
+                              ),
                               const SizedBox(width: 8),
-                              Text('Added $title', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: color)),
+                              Text(
+                                'Added $title',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: color,
+                                ),
+                              ),
                               const Spacer(),
                               if (addedItems.isNotEmpty)
                                 TextButton(
-                                  onPressed: () => setState(() => addedItems.clear()),
-                                  style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: Size.zero),
-                                  child: const Text('Clear All', style: TextStyle(fontSize: 12, color: Colors.red)),
+                                  onPressed: () =>
+                                      setState(() => addedItems.clear()),
+                                  style: TextButton.styleFrom(
+                                    padding: EdgeInsets.zero,
+                                    minimumSize: Size.zero,
+                                  ),
+                                  child: const Text(
+                                    'Clear All',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.red,
+                                    ),
+                                  ),
                                 ),
                             ],
                           ),
@@ -1244,14 +1361,33 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
                           if (addedItems.isEmpty)
                             Container(
                               padding: const EdgeInsets.all(24),
-                              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8)),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
                               child: Center(
                                 child: Column(
                                   children: [
-                                    Icon(Icons.inbox, size: 40, color: Colors.grey[400]),
+                                    Icon(
+                                      Icons.inbox,
+                                      size: 40,
+                                      color: Colors.grey[400],
+                                    ),
                                     const SizedBox(height: 8),
-                                    Text('No $title added yet', style: TextStyle(color: Colors.grey[500], fontSize: 12)),
-                                    Text('Use the form on the left to add', style: TextStyle(color: Colors.grey[400], fontSize: 10)),
+                                    Text(
+                                      'No $title added yet',
+                                      style: TextStyle(
+                                        color: Colors.grey[500],
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                    Text(
+                                      'Use the form on the left to add',
+                                      style: TextStyle(
+                                        color: Colors.grey[400],
+                                        fontSize: 10,
+                                      ),
+                                    ),
                                   ],
                                 ),
                               ),
@@ -1261,17 +1397,36 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
                               shrinkWrap: true,
                               physics: const NeverScrollableScrollPhysics(),
                               itemCount: addedItems.length,
-                              separatorBuilder: (context, index) => const Divider(height: 1),
+                              separatorBuilder: (context, index) =>
+                                  const Divider(height: 1),
                               itemBuilder: (context, index) {
                                 final item = addedItems[index];
                                 return ListTile(
                                   leading: CircleAvatar(
-                                    backgroundColor: color.withValues(alpha: 0.1),
-                                    child: Text('${index + 1}', style: TextStyle(fontSize: 12, color: color)),
+                                    backgroundColor: color.withValues(
+                                      alpha: 0.1,
+                                    ),
+                                    child: Text(
+                                      '${index + 1}',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: color,
+                                      ),
+                                    ),
                                   ),
-                                  title: Text(itemDisplayName(item), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+                                  title: Text(
+                                    itemDisplayName(item),
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
                                   trailing: IconButton(
-                                    icon: const Icon(Icons.delete_outline, size: 20, color: Colors.red),
+                                    icon: const Icon(
+                                      Icons.delete_outline,
+                                      size: 20,
+                                      color: Colors.red,
+                                    ),
                                     onPressed: () => onRemove(index),
                                   ),
                                   dense: true,
@@ -1300,9 +1455,20 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
                       children: [
                         Row(
                           children: [
-                            const Icon(Icons.add_circle_outline, size: 20, color: Colors.green),
+                            const Icon(
+                              Icons.add_circle_outline,
+                              size: 20,
+                              color: Colors.green,
+                            ),
                             const SizedBox(width: 8),
-                            Text('Add New $title', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: color)),
+                            Text(
+                              'Add New $title',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: color,
+                              ),
+                            ),
                           ],
                         ),
                         const SizedBox(height: 12),
@@ -1318,7 +1484,9 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
                               backgroundColor: color,
                               foregroundColor: Colors.white,
                               padding: const EdgeInsets.symmetric(vertical: 10),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
                             ),
                           ),
                         ),
@@ -1338,15 +1506,36 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
                       children: [
                         Row(
                           children: [
-                            const Icon(Icons.list, size: 20, color: Colors.blue),
+                            const Icon(
+                              Icons.list,
+                              size: 20,
+                              color: Colors.blue,
+                            ),
                             const SizedBox(width: 8),
-                            Text('Added $title', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: color)),
+                            Text(
+                              'Added $title',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: color,
+                              ),
+                            ),
                             const Spacer(),
                             if (addedItems.isNotEmpty)
                               TextButton(
-                                onPressed: () => setState(() => addedItems.clear()),
-                                style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: Size.zero),
-                                child: const Text('Clear All', style: TextStyle(fontSize: 12, color: Colors.red)),
+                                onPressed: () =>
+                                    setState(() => addedItems.clear()),
+                                style: TextButton.styleFrom(
+                                  padding: EdgeInsets.zero,
+                                  minimumSize: Size.zero,
+                                ),
+                                child: const Text(
+                                  'Clear All',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.red,
+                                  ),
+                                ),
                               ),
                           ],
                         ),
@@ -1354,14 +1543,33 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
                         if (addedItems.isEmpty)
                           Container(
                             padding: const EdgeInsets.all(24),
-                            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8)),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
                             child: Center(
                               child: Column(
                                 children: [
-                                  Icon(Icons.inbox, size: 40, color: Colors.grey[400]),
+                                  Icon(
+                                    Icons.inbox,
+                                    size: 40,
+                                    color: Colors.grey[400],
+                                  ),
                                   const SizedBox(height: 8),
-                                  Text('No $title added yet', style: TextStyle(color: Colors.grey[500], fontSize: 12)),
-                                  Text('Tap + button to add', style: TextStyle(color: Colors.grey[400], fontSize: 10)),
+                                  Text(
+                                    'No $title added yet',
+                                    style: TextStyle(
+                                      color: Colors.grey[500],
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                  Text(
+                                    'Tap + button to add',
+                                    style: TextStyle(
+                                      color: Colors.grey[400],
+                                      fontSize: 10,
+                                    ),
+                                  ),
                                 ],
                               ),
                             ),
@@ -1371,17 +1579,34 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
                             shrinkWrap: true,
                             physics: const NeverScrollableScrollPhysics(),
                             itemCount: addedItems.length,
-                            separatorBuilder: (context, index) => const Divider(height: 1),
+                            separatorBuilder: (context, index) =>
+                                const Divider(height: 1),
                             itemBuilder: (context, index) {
                               final item = addedItems[index];
                               return ListTile(
                                 leading: CircleAvatar(
                                   backgroundColor: color.withValues(alpha: 0.1),
-                                  child: Text('${index + 1}', style: TextStyle(fontSize: 12, color: color)),
+                                  child: Text(
+                                    '${index + 1}',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: color,
+                                    ),
+                                  ),
                                 ),
-                                title: Text(itemDisplayName(item), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+                                title: Text(
+                                  itemDisplayName(item),
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
                                 trailing: IconButton(
-                                  icon: const Icon(Icons.delete_outline, size: 20, color: Colors.red),
+                                  icon: const Icon(
+                                    Icons.delete_outline,
+                                    size: 20,
+                                    color: Colors.red,
+                                  ),
                                   onPressed: () => onRemove(index),
                                 ),
                                 dense: true,
@@ -1402,22 +1627,32 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
 
   Widget _buildAgeCategorySection() {
     if (_isLoadingGlobalData) {
-      return _buildLoadingCard('Age Categories', Icons.calendar_today, Colors.green);
+      return _buildLoadingCard(
+        'Age Categories',
+        Icons.calendar_today,
+        Colors.green,
+      );
     }
-    
+
     if (_hasErrorLoadingData && _globalAgeCategories.isEmpty) {
-      return _buildErrorCard('Age Categories', Icons.calendar_today, Colors.green, () {
-        _loadGlobalData();
-      });
+      return _buildErrorCard(
+        'Age Categories',
+        Icons.calendar_today,
+        Colors.green,
+        () {
+          _loadGlobalData();
+        },
+      );
     }
-    
+
     return _buildSplitViewSection(
       title: 'Age Categories',
       icon: Icons.calendar_today,
       color: Colors.green,
       addedItems: _addedAgeCategories,
       onRemove: _removeAgeCategory,
-      itemDisplayName: (item) => '${item['display_name']} (${item['min_age']}-${item['max_age']})',
+      itemDisplayName: (item) =>
+          '${item['display_name']} (${item['min_age']}-${item['max_age']})',
       formFields: Column(
         children: [
           _buildSuggestionField(
@@ -1425,7 +1660,9 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
             label: 'Display Name *',
             hint: 'e.g., Child, Teen, Adult, Senior',
             icon: Icons.visibility,
-            suggestions: _globalAgeCategories.map((a) => a['display_name'] as String).toList(),
+            suggestions: _globalAgeCategories
+                .map((a) => a['display_name'] as String)
+                .toList(),
             onSelected: (String value) {
               final selected = _globalAgeCategories.firstWhere(
                 (a) => a['display_name'] == value,
@@ -1469,7 +1706,10 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
                 children: [
                   const Icon(Icons.error_outline, size: 14, color: Colors.red),
                   const SizedBox(width: 4),
-                  const Text('Min age cannot be greater than max age', style: TextStyle(fontSize: 12, color: Colors.red)),
+                  const Text(
+                    'Min age cannot be greater than max age',
+                    style: TextStyle(fontSize: 12, color: Colors.red),
+                  ),
                 ],
               ),
             ),
@@ -1483,13 +1723,18 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
     if (_isLoadingGlobalData) {
       return _buildLoadingCard('Main Services', Icons.category, Colors.orange);
     }
-    
+
     if (_hasErrorLoadingData && _globalCategories.isEmpty) {
-      return _buildErrorCard('Main Services', Icons.category, Colors.orange, () {
-        _loadGlobalData();
-      });
+      return _buildErrorCard(
+        'Main Services',
+        Icons.category,
+        Colors.orange,
+        () {
+          _loadGlobalData();
+        },
+      );
     }
-    
+
     return _buildSplitViewSection(
       title: 'Main Services',
       icon: Icons.category,
@@ -1504,7 +1749,9 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
             label: 'Service Name *',
             hint: 'e.g., Hair, Skin, Nails, Grooming',
             icon: Icons.category,
-            suggestions: _globalCategories.map((c) => c['display_name'] as String).toList(),
+            suggestions: _globalCategories
+                .map((c) => c['display_name'] as String)
+                .toList(),
             onSelected: (String value) {
               final selected = _globalCategories.firstWhere(
                 (c) => c['display_name'] == value,
@@ -1535,7 +1782,10 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('Icon', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+        const Text(
+          'Icon',
+          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+        ),
         const SizedBox(height: 8),
         SizedBox(
           height: 70,
@@ -1547,24 +1797,46 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
               final isSelected = _selectedIcon == iconItem['name'];
 
               return GestureDetector(
-                onTap: () => setState(() => _selectedIcon = iconItem['name'] as String),
+                onTap: () =>
+                    setState(() => _selectedIcon = iconItem['name'] as String),
                 child: Container(
                   width: 60,
                   margin: const EdgeInsets.only(right: 8),
                   decoration: BoxDecoration(
-                    color: isSelected ? const Color(0xFFFF6B8B).withValues(alpha: 0.1) : Colors.grey[100],
+                    color: isSelected
+                        ? const Color(0xFFFF6B8B).withValues(alpha: 0.1)
+                        : Colors.grey[100],
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
-                      color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[300]!,
+                      color: isSelected
+                          ? const Color(0xFFFF6B8B)
+                          : Colors.grey[300]!,
                       width: isSelected ? 1.5 : 1,
                     ),
                   ),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(iconItem['icon'] as IconData, size: 24, color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[600]),
+                      Icon(
+                        iconItem['icon'] as IconData,
+                        size: 24,
+                        color: isSelected
+                            ? const Color(0xFFFF6B8B)
+                            : Colors.grey[600],
+                      ),
                       const SizedBox(height: 4),
-                      Text(iconItem['label'] as String, style: TextStyle(fontSize: 9, color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[600]), textAlign: TextAlign.center, maxLines: 1, overflow: TextOverflow.ellipsis),
+                      Text(
+                        iconItem['label'] as String,
+                        style: TextStyle(
+                          fontSize: 9,
+                          color: isSelected
+                              ? const Color(0xFFFF6B8B)
+                              : Colors.grey[600],
+                        ),
+                        textAlign: TextAlign.center,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ],
                   ),
                 ),
@@ -1578,15 +1850,24 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
 
   Widget _buildColorPicker() {
     final List<Color> colorOptions = [
-      const Color(0xFFFF6B8B), const Color(0xFF4CAF50), const Color(0xFF2196F3),
-      const Color(0xFFFF9800), const Color(0xFF9C27B0), const Color(0xFFF44336),
-      const Color(0xFF00BCD4), const Color(0xFF795548), const Color(0xFF607D8B),
+      const Color(0xFFFF6B8B),
+      const Color(0xFF4CAF50),
+      const Color(0xFF2196F3),
+      const Color(0xFFFF9800),
+      const Color(0xFF9C27B0),
+      const Color(0xFFF44336),
+      const Color(0xFF00BCD4),
+      const Color(0xFF795548),
+      const Color(0xFF607D8B),
     ];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('Color', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+        const Text(
+          'Color',
+          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+        ),
         const SizedBox(height: 8),
         Wrap(
           spacing: 8,
@@ -1601,10 +1882,23 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
                 decoration: BoxDecoration(
                   color: color,
                   shape: BoxShape.circle,
-                  border: isSelected ? Border.all(color: Colors.white, width: 2) : null,
-                  boxShadow: isSelected ? [BoxShadow(color: color.withValues(alpha: 0.5), blurRadius: 4)] : null,
+                  border: isSelected
+                      ? Border.all(color: Colors.white, width: 2)
+                      : null,
+                  boxShadow: isSelected
+                      ? [
+                          BoxShadow(
+                            color: color.withValues(alpha: 0.5),
+                            blurRadius: 4,
+                          ),
+                        ]
+                      : null,
                 ),
-                child: isSelected ? const Center(child: Icon(Icons.check, color: Colors.white, size: 14)) : null,
+                child: isSelected
+                    ? const Center(
+                        child: Icon(Icons.check, color: Colors.white, size: 14),
+                      )
+                    : null,
               ),
             );
           }).toList(),
@@ -1627,38 +1921,60 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
       padding: const EdgeInsets.only(bottom: 8),
       child: Autocomplete<String>(
         optionsBuilder: (TextEditingValue textEditingValue) {
-          if (textEditingValue.text.isEmpty) return const Iterable<String>.empty();
-          return suggestions.where((option) => option.toLowerCase().contains(textEditingValue.text.toLowerCase()));
+          if (textEditingValue.text.isEmpty) {
+            return const Iterable<String>.empty();
+          }
+          return suggestions.where(
+            (option) => option.toLowerCase().contains(
+              textEditingValue.text.toLowerCase(),
+            ),
+          );
         },
         onSelected: (String selection) {
           onSelected(selection);
           controller.text = selection;
         },
-        fieldViewBuilder: (context, textController, focusNode, onFieldSubmitted) {
-          if (textController.text != controller.text) textController.text = controller.text;
-          controller.addListener(() {
-            if (textController.text != controller.text) textController.text = controller.text;
-          });
-          return TextFormField(
-            controller: textController,
-            focusNode: focusNode,
-            keyboardType: keyboardType,
-            maxLines: maxLines,
-            decoration: InputDecoration(
-              labelText: label,
-              hintText: hint,
-              prefixIcon: Icon(icon, color: Colors.grey),
-              suffixIcon: const Icon(Icons.arrow_drop_down, color: Colors.grey),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-                borderSide: const BorderSide(color: Color(0xFFFF6B8B), width: 2),
-              ),
-            ),
-            onChanged: (value) => controller.text = value,
-          );
-        },
+        fieldViewBuilder:
+            (context, textController, focusNode, onFieldSubmitted) {
+              if (textController.text != controller.text) {
+                textController.text = controller.text;
+              }
+              controller.addListener(() {
+                if (textController.text != controller.text) {
+                  textController.text = controller.text;
+                }
+              });
+              return TextFormField(
+                controller: textController,
+                focusNode: focusNode,
+                keyboardType: keyboardType,
+                maxLines: maxLines,
+                decoration: InputDecoration(
+                  labelText: label,
+                  hintText: hint,
+                  prefixIcon: Icon(icon, color: Colors.grey),
+                  suffixIcon: const Icon(
+                    Icons.arrow_drop_down,
+                    color: Colors.grey,
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(
+                      color: Color(0xFFFF6B8B),
+                      width: 2,
+                    ),
+                  ),
+                ),
+                onChanged: (value) => controller.text = value,
+              );
+            },
       ),
     );
   }
@@ -1693,7 +2009,10 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
               ? 'Enter valid email address'
               : null,
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: 10,
+          ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
             borderSide: const BorderSide(color: Color(0xFFFF6B8B), width: 2),
@@ -1744,9 +2063,16 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.add_photo_alternate, size: isDesktop ? 48 : 36, color: Colors.grey[400]),
+                          Icon(
+                            Icons.add_photo_alternate,
+                            size: isDesktop ? 48 : 36,
+                            color: Colors.grey[400],
+                          ),
                           const SizedBox(height: 8),
-                          Text('Tap to add cover photo', style: TextStyle(color: Colors.grey[600])),
+                          Text(
+                            'Tap to add cover photo',
+                            style: TextStyle(color: Colors.grey[600]),
+                          ),
                         ],
                       ),
                     )
@@ -1760,14 +2086,23 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
               child: GestureDetector(
                 onTap: () => _showCoverSourceDialog(),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.6), borderRadius: BorderRadius.circular(20)),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.6),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       const Icon(Icons.edit, size: 14, color: Colors.white),
                       const SizedBox(width: 4),
-                      Text('Edit', style: TextStyle(color: Colors.white, fontSize: 12)),
+                      Text(
+                        'Edit',
+                        style: TextStyle(color: Colors.white, fontSize: 12),
+                      ),
                     ],
                   ),
                 ),
@@ -1792,7 +2127,13 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
           decoration: BoxDecoration(
             color: Colors.white,
             shape: BoxShape.circle,
-            boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 8, offset: const Offset(0, 2))],
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.2),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
             image: (_logoFile != null || _logoWebBytes != null)
                 ? DecorationImage(
                     image: kIsWeb && _logoWebBytes != null
@@ -1804,26 +2145,50 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
           ),
           child: (_logoFile == null && _logoWebBytes == null)
               ? Container(
-                  decoration: BoxDecoration(color: Colors.grey[300], shape: BoxShape.circle),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[300],
+                    shape: BoxShape.circle,
+                  ),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.add_a_photo, size: isDesktop ? 30 : 24, color: Colors.grey[600]),
+                      Icon(
+                        Icons.add_a_photo,
+                        size: isDesktop ? 30 : 24,
+                        color: Colors.grey[600],
+                      ),
                       SizedBox(height: isDesktop ? 4 : 2),
-                      Text('Add Logo', style: TextStyle(fontSize: isDesktop ? 10 : 8, color: Colors.grey[600])),
+                      Text(
+                        'Add Logo',
+                        style: TextStyle(
+                          fontSize: isDesktop ? 10 : 8,
+                          color: Colors.grey[600],
+                        ),
+                      ),
                     ],
                   ),
                 )
               : Stack(
                   children: [
-                    const CircleAvatar(backgroundColor: Colors.transparent, radius: 50),
+                    const CircleAvatar(
+                      backgroundColor: Colors.transparent,
+                      radius: 50,
+                    ),
                     Positioned(
                       bottom: 0,
                       right: 0,
                       child: Container(
                         padding: const EdgeInsets.all(4),
-                        decoration: BoxDecoration(color: const Color(0xFFFF6B8B), shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2)),
-                        child: const Icon(Icons.edit, size: 14, color: Colors.white),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFF6B8B),
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 2),
+                        ),
+                        child: const Icon(
+                          Icons.edit,
+                          size: 14,
+                          color: Colors.white,
+                        ),
                       ),
                     ),
                   ],
@@ -1836,28 +2201,51 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
   void _showLogoSourceDialog() {
     showModalBottomSheet(
       context: context,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
       builder: (context) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Padding(padding: EdgeInsets.all(16), child: Text('Add Logo', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                'Add Logo',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+            ),
             const Divider(),
             ListTile(
-              leading: const Icon(Icons.photo_library, color: Color(0xFFFF6B8B)),
+              leading: const Icon(
+                Icons.photo_library,
+                color: Color(0xFFFF6B8B),
+              ),
               title: const Text('Choose from Gallery'),
-              onTap: () { Navigator.pop(context); _pickLogo(); },
+              onTap: () {
+                Navigator.pop(context);
+                _pickLogo();
+              },
             ),
             ListTile(
               leading: const Icon(Icons.camera_alt, color: Color(0xFFFF6B8B)),
               title: const Text('Take a Photo'),
-              onTap: () { Navigator.pop(context); _takeLogoPhoto(); },
+              onTap: () {
+                Navigator.pop(context);
+                _takeLogoPhoto();
+              },
             ),
             if (_logoFile != null || _logoWebBytes != null)
               ListTile(
                 leading: const Icon(Icons.delete, color: Colors.red),
-                title: const Text('Remove Logo', style: TextStyle(color: Colors.red)),
-                onTap: () { Navigator.pop(context); _removeLogo(); },
+                title: const Text(
+                  'Remove Logo',
+                  style: TextStyle(color: Colors.red),
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  _removeLogo();
+                },
               ),
             const SizedBox(height: 12),
           ],
@@ -1869,28 +2257,51 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
   void _showCoverSourceDialog() {
     showModalBottomSheet(
       context: context,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
       builder: (context) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Padding(padding: EdgeInsets.all(16), child: Text('Add Cover Photo', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                'Add Cover Photo',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+            ),
             const Divider(),
             ListTile(
-              leading: const Icon(Icons.photo_library, color: Color(0xFFFF6B8B)),
+              leading: const Icon(
+                Icons.photo_library,
+                color: Color(0xFFFF6B8B),
+              ),
               title: const Text('Choose from Gallery'),
-              onTap: () { Navigator.pop(context); _pickCover(); },
+              onTap: () {
+                Navigator.pop(context);
+                _pickCover();
+              },
             ),
             ListTile(
               leading: const Icon(Icons.camera_alt, color: Color(0xFFFF6B8B)),
               title: const Text('Take a Photo'),
-              onTap: () { Navigator.pop(context); _takeCoverPhoto(); },
+              onTap: () {
+                Navigator.pop(context);
+                _takeCoverPhoto();
+              },
             ),
             if (_coverFile != null || _coverWebBytes != null)
               ListTile(
                 leading: const Icon(Icons.delete, color: Colors.red),
-                title: const Text('Remove Cover', style: TextStyle(color: Colors.red)),
-                onTap: () { Navigator.pop(context); _removeCover(); },
+                title: const Text(
+                  'Remove Cover',
+                  style: TextStyle(color: Colors.red),
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  _removeCover();
+                },
               ),
             const SizedBox(height: 12),
           ],
@@ -1901,111 +2312,186 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
 
   Future<void> _pickLogo() async {
     try {
-      final XFile? pickedFile = await picker.pickImage(source: ImageSource.gallery, maxWidth: 800, maxHeight: 800, imageQuality: 85);
+      final XFile? pickedFile = await picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 800,
+        maxHeight: 800,
+        imageQuality: 85,
+      );
       if (pickedFile != null) {
         if (kIsWeb) {
           final bytes = await pickedFile.readAsBytes();
-          setState(() { _logoWebBytes = bytes; _logoFile = null; });
-          _showSnackBar('Logo selected', Colors.green);
+          setState(() {
+            _logoWebBytes = bytes;
+            _logoFile = null;
+          });
         } else {
           final croppedFile = await ImageCropper().cropImage(
             sourcePath: pickedFile.path,
             aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
             uiSettings: [
-              AndroidUiSettings(toolbarTitle: 'Crop Logo', toolbarColor: const Color(0xFFFF6B8B), toolbarWidgetColor: Colors.white, initAspectRatio: CropAspectRatioPreset.square, lockAspectRatio: true),
+              AndroidUiSettings(
+                toolbarTitle: 'Crop Logo',
+                toolbarColor: const Color(0xFFFF6B8B),
+                toolbarWidgetColor: Colors.white,
+                initAspectRatio: CropAspectRatioPreset.square,
+                lockAspectRatio: true,
+              ),
               IOSUiSettings(title: 'Crop Logo', aspectRatioLockEnabled: true),
             ],
           );
           if (croppedFile != null) {
-            setState(() { _logoFile = File(croppedFile.path); _logoWebBytes = null; });
-            _showSnackBar('Logo cropped', Colors.green);
+            setState(() {
+              _logoFile = File(croppedFile.path);
+              _logoWebBytes = null;
+            });
           }
         }
       }
-    } catch (e) { _showSnackBar('Error picking logo', Colors.red); }
+    } catch (e) {
+      _showSnackBar('Error picking logo', Colors.red);
+    }
   }
 
   Future<void> _takeLogoPhoto() async {
     try {
-      final XFile? pickedFile = await picker.pickImage(source: ImageSource.camera, maxWidth: 800, maxHeight: 800, imageQuality: 85);
+      final XFile? pickedFile = await picker.pickImage(
+        source: ImageSource.camera,
+        maxWidth: 800,
+        maxHeight: 800,
+        imageQuality: 85,
+      );
       if (pickedFile != null) {
         if (kIsWeb) {
           final bytes = await pickedFile.readAsBytes();
-          setState(() { _logoWebBytes = bytes; _logoFile = null; });
-          _showSnackBar('Logo captured', Colors.green);
+          setState(() {
+            _logoWebBytes = bytes;
+            _logoFile = null;
+          });
         } else {
           final croppedFile = await ImageCropper().cropImage(
             sourcePath: pickedFile.path,
             aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
             uiSettings: [
-              AndroidUiSettings(toolbarTitle: 'Crop Logo', toolbarColor: const Color(0xFFFF6B8B), toolbarWidgetColor: Colors.white, lockAspectRatio: true),
+              AndroidUiSettings(
+                toolbarTitle: 'Crop Logo',
+                toolbarColor: const Color(0xFFFF6B8B),
+                toolbarWidgetColor: Colors.white,
+                lockAspectRatio: true,
+              ),
               IOSUiSettings(title: 'Crop Logo', aspectRatioLockEnabled: true),
             ],
           );
           if (croppedFile != null) {
-            setState(() { _logoFile = File(croppedFile.path); _logoWebBytes = null; });
-            _showSnackBar('Logo captured and cropped', Colors.green);
+            setState(() {
+              _logoFile = File(croppedFile.path);
+              _logoWebBytes = null;
+            });
           }
         }
       }
-    } catch (e) { _showSnackBar('Error taking photo', Colors.red); }
+    } catch (e) {
+      _showSnackBar('Error taking photo', Colors.red);
+    }
   }
 
-  void _removeLogo() { setState(() { _logoFile = null; _logoWebBytes = null; }); _showSnackBar('Logo removed', Colors.red); }
+  void _removeLogo() {
+    setState(() {
+      _logoFile = null;
+      _logoWebBytes = null;
+    });
+  }
 
   Future<void> _pickCover() async {
     try {
-      final XFile? pickedFile = await picker.pickImage(source: ImageSource.gallery, maxWidth: 1920, maxHeight: 1080, imageQuality: 85);
+      final XFile? pickedFile = await picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1920,
+        maxHeight: 1080,
+        imageQuality: 85,
+      );
       if (pickedFile != null) {
         if (kIsWeb) {
           final bytes = await pickedFile.readAsBytes();
-          setState(() { _coverWebBytes = bytes; _coverFile = null; });
-          _showSnackBar('Cover selected', Colors.green);
-        } else {
+          setState(() {
+            _coverWebBytes = bytes;
+            _coverFile = null;
+          });
           final croppedFile = await ImageCropper().cropImage(
             sourcePath: pickedFile.path,
             aspectRatio: const CropAspectRatio(ratioX: 16, ratioY: 9),
             uiSettings: [
-              AndroidUiSettings(toolbarTitle: 'Crop Cover', toolbarColor: const Color(0xFFFF6B8B), toolbarWidgetColor: Colors.white, initAspectRatio: CropAspectRatioPreset.ratio16x9, lockAspectRatio: true),
+              AndroidUiSettings(
+                toolbarTitle: 'Crop Cover',
+                toolbarColor: const Color(0xFFFF6B8B),
+                toolbarWidgetColor: Colors.white,
+                initAspectRatio: CropAspectRatioPreset.ratio16x9,
+                lockAspectRatio: true,
+              ),
               IOSUiSettings(title: 'Crop Cover', aspectRatioLockEnabled: true),
             ],
           );
           if (croppedFile != null) {
-            setState(() { _coverFile = File(croppedFile.path); _coverWebBytes = null; });
-            _showSnackBar('Cover cropped', Colors.green);
+            setState(() {
+              _coverFile = File(croppedFile.path);
+              _coverWebBytes = null;
+            });
           }
         }
       }
-    } catch (e) { _showSnackBar('Error picking cover', Colors.red); }
+    } catch (e) {
+      _showSnackBar('Error picking cover', Colors.red);
+    }
   }
 
   Future<void> _takeCoverPhoto() async {
     try {
-      final XFile? pickedFile = await picker.pickImage(source: ImageSource.camera, maxWidth: 1920, maxHeight: 1080, imageQuality: 85);
+      final XFile? pickedFile = await picker.pickImage(
+        source: ImageSource.camera,
+        maxWidth: 1920,
+        maxHeight: 1080,
+        imageQuality: 85,
+      );
       if (pickedFile != null) {
         if (kIsWeb) {
           final bytes = await pickedFile.readAsBytes();
-          setState(() { _coverWebBytes = bytes; _coverFile = null; });
-          _showSnackBar('Cover captured', Colors.green);
+          setState(() {
+            _coverWebBytes = bytes;
+            _coverFile = null;
+          });
         } else {
           final croppedFile = await ImageCropper().cropImage(
             sourcePath: pickedFile.path,
             aspectRatio: const CropAspectRatio(ratioX: 16, ratioY: 9),
             uiSettings: [
-              AndroidUiSettings(toolbarTitle: 'Crop Cover', toolbarColor: const Color(0xFFFF6B8B), toolbarWidgetColor: Colors.white, lockAspectRatio: true),
+              AndroidUiSettings(
+                toolbarTitle: 'Crop Cover',
+                toolbarColor: const Color(0xFFFF6B8B),
+                toolbarWidgetColor: Colors.white,
+                lockAspectRatio: true,
+              ),
               IOSUiSettings(title: 'Crop Cover', aspectRatioLockEnabled: true),
             ],
           );
           if (croppedFile != null) {
-            setState(() { _coverFile = File(croppedFile.path); _coverWebBytes = null; });
-            _showSnackBar('Cover captured and cropped', Colors.green);
+            setState(() {
+              _coverFile = File(croppedFile.path);
+              _coverWebBytes = null;
+            });
           }
         }
       }
-    } catch (e) { _showSnackBar('Error taking photo', Colors.red); }
+    } catch (e) {
+      _showSnackBar('Error taking photo', Colors.red);
+    }
   }
 
-  void _removeCover() { setState(() { _coverFile = null; _coverWebBytes = null; }); _showSnackBar('Cover removed', Colors.red); }
+  void _removeCover() {
+    setState(() {
+      _coverFile = null;
+      _coverWebBytes = null;
+    });
+  }
 
   Future<String?> _uploadLogo() async {
     if (_logoFile == null && _logoWebBytes == null) return null;
@@ -2017,17 +2503,25 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
       if (kIsWeb && _logoWebBytes != null) {
         fileName = 'logo_${DateTime.now().millisecondsSinceEpoch}.png';
         final filePath = 'salons/$userId/$fileName';
-        await supabase.storage.from('salon-images').uploadBinary(filePath, _logoWebBytes!);
+        await supabase.storage
+            .from('salon-images')
+            .uploadBinary(filePath, _logoWebBytes!);
         return supabase.storage.from('salon-images').getPublicUrl(filePath);
       } else if (_logoFile != null) {
         final fileExt = path.extension(_logoFile!.path);
         fileName = 'logo_${DateTime.now().millisecondsSinceEpoch}$fileExt';
         final filePath = 'salons/$userId/$fileName';
-        await supabase.storage.from('salon-images').upload(filePath, _logoFile!);
+        await supabase.storage
+            .from('salon-images')
+            .upload(filePath, _logoFile!);
         return supabase.storage.from('salon-images').getPublicUrl(filePath);
       }
       return null;
-    } catch (e) { return null; } finally { if (mounted) setState(() => _isUploadingLogo = false); }
+    } catch (e) {
+      return null;
+    } finally {
+      if (mounted) setState(() => _isUploadingLogo = false);
+    }
   }
 
   Future<String?> _uploadCover() async {
@@ -2040,17 +2534,25 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
       if (kIsWeb && _coverWebBytes != null) {
         fileName = 'cover_${DateTime.now().millisecondsSinceEpoch}.png';
         final filePath = 'salons/$userId/$fileName';
-        await supabase.storage.from('salon-images').uploadBinary(filePath, _coverWebBytes!);
+        await supabase.storage
+            .from('salon-images')
+            .uploadBinary(filePath, _coverWebBytes!);
         return supabase.storage.from('salon-images').getPublicUrl(filePath);
       } else if (_coverFile != null) {
         final fileExt = path.extension(_coverFile!.path);
         fileName = 'cover_${DateTime.now().millisecondsSinceEpoch}$fileExt';
         final filePath = 'salons/$userId/$fileName';
-        await supabase.storage.from('salon-images').upload(filePath, _coverFile!);
+        await supabase.storage
+            .from('salon-images')
+            .upload(filePath, _coverFile!);
         return supabase.storage.from('salon-images').getPublicUrl(filePath);
       }
       return null;
-    } catch (e) { return null; } finally { if (mounted) setState(() => _isUploadingCover = false); }
+    } catch (e) {
+      return null;
+    } finally {
+      if (mounted) setState(() => _isUploadingCover = false);
+    }
   }
 
   // ==================== BUSINESS HOURS CARD ====================
@@ -2062,7 +2564,10 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Business Hours', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const Text(
+              'Business Hours',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 8),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -2075,7 +2580,10 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
                 children: [
                   Text(
                     _getTimezoneDisplay(),
-                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                   const SizedBox(width: 8),
                   const Icon(Icons.access_time, size: 14),
@@ -2117,42 +2625,6 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
               ],
             ),
             const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.grey[50],
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Column(
-                children: [
-                  Row(
-                    children: [
-                      Icon(Icons.info_outline, size: 16, color: Colors.grey[600]),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Times are saved in UTC and will be displayed in your local timezone',
-                          style: TextStyle(fontSize: 11, color: Colors.grey[600]),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      Icon(Icons.cloud_queue, size: 16, color: Colors.grey[600]),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'UTC Time: $_openTimeUtc - $_closeTimeUtc',
-                          style: TextStyle(fontSize: 11, color: Colors.grey[500], fontFamily: 'monospace'),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
           ],
         ),
       ),
@@ -2166,7 +2638,9 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
     final phone = _phoneController.text.trim();
     if (phone.isNotEmpty) {
       final cleaned = phone.replaceAll(RegExp(r'[^0-9]'), '');
-      if (cleaned.length < 9 || cleaned.length > 10 || !cleaned.startsWith('0')) {
+      if (cleaned.length < 9 ||
+          cleaned.length > 10 ||
+          !cleaned.startsWith('0')) {
         _showSnackBar('Please enter a valid phone number', Colors.orange);
         return;
       }
@@ -2174,7 +2648,9 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
 
     final email = _emailController.text.trim();
     if (email.isNotEmpty) {
-      final emailRegex = RegExp(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$');
+      final emailRegex = RegExp(
+        r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
+      );
       if (!emailRegex.hasMatch(email)) {
         _showSnackBar('Please enter a valid email address', Colors.orange);
         return;
@@ -2203,11 +2679,17 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
     setState(() => _isLoading = true);
 
     try {
-      String? logoUrl = (_logoFile != null || _logoWebBytes != null) ? await _uploadLogo() : null;
-      String? coverUrl = (_coverFile != null || _coverWebBytes != null) ? await _uploadCover() : null;
+      String? logoUrl = (_logoFile != null || _logoWebBytes != null)
+          ? await _uploadLogo()
+          : null;
+      String? coverUrl = (_coverFile != null || _coverWebBytes != null)
+          ? await _uploadCover()
+          : null;
 
       final prefs = await SharedPreferences.getInstance();
-      final userTimezone = prefs.getString('user_timezone') ?? TimezoneService.getCurrentTimezone();
+      final userTimezone =
+          prefs.getString('user_timezone') ??
+          TimezoneService.getCurrentTimezone();
 
       final extraData = {
         'created_from': _isWeb ? 'web' : 'mobile',
@@ -2217,21 +2699,33 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
 
       final salonData = {
         'name': _nameController.text.trim(),
-        'address': _addressController.text.trim().isEmpty ? null : _addressController.text.trim(),
-        'phone': _phoneController.text.trim().isEmpty ? null : _phoneController.text.trim(),
-        'email': _emailController.text.trim().isEmpty ? null : _emailController.text.trim(),
+        'address': _addressController.text.trim().isEmpty
+            ? null
+            : _addressController.text.trim(),
+        'phone': _phoneController.text.trim().isEmpty
+            ? null
+            : _phoneController.text.trim(),
+        'email': _emailController.text.trim().isEmpty
+            ? null
+            : _emailController.text.trim(),
         'owner_id': userId,
-        'description': _descriptionController.text.trim().isEmpty ? null : _descriptionController.text.trim(),
+        'description': _descriptionController.text.trim().isEmpty
+            ? null
+            : _descriptionController.text.trim(),
         'logo_url': logoUrl,
         'cover_url': coverUrl,
-        'open_time': _openTimeUtc,      // UTC time from conversion
-        'close_time': _closeTimeUtc,    // UTC time from conversion
-        'timezone': _salonTimezone,     // Salon's timezone
+        'open_time': _openTimeUtc, // UTC time from conversion
+        'close_time': _closeTimeUtc, // UTC time from conversion
+        // 'timezone': _salonTimezone,     // Salon's timezone
         'extra_data': extraData,
         'is_active': true,
       };
 
-      final response = await supabase.from('salons').insert(salonData).select('id, name').single();
+      final response = await supabase
+          .from('salons')
+          .insert(salonData)
+          .select('id, name')
+          .single();
       final salonId = response['id'] as int;
 
       for (int i = 0; i < _selectedGenderIds.length; i++) {
@@ -2276,7 +2770,6 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
         message:
             "${_nameController.text.trim()} created successfully.\n\n"
             "📍 Salon Timezone: ${_getTimezoneDisplay()}\n"
-            "🕐 Salon Hours (UTC): $_openTimeUtc - $_closeTimeUtc\n"
             "🕐 Salon Hours (Local): ${_openTimeLocal.format(context)} - ${_closeTimeLocal.format(context)}\n"
             "✅ ${_selectedGenderIds.length} genders selected\n"
             "✅ ${_addedAgeCategories.length} age categories added\n"
@@ -2294,11 +2787,22 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
     }
   }
 
-  String _getPlatformName() => kIsWeb ? 'web' : Platform.isIOS ? 'ios' : Platform.isAndroid ? 'android' : 'mobile';
+  String _getPlatformName() => kIsWeb
+      ? 'web'
+      : Platform.isIOS
+      ? 'ios'
+      : Platform.isAndroid
+      ? 'android'
+      : 'mobile';
 
   void _showSnackBar(String msg, Color color) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), backgroundColor: color, behavior: SnackBarBehavior.floating, duration: const Duration(seconds: 2)),
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: color,
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+      ),
     );
   }
 
@@ -2316,11 +2820,18 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
           elevation: 0,
         ),
         body: const Center(
-          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-            SizedBox(width: 40, height: 40, child: CircularProgressIndicator()),
-            SizedBox(height: 16),
-            Text('Loading timezone...'),
-          ]),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              SizedBox(
+                width: 40,
+                height: 40,
+                child: CircularProgressIndicator(),
+              ),
+              SizedBox(height: 16),
+              Text('Loading timezone...'),
+            ],
+          ),
         ),
       );
     }
@@ -2337,7 +2848,9 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
         color: Colors.grey[50],
         child: Center(
           child: Container(
-            constraints: BoxConstraints(maxWidth: isDesktop ? 1200 : double.infinity),
+            constraints: BoxConstraints(
+              maxWidth: isDesktop ? 1200 : double.infinity,
+            ),
             child: SingleChildScrollView(
               padding: EdgeInsets.all(isDesktop ? 32 : 16),
               child: Form(
@@ -2347,57 +2860,53 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
                     _buildCoverSection(),
                     Transform.translate(
                       offset: const Offset(16, -40),
-                      child: Align(alignment: Alignment.topLeft, child: _buildLogoSeparate()),
-                    ),
-                    const SizedBox(height: 16),
-                    
-                    // Timezone info card
-                    Card(
-                      color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                      child: Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.access_time, color: Color(0xFFFF6B8B)),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'Your Timezone: ${_getTimezoneDisplay()}',
-                                    style: const TextStyle(fontWeight: FontWeight.w500),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    'All times you select will be saved in UTC and displayed in your local timezone',
-                                    style: TextStyle(fontSize: 11, color: Colors.grey[600]),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
+                      child: Align(
+                        alignment: Alignment.topLeft,
+                        child: _buildLogoSeparate(),
                       ),
                     ),
                     const SizedBox(height: 16),
 
                     // Basic Information
                     Card(
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
                       child: Padding(
                         padding: const EdgeInsets.all(16),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text('Basic Information', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                            const Text(
+                              'Basic Information',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
                             const SizedBox(height: 16),
-                            _buildTextField(controller: _nameController, label: 'Salon Name *', hint: 'Enter salon name', icon: Icons.store),
+                            _buildTextField(
+                              controller: _nameController,
+                              label: 'Salon Name *',
+                              hint: 'Enter salon name',
+                              icon: Icons.store,
+                            ),
                             const SizedBox(height: 12),
-                            _buildTextField(controller: _addressController, label: 'Address', hint: 'Enter address', icon: Icons.location_on, maxLines: 2),
+                            _buildTextField(
+                              controller: _addressController,
+                              label: 'Address',
+                              hint: 'Enter address',
+                              icon: Icons.location_on,
+                              maxLines: 2,
+                            ),
                             const SizedBox(height: 12),
-                            _buildTextField(controller: _descriptionController, label: 'Description', hint: 'Tell about your salon', icon: Icons.description, maxLines: 3),
+                            _buildTextField(
+                              controller: _descriptionController,
+                              label: 'Description',
+                              hint: 'Tell about your salon',
+                              icon: Icons.description,
+                              maxLines: 3,
+                            ),
                           ],
                         ),
                       ),
@@ -2406,19 +2915,48 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
 
                     // Contact Information
                     Card(
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
                       child: Padding(
                         padding: const EdgeInsets.all(16),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text('Contact Information', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                            const Text(
+                              'Contact Information',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
                             const SizedBox(height: 16),
-                            _buildTextField(controller: _phoneController, label: 'Phone Number', hint: 'Enter phone number (e.g., 0771234567)', icon: Icons.phone, keyboardType: TextInputType.phone, isPhone: true),
+                            _buildTextField(
+                              controller: _phoneController,
+                              label: 'Phone Number',
+                              hint: 'Enter phone number (e.g., 0771234567)',
+                              icon: Icons.phone,
+                              keyboardType: TextInputType.phone,
+                              isPhone: true,
+                            ),
                             const SizedBox(height: 12),
-                            _buildTextField(controller: _emailController, label: 'Email Address', hint: 'Enter email address (e.g., salon@example.com)', icon: Icons.email, keyboardType: TextInputType.emailAddress, isEmail: true),
+                            _buildTextField(
+                              controller: _emailController,
+                              label: 'Email Address',
+                              hint:
+                                  'Enter email address (e.g., salon@example.com)',
+                              icon: Icons.email,
+                              keyboardType: TextInputType.emailAddress,
+                              isEmail: true,
+                            ),
                             const SizedBox(height: 8),
-                            Text('Phone and email are optional but recommended', style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+                            Text(
+                              'Phone and email are optional but recommended',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.grey[500],
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -2438,24 +2976,57 @@ TimeOfDay _utcTimeStringToLocalTimeOfDay(String utcTimeString) {
                       width: double.infinity,
                       height: 54,
                       child: ElevatedButton(
-                        onPressed: (_isLoading || _isUploadingLogo || _isUploadingCover) ? null : _createSalon,
+                        onPressed:
+                            (_isLoading ||
+                                _isUploadingLogo ||
+                                _isUploadingCover)
+                            ? null
+                            : _createSalon,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFFFF6B8B),
                           foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
                           elevation: 0,
                         ),
-                        child: (_isLoading || _isUploadingLogo || _isUploadingCover)
-                            ? Row(mainAxisSize: MainAxisSize.min, children: [
-                                const SizedBox(height: 24, width: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)),
-                                const SizedBox(width: 12),
-                                Text(_isUploadingLogo || _isUploadingCover ? 'Uploading...' : 'Creating...'),
-                              ])
-                            : const Row(mainAxisSize: MainAxisSize.min, children: [
-                                Icon(Icons.add_business, size: 20),
-                                SizedBox(width: 8),
-                                Text('Create Salon', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                              ]),
+                        child:
+                            (_isLoading ||
+                                _isUploadingLogo ||
+                                _isUploadingCover)
+                            ? Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const SizedBox(
+                                    height: 24,
+                                    width: 24,
+                                    child: CircularProgressIndicator(
+                                      color: Colors.white,
+                                      strokeWidth: 2,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Text(
+                                    _isUploadingLogo || _isUploadingCover
+                                        ? 'Uploading...'
+                                        : 'Creating...',
+                                  ),
+                                ],
+                              )
+                            : const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.add_business, size: 20),
+                                  SizedBox(width: 8),
+                                  Text(
+                                    'Create Salon',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
                       ),
                     ),
                   ],

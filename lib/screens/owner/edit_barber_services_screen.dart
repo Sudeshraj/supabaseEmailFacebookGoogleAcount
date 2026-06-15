@@ -789,7 +789,6 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
         setState(() {
           _services.removeWhere((s) => s['id'] == service['id']);
         });
-        _showSnackBar('Service removed successfully', Colors.green);
       }
     } catch (e) {
       if (mounted) {
@@ -902,7 +901,6 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
             }
           }
         });
-        _showSnackBar('Option removed successfully', Colors.green);
       }
     } catch (e) {
       if (mounted) {

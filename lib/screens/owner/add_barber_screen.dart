@@ -44,8 +44,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   // Salon hours
   String _salonOpenTimeUtc = '09:00:00';
   String _salonCloseTimeUtc = '18:00:00';
-  TimeOfDay? _salonOpenTimeLocal;
-  TimeOfDay? _salonCloseTimeLocal;
 
   // ==================== UI STATES ====================
   bool _isLoading = true;
@@ -108,7 +106,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   @override
   void initState() {
     super.initState();
-    debugPrint('📍 AddBarberScreen initState');
     _initializeAllData();
     _searchController.addListener(_onSearchChanged);
 
@@ -139,7 +136,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
 
   @override
   void didPopNext() {
-    debugPrint('📍 AddBarberScreen came to foreground - refreshing data');
     _refreshData();
   }
 
@@ -147,42 +143,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   // CORRECT TIMEZONE CONVERSION FUNCTIONS
   // ============================================================
 
-  /// Convert UTC time string to Local TimeOfDay using salon's timezone
-  TimeOfDay _utcToLocalTimeOfDay(String utcTimeStr, String timezone) {
-    try {
-      final parts = utcTimeStr.split(':');
-      final utcHour = int.parse(parts[0]);
-      final utcMinute = int.parse(parts[1]);
-
-      final now = DateTime.now();
-      final utcDateTime = DateTime.utc(
-        now.year,
-        now.month,
-        now.day,
-        utcHour,
-        utcMinute,
-      );
-      final location = tz.getLocation(timezone);
-      final localDateTime = tz.TZDateTime.from(utcDateTime, location);
-
-      debugPrint(
-        '🔄 UTC to Local: $utcTimeStr UTC → ${localDateTime.hour}:${localDateTime.minute} ($timezone)',
-      );
-
-      return TimeOfDay(hour: localDateTime.hour, minute: localDateTime.minute);
-    } catch (e) {
-      debugPrint('❌ Error converting UTC to local: $e');
-      // Fallback: simple conversion
-      final parts = utcTimeStr.split(':');
-      final utcHour = int.parse(parts[0]);
-      final utcMinute = int.parse(parts[1]);
-      final offsetHours = TimezoneService.getUtcOffsetHours();
-      int localHour = utcHour + offsetHours;
-      if (localHour >= 24) localHour -= 24;
-      if (localHour < 0) localHour += 24;
-      return TimeOfDay(hour: localHour, minute: utcMinute);
-    }
-  }
 
   /// Convert Local TimeOfDay to UTC time string using salon's timezone
   String _localTimeToUtcString(TimeOfDay localTime, String timezone) {
@@ -201,10 +161,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
 
       final utcDateTime = localTZDateTime.toUtc();
 
-      debugPrint(
-        '🔄 Local to UTC: ${localTime.hour}:${localTime.minute} ($timezone) → ${utcDateTime.hour}:${utcDateTime.minute} UTC',
-      );
-
       return '${utcDateTime.hour.toString().padLeft(2, '0')}:${utcDateTime.minute.toString().padLeft(2, '0')}:00';
     } catch (e) {
       debugPrint('❌ Error converting local to UTC: $e');
@@ -222,8 +178,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   // ============================================================
 
   Future<void> _initializeAllData() async {
-    debugPrint('🔄 Initializing all data...');
-
     try {
       // Load timezone first
       await TimezoneService.initialize();
@@ -233,11 +187,9 @@ class _AddBarberScreenState extends State<AddBarberScreen>
 
       if (cachedTimezone != null && cachedTimezone.isNotEmpty) {
         _deviceTimezone = cachedTimezone;
-        debugPrint('✅ Using cached timezone: $_deviceTimezone');
       } else {
         _deviceTimezone = TimezoneService.getCurrentTimezone();
         await prefs.setString('cached_timezone', _deviceTimezone);
-        debugPrint('✅ Saved device timezone to cache: $_deviceTimezone');
       }
 
       if (mounted) {
@@ -286,23 +238,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
         _salonCloseTimeUtc = response['close_time'] ?? '18:00:00';
 
         // Convert UTC to local for display
-        _salonOpenTimeLocal = _utcToLocalTimeOfDay(
-          _salonOpenTimeUtc,
-          _salonTimezone,
-        );
-        _salonCloseTimeLocal = _utcToLocalTimeOfDay(
-          _salonCloseTimeUtc,
-          _salonTimezone,
-        );
       });
-
-      debugPrint('✅ Salon timezone loaded: $_salonTimezone');
-      debugPrint(
-        '✅ Salon hours - UTC: $_salonOpenTimeUtc - $_salonCloseTimeUtc',
-      );
-      debugPrint(
-        '✅ Salon hours - Local: ${_salonOpenTimeLocal?.hour}:${_salonOpenTimeLocal?.minute} - ${_salonCloseTimeLocal?.hour}:${_salonCloseTimeLocal?.minute}',
-      );
     } catch (e) {
       debugPrint('❌ Error loading salon timezone: $e');
       // Set defaults
@@ -310,8 +246,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
         _salonTimezone = TimezoneService.getCurrentTimezone();
         _salonOpenTimeUtc = '09:00:00';
         _salonCloseTimeUtc = '18:00:00';
-        _salonOpenTimeLocal = const TimeOfDay(hour: 9, minute: 0);
-        _salonCloseTimeLocal = const TimeOfDay(hour: 18, minute: 0);
       });
     }
   }
@@ -327,7 +261,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
 
     try {
       _currentIp = await IpHelper.getPublicIp();
-      debugPrint('🌐 Current IP: $_currentIp');
     } catch (e) {
       debugPrint('❌ Error loading IP: $e');
     } finally {
@@ -361,9 +294,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
         'created_at': DateTime.now().toIso8601String(),
       };
 
-      debugPrint('📝 Logging activity: $actionType');
       await supabase.from('owner_activity_log').insert(logData);
-      debugPrint('✅ Activity logged: $actionType');
     } catch (e) {
       debugPrint('❌ Error logging activity: $e');
     }
@@ -374,7 +305,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   // ============================================================
 
   Future<void> _refreshData() async {
-    debugPrint('🔄 Refreshing data...');
     if (!mounted) return;
 
     if (mounted) setState(() => _isLoading = true);
@@ -411,8 +341,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
         return;
       }
 
-      debugPrint('📡 Fetching salons for user: $userId');
-
       final response = await supabase
           .from('salons')
           .select(
@@ -421,8 +349,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
           .eq('owner_id', userId)
           .eq('is_active', true)
           .order('name');
-
-      debugPrint('📊 Owner salons loaded: ${response.length}');
 
       if (mounted) {
         setState(() {
@@ -489,12 +415,10 @@ class _AddBarberScreenState extends State<AddBarberScreen>
 
   void _onSearchChanged() {
     final query = _searchController.text.trim();
-    debugPrint('🔍 _onSearchChanged called with query: "$query"');
 
     _debounceTimer?.cancel();
 
     if (query.isEmpty) {
-      debugPrint('🔍 Query empty, clearing results');
       if (mounted) {
         setState(() {
           _searchResults = [];
@@ -506,7 +430,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     }
 
     if (_selectedSalonId == null) {
-      debugPrint('⚠️ No salon selected, cannot search');
       if (mounted) {
         setState(() {
           _searchResults = [];
@@ -518,19 +441,14 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     }
 
     if (query.length >= 2) {
-      debugPrint('🔍 Query length >= 2, starting search timer');
       if (mounted) setState(() => _isSearching = true);
 
       _debounceTimer = Timer(const Duration(milliseconds: 500), () {
-        debugPrint('🔍 Debounce timer executed, calling _searchUsers');
         if (mounted) {
           _searchUsers(query);
         }
       });
     } else {
-      debugPrint(
-        '🔍 Query too short (${query.length}), waiting for more characters',
-      );
       if (mounted) {
         setState(() {
           _searchResults = [];
@@ -541,12 +459,9 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   }
 
   Future<void> _searchUsers(String query) async {
-    debugPrint('🔍🔍🔍 _searchUsers STARTED with query: "$query"');
-
     if (query.length < 2) return;
 
     if (_selectedSalonId == null) {
-      debugPrint('⚠️ No salon selected');
       if (mounted) {
         setState(() {
           _searchResults = [];
@@ -564,10 +479,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
         params: {'search_query': query},
       );
 
-      debugPrint('📊 Function response length: ${response.length}');
-
       if (response.isEmpty) {
-        debugPrint('⚠️ No barbers found from function');
         if (mounted) {
           setState(() {
             _searchResults = [];
@@ -599,10 +511,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
         if (a['already_in_salon'] == b['already_in_salon']) return 0;
         return a['already_in_salon'] ? 1 : -1;
       });
-
-      debugPrint(
-        '✅ Search complete - Found ${results.length} matching barbers',
-      );
 
       if (mounted) {
         setState(() {
@@ -642,42 +550,9 @@ class _AddBarberScreenState extends State<AddBarberScreen>
       return;
     }
 
-    debugPrint('📡 Loading salon specific data for salon: $_selectedSalonId');
-
     if (mounted) setState(() => _isLoadingSalonData = true);
 
     try {
-      final salonIdInt = int.parse(_selectedSalonId!);
-
-      final categoriesResponse = await supabase
-          .from('salon_categories')
-          .select(
-            'id, display_name, description, icon_name, color, display_order, is_active',
-          )
-          .eq('salon_id', salonIdInt)
-          .eq('is_active', true)
-          .order('display_order');
-
-      final gendersResponse = await supabase
-          .from('salon_genders')
-          .select('id, display_name, display_order, is_active')
-          .eq('salon_id', salonIdInt)
-          .eq('is_active', true)
-          .order('display_order');
-
-      final ageCategoriesResponse = await supabase
-          .from('salon_age_categories')
-          .select(
-            'id, display_name, min_age, max_age, display_order, is_active',
-          )
-          .eq('salon_id', salonIdInt)
-          .eq('is_active', true)
-          .order('display_order');
-
-      debugPrint(
-        '✅ Salon data loaded - Categories: ${categoriesResponse.length}, Genders: ${gendersResponse.length}, Age Cats: ${ageCategoriesResponse.length}',
-      );
-
       if (mounted) {
         setState(() {
           _isLoadingSalonData = false;
@@ -742,8 +617,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
           .eq('is_active', true)
           .order('name');
 
-      debugPrint('📊 Services loaded: ${servicesResponse.length}');
-
       final categoriesResponse = await supabase
           .from('salon_categories')
           .select('id, display_name, icon_name, color')
@@ -773,8 +646,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
             .inFilter('service_id', serviceIds)
             .eq('is_active', true);
       }
-
-      debugPrint('📊 Variants loaded: ${variantsResponse.length}');
 
       final gendersResponse = await supabase
           .from('salon_genders')
@@ -893,11 +764,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
               _expandedServices.add(serviceId);
             }
           }
-          debugPrint(
-            '✅ Expanded ${_expandedServices.length} services by default',
-          );
         });
-        debugPrint('✅ Services processed: ${processedServices.length}');
       }
     } catch (e) {
       debugPrint('❌ Error loading services: $e');
@@ -1395,14 +1262,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
         _salonTimezone,
       );
       final lunchEndUtc = _localTimeToUtcString(lunchEndLocal, _salonTimezone);
-
-      debugPrint('⏰ Salon timezone: $_salonTimezone');
-      debugPrint('⏰ Salon hours - UTC: $openTimeUtc - $closeTimeUtc');
-      debugPrint(
-        '⏰ Salon hours - Local: ${_salonOpenTimeLocal?.hour}:${_salonOpenTimeLocal?.minute} - ${_salonCloseTimeLocal?.hour}:${_salonCloseTimeLocal?.minute}',
-      );
-      debugPrint('🍽️ Lunch break - Local: 12:00-13:00');
-      debugPrint('🍽️ Lunch break - UTC: $lunchStartUtc - $lunchEndUtc');
 
       final List<int> weekDays = [1, 2, 3, 4, 5, 6, 7];
       final Map<int, String> dayNames = {
@@ -2812,10 +2671,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
         _isLoadingSalons ||
         _isLoadingSalonData ||
         !_isTimezoneLoaded;
-
-    debugPrint(
-      '🔍 Build state - isLoading: $_isLoading, isLoadingServices: $_isLoadingServices, isLoadingSalons: $_isLoadingSalons, isLoadingSalonData: $_isLoadingSalonData, isTimezoneLoaded: $_isTimezoneLoaded, ownerSalons length: ${_ownerSalons.length}',
-    );
 
     return Scaffold(
       appBar: AppBar(
