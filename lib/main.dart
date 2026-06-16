@@ -15,7 +15,6 @@ import 'package:flutter_application_1/screens/authantication/command/reset_passw
 import 'package:flutter_application_1/screens/authantication/command/role_selector_screen.dart';
 import 'package:flutter_application_1/screens/baber/barber_appointments_screen.dart';
 import 'package:flutter_application_1/screens/customer/booking_flow_screen.dart';
-import 'package:flutter_application_1/screens/customer/booking_screen.dart';
 import 'package:flutter_application_1/screens/customer/my_bookings_screen.dart';
 import 'package:flutter_application_1/screens/customer/offers_screen.dart';
 import 'package:flutter_application_1/screens/customer/salon_profile_screen.dart';
@@ -981,11 +980,7 @@ GoRouter _createRouter() {
           final salon = state.extra as Map<String, dynamic>?;
           return BookingFlowScreen(initialSalon: salon);
         },
-      ),
-      GoRoute(
-        path: '/customer/book',
-        builder: (context, state) => const BookingScreen(),
-      ),
+      ),    
       GoRoute(
         path: '/customer/vip-booking',
         builder: (context, state) => const VIPBookingScreen(),
