@@ -70,7 +70,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     debugPrint('✅ User timezone: $_userTimezone');
   }
 
-  // ==================== TIMEZONE CONVERSION ====================
+  // ==================== TIMEZONE CONVERSION (FIXED) ====================
   
   /// Convert UTC salon hours to user's local time
   void _convertSalonHoursToLocal() {
@@ -90,9 +90,10 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
   }
 
   /// Convert UTC time string to user's local time string
+  /// ✅ FIXED: Use utcToLocalTimeRecurring instead of deprecated utcToLocalTime
   String _utcToLocalTimeString(String utcTime) {
     try {
-      return TimezoneService.utcToLocalTime(utcTime, DateTime.now());
+      return TimezoneService.utcToLocalTimeRecurring(utcTime);
     } catch (e) {
       debugPrint('Error converting UTC to local: $e');
       return _formatTimeString(utcTime);

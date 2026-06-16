@@ -27,9 +27,9 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
 
   // Colors
   final Color _primaryColor = const Color(0xFFFF6B8B);
-  final Color _vipColor = const Color(0xFF9C27B0);  // VIP purple color
-  final Color _regularColor = const Color(0xFF4CAF50);  // Regular green color
-  final Color _secondaryColor = const Color(0xFF4CAF50);  
+  final Color _vipColor = const Color(0xFF9C27B0);
+  final Color _regularColor = const Color(0xFF4CAF50);
+  final Color _secondaryColor = const Color(0xFF4CAF50);
   final Color _bgLight = const Color(0xFFF8F9FA);
 
   // Loading states
@@ -61,7 +61,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
   }
 
   // =====================================================
-  // LOAD BOOKINGS (UPDATED - WITH QUEUE DISPLAY NUMBERS)
+  // LOAD BOOKINGS (UPDATED - FOLLOWED SALONS ONLY + QUEUE NUMBERS)
   // =====================================================
   Future<void> _loadBookings() async {
     try {
@@ -74,10 +74,31 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
         return;
       }
 
+      // ✅ STEP 1: Get followed salons
+      final followedSalons = await supabase
+          .from('salon_followers')
+          .select('salon_id')
+          .eq('customer_id', user.id);
+
+      final followedSalonIds = followedSalons
+          .map((f) => f['salon_id'] as int)
+          .toList();
+
+      // ✅ STEP 2: If no followed salons, show empty state
+      if (followedSalonIds.isEmpty) {
+        setState(() {
+          _bookings = [];
+          _isLoading = false;
+        });
+        return;
+      }
+
+      // ✅ STEP 3: Get appointments only from followed salons
       final appointments = await supabase
           .from('appointments')
           .select('*')
           .eq('customer_id', user.id)
+          .inFilter('salon_id', followedSalonIds)
           .order('appointment_date', ascending: false);
 
       final now = DateTime.now();
@@ -123,23 +144,23 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
         }
 
         // =====================================================
-        // TIME CONVERSION (UTC to LOCAL)
+        // TIME CONVERSION (UTC to LOCAL) - FIXED
         // =====================================================
         final utcDate = DateTime.parse(booking['appointment_date']);
         final utcStartTime = booking['start_time'] as String;
         final utcEndTime = booking['end_time'] as String;
 
-        // Convert to local times for DISPLAY
-        final localStartTime = TimezoneService.utcToLocalTime(
+        // ✅ FIXED: Use utcToLocalTimeForDate instead of deprecated method
+        final localStartTime = TimezoneService.utcToLocalTimeForDate(
           utcStartTime,
           utcDate,
         );
-        final localEndTime = TimezoneService.utcToLocalTime(
+        final localEndTime = TimezoneService.utcToLocalTimeForDate(
           utcEndTime,
           utcDate,
         );
 
-        // ✅ FIX: Create LOCAL date from UTC date for comparison
+        // Create LOCAL date from UTC date for comparison
         final localDate = DateTime(utcDate.year, utcDate.month, utcDate.day);
 
         // Determine status category using LOCAL date
@@ -210,17 +231,33 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
   }
 
   // =====================================================
-  // LOAD OVERFLOW NOTIFICATIONS
+  // LOAD OVERFLOW NOTIFICATIONS (UPDATED - FOLLOWED SALONS ONLY)
   // =====================================================
   Future<void> _loadOverflowNotifications() async {
     try {
       final user = supabase.auth.currentUser;
       if (user == null) return;
 
+      // ✅ Get followed salons
+      final followedSalons = await supabase
+          .from('salon_followers')
+          .select('salon_id')
+          .eq('customer_id', user.id);
+
+      final followedSalonIds = followedSalons
+          .map((f) => f['salon_id'] as int)
+          .toList();
+
+      if (followedSalonIds.isEmpty) {
+        setState(() => _overflowNotifications = []);
+        return;
+      }
+
       final result = await supabase
           .from('overflow_notifications')
           .select('*')
           .eq('customer_id', user.id)
+          .inFilter('salon_id', followedSalonIds)
           .eq('status', 'PENDING')
           .order('notified_at', ascending: false);
 
@@ -249,11 +286,12 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
         final utcStartTime = apt['start_time'] as String;
         final utcEndTime = apt['end_time'] as String;
 
-        final localStartTime = TimezoneService.utcToLocalTime(
+        // ✅ FIXED: Use utcToLocalTimeForDate instead of deprecated method
+        final localStartTime = TimezoneService.utcToLocalTimeForDate(
           utcStartTime,
           appointmentDate,
         );
-        final localEndTime = TimezoneService.utcToLocalTime(
+        final localEndTime = TimezoneService.utcToLocalTimeForDate(
           utcEndTime,
           appointmentDate,
         );

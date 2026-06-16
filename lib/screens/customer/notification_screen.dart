@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/notification_service.dart';
+import '../../services/timezone_service.dart';
 
 class NotificationScreen extends StatefulWidget {
   const NotificationScreen({super.key});
@@ -21,7 +23,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
   String _errorMessage = '';
   String _selectedFilter = 'all'; // all, unread, read
 
-  // ✅ Pagination variables
+  // Pagination variables
   bool _isLoadingMore = false;
   bool _hasMore = true;
   int _currentPage = 0;
@@ -30,10 +32,15 @@ class _NotificationScreenState extends State<NotificationScreen> {
   // Scroll controller for pagination
   final ScrollController _scrollController = ScrollController();
 
+  // ============================================
+  // TIMEZONE VARIABLES
+  // ============================================
+  bool _isTimezoneLoaded = false;
+
   @override
   void initState() {
     super.initState();
-    _loadNotifications();
+    _initializeTimezone();
     _scrollController.addListener(_onScroll);
   }
 
@@ -43,10 +50,62 @@ class _NotificationScreenState extends State<NotificationScreen> {
     super.dispose();
   }
 
+  // ============================================
+  // TIMEZONE INITIALIZATION
+  // ============================================
+
+  Future<void> _initializeTimezone() async {
+    await TimezoneService.initialize();
+    
+    final prefs = await SharedPreferences.getInstance();
+    final userTimezone = prefs.getString('cached_timezone') ?? TimezoneService.getCurrentTimezone();
+    await TimezoneService.setTimezone(userTimezone);
+    
+    setState(() {
+      _isTimezoneLoaded = true;
+    });
+    
+    await _loadNotifications();
+  }
+
   void _onScroll() {
     if (_scrollController.position.pixels >=
         _scrollController.position.maxScrollExtent - 200) {
       _loadMoreNotifications();
+    }
+  }
+
+  // ============================================
+  // TIME FORMATTING WITH TIMEZONESERVICE (FIXED)
+  // ============================================
+
+  String _formatTime(String createdAt) {
+    try {
+      final utcDateTime = DateTime.parse(createdAt);
+      
+      // ✅ Convert UTC to local time using TimezoneService
+      final localDateTime = TimezoneService.utcToLocalDateTimeForDate(
+        '${utcDateTime.hour.toString().padLeft(2, '0')}:${utcDateTime.minute.toString().padLeft(2, '0')}:00',
+        utcDateTime,
+      );
+      
+      final now = DateTime.now();
+      final difference = now.difference(localDateTime);
+
+      if (difference.inDays > 7) {
+        return DateFormat('MMM dd, yyyy').format(localDateTime);
+      } else if (difference.inDays > 0) {
+        return '${difference.inDays}d ago';
+      } else if (difference.inHours > 0) {
+        return '${difference.inHours}h ago';
+      } else if (difference.inMinutes > 0) {
+        return '${difference.inMinutes}m ago';
+      } else {
+        return 'Just now';
+      }
+    } catch (e) {
+      debugPrint('Error formatting time: $e');
+      return createdAt;
     }
   }
 
@@ -74,7 +133,6 @@ class _NotificationScreenState extends State<NotificationScreen> {
         return;
       }
 
-      // ✅ Load first page with pagination
       final result = await supabase
           .from('notifications')
           .select('*')
@@ -201,7 +259,6 @@ class _NotificationScreenState extends State<NotificationScreen> {
         ),
       );
 
-      // ✅ Return true to refresh dashboard count
       Navigator.pop(context, true);
     }
   }
@@ -230,12 +287,10 @@ class _NotificationScreenState extends State<NotificationScreen> {
               final success = await _notificationService.clearAllNotifications(
                 user.id,
               );
-              // Use the dialogContext and check mounted on the State
               if (success && mounted) {
                 setState(() {
                   _notifications = [];
                 });
-                // ✅ Return true to refresh dashboard count
                 Navigator.pop(context, true);
               }
             },
@@ -311,28 +366,6 @@ class _NotificationScreenState extends State<NotificationScreen> {
     }
   }
 
-  String _formatTime(String createdAt) {
-    try {
-      final date = DateTime.parse(createdAt);
-      final now = DateTime.now();
-      final difference = now.difference(date);
-
-      if (difference.inDays > 7) {
-        return DateFormat('MMM dd, yyyy').format(date);
-      } else if (difference.inDays > 0) {
-        return '${difference.inDays}d ago';
-      } else if (difference.inHours > 0) {
-        return '${difference.inHours}h ago';
-      } else if (difference.inMinutes > 0) {
-        return '${difference.inMinutes}m ago';
-      } else {
-        return 'Just now';
-      }
-    } catch (e) {
-      return createdAt;
-    }
-  }
-
   IconData _getNotificationIcon(String? type) {
     switch (type) {
       case 'appointment_confirmed':
@@ -381,6 +414,27 @@ class _NotificationScreenState extends State<NotificationScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (!_isTimezoneLoaded) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('Notifications'),
+          backgroundColor: const Color(0xFFFF6B8B),
+          foregroundColor: Colors.white,
+          elevation: 0,
+        ),
+        body: const Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+              SizedBox(height: 16),
+              Text('Loading timezone...'),
+            ],
+          ),
+        ),
+      );
+    }
+
     final unreadCount = _notifications
         .where((n) => n['is_read'] == false)
         .length;

@@ -160,17 +160,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     _lastTimezone = currentTimezone;
   }
 
-  bool _isDST() {
-    final timezone = _userTimezone;
-    if (!timezone.contains('America/') && !timezone.contains('Europe/')) {
-      return false;
-    }
-    final now = DateTime.now();
-    final month = now.month;
-    return month > 3 && month < 11;
-  }
-
-  // ==================== PARSE DATE SAFELY (FIXED) ====================
+  // ==================== FIXED: PARSE DATE SAFELY ====================
 
   DateTime _parseDateSafely(String dateStr) {
     String processedStr = dateStr;
@@ -180,7 +170,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     return DateTime.parse(processedStr).toUtc();
   }
 
-  // ==================== CHECK OFFER ACTIVE (FIXED) ====================
+  // ==================== FIXED: CHECK OFFER ACTIVE ====================
 
   bool _isOfferActive(Map<String, dynamic> offer) {
     try {
@@ -212,7 +202,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     }
   }
 
-  // ==================== GET DAYS LEFT (FIXED) ====================
+  // ==================== FIXED: GET DAYS LEFT ====================
 
   int _getDaysLeft(String validToUtc) {
     try {
@@ -235,14 +225,16 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     }
   }
 
-  // ==================== TIMEZONE CONVERSION METHODS ====================
+  // ==================== FIXED: TIMEZONE CONVERSION METHODS ====================
 
+  /// Convert UTC time to local time string using TimezoneService (DST-SAFE)
   String _convertUtcToLocalTime(String? utcTime, DateTime referenceDate) {
     if (utcTime == null || utcTime.isEmpty) return '--:--';
     try {
       String timeStr = utcTime;
       if (timeStr.length > 5) timeStr = timeStr.substring(0, 5);
-      return TimezoneService.utcToLocalTime(timeStr, referenceDate);
+      // ✅ FIXED: Use utcToLocalTimeForDate instead of deprecated method
+      return TimezoneService.utcToLocalTimeForDate(timeStr, referenceDate);
     } catch (e) {
       debugPrint('Error converting time: $e');
       return utcTime.length > 5 ? utcTime.substring(0, 5) : utcTime;
@@ -290,24 +282,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
             ),
             const SizedBox(width: 4),
             const Icon(Icons.arrow_drop_down, size: 20, color: Colors.white),
-            if (_isDST()) ...[
-              const SizedBox(width: 4),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Colors.amber.shade100,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  'DST',
-                  style: TextStyle(
-                    fontSize: 8,
-                    color: Colors.amber.shade800,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ],
           ],
         ),
       ),
@@ -315,7 +289,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ==================== TIMEZONE PICKER METHODS ====================
-  // (Keeping existing timezone picker methods - too long to repeat but they work)
 
   String _extractCountryCode(String timezone) {
     final countryMap = {
@@ -1766,7 +1739,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     context.push('/customer/favorites');
   }
 
-  // ==================== 🔥 FIXED: APPLY OFFER METHOD ====================
+  // ==================== APPLY OFFER METHOD ====================
 
   void _showSnackBar(String message, Color color) {
     if (!mounted) return;
@@ -1792,7 +1765,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         return;
       }
 
-      // 2. CHECK OFFER VALIDITY (FIXED)
+      // 2. CHECK OFFER VALIDITY
       if (!_isOfferActive(offer)) {
         if (mounted) {
           _showSnackBar('This offer has expired', Colors.red);
@@ -2648,7 +2621,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     );
   }
 
-  // ==================== FACEBOOK STYLE OFFER POST (UPDATED WITH FIXED APPLY) ====================
+  // ==================== FACEBOOK STYLE OFFER POST ====================
 
   Widget _buildFacebookStyleOfferPost(Map<String, dynamic> offer, int index) {
     final salonData = offer['salons'];
@@ -2658,12 +2631,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     final daysLeft = _getDaysLeft(offer['valid_to']);
     final discountColor = _getDiscountColor(offer['discount_type']);
     final discountText = _getDiscountText(offer);
-
-    if (daysLeft < 0) {
-    } else if (daysLeft == 0) {
-    } else if (daysLeft <= 3) {
-    } else if (daysLeft <= 7) {
-    } else {}
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),

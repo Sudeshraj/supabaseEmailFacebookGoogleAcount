@@ -81,82 +81,56 @@ class _OffersScreenState extends State<OffersScreen> {
   }
 
   // ============================================
-  // 🔥 FIXED: TIMEZONE HELPER METHODS (UTC-based calculation)
+  // ✅ FIXED: TIMEZONE HELPER METHODS (Using TimezoneService)
   // ============================================
 
-  // ============================================
-  // 🔥 COMPLETELY FIXED TIMEZONE METHODS
-  // ============================================
-
-  /// Parse date string safely (handles date-only and full datetime)
-  DateTime _parseDateSafely(String dateStr) {
-    String processedStr = dateStr;
-    if (!dateStr.contains('T') && dateStr.length == 10) {
-      processedStr = '${dateStr}T00:00:00Z';
-    }
-    return DateTime.parse(processedStr).toUtc();
-  }
-
-  /// Get days left (FIXED)
+  /// Get days left using TimezoneService
   int _getDaysLeftLocal(String validToUtc) {
     try {
-      final utcDate = _parseDateSafely(validToUtc);
-      final nowUtc = DateTime.now().toUtc();
-      final todayUtcMidnight = DateTime.utc(
-        nowUtc.year,
-        nowUtc.month,
-        nowUtc.day,
-      );
-      final validToUtcMidnight = DateTime.utc(
-        utcDate.year,
-        utcDate.month,
-        utcDate.day,
-      );
-      return validToUtcMidnight.difference(todayUtcMidnight).inDays;
+      final utcDate = DateTime.parse(validToUtc);
+      
+      // Convert UTC to local using TimezoneService
+      final localDateTime = TimezoneService.utcToLocalDateTimeForDate('00:00:00', utcDate);
+      final localDate = DateTime(localDateTime.year, localDateTime.month, localDateTime.day);
+      
+      // Get today's local date
+      final now = DateTime.now();
+      final todayLocal = DateTime(now.year, now.month, now.day);
+      
+      return localDate.difference(todayLocal).inDays;
     } catch (e) {
       debugPrint('Error calculating days left: $e');
       return -1;
     }
   }
 
-  /// Check if offer is active (FIXED - includes start date)
+  /// Check if offer is active using TimezoneService
   bool _isOfferActiveLocally(Map<String, dynamic> offer) {
     try {
-      final validFromUtc = _parseDateSafely(offer['valid_from']);
-      final validToUtc = _parseDateSafely(offer['valid_to']);
-
-      final nowUtc = DateTime.now().toUtc();
-      final todayUtcMidnight = DateTime.utc(
-        nowUtc.year,
-        nowUtc.month,
-        nowUtc.day,
-      );
-      final validFromUtcMidnight = DateTime.utc(
-        validFromUtc.year,
-        validFromUtc.month,
-        validFromUtc.day,
-      );
-      final validToUtcMidnight = DateTime.utc(
-        validToUtc.year,
-        validToUtc.month,
-        validToUtc.day,
-      );
-
+      final validFromUtc = DateTime.parse(offer['valid_from']);
+      final validToUtc = DateTime.parse(offer['valid_to']);
+      
+      // Convert UTC to local using TimezoneService
+      final validFromLocal = TimezoneService.utcToLocalDateTimeForDate('00:00:00', validFromUtc);
+      final validToLocal = TimezoneService.utcToLocalDateTimeForDate('00:00:00', validToUtc);
+      
+      final fromLocal = DateTime(validFromLocal.year, validFromLocal.month, validFromLocal.day);
+      final toLocal = DateTime(validToLocal.year, validToLocal.month, validToLocal.day);
+      
+      final now = DateTime.now();
+      final todayLocal = DateTime(now.year, now.month, now.day);
+      
       // valid_from <= today < valid_to
-      final isActive =
-          !validFromUtcMidnight.isAfter(todayUtcMidnight) &&
-          validToUtcMidnight.isAfter(todayUtcMidnight);
-
-      return isActive;
+      return !fromLocal.isAfter(todayLocal) && toLocal.isAfter(todayLocal);
     } catch (e) {
       debugPrint('Error checking offer active: $e');
       return false;
     }
   }
 
-  /// Get timezone display string
+  /// Get timezone display string using TimezoneService
   String _getTimezoneDisplay() {
-    return '${TimezoneService.getCurrentFlag()} ${TimezoneService.getTimezoneDisplayName()} (${TimezoneService.getUtcOffsetString()})';
+    return TimezoneService.getFullTimezoneDisplay();
   }
 
   /// Check if DST is active
@@ -276,7 +250,7 @@ class _OffersScreenState extends State<OffersScreen> {
   List<Map<String, dynamic>> get _filteredAndSortedOffers {
     List<Map<String, dynamic>> filtered = List.from(_offers);
 
-    // Apply filter using UTC-based calculation
+    // Apply filter using TimezoneService methods
     switch (_selectedFilter) {
       case 'active':
         filtered = filtered
@@ -302,8 +276,8 @@ class _OffersScreenState extends State<OffersScreen> {
     switch (_selectedSort) {
       case 'newest':
         filtered.sort((a, b) {
-          final aDate = _parseDateSafely(a['valid_from']);
-          final bDate = _parseDateSafely(b['valid_from']);
+          final aDate = DateTime.parse(a['valid_from']);
+          final bDate = DateTime.parse(b['valid_from']);
           return bDate.compareTo(aDate);
         });
         break;
@@ -381,12 +355,11 @@ class _OffersScreenState extends State<OffersScreen> {
   }
 
   // ============================================
-  // ✅ COMPLETE APPLY OFFER METHOD (FIXED)
+  // APPLY OFFER METHOD
   // ============================================
 
   Future<void> _applyOffer(Map<String, dynamic> offer) async {
     try {
-      // 1. CHECK LOGIN
       final user = supabase.auth.currentUser;
       if (user == null) {
         if (mounted) {
@@ -396,7 +369,7 @@ class _OffersScreenState extends State<OffersScreen> {
         return;
       }
 
-      // 2. CHECK OFFER VALIDITY (using UTC-based calculation)
+      // Check offer validity using TimezoneService
       if (!_isOfferActiveLocally(offer)) {
         if (mounted) {
           _showSnackBar('This offer has expired', Colors.red);
@@ -404,7 +377,7 @@ class _OffersScreenState extends State<OffersScreen> {
         return;
       }
 
-      // 3. CHECK POINTS REQUIREMENT
+      // Check points requirement
       final pointsRequired = offer['points_required'] ?? 0;
       if (pointsRequired > 0) {
         final loyaltyResult = await supabase
@@ -425,7 +398,7 @@ class _OffersScreenState extends State<OffersScreen> {
         }
       }
 
-      // 4. CHECK USAGE LIMIT
+      // Check usage limit
       final usageLimit = offer['usage_limit'];
       final usedCount = offer['used_count'] ?? 0;
       if (usageLimit != null && usedCount >= usageLimit) {
@@ -435,7 +408,7 @@ class _OffersScreenState extends State<OffersScreen> {
         return;
       }
 
-      // 5. CHECK IF ALREADY APPLIED
+      // Check if already applied
       final existingOffer = await supabase
           .from('customer_offers')
           .select('id, status')
@@ -459,7 +432,7 @@ class _OffersScreenState extends State<OffersScreen> {
 
       if (!mounted) return;
 
-      // 6. SHOW CONFIRMATION DIALOG
+      // Show confirmation dialog
       final confirmed = await showDialog<bool>(
         context: context,
         barrierDismissible: false,
@@ -558,7 +531,7 @@ class _OffersScreenState extends State<OffersScreen> {
       if (!mounted) return;
       if (confirmed != true) return;
 
-      // 7. SAVE TO customer_offers TABLE
+      // Save to customer_offers table
       await supabase.from('customer_offers').insert({
         'customer_id': user.id,
         'offer_id': offer['id'],
@@ -567,13 +540,13 @@ class _OffersScreenState extends State<OffersScreen> {
         'status': 'active',
       });
 
-      // 8. UPDATE OFFER USAGE COUNT
+      // Update offer usage count
       await supabase
           .from('offers')
           .update({'used_count': (usedCount + 1)})
           .eq('id', offer['id']);
 
-      // 9. DEDUCT POINTS IF REQUIRED
+      // Deduct points if required
       if (pointsRequired > 0) {
         final loyaltyResult = await supabase
             .from('customer_loyalty')
@@ -604,7 +577,7 @@ class _OffersScreenState extends State<OffersScreen> {
         });
       }
 
-      // 10. SHOW SUCCESS MESSAGE
+      // Show success message
       if (mounted) {
         _showSnackBar(
           '✅ "${offer['title']}" applied successfully!',
@@ -612,7 +585,7 @@ class _OffersScreenState extends State<OffersScreen> {
         );
       }
 
-      // 11. NAVIGATE TO BOOKING FLOW
+      // Navigate to booking flow
       if (mounted) {
         context.push('/customer/booking-flow', extra: {'offer': offer});
       }
@@ -994,7 +967,7 @@ class _OffersScreenState extends State<OffersScreen> {
     final discountIcon = _getDiscountIcon(offer['discount_type']);
     final discountText = _getDiscountText(offer);
 
-    // 🔥 FIXED: Status text logic with "Last day" case
+    // Status text logic
     String statusText = '';
     Color statusColor = Colors.green;
 
