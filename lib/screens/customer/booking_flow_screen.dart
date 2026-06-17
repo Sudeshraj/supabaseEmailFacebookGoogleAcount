@@ -1049,53 +1049,142 @@ Widget _buildDateSelectionStep() {
 
   // ==================== STEP 3: SERVICE SELECTION ====================
 
-  Future<void> _loadSalonServices() async {
+  // Future<void> _loadSalonServices() async {
+  //   if (_servicesLoaded) return;
+  //   setState(() => _isLoadingServices = true);
+  //   try {
+  //     final response = await supabase
+  //         .from('salon_services_with_details')
+  //         .select()
+  //         .eq('salon_id', _selectedSalon!['id'])
+  //         .eq('service_active', true);
+  //     final categories = await supabase
+  //         .from('salon_categories')
+  //         .select('id, display_name')
+  //         .eq('salon_id', _selectedSalon!['id'])
+  //         .eq('is_active', true);
+  //     final Map<int, String> categoryMap = {
+  //       for (var cat in categories) cat['id']: cat['display_name'],
+  //     };
+  //     final Map<int, Map<String, dynamic>> groupedServices = {};
+  //     for (var service in response) {
+  //       final serviceId = service['service_id'] as int;
+  //       if (!groupedServices.containsKey(serviceId)) {
+  //         groupedServices[serviceId] = {
+  //           'id': serviceId,
+  //           'name': service['service_name']?.toString() ?? 'Service',
+  //           'description': service['description']?.toString(),
+  //           'category_name':
+  //               categoryMap[service['salon_category_id']] ?? 'Other',
+  //           'variants': [],
+  //         };
+  //       }
+  //       if (service['variant_id'] != null) {
+  //         groupedServices[serviceId]!['variants'].add({
+  //           'id': service['variant_id'],
+  //           'gender': service['gender_display_name']?.toString() ?? '',
+  //           'age': service['age_category_display_name']?.toString() ?? '',
+  //           'price': (service['price'] as num?)?.toDouble() ?? 0.0,
+  //           'duration': service['duration'] ?? 30,
+  //         });
+  //       }
+  //     }
+  //     setState(() {
+  //       _salonServices = groupedServices.values.toList();
+  //       _isLoadingServices = false;
+  //       _servicesLoaded = true;
+  //     });
+  //   } catch (e) {
+  //     setState(() => _isLoadingServices = false);
+  //   }
+  // }
+
+  //--------------------without view----------------------
+   Future<void> _loadSalonServices() async {
     if (_servicesLoaded) return;
     setState(() => _isLoadingServices = true);
+
     try {
+      final salonId = _selectedSalon!['id'];
+
+      // Single query with all joins
       final response = await supabase
-          .from('salon_services_with_details')
-          .select()
-          .eq('salon_id', _selectedSalon!['id'])
-          .eq('service_active', true);
-      final categories = await supabase
-          .from('salon_categories')
-          .select('id, display_name')
-          .eq('salon_id', _selectedSalon!['id'])
-          .eq('is_active', true);
-      final Map<int, String> categoryMap = {
-        for (var cat in categories) cat['id']: cat['display_name'],
-      };
+          .from('services')
+          .select('''
+          id,
+          name,
+          description,
+          is_active,
+          category_id,
+          salon_categories!inner (
+            display_name
+          ),
+          service_variants!inner (
+            id,
+            price,
+            duration,
+            salon_gender_id,
+            salon_age_category_id,
+            salon_genders!inner (
+              display_name
+            ),
+            salon_age_categories!inner (
+              display_name
+            )
+          )
+        ''')
+          .eq('salon_id', salonId)
+          .eq('is_active', true)
+          .eq('service_variants.is_active', true);
+
       final Map<int, Map<String, dynamic>> groupedServices = {};
+
       for (var service in response) {
-        final serviceId = service['service_id'] as int;
+        final serviceId = service['id'] as int;
+
+        // Initialize service if not exists
         if (!groupedServices.containsKey(serviceId)) {
           groupedServices[serviceId] = {
             'id': serviceId,
-            'name': service['service_name']?.toString() ?? 'Service',
+            'name': service['name']?.toString() ?? 'Service',
             'description': service['description']?.toString(),
             'category_name':
-                categoryMap[service['salon_category_id']] ?? 'Other',
+                service['salon_categories']?['display_name'] ?? 'Other',
             'variants': [],
           };
         }
-        if (service['variant_id'] != null) {
+
+        // Add variants
+        final variants = service['service_variants'] as List? ?? [];
+        for (var variant in variants) {
           groupedServices[serviceId]!['variants'].add({
-            'id': service['variant_id'],
-            'gender': service['gender_display_name']?.toString() ?? '',
-            'age': service['age_category_display_name']?.toString() ?? '',
-            'price': (service['price'] as num?)?.toDouble() ?? 0.0,
-            'duration': service['duration'] ?? 30,
+            'id': variant['id'],
+            'gender': variant['salon_genders']?['display_name'] ?? '',
+            'age': variant['salon_age_categories']?['display_name'] ?? '',
+            'price': (variant['price'] as num?)?.toDouble() ?? 0.0,
+            'duration': variant['duration'] ?? 30,
           });
         }
       }
+
+      // Convert to list
+      final servicesList = groupedServices.values.toList();
+
       setState(() {
-        _salonServices = groupedServices.values.toList();
+        _salonServices = servicesList;
         _isLoadingServices = false;
         _servicesLoaded = true;
       });
     } catch (e) {
       setState(() => _isLoadingServices = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to load services: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 

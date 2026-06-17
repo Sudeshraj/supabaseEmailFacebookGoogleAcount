@@ -813,365 +813,416 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     }
   }
 
-Widget _buildDateSelectionStep() {
-  final today = DateTime(
-    DateTime.now().year,
-    DateTime.now().month,
-    DateTime.now().day,
-  );
-  final maxDate = today.add(const Duration(days: 30));
-  final isMobile = MediaQuery.of(context).size.width < 600;
+  Widget _buildDateSelectionStep() {
+    final today = DateTime(
+      DateTime.now().year,
+      DateTime.now().month,
+      DateTime.now().day,
+    );
+    final maxDate = today.add(const Duration(days: 30));
+    final isMobile = MediaQuery.of(context).size.width < 600;
 
-  // ✅ Check if date is selectable
-  bool isDateSelectable(DateTime date) {
-    // Disable holidays
-    if (_holidays.contains(date)) return false;
-    
-    // Disable today (current day)
-    if (date.isAtSameMomentAs(today)) return false;
-    
-    // Disable past dates (before today)
-    if (date.isBefore(today)) return false;
-    
-    return true;
-  }
+    // ✅ Check if date is selectable
+    bool isDateSelectable(DateTime date) {
+      // Disable holidays
+      if (_holidays.contains(date)) return false;
 
-  DateTime getValidInitialDate() {
-    DateTime checkDate = today.add(const Duration(days: 1));
-    for (int i = 0; i < 30; i++) {
-      if (isDateSelectable(checkDate)) {
-        return checkDate;
-      }
-      checkDate = checkDate.add(const Duration(days: 1));
+      // Disable today (current day)
+      if (date.isAtSameMomentAs(today)) return false;
+
+      // Disable past dates (before today)
+      if (date.isBefore(today)) return false;
+
+      return true;
     }
-    return today.add(const Duration(days: 1));
-  }
 
-  return Column(
-    children: [
-      Container(
-        padding: const EdgeInsets.all(16),
-        color: Colors.white,
-        child: Row(
-          children: [
-            Container(
-              width: 45,
-              height: 45,
-              decoration: BoxDecoration(
-                color: _primaryColor.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(12),
-                image: (_selectedSalon?['logo_url'] as String?) != null && (_selectedSalon!['logo_url'] as String).isNotEmpty
-                    ? DecorationImage(
-                        image: NetworkImage(_selectedSalon!['logo_url']),
-                        fit: BoxFit.cover,
+    DateTime getValidInitialDate() {
+      DateTime checkDate = today.add(const Duration(days: 1));
+      for (int i = 0; i < 30; i++) {
+        if (isDateSelectable(checkDate)) {
+          return checkDate;
+        }
+        checkDate = checkDate.add(const Duration(days: 1));
+      }
+      return today.add(const Duration(days: 1));
+    }
+
+    return Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(16),
+          color: Colors.white,
+          child: Row(
+            children: [
+              Container(
+                width: 45,
+                height: 45,
+                decoration: BoxDecoration(
+                  color: _primaryColor.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                  image:
+                      (_selectedSalon?['logo_url'] as String?) != null &&
+                          (_selectedSalon!['logo_url'] as String).isNotEmpty
+                      ? DecorationImage(
+                          image: NetworkImage(_selectedSalon!['logo_url']),
+                          fit: BoxFit.cover,
+                        )
+                      : null,
+                ),
+                child:
+                    (_selectedSalon?['logo_url'] == null ||
+                        (_selectedSalon!['logo_url'] as String).isEmpty)
+                    ? Center(
+                        child: Text(
+                          (_selectedSalon?['name'] as String?)
+                                  ?.substring(0, 1)
+                                  .toUpperCase() ??
+                              'S',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: _primaryColor,
+                          ),
+                        ),
                       )
                     : null,
               ),
-              child: (_selectedSalon?['logo_url'] == null || (_selectedSalon!['logo_url'] as String).isEmpty)
-                  ? Center(
-                      child: Text(
-                        (_selectedSalon?['name'] as String?)?.substring(0, 1).toUpperCase() ?? 'S',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: _primaryColor,
-                        ),
-                      ),
-                    )
-                  : null,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Selected Salon',
-                    style: TextStyle(fontSize: 13, color: Colors.grey[600]),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    _selectedSalon?['name'] ?? '',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            TextButton(
-              onPressed: () => setState(() => _currentStep = 0),
-              child: Text(
-                'Change',
-                style: TextStyle(color: _primaryColor, fontSize: 14),
-              ),
-            ),
-          ],
-        ),
-      ),
-      Expanded(
-        child: SingleChildScrollView(
-          physics: const BouncingScrollPhysics(),
-          padding: EdgeInsets.only(
-            left: 16,
-            right: 16,
-            top: 16,
-            bottom: isMobile ? 100 : 16,
-          ),
-          child: Column(
-            children: [
-              // ✅ Info Banner - Today is disabled
-              Container(
-                padding: const EdgeInsets.all(12),
-                margin: const EdgeInsets.only(bottom: 16),
-                decoration: BoxDecoration(
-                  color: Colors.orange.shade50,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.orange.shade200),
-                ),
-                child: Row(
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(Icons.calendar_today, color: Colors.orange.shade700, size: 20),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            '📅 ${DateFormat('EEEE, MMM dd').format(today)} is not available',
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.orange.shade700,
-                            ),
-                          ),
-                          Text(
-                            'Please select a future date (tomorrow or later)',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.orange.shade600,
-                            ),
-                          ),
-                        ],
+                    Text(
+                      'Selected Salon',
+                      style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _selectedSalon?['name'] ?? '',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
                   ],
                 ),
               ),
-              
-              Card(
-                elevation: 3,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Container(
-                  padding: const EdgeInsets.all(16),
-                  child: CalendarDatePicker(
-                    initialDate: getValidInitialDate(),
-                    firstDate: today.add(const Duration(days: 1)),
-                    lastDate: maxDate,
-                    selectableDayPredicate: (date) => isDateSelectable(date),
-                    onDateChanged: (date) async {
-                      setState(() {
-                        _selectedDate = date;
-                        _isDateUnavailable = false;
-                      });
-                      await _checkDateAvailability(date);
-                    },
-                  ),
+              TextButton(
+                onPressed: () => setState(() => _currentStep = 0),
+                child: Text(
+                  'Change',
+                  style: TextStyle(color: _primaryColor, fontSize: 14),
                 ),
               ),
-              
-              if (_selectedDate != null && _holidays.contains(_selectedDate))
+            ],
+          ),
+        ),
+        Expanded(
+          child: SingleChildScrollView(
+            physics: const BouncingScrollPhysics(),
+            padding: EdgeInsets.only(
+              left: 16,
+              right: 16,
+              top: 16,
+              bottom: isMobile ? 100 : 16,
+            ),
+            child: Column(
+              children: [
+                // ✅ Info Banner - Today is disabled
                 Container(
-                  margin: const EdgeInsets.only(top: 16),
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: Colors.red.shade50,
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.event_busy, color: Colors.red.shade700),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          '⛔ Holiday: ${_holidayNames[_selectedDate]}',
-                          style: TextStyle(
-                            color: Colors.red.shade700,
-                            fontWeight: FontWeight.w500,
-                            fontSize: 14,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              
-              if (_isDateUnavailable && !_holidays.contains(_selectedDate))
-                Container(
-                  margin: const EdgeInsets.only(top: 16),
-                  padding: const EdgeInsets.all(14),
+                  padding: const EdgeInsets.all(12),
+                  margin: const EdgeInsets.only(bottom: 16),
                   decoration: BoxDecoration(
                     color: Colors.orange.shade50,
-                    borderRadius: BorderRadius.circular(14),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.orange.shade200),
                   ),
                   child: Row(
                     children: [
                       Icon(
-                        Icons.warning_amber,
+                        Icons.calendar_today,
                         color: Colors.orange.shade700,
+                        size: 20,
                       ),
-                      const SizedBox(width: 10),
+                      const SizedBox(width: 12),
                       Expanded(
-                        child: Text(
-                          _unavailableReason ?? '⚠️ No barbers available on this day',
-                          style: TextStyle(
-                            color: Colors.orange.shade700,
-                            fontSize: 14,
-                          ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '📅 ${DateFormat('EEEE, MMM dd').format(today)} is not available',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.orange.shade700,
+                              ),
+                            ),
+                            Text(
+                              'Please select a future date (tomorrow or later)',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.orange.shade600,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ],
                   ),
                 ),
-            ],
+
+                Card(
+                  elevation: 3,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    child: CalendarDatePicker(
+                      initialDate: getValidInitialDate(),
+                      firstDate: today.add(const Duration(days: 1)),
+                      lastDate: maxDate,
+                      selectableDayPredicate: (date) => isDateSelectable(date),
+                      onDateChanged: (date) async {
+                        setState(() {
+                          _selectedDate = date;
+                          _isDateUnavailable = false;
+                        });
+                        await _checkDateAvailability(date);
+                      },
+                    ),
+                  ),
+                ),
+
+                if (_selectedDate != null && _holidays.contains(_selectedDate))
+                  Container(
+                    margin: const EdgeInsets.only(top: 16),
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.red.shade50,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.event_busy, color: Colors.red.shade700),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            '⛔ Holiday: ${_holidayNames[_selectedDate]}',
+                            style: TextStyle(
+                              color: Colors.red.shade700,
+                              fontWeight: FontWeight.w500,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                if (_isDateUnavailable && !_holidays.contains(_selectedDate))
+                  Container(
+                    margin: const EdgeInsets.only(top: 16),
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.shade50,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.warning_amber,
+                          color: Colors.orange.shade700,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            _unavailableReason ??
+                                '⚠️ No barbers available on this day',
+                            style: TextStyle(
+                              color: Colors.orange.shade700,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
-      ),
-      Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.grey.withValues(alpha: 0.1),
-              blurRadius: 8,
-              offset: const Offset(0, -2),
-            ),
-          ],
-        ),
-        child: SizedBox(
-          width: double.infinity,
-          child: ElevatedButton(
-            onPressed:
-                (_selectedDate != null &&
-                    !_isDateUnavailable &&
-                    !_holidays.contains(_selectedDate) &&
-                    !_selectedDate!.isAtSameMomentAs(today) &&
-                    _selectedDate!.isAfter(today))
-                ? () async {
-                    setState(() => _currentStep = 2);
-                    await _loadSalonServices();
-                  }
-                : null,
-            style: ElevatedButton.styleFrom(
-              backgroundColor:
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.grey.withValues(alpha: 0.1),
+                blurRadius: 8,
+                offset: const Offset(0, -2),
+              ),
+            ],
+          ),
+          child: SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed:
                   (_selectedDate != null &&
                       !_isDateUnavailable &&
                       !_holidays.contains(_selectedDate) &&
                       !_selectedDate!.isAtSameMomentAs(today) &&
                       _selectedDate!.isAfter(today))
-                  ? _primaryColor
-                  : Colors.grey[400],
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
-              ),
-              elevation: 2,
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  _selectedDate == null
-                      ? 'Select Date'
-                      : (_selectedDate!.isAtSameMomentAs(today)
-                          ? 'Today Not Available'
-                          : (_holidays.contains(_selectedDate)
-                              ? 'Holiday - Not Available'
-                              : (_isDateUnavailable
-                                  ? 'No Barbers Available'
-                                  : 'Continue to Services'))),
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
+                  ? () async {
+                      setState(() => _currentStep = 2);
+                      await _loadSalonServices();
+                    }
+                  : null,
+              style: ElevatedButton.styleFrom(
+                backgroundColor:
+                    (_selectedDate != null &&
+                        !_isDateUnavailable &&
+                        !_holidays.contains(_selectedDate) &&
+                        !_selectedDate!.isAtSameMomentAs(today) &&
+                        _selectedDate!.isAfter(today))
+                    ? _primaryColor
+                    : Colors.grey[400],
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
                 ),
-                if (_selectedDate != null &&
-                    !_isDateUnavailable &&
-                    !_holidays.contains(_selectedDate) &&
-                    !_selectedDate!.isAtSameMomentAs(today) &&
-                    _selectedDate!.isAfter(today))
-                  const SizedBox(width: 8),
-                if (_selectedDate != null &&
-                    !_isDateUnavailable &&
-                    !_holidays.contains(_selectedDate) &&
-                    !_selectedDate!.isAtSameMomentAs(today) &&
-                    _selectedDate!.isAfter(today))
-                  const Icon(Icons.arrow_forward, size: 18),
-              ],
+                elevation: 2,
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    _selectedDate == null
+                        ? 'Select Date'
+                        : (_selectedDate!.isAtSameMomentAs(today)
+                              ? 'Today Not Available'
+                              : (_holidays.contains(_selectedDate)
+                                    ? 'Holiday - Not Available'
+                                    : (_isDateUnavailable
+                                          ? 'No Barbers Available'
+                                          : 'Continue to Services'))),
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  if (_selectedDate != null &&
+                      !_isDateUnavailable &&
+                      !_holidays.contains(_selectedDate) &&
+                      !_selectedDate!.isAtSameMomentAs(today) &&
+                      _selectedDate!.isAfter(today))
+                    const SizedBox(width: 8),
+                  if (_selectedDate != null &&
+                      !_isDateUnavailable &&
+                      !_holidays.contains(_selectedDate) &&
+                      !_selectedDate!.isAtSameMomentAs(today) &&
+                      _selectedDate!.isAfter(today))
+                    const Icon(Icons.arrow_forward, size: 18),
+                ],
+              ),
             ),
           ),
         ),
-      ),
-    ],
-  );
-}
+      ],
+    );
+  }
 
   // ============================================
   // STEP 3: SERVICE SELECTION
   // ============================================
 
+  //--------------------without view----------------------
   Future<void> _loadSalonServices() async {
     if (_servicesLoaded) return;
     setState(() => _isLoadingServices = true);
+
     try {
+      final salonId = _selectedSalon!['id'];
+
+      // Single query with all joins
       final response = await supabase
-          .from('salon_services_with_details')
-          .select()
-          .eq('salon_id', _selectedSalon!['id'])
-          .eq('service_active', true);
-      final categories = await supabase
-          .from('salon_categories')
-          .select('id, display_name')
-          .eq('salon_id', _selectedSalon!['id'])
-          .eq('is_active', true);
-      final Map<int, String> categoryMap = {
-        for (var cat in categories) cat['id']: cat['display_name'],
-      };
+          .from('services')
+          .select('''
+          id,
+          name,
+          description,
+          is_active,
+          category_id,
+          salon_categories!inner (
+            display_name
+          ),
+          service_variants!inner (
+            id,
+            price,
+            duration,
+            salon_gender_id,
+            salon_age_category_id,
+            salon_genders!inner (
+              display_name
+            ),
+            salon_age_categories!inner (
+              display_name
+            )
+          )
+        ''')
+          .eq('salon_id', salonId)
+          .eq('is_active', true)
+          .eq('service_variants.is_active', true);
+
       final Map<int, Map<String, dynamic>> groupedServices = {};
+
       for (var service in response) {
-        final serviceId = service['service_id'] as int;
+        final serviceId = service['id'] as int;
+
+        // Initialize service if not exists
         if (!groupedServices.containsKey(serviceId)) {
           groupedServices[serviceId] = {
             'id': serviceId,
-            'name': service['service_name'] ?? 'Service',
-            'description': service['description'],
+            'name': service['name']?.toString() ?? 'Service',
+            'description': service['description']?.toString(),
             'category_name':
-                categoryMap[service['salon_category_id']] ?? 'Other',
+                service['salon_categories']?['display_name'] ?? 'Other',
             'variants': [],
           };
         }
-        if (service['variant_id'] != null) {
+
+        // Add variants
+        final variants = service['service_variants'] as List? ?? [];
+        for (var variant in variants) {
           groupedServices[serviceId]!['variants'].add({
-            'id': service['variant_id'],
-            'gender': service['gender_display_name'] ?? '',
-            'age': service['age_category_display_name'] ?? '',
-            'price': (service['price'] as num?)?.toDouble() ?? 0.0,
-            'duration': service['duration'] ?? 30,
+            'id': variant['id'],
+            'gender': variant['salon_genders']?['display_name'] ?? '',
+            'age': variant['salon_age_categories']?['display_name'] ?? '',
+            'price': (variant['price'] as num?)?.toDouble() ?? 0.0,
+            'duration': variant['duration'] ?? 30,
           });
         }
       }
+
+      // Convert to list
+      final servicesList = groupedServices.values.toList();
+
       setState(() {
-        _salonServices = groupedServices.values.toList();
+        _salonServices = servicesList;
         _isLoadingServices = false;
         _servicesLoaded = true;
       });
     } catch (e) {
       setState(() => _isLoadingServices = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to load services: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
