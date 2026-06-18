@@ -19,7 +19,7 @@ import 'package:flutter_application_1/screens/customer/my_bookings_screen.dart';
 import 'package:flutter_application_1/screens/customer/offers_screen.dart';
 import 'package:flutter_application_1/screens/customer/salon_profile_screen.dart';
 import 'package:flutter_application_1/screens/customer/vip_booking_screen.dart';
-import 'package:flutter_application_1/screens/customer/notification_screen.dart';
+import 'package:flutter_application_1/screens/settings/notification_screen.dart';
 import 'package:flutter_application_1/screens/owner/add_barber_screen.dart';
 import 'package:flutter_application_1/screens/owner/add_barber_service_screen.dart';
 import 'package:flutter_application_1/screens/owner/add_services.dart';
