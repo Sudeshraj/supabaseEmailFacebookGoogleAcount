@@ -371,7 +371,7 @@ class NotificationService {
     }
   }
 
-  /// ✅ RPC: Get unread notification count
+  /// Get unread notification count (RPC)
   Future<int> getUnreadCount(String userId) async {
     try {
       final result = await supabase.rpc(
@@ -386,7 +386,7 @@ class NotificationService {
     }
   }
 
-  /// ✅ RPC: Get all notifications for user
+  /// Get all notifications for user (RPC)
   Future<List<Map<String, dynamic>>> getNotifications(String userId) async {
     try {
       final result = await supabase.rpc(
@@ -406,7 +406,175 @@ class NotificationService {
     }
   }
 
-  /// ✅ RPC: Mark notification as read (UPDATED - RELIABLE VERSION)
+  // ============= ROLE-BASED NOTIFICATION METHODS (NEW) =============
+
+  /// Get notifications filtered by role
+  Future<List<Map<String, dynamic>>> getNotificationsWithRole({
+    required String userId,
+    required String role, // 'customer', 'barber', 'owner'
+    int limit = 50,
+    bool unreadOnly = false,
+  }) async {
+    try {
+      // Get all notifications via RPC
+      final result = await supabase.rpc(
+        'get_user_notifications',
+        params: {'p_user_id': userId},
+      );
+
+      List<Map<String, dynamic>> notifications = [];
+      if (result != null && result.isNotEmpty) {
+        notifications = List<Map<String, dynamic>>.from(result);
+      }
+
+      // ✅ Filter by role
+      notifications = notifications.where((n) {
+        final data = n['data'] as Map? ?? {};
+        final notificationRole = data['role'] ?? 'customer';
+        return notificationRole == role || notificationRole == 'all';
+      }).toList();
+
+      if (unreadOnly) {
+        notifications = notifications
+            .where((n) => n['is_read'] == false)
+            .toList();
+      }
+
+      // Apply limit
+      if (notifications.length > limit) {
+        notifications = notifications.take(limit).toList();
+      }
+
+      debugPrint(
+        '✅ Loaded ${notifications.length} notifications for role: $role',
+      );
+      return notifications;
+    } catch (e) {
+      debugPrint('❌ Error getting role-based notifications: $e');
+      return [];
+    }
+  }
+
+  /// Get unread notification count with role filter
+  Future<int> getUnreadCountWithRole({
+    required String userId,
+    required String role,
+  }) async {
+    try {
+      final notifications = await getNotificationsWithRole(
+        userId: userId,
+        role: role,
+        unreadOnly: true,
+      );
+      return notifications.length;
+    } catch (e) {
+      debugPrint('❌ Error getting unread count with role: $e');
+      return 0;
+    }
+  }
+
+  /// Send notification to specific user with role data
+  Future<void> sendNotificationWithRole({
+    required String userId,
+    required String title,
+    required String body,
+    String type = 'general',
+    Map<String, dynamic>? data,
+    required String role,
+  }) async {
+    try {
+      // 1. Save to database
+      await supabase.from('notifications').insert({
+        'user_id': userId,
+        'title': title,
+        'body': body,
+        'type': type,
+        'data': {...?data, 'role': role},
+        'is_read': false,
+        'created_at': DateTime.now().toUtc().toIso8601String(),
+      });
+
+      debugPrint('✅ Notification saved for $userId (role: $role)');
+
+      // 2. Send push notification
+      await _sendPushNotificationWithToken(
+        userId: userId,
+        title: title,
+        body: body,
+        data: data,
+        role: role,
+      );
+    } catch (e) {
+      debugPrint('❌ Error sending notification: $e');
+    }
+  }
+
+  /// Send push notification using FCM token
+  /// Send push notification using FCM token via Edge Function
+  Future<void> _sendPushNotificationWithToken({
+    required String userId,
+    required String title,
+    required String body,
+    Map<String, dynamic>? data,
+    required String role,
+  }) async {
+    try {
+      // Get FCM token
+      final userProfile = await supabase
+          .from('profiles')
+          .select('fcm_token')
+          .eq('id', userId)
+          .maybeSingle();
+
+      final fcmToken = userProfile?['fcm_token'];
+
+      if (fcmToken == null || fcmToken.toString().isEmpty) {
+        debugPrint('⚠️ No FCM token for user $userId');
+        return;
+      }
+
+      // Call Edge Function
+      final result = await supabase.functions.invoke(
+        'send-notification',
+        body: {
+          'userId': userId,
+          'title': title,
+          'body': body,
+          'role': role,
+          'screen': data?['screen'] ?? 'home',
+          'bookingId': data?['bookingId']?.toString() ?? '',
+          'extraData': data ?? {},
+          'fcmToken': fcmToken,
+        },
+      );
+
+      // ✅ Use result to check success
+      if (result.status == 200) {
+        final responseData = result.data as Map<String, dynamic>?;
+        if (responseData?['success'] == true) {
+          debugPrint('✅ Push notification sent successfully to $userId');
+          if (responseData?['result'] != null) {
+            debugPrint(
+              '📤 FCM Message ID: ${responseData?['result']?['name']}',
+            );
+          }
+        } else {
+          debugPrint(
+            '⚠️ Push notification failed: ${responseData?['message']}',
+          );
+        }
+      } else {
+        debugPrint('⚠️ Edge Function returned status: ${result.status}');
+        debugPrint('📤 Response: ${result.data}');
+      }
+    } catch (e) {
+      debugPrint('❌ Error sending push notification: $e');
+    }
+  }
+
+  // ============= MARK AS READ METHODS =============
+
+  /// Mark notification as read (RPC)
   Future<bool> markAsRead(int notificationId) async {
     try {
       final user = supabase.auth.currentUser;
@@ -419,7 +587,6 @@ class NotificationService {
         '🔍 [RPC] Marking notification $notificationId as read for user ${user.id}',
       );
 
-      // ✅ Call RPC function
       final result = await supabase.rpc(
         'mark_notification_as_read',
         params: {'p_notification_id': notificationId},
@@ -434,18 +601,15 @@ class NotificationService {
         return true;
       } else {
         debugPrint('⚠️ [RPC] Failed to mark as read: $result');
-        return false;
+        return await _markAsReadDirect(notificationId);
       }
     } catch (e) {
       debugPrint('❌ [RPC] Error marking as read: $e');
-
-      // ✅ Fallback: Direct update if RPC fails
       return await _markAsReadDirect(notificationId);
     }
   }
 
-  /// ✅ Fallback method: Direct update without RPC
-  /// ✅ Fallback method: Direct update without RPC (NO updated_at)
+  /// Fallback: Direct update without RPC
   Future<bool> _markAsReadDirect(int notificationId) async {
     try {
       final user = supabase.auth.currentUser;
@@ -455,13 +619,9 @@ class NotificationService {
         '🔍 [DIRECT] Attempting direct update for notification $notificationId',
       );
 
-      // ✅ Remove updated_at - it doesn't exist in your table
       final result = await supabase
           .from('notifications')
-          .update({
-            'is_read': true,
-            // 'updated_at': DateTime.now().toIso8601String(), // ❌ REMOVE THIS LINE
-          })
+          .update({'is_read': true})
           .eq('id', notificationId)
           .eq('user_id', user.id)
           .select();
@@ -481,7 +641,7 @@ class NotificationService {
     }
   }
 
-  /// ✅ RPC: Mark all notifications as read
+  /// Mark all notifications as read (RPC)
   Future<bool> markAllAsRead(String userId) async {
     try {
       debugPrint('🔍 [RPC] Marking all notifications as read for user $userId');
@@ -506,7 +666,7 @@ class NotificationService {
     }
   }
 
-  /// ✅ Fallback: Direct update for mark all as read
+  /// Fallback: Direct update for mark all as read
   Future<bool> _markAllAsReadDirect(String userId) async {
     try {
       debugPrint(
@@ -515,10 +675,7 @@ class NotificationService {
 
       await supabase
           .from('notifications')
-          .update({
-            'is_read': true,
-            // 'updated_at': DateTime.now().toIso8601String(), // ❌ REMOVE THIS LINE
-          })
+          .update({'is_read': true})
           .eq('user_id', userId)
           .eq('is_read', false);
 
@@ -530,7 +687,7 @@ class NotificationService {
     }
   }
 
-  /// ✅ RPC: Delete a single notification
+  /// Delete notification (RPC)
   Future<bool> deleteNotification(int notificationId) async {
     try {
       final user = supabase.auth.currentUser;
@@ -563,7 +720,7 @@ class NotificationService {
     }
   }
 
-  /// ✅ RPC: Clear all notifications for a user
+  /// Clear all notifications (RPC)
   Future<bool> clearAllNotifications(String userId) async {
     try {
       debugPrint('🔍 [RPC] Clearing all notifications for user $userId');
@@ -589,44 +746,9 @@ class NotificationService {
     }
   }
 
-  // ============= PUSH NOTIFICATION VIA EDGE FUNCTION =============
+  // ============= ROLE-SPECIFIC NOTIFICATION SENDING METHODS =============
 
-  /// Send push notification via Supabase Edge Function
-  Future<void> sendPushNotification({
-    required String userId,
-    required String title,
-    required String body,
-    String screen = 'home',
-    String bookingId = '',
-    Map<String, dynamic>? extraData,
-  }) async {
-    try {
-      // First save to database
-      await _saveNotificationToDatabase(
-        title: title,
-        body: body,
-        type: _getNotificationType(screen),
-        data: {'screen': screen, 'bookingId': bookingId, ...?extraData},
-      );
-    } catch (e) {
-      debugPrint('❌ Push notification error: $e');
-    }
-  }
-
-  String _getNotificationType(String screen) {
-    switch (screen) {
-      case 'booking_details':
-        return 'appointment_confirmed';
-      case 'vip_bookings':
-        return 'vip_approved';
-      case 'offers':
-        return 'special_offer';
-      default:
-        return 'general';
-    }
-  }
-
-  // ============= NOTIFICATION SENDING METHODS =============
+  // -------------------- CUSTOMER NOTIFICATIONS --------------------
 
   Future<void> sendAppointmentConfirmed({
     required String customerId,
@@ -642,19 +764,21 @@ class NotificationService {
     final body =
         'Your appointment #$bookingNumber is confirmed for $appointmentDate at $appointmentTime at $salonName with $barberName (Queue #$queueNumber)';
 
-    await sendPushNotification(
+    await sendNotificationWithRole(
       userId: customerId,
       title: title,
       body: body,
-      screen: 'booking_details',
-      bookingId: appointmentId.toString(),
-      extraData: {
+      type: 'appointment_confirmed',
+      role: 'customer',
+      data: {
         'bookingNumber': bookingNumber,
         'queueNumber': queueNumber,
         'appointmentDate': appointmentDate,
         'appointmentTime': appointmentTime,
         'salonName': salonName,
         'barberName': barberName,
+        'appointmentId': appointmentId,
+        'screen': 'booking_details',
       },
     );
   }
@@ -671,16 +795,19 @@ class NotificationService {
     final body =
         'Reminder: Your appointment #$bookingNumber at $salonName is tomorrow at $appointmentTime.';
 
-    await sendPushNotification(
+    await sendNotificationWithRole(
       userId: customerId,
       title: title,
       body: body,
-      screen: 'booking_details',
-      bookingId: appointmentId.toString(),
-      extraData: {
+      type: 'booking_reminder',
+      role: 'customer',
+      data: {
         'bookingNumber': bookingNumber,
         'appointmentDate': appointmentDate,
         'appointmentTime': appointmentTime,
+        'appointmentId': appointmentId,
+        'salonName': salonName,
+        'screen': 'booking_details',
       },
     );
   }
@@ -697,15 +824,19 @@ class NotificationService {
     final body =
         'Your appointment #$bookingNumber has been reassigned to $newBarberName on $appointmentDate at $appointmentTime.';
 
-    await sendPushNotification(
+    await sendNotificationWithRole(
       userId: customerId,
       title: title,
       body: body,
-      screen: 'booking_details',
-      bookingId: appointmentId.toString(),
-      extraData: {
+      type: 'appointment_reassigned',
+      role: 'customer',
+      data: {
         'bookingNumber': bookingNumber,
         'newBarberName': newBarberName,
+        'appointmentDate': appointmentDate,
+        'appointmentTime': appointmentTime,
+        'appointmentId': appointmentId,
+        'screen': 'booking_details',
       },
     );
   }
@@ -722,17 +853,19 @@ class NotificationService {
     final body =
         'Your appointment #$bookingNumber has been moved from $oldDate to $newDate (Queue #$queueNumber).';
 
-    await sendPushNotification(
+    await sendNotificationWithRole(
       userId: customerId,
       title: title,
       body: body,
-      screen: 'booking_details',
-      bookingId: appointmentId.toString(),
-      extraData: {
+      type: 'appointment_moved',
+      role: 'customer',
+      data: {
         'bookingNumber': bookingNumber,
         'newDate': newDate,
         'oldDate': oldDate,
         'queueNumber': queueNumber,
+        'appointmentId': appointmentId,
+        'screen': 'booking_details',
       },
     );
   }
@@ -748,16 +881,18 @@ class NotificationService {
     final body =
         'Your appointment #$bookingNumber has been cancelled by $cancelledBy. Reason: $reason';
 
-    await sendPushNotification(
+    await sendNotificationWithRole(
       userId: customerId,
       title: title,
       body: body,
-      screen: 'my_bookings',
-      bookingId: appointmentId.toString(),
-      extraData: {
+      type: 'appointment_cancelled',
+      role: 'customer',
+      data: {
         'bookingNumber': bookingNumber,
         'reason': reason,
         'cancelledBy': cancelledBy,
+        'appointmentId': appointmentId,
+        'screen': 'my_bookings',
       },
     );
   }
@@ -774,17 +909,19 @@ class NotificationService {
     final body =
         'Your VIP $eventType booking for $eventDate at $eventTime at $salonName has been approved.';
 
-    await sendPushNotification(
+    await sendNotificationWithRole(
       userId: customerId,
       title: title,
       body: body,
-      screen: 'vip_bookings',
-      bookingId: vipBookingId.toString(),
-      extraData: {
+      type: 'vip_approved',
+      role: 'customer',
+      data: {
         'eventType': eventType,
         'eventDate': eventDate,
         'eventTime': eventTime,
         'salonName': salonName,
+        'vipBookingId': vipBookingId,
+        'screen': 'vip_bookings',
       },
     );
   }
@@ -800,16 +937,18 @@ class NotificationService {
     final body =
         'Your VIP $eventType booking for $eventDate at $salonName is pending approval.';
 
-    await sendPushNotification(
+    await sendNotificationWithRole(
       userId: customerId,
       title: title,
       body: body,
-      screen: 'vip_bookings',
-      bookingId: vipBookingId.toString(),
-      extraData: {
+      type: 'vip_pending',
+      role: 'customer',
+      data: {
         'eventType': eventType,
         'eventDate': eventDate,
         'salonName': salonName,
+        'vipBookingId': vipBookingId,
+        'screen': 'vip_bookings',
       },
     );
   }
@@ -826,22 +965,22 @@ class NotificationService {
     final body =
         'Your VIP $eventType booking for $eventDate at $salonName has been rejected. Reason: $reason';
 
-    await sendPushNotification(
+    await sendNotificationWithRole(
       userId: customerId,
       title: title,
       body: body,
-      screen: 'vip_bookings',
-      bookingId: vipBookingId.toString(),
-      extraData: {
+      type: 'vip_rejected',
+      role: 'customer',
+      data: {
         'eventType': eventType,
         'eventDate': eventDate,
         'salonName': salonName,
         'reason': reason,
+        'vipBookingId': vipBookingId,
+        'screen': 'vip_bookings',
       },
     );
   }
-
-  // ============= SPECIAL OFFER NOTIFICATION =============
 
   Future<void> sendSpecialOffer({
     required String customerId,
@@ -854,55 +993,20 @@ class NotificationService {
     final title = '🎁 Special Offer!';
     final body = '$offerTitle: $discountText at $salonName. $offerDescription';
 
-    // 1. Save to database
-    await _saveNotificationToDatabase(
+    await sendNotificationWithRole(
+      userId: customerId,
       title: title,
       body: body,
       type: 'special_offer',
+      role: 'customer',
       data: {
         'offerTitle': offerTitle,
         'discountText': discountText,
         'salonName': salonName,
         'offerId': offerId,
+        'screen': 'offers',
       },
     );
-
-    // 2. Direct Edge Function call
-    try {
-      final userProfile = await supabase
-          .from('profiles')
-          .select('fcm_token')
-          .eq('id', customerId)
-          .maybeSingle();
-
-      final fcmToken = userProfile?['fcm_token'];
-
-      if (fcmToken == null || fcmToken.toString().isEmpty) {
-        debugPrint('⚠️ No FCM token for user $customerId');
-        return;
-      }
-
-      final result = await supabase.functions.invoke(
-        'send-notification',
-        body: {
-          'token': fcmToken,
-          'title': title,
-          'body': body,
-          'data': {
-            'screen': 'offers',
-            'bookingId': offerId.toString(),
-            'type': 'special_offer',
-            'offerTitle': offerTitle,
-            'discountText': discountText,
-            'salonName': salonName,
-          },
-        },
-      );
-
-      debugPrint('✅ Special offer push notification sent: $result');
-    } catch (e) {
-      debugPrint('❌ Error sending special offer push notification: $e');
-    }
   }
 
   Future<void> sendWaitingListAvailable({
@@ -917,17 +1021,19 @@ class NotificationService {
     final body =
         'A slot for $serviceName has opened up on $appointmentDate at $appointmentTime at $salonName. Book now!';
 
-    await sendPushNotification(
+    await sendNotificationWithRole(
       userId: customerId,
       title: title,
       body: body,
-      screen: 'waiting_list',
-      bookingId: waitingListId.toString(),
-      extraData: {
+      type: 'waiting_list_available',
+      role: 'customer',
+      data: {
         'appointmentDate': appointmentDate,
         'appointmentTime': appointmentTime,
         'serviceName': serviceName,
         'salonName': salonName,
+        'waitingListId': waitingListId,
+        'screen': 'waiting_list',
       },
     );
   }
@@ -943,43 +1049,18 @@ class NotificationService {
     final body =
         'You are #$queuePosition in queue. Your estimated time is $estimatedTime with $barberName. Please be ready.';
 
-    await sendPushNotification(
+    await sendNotificationWithRole(
       userId: customerId,
       title: title,
       body: body,
-      screen: 'booking_details',
-      bookingId: appointmentId.toString(),
-      extraData: {
+      type: 'next_appointment_alert',
+      role: 'customer',
+      data: {
         'queuePosition': queuePosition,
         'estimatedTime': estimatedTime,
         'barberName': barberName,
-      },
-    );
-  }
-
-  Future<void> sendLeaveRequestToOwner({
-    required String ownerId,
-    required String barberName,
-    required String leaveDate,
-    required String leaveType,
-    required int leaveId,
-    required String reason,
-  }) async {
-    final title = '✈️ New Leave Request';
-    final body =
-        '$barberName requested $leaveType leave on $leaveDate. Reason: $reason';
-
-    await sendPushNotification(
-      userId: ownerId,
-      title: title,
-      body: body,
-      screen: 'owner_leaves',
-      bookingId: leaveId.toString(),
-      extraData: {
-        'barberName': barberName,
-        'leaveDate': leaveDate,
-        'leaveType': leaveType,
-        'reason': reason,
+        'appointmentId': appointmentId,
+        'screen': 'booking_details',
       },
     );
   }
@@ -995,16 +1076,18 @@ class NotificationService {
     final body =
         'Your appointment #$bookingNumber may exceed closing time by $excessMinutes minutes. Salon closes at $salonCloseTime.';
 
-    await sendPushNotification(
+    await sendNotificationWithRole(
       userId: customerId,
       title: title,
       body: body,
-      screen: 'booking_details',
-      bookingId: appointmentId.toString(),
-      extraData: {
+      type: 'overflow_warning',
+      role: 'customer',
+      data: {
         'excessMinutes': excessMinutes,
         'salonCloseTime': salonCloseTime,
         'bookingNumber': bookingNumber,
+        'appointmentId': appointmentId,
+        'screen': 'booking_details',
       },
     );
   }
@@ -1019,13 +1102,18 @@ class NotificationService {
     final body =
         'How was your experience at $salonName? Leave a review for appointment #$bookingNumber';
 
-    await sendPushNotification(
+    await sendNotificationWithRole(
       userId: customerId,
       title: title,
       body: body,
-      screen: 'reviews',
-      bookingId: appointmentId.toString(),
-      extraData: {'salonName': salonName, 'bookingNumber': bookingNumber},
+      type: 'review_reminder',
+      role: 'customer',
+      data: {
+        'salonName': salonName,
+        'bookingNumber': bookingNumber,
+        'appointmentId': appointmentId,
+        'screen': 'reviews',
+      },
     );
   }
 
@@ -1038,13 +1126,17 @@ class NotificationService {
     final body =
         'Happy Birthday $customerName! Enjoy $discountText on your next booking as a special gift.';
 
-    await sendPushNotification(
+    await sendNotificationWithRole(
       userId: customerId,
       title: title,
       body: body,
-      screen: 'offers',
-      bookingId: '',
-      extraData: {'customerName': customerName, 'discountText': discountText},
+      type: 'birthday_greeting',
+      role: 'customer',
+      data: {
+        'customerName': customerName,
+        'discountText': discountText,
+        'screen': 'offers',
+      },
     );
   }
 
@@ -1058,54 +1150,393 @@ class NotificationService {
     final body =
         'You earned $points points from $source! Total points: $totalPoints';
 
-    await sendPushNotification(
+    await sendNotificationWithRole(
       userId: customerId,
       title: title,
       body: body,
-      screen: 'loyalty',
-      bookingId: '',
-      extraData: {
+      type: 'loyalty_points',
+      role: 'customer',
+      data: {
         'points': points,
         'totalPoints': totalPoints,
         'source': source,
+        'screen': 'loyalty',
       },
     );
   }
 
+  // -------------------- BARBER NOTIFICATIONS --------------------
+
+  Future<void> sendNewBookingAssigned({
+    required String barberId,
+    required String customerName,
+    required String serviceName,
+    required String appointmentTime,
+    required int appointmentId,
+    required String bookingNumber,
+  }) async {
+    final title = '📅 New Booking Assigned';
+    final body = '$customerName booked $serviceName at $appointmentTime';
+
+    await sendNotificationWithRole(
+      userId: barberId,
+      title: title,
+      body: body,
+      type: 'new_booking_assigned',
+      role: 'barber',
+      data: {
+        'appointmentId': appointmentId,
+        'customerName': customerName,
+        'serviceName': serviceName,
+        'time': appointmentTime,
+        'bookingNumber': bookingNumber,
+        'screen': 'barber_appointment',
+      },
+    );
+  }
+
+  Future<void> sendBarberBookingReminder({
+    required String barberId,
+    required String customerName,
+    required String serviceName,
+    required String appointmentTime,
+    required int appointmentId,
+    required String bookingNumber,
+  }) async {
+    final title = '⏰ Upcoming Appointment';
+    final body = '$customerName - $serviceName at $appointmentTime';
+
+    await sendNotificationWithRole(
+      userId: barberId,
+      title: title,
+      body: body,
+      type: 'booking_reminder',
+      role: 'barber',
+      data: {
+        'appointmentId': appointmentId,
+        'customerName': customerName,
+        'serviceName': serviceName,
+        'time': appointmentTime,
+        'bookingNumber': bookingNumber,
+        'screen': 'barber_appointment',
+      },
+    );
+  }
+
+  Future<void> sendBarberAppointmentCancelled({
+    required String barberId,
+    required String customerName,
+    required String serviceName,
+    required String appointmentTime,
+    required int appointmentId,
+    required String bookingNumber,
+    required String reason,
+  }) async {
+    final title = '❌ Appointment Cancelled';
+    final body =
+        '$customerName cancelled $serviceName at $appointmentTime. Reason: $reason';
+
+    await sendNotificationWithRole(
+      userId: barberId,
+      title: title,
+      body: body,
+      type: 'appointment_cancelled',
+      role: 'barber',
+      data: {
+        'appointmentId': appointmentId,
+        'customerName': customerName,
+        'serviceName': serviceName,
+        'time': appointmentTime,
+        'bookingNumber': bookingNumber,
+        'reason': reason,
+        'screen': 'barber_appointments',
+      },
+    );
+  }
+
+  Future<void> sendBarberAppointmentReassigned({
+    required String barberId,
+    required String customerName,
+    required String serviceName,
+    required String appointmentTime,
+    required int appointmentId,
+    required String bookingNumber,
+    required String fromBarberName,
+  }) async {
+    final title = '🔄 Appointment Reassigned';
+    final body =
+        '$customerName - $serviceName reassigned from $fromBarberName to you at $appointmentTime';
+
+    await sendNotificationWithRole(
+      userId: barberId,
+      title: title,
+      body: body,
+      type: 'appointment_reassigned',
+      role: 'barber',
+      data: {
+        'appointmentId': appointmentId,
+        'customerName': customerName,
+        'serviceName': serviceName,
+        'time': appointmentTime,
+        'bookingNumber': bookingNumber,
+        'fromBarber': fromBarberName,
+        'screen': 'barber_appointment',
+      },
+    );
+  }
+
+  Future<void> sendBarberLeaveStatusUpdate({
+    required String barberId,
+    required String leaveDate,
+    required String leaveType,
+    required String status, // 'approved' or 'rejected'
+    required String? reason,
+    required int leaveId,
+  }) async {
+    final title = status == 'approved'
+        ? '✅ Leave Approved'
+        : '❌ Leave Rejected';
+    final body =
+        'Your $leaveType leave request for $leaveDate has been $status.${reason != null ? ' Reason: $reason' : ''}';
+
+    await sendNotificationWithRole(
+      userId: barberId,
+      title: title,
+      body: body,
+      type: 'leave_status_update',
+      role: 'barber',
+      data: {
+        'leaveDate': leaveDate,
+        'leaveType': leaveType,
+        'status': status,
+        'reason': reason,
+        'leaveId': leaveId,
+        'screen': 'barber_leaves',
+      },
+    );
+  }
+
+  Future<void> sendBarberNewLeaveRequest({
+    required String ownerId,
+    required String barberName,
+    required String leaveDate,
+    required String leaveType,
+    required int leaveId,
+    required String reason,
+  }) async {
+    final title = '✈️ New Leave Request';
+    final body =
+        '$barberName requested $leaveType leave on $leaveDate. Reason: $reason';
+
+    await sendNotificationWithRole(
+      userId: ownerId,
+      title: title,
+      body: body,
+      type: 'new_leave_request',
+      role: 'owner',
+      data: {
+        'barberName': barberName,
+        'leaveDate': leaveDate,
+        'leaveType': leaveType,
+        'reason': reason,
+        'leaveId': leaveId,
+        'screen': 'owner_leaves',
+      },
+    );
+  }
+
+  // -------------------- OWNER NOTIFICATIONS --------------------
+
+  Future<void> sendNewSalonFollower({
+    required String ownerId,
+    required String customerName,
+    required int salonId,
+    required String salonName,
+  }) async {
+    final title = '👤 New Salon Follower';
+    final body = '$customerName started following $salonName';
+
+    await sendNotificationWithRole(
+      userId: ownerId,
+      title: title,
+      body: body,
+      type: 'new_follower',
+      role: 'owner',
+      data: {
+        'customerName': customerName,
+        'salonId': salonId,
+        'salonName': salonName,
+        'screen': 'owner_salon',
+      },
+    );
+  }
+
+  Future<void> sendNewReviewReceived({
+    required String ownerId,
+    required String customerName,
+    required double rating,
+    required int reviewId,
+    required int salonId,
+    required String salonName,
+  }) async {
+    final title = '⭐ New Review Received';
+    final body = '$customerName left a $rating-star review for $salonName';
+
+    await sendNotificationWithRole(
+      userId: ownerId,
+      title: title,
+      body: body,
+      type: 'new_review',
+      role: 'owner',
+      data: {
+        'customerName': customerName,
+        'rating': rating,
+        'reviewId': reviewId,
+        'salonId': salonId,
+        'salonName': salonName,
+        'screen': 'owner_reviews',
+      },
+    );
+  }
+
+  Future<void> sendNewBookingForOwner({
+    required String ownerId,
+    required String customerName,
+    required String serviceName,
+    required String appointmentDate,
+    required String appointmentTime,
+    required int appointmentId,
+    required int salonId,
+    required String salonName,
+    required String barberName,
+  }) async {
+    final title = '📅 New Booking in Your Salon';
+    final body =
+        '$customerName booked $serviceName at $salonName with $barberName on $appointmentDate at $appointmentTime';
+
+    await sendNotificationWithRole(
+      userId: ownerId,
+      title: title,
+      body: body,
+      type: 'new_booking',
+      role: 'owner',
+      data: {
+        'customerName': customerName,
+        'serviceName': serviceName,
+        'appointmentDate': appointmentDate,
+        'appointmentTime': appointmentTime,
+        'appointmentId': appointmentId,
+        'salonId': salonId,
+        'salonName': salonName,
+        'barberName': barberName,
+        'screen': 'owner_bookings',
+      },
+    );
+  }
+
+  Future<void> sendLowStockAlert({
+    required String ownerId,
+    required String productName,
+    required int currentStock,
+    required int threshold,
+    required int salonId,
+    required String salonName,
+  }) async {
+    final title = '⚠️ Low Stock Alert';
+    final body =
+        '$productName is running low. Current stock: $currentStock (Threshold: $threshold)';
+
+    await sendNotificationWithRole(
+      userId: ownerId,
+      title: title,
+      body: body,
+      type: 'low_stock',
+      role: 'owner',
+      data: {
+        'productName': productName,
+        'currentStock': currentStock,
+        'threshold': threshold,
+        'salonId': salonId,
+        'salonName': salonName,
+        'screen': 'owner_inventory',
+      },
+    );
+  }
+
+  Future<void> sendOwnerDailySummary({
+    required String ownerId,
+    required int totalBookings,
+    required int totalEarnings,
+    required int totalCustomers,
+    required int salonId,
+    required String salonName,
+    required String date,
+  }) async {
+    final title = '📊 Daily Summary';
+    final body =
+        '$salonName summary for $date: $totalBookings bookings, ₹$totalEarnings earnings, $totalCustomers customers served';
+
+    await sendNotificationWithRole(
+      userId: ownerId,
+      title: title,
+      body: body,
+      type: 'daily_summary',
+      role: 'owner',
+      data: {
+        'totalBookings': totalBookings,
+        'totalEarnings': totalEarnings,
+        'totalCustomers': totalCustomers,
+        'salonId': salonId,
+        'salonName': salonName,
+        'date': date,
+        'screen': 'owner_dashboard',
+      },
+    );
+  }
+
+  // ============= GENERIC NOTIFICATION METHODS =============
+
   Future<void> sendGenericNotification({
-    required String customerId,
+    required String userId,
     required String title,
     required String body,
+    required String role, // 'customer', 'barber', 'owner'
     String screen = 'home',
     Map<String, dynamic>? extraData,
   }) async {
-    await sendPushNotification(
-      userId: customerId,
+    await sendNotificationWithRole(
+      userId: userId,
       title: title,
       body: body,
-      screen: screen,
-      bookingId: '',
-      extraData: extraData,
+      type: 'general',
+      role: role,
+      data: {'screen': screen, ...?extraData},
     );
   }
 
   Future<void> sendAppointmentNotification({
-    required String customerId,
+    required String userId,
     required String title,
     required String body,
+    required String role,
     Map<String, dynamic>? data,
   }) async {
-    await sendPushNotification(
-      userId: customerId,
+    await sendNotificationWithRole(
+      userId: userId,
       title: title,
       body: body,
-      screen: data?['screen'] ?? 'home',
-      bookingId: data?['bookingId']?.toString() ?? '',
-      extraData: data,
+      type: data?['type'] ?? 'general',
+      role: role,
+      data: {
+        'screen': data?['screen'] ?? 'home',
+        'bookingId': data?['bookingId']?.toString() ?? '',
+        ...?data,
+      },
     );
   }
 
   // ============= MESSAGE HANDLING =============
+
   void _setupMessageListeners() {
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       // Save to database
@@ -1193,17 +1624,23 @@ class NotificationService {
         return Colors.amber;
       case 'special_offer':
         return const Color(0xFFFF6B8B);
-      case 'cancellation':
+      case 'appointment_cancelled':
         return Colors.red;
       case 'booking_reminder':
         return Colors.blue;
       case 'next_appointment_alert':
       case 'overflow_warning':
         return Colors.orange;
+      case 'new_booking_assigned':
+        return Colors.purple;
+      case 'new_leave_request':
+        return Colors.indigo;
       default:
         return const Color(0xFFFF6B8B);
     }
   }
+
+  // ============= NAVIGATION HANDLING =============
 
   void _handleMessage(RemoteMessage message) {
     Map<String, dynamic> data = message.data;
@@ -1217,9 +1654,48 @@ class NotificationService {
       Map<String, dynamic> data = jsonDecode(payload);
       String screen = data['screen'] ?? 'home';
       String bookingId = data['bookingId'] ?? '';
+      String role = data['role'] ?? 'customer';
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
         switch (screen) {
+          // ========== BARBER SCREENS ==========
+          case 'barber_appointment':
+            if (bookingId.isNotEmpty) {
+              navigatorKey.currentState?.context.go(
+                '/barber/appointment/$bookingId',
+              );
+            } else {
+              navigatorKey.currentState?.context.go('/barber/appointments');
+            }
+            break;
+          case 'barber_appointments':
+            navigatorKey.currentState?.context.go('/barber/appointments');
+            break;
+          case 'barber_leaves':
+            navigatorKey.currentState?.context.go('/barber/leaves');
+            break;
+
+          // ========== OWNER SCREENS ==========
+          case 'owner_leaves':
+            navigatorKey.currentState?.context.go('/owner/leaves');
+            break;
+          case 'owner_salon':
+            navigatorKey.currentState?.context.go('/owner/salon');
+            break;
+          case 'owner_reviews':
+            navigatorKey.currentState?.context.go('/owner/reviews');
+            break;
+          case 'owner_bookings':
+            navigatorKey.currentState?.context.go('/owner/bookings');
+            break;
+          case 'owner_inventory':
+            navigatorKey.currentState?.context.go('/owner/inventory');
+            break;
+          case 'owner_dashboard':
+            navigatorKey.currentState?.context.go('/owner/dashboard');
+            break;
+
+          // ========== CUSTOMER SCREENS ==========
           case 'booking_details':
             if (bookingId.isNotEmpty) {
               navigatorKey.currentState?.context.go(
@@ -1238,9 +1714,6 @@ class NotificationService {
           case 'waiting_list':
             navigatorKey.currentState?.context.go('/customer/waiting-list');
             break;
-          case 'owner_leaves':
-            navigatorKey.currentState?.context.go('/owner/leaves');
-            break;
           case 'my_bookings':
             navigatorKey.currentState?.context.go('/customer/my-bookings');
             break;
@@ -1250,8 +1723,16 @@ class NotificationService {
           case 'loyalty':
             navigatorKey.currentState?.context.go('/customer/loyalty');
             break;
+
+          // ========== DEFAULT ==========
           default:
-            navigatorKey.currentState?.context.go('/customer/dashboard');
+            if (role == 'barber') {
+              navigatorKey.currentState?.context.go('/barber/dashboard');
+            } else if (role == 'owner') {
+              navigatorKey.currentState?.context.go('/owner/dashboard');
+            } else {
+              navigatorKey.currentState?.context.go('/customer/dashboard');
+            }
             break;
         }
       });

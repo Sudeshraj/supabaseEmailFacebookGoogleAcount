@@ -7,7 +7,12 @@ import '../../services/notification_service.dart';
 import '../../services/timezone_service.dart';
 
 class NotificationScreen extends StatefulWidget {
-  const NotificationScreen({super.key});
+  final String? role; // 'customer', 'barber', 'owner'
+
+  const NotificationScreen({
+    super.key,
+    this.role = 'customer',
+  });
 
   @override
   State<NotificationScreen> createState() => _NotificationScreenState();
@@ -76,14 +81,13 @@ class _NotificationScreenState extends State<NotificationScreen> {
   }
 
   // ============================================
-  // TIME FORMATTING WITH TIMEZONESERVICE (FIXED)
+  // TIME FORMATTING WITH TIMEZONESERVICE
   // ============================================
 
   String _formatTime(String createdAt) {
     try {
       final utcDateTime = DateTime.parse(createdAt);
       
-      // ✅ Convert UTC to local time using TimezoneService
       final localDateTime = TimezoneService.utcToLocalDateTimeForDate(
         '${utcDateTime.hour.toString().padLeft(2, '0')}:${utcDateTime.minute.toString().padLeft(2, '0')}:00',
         utcDateTime,
@@ -109,6 +113,10 @@ class _NotificationScreenState extends State<NotificationScreen> {
     }
   }
 
+  // ============================================
+  // LOAD NOTIFICATIONS WITH ROLE SUPPORT
+  // ============================================
+
   Future<void> _loadNotifications({bool refresh = false}) async {
     if (!mounted) return;
 
@@ -122,6 +130,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
     try {
       final user = supabase.auth.currentUser;
       debugPrint('🔍 Current user: ${user?.id}');
+      debugPrint('🎯 Role: ${widget.role}');
 
       if (user == null) {
         if (!mounted) return;
@@ -133,18 +142,19 @@ class _NotificationScreenState extends State<NotificationScreen> {
         return;
       }
 
-      final result = await supabase
-          .from('notifications')
-          .select('*')
-          .eq('user_id', user.id)
-          .order('created_at', ascending: false)
-          .range(0, _pageSize - 1);
+      // ✅ Use role-based notification loading
+      final result = await _notificationService.getNotificationsWithRole(
+        userId: user.id,
+        role: widget.role!,
+        limit: _pageSize,
+        unreadOnly: _selectedFilter == 'unread',
+      );
 
-      debugPrint('✅ Loaded ${result.length} notifications');
+      debugPrint('✅ Loaded ${result.length} notifications for role: ${widget.role}');
 
       if (!mounted) return;
       setState(() {
-        _notifications = List<Map<String, dynamic>>.from(result);
+        _notifications = result;
         _isLoading = false;
         _hasMore = result.length == _pageSize;
         _currentPage = 1;
@@ -174,20 +184,21 @@ class _NotificationScreenState extends State<NotificationScreen> {
       final start = _currentPage * _pageSize;
       final end = start + _pageSize - 1;
 
-      final result = await supabase
-          .from('notifications')
-          .select('*')
-          .eq('user_id', user.id)
-          .order('created_at', ascending: false)
-          .range(start, end);
+      // ✅ Load more with role filter
+      final allNotifications = await _notificationService.getNotificationsWithRole(
+        userId: user.id,
+        role: widget.role!,
+        limit: end + 1,
+      );
 
       if (!mounted) return;
 
-      if (result.isNotEmpty) {
+      if (allNotifications.length > _notifications.length) {
+        final newNotifications = allNotifications.sublist(_notifications.length);
         setState(() {
-          _notifications.addAll(List<Map<String, dynamic>>.from(result));
+          _notifications.addAll(newNotifications);
           _currentPage++;
-          _hasMore = result.length == _pageSize;
+          _hasMore = newNotifications.length == _pageSize;
         });
       } else {
         setState(() {
@@ -320,6 +331,10 @@ class _NotificationScreenState extends State<NotificationScreen> {
     }
   }
 
+  // ============================================
+  // NAVIGATION WITH ROLE SUPPORT
+  // ============================================
+
   void _handleNotificationTap(Map<String, dynamic> notification) async {
     final notificationId = notification['id'];
     final wasUnread = notification['is_read'] == false;
@@ -332,37 +347,120 @@ class _NotificationScreenState extends State<NotificationScreen> {
 
     final type = notification['type'];
     final data = notification['data'] as Map<String, dynamic>?;
+    final role = widget.role ?? 'customer';
 
-    if (type == 'appointment_confirmed' || type == 'booking_confirmed') {
-      final appointmentId = data?['appointment_id'] ?? data?['bookingId'];
-      if (appointmentId != null) {
-        await context.push('/customer/booking/$appointmentId');
+    // ========== BARBER NAVIGATION ==========
+    if (role == 'barber') {
+      if (type == 'new_booking_assigned' || type == 'booking_reminder') {
+        final appointmentId = data?['appointmentId'] ?? data?['bookingId'];
+        if (appointmentId != null) {
+          await context.push('/barber/appointment/$appointmentId');
+        } else {
+          await context.push('/barber/appointments');
+        }
+      } else if (type == 'appointment_cancelled') {
+        await context.push('/barber/appointments');
+      } else if (type == 'appointment_reassigned') {
+        final appointmentId = data?['appointmentId'];
+        if (appointmentId != null) {
+          await context.push('/barber/appointment/$appointmentId');
+        } else {
+          await context.push('/barber/appointments');
+        }
+      } else if (type == 'leave_status_update') {
+        await context.push('/barber/leaves');
       } else {
-        await context.push('/customer/my-bookings');
+        await context.push('/barber/dashboard');
       }
-    } else if (type == 'vip_approved' || type == 'vip_request_update') {
-      await context.push('/customer/vip-bookings');
-    } else if (type == 'special_offer') {
-      await context.push('/customer/offers');
-    } else if (type == 'booking_reminder') {
-      await context.push('/customer/my-bookings');
-    } else if (type == 'next_appointment_alert') {
-      await context.push('/customer/my-bookings');
-    } else if (type == 'cancellation') {
-      await context.push('/customer/my-bookings');
-    } else if (type == 'overflow_warning') {
-      await context.push('/customer/my-bookings');
-    } else {
-      final actionUrl = notification['action_url'];
-      if (actionUrl != null && actionUrl.isNotEmpty) {
-        await context.push(actionUrl);
+    }
+    // ========== OWNER NAVIGATION ==========
+    else if (role == 'owner') {
+      if (type == 'new_leave_request') {
+        await context.push('/owner/leaves');
+      } else if (type == 'new_follower') {
+        await context.push('/owner/salon');
+      } else if (type == 'new_review') {
+        await context.push('/owner/reviews');
+      } else if (type == 'new_booking') {
+        await context.push('/owner/bookings');
+      } else if (type == 'low_stock') {
+        await context.push('/owner/inventory');
+      } else if (type == 'daily_summary') {
+        await context.push('/owner/dashboard');
       } else {
+        await context.push('/owner/dashboard');
+      }
+    }
+    // ========== CUSTOMER NAVIGATION ==========
+    else {
+      if (type == 'appointment_confirmed' || type == 'booking_confirmed') {
+        final appointmentId = data?['appointment_id'] ?? data?['bookingId'];
+        if (appointmentId != null) {
+          await context.push('/customer/booking/$appointmentId');
+        } else {
+          await context.push('/customer/my-bookings');
+        }
+      } else if (type == 'vip_approved' || type == 'vip_pending' || type == 'vip_rejected') {
+        await context.push('/customer/vip-bookings');
+      } else if (type == 'special_offer') {
+        await context.push('/customer/offers');
+      } else if (type == 'booking_reminder') {
         await context.push('/customer/my-bookings');
+      } else if (type == 'next_appointment_alert') {
+        await context.push('/customer/my-bookings');
+      } else if (type == 'appointment_cancelled' || type == 'appointment_moved' || type == 'appointment_reassigned') {
+        final appointmentId = data?['appointmentId'];
+        if (appointmentId != null) {
+          await context.push('/customer/booking/$appointmentId');
+        } else {
+          await context.push('/customer/my-bookings');
+        }
+      } else if (type == 'overflow_warning') {
+        await context.push('/customer/my-bookings');
+      } else if (type == 'review_reminder') {
+        await context.push('/customer/reviews');
+      } else if (type == 'loyalty_points') {
+        await context.push('/customer/loyalty');
+      } else if (type == 'waiting_list_available') {
+        await context.push('/customer/waiting-list');
+      } else {
+        final actionUrl = notification['action_url'];
+        if (actionUrl != null && actionUrl.isNotEmpty) {
+          await context.push(actionUrl);
+        } else {
+          await context.push('/customer/my-bookings');
+        }
       }
     }
 
     if (mounted && wasUnread) {
       Navigator.pop(context, true);
+    }
+  }
+
+  // ============================================
+  // UI HELPERS
+  // ============================================
+
+  String _getTitle() {
+    switch (widget.role) {
+      case 'barber':
+        return 'Barber Notifications';
+      case 'owner':
+        return 'Owner Notifications';
+      default:
+        return 'Notifications';
+    }
+  }
+
+  Color _getAppBarColor() {
+    switch (widget.role) {
+      case 'barber':
+        return Colors.blue;
+      case 'owner':
+        return Colors.purple;
+      default:
+        return const Color(0xFFFF6B8B);
     }
   }
 
@@ -373,7 +471,9 @@ class _NotificationScreenState extends State<NotificationScreen> {
         return Icons.check_circle;
       case 'vip_approved':
         return Icons.star;
-      case 'vip_request_update':
+      case 'vip_pending':
+        return Icons.hourglass_empty;
+      case 'vip_rejected':
         return Icons.star_border;
       case 'special_offer':
         return Icons.local_offer;
@@ -381,10 +481,26 @@ class _NotificationScreenState extends State<NotificationScreen> {
         return Icons.alarm;
       case 'next_appointment_alert':
         return Icons.notifications_active;
-      case 'cancellation':
+      case 'appointment_cancelled':
         return Icons.cancel;
       case 'overflow_warning':
         return Icons.warning_amber;
+      case 'new_booking_assigned':
+        return Icons.assignment_add;
+      case 'new_leave_request':
+        return Icons.event_busy;
+      case 'leave_status_update':
+        return type!.contains('approved') ? Icons.check_circle : Icons.cancel;
+      case 'new_follower':
+        return Icons.person_add;
+      case 'new_review':
+        return Icons.star;
+      case 'new_booking':
+        return Icons.calendar_today;
+      case 'low_stock':
+        return Icons.inventory;
+      case 'daily_summary':
+        return Icons.analytics;
       default:
         return Icons.notifications;
     }
@@ -397,28 +513,72 @@ class _NotificationScreenState extends State<NotificationScreen> {
         return Colors.green;
       case 'vip_approved':
         return Colors.amber;
+      case 'vip_pending':
+        return Colors.orange;
+      case 'vip_rejected':
+        return Colors.red;
       case 'special_offer':
         return const Color(0xFFFF6B8B);
       case 'booking_reminder':
         return Colors.blue;
       case 'next_appointment_alert':
         return Colors.orange;
-      case 'cancellation':
+      case 'appointment_cancelled':
         return Colors.red;
       case 'overflow_warning':
         return Colors.orange;
+      case 'new_booking_assigned':
+        return Colors.purple;
+      case 'new_leave_request':
+        return Colors.indigo;
+      case 'leave_status_update':
+        return Colors.green;
+      case 'new_follower':
+        return Colors.teal;
+      case 'new_review':
+        return Colors.amber;
+      case 'new_booking':
+        return Colors.blue;
+      case 'low_stock':
+        return Colors.red;
+      case 'daily_summary':
+        return Colors.cyan;
       default:
         return Colors.grey;
     }
   }
+
+  String _getEmptyMessage() {
+    if (_selectedFilter == 'unread') {
+      return 'No unread notifications';
+    } else if (_selectedFilter == 'read') {
+      return 'No read notifications';
+    }
+    return 'No notifications yet';
+  }
+
+  String _getEmptySubMessage() {
+    switch (widget.role) {
+      case 'barber':
+        return 'You will see notifications about new bookings and schedule updates here';
+      case 'owner':
+        return 'You will see notifications about salon activity, reviews, and requests here';
+      default:
+        return 'When you get notifications, they will appear here';
+    }
+  }
+
+  // ============================================
+  // BUILD METHODS
+  // ============================================
 
   @override
   Widget build(BuildContext context) {
     if (!_isTimezoneLoaded) {
       return Scaffold(
         appBar: AppBar(
-          title: const Text('Notifications'),
-          backgroundColor: const Color(0xFFFF6B8B),
+          title: Text(_getTitle()),
+          backgroundColor: _getAppBarColor(),
           foregroundColor: Colors.white,
           elevation: 0,
         ),
@@ -444,9 +604,9 @@ class _NotificationScreenState extends State<NotificationScreen> {
       appBar: AppBar(
         title: Row(
           children: [
-            const Text(
-              'Notifications',
-              style: TextStyle(fontWeight: FontWeight.bold),
+            Text(
+              _getTitle(),
+              style: const TextStyle(fontWeight: FontWeight.bold),
             ),
             if (unreadCount > 0) ...[
               const SizedBox(width: 8),
@@ -468,7 +628,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
             ],
           ],
         ),
-        backgroundColor: const Color(0xFFFF6B8B),
+        backgroundColor: _getAppBarColor(),
         foregroundColor: Colors.white,
         elevation: 0,
         centerTitle: false,
@@ -535,7 +695,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
                   ElevatedButton(
                     onPressed: _loadNotifications,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFFF6B8B),
+                      backgroundColor: _getAppBarColor(),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
                       ),
@@ -553,18 +713,18 @@ class _NotificationScreenState extends State<NotificationScreen> {
                   Container(
                     padding: const EdgeInsets.all(24),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                      color: _getAppBarColor().withValues(alpha: 0.1),
                       shape: BoxShape.circle,
                     ),
                     child: Icon(
                       Icons.notifications_none,
                       size: 64,
-                      color: const Color(0xFFFF6B8B).withValues(alpha: 0.5),
+                      color: _getAppBarColor().withValues(alpha: 0.5),
                     ),
                   ),
                   const SizedBox(height: 24),
                   Text(
-                    'No Notifications',
+                    _getEmptyMessage(),
                     style: TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.bold,
@@ -573,7 +733,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'When you get notifications, they will appear here',
+                    _getEmptySubMessage(),
                     style: TextStyle(fontSize: 14, color: Colors.grey[500]),
                     textAlign: TextAlign.center,
                   ),
@@ -619,7 +779,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
                 Expanded(
                   child: RefreshIndicator(
                     onRefresh: _refreshNotifications,
-                    color: const Color(0xFFFF6B8B),
+                    color: _getAppBarColor(),
                     child: _filteredNotifications.isEmpty
                         ? Center(
                             child: Column(
@@ -704,9 +864,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
                                 },
                                 child: Material(
                                   color: isUnread
-                                      ? const Color(
-                                          0xFFFF6B8B,
-                                        ).withValues(alpha: 0.05)
+                                      ? _getAppBarColor().withValues(alpha: 0.05)
                                       : Colors.white,
                                   child: InkWell(
                                     onTap: () =>
@@ -732,9 +890,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
                                         ],
                                         border: isUnread
                                             ? Border.all(
-                                                color: const Color(
-                                                  0xFFFF6B8B,
-                                                ).withValues(alpha: 0.3),
+                                                color: _getAppBarColor().withValues(alpha: 0.3),
                                               )
                                             : null,
                                       ),
@@ -839,13 +995,15 @@ class _NotificationScreenState extends State<NotificationScreen> {
       onSelected: (selected) {
         setState(() {
           _selectedFilter = value;
+          // Reload notifications with filter
+          _loadNotifications();
         });
       },
-      selectedColor: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
-      checkmarkColor: const Color(0xFFFF6B8B),
+      selectedColor: _getAppBarColor().withValues(alpha: 0.1),
+      checkmarkColor: _getAppBarColor(),
       labelStyle: TextStyle(
         color: _selectedFilter == value
-            ? const Color(0xFFFF6B8B)
+            ? _getAppBarColor()
             : Colors.grey[600],
         fontWeight: _selectedFilter == value
             ? FontWeight.w600
@@ -854,7 +1012,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
       shape: StadiumBorder(
         side: BorderSide(
           color: _selectedFilter == value
-              ? const Color(0xFFFF6B8B)
+              ? _getAppBarColor()
               : Colors.grey[300]!,
         ),
       ),

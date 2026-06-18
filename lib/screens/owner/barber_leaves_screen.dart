@@ -387,15 +387,14 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
         case 'accept':
           if (availableBarber != null) {
             await _reassignToBarber(appointment, availableBarber, barberId);
-            await _notificationService.sendAppointmentNotification(
+            // ✅ Use customer-specific method
+            await _notificationService.sendAppointmentReassigned(
               customerId: customerId,
-              title: 'Appointment Reassigned',
-              body:
-                  'Your appointment has been reassigned to ${availableBarber['name']}.',
-              data: {
-                'type': 'reassigned',
-                'barber_name': availableBarber['name'],
-              },
+              newBarberName: availableBarber['name'],
+              appointmentDate: dateFormatted,
+              appointmentTime: timeFormatted,
+              appointmentId: appointment['id'],
+              bookingNumber: appointment['booking_number'] ?? '',
             );
           }
           break;
@@ -403,12 +402,14 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
         case 'next_day':
           final newDate = await _moveToNextDay(appointment);
           final newLocalDate = _utcDateStringToLocalDate(newDate);
-          await _notificationService.sendAppointmentNotification(
+          // ✅ Use customer-specific method
+          await _notificationService.sendAppointmentMoved(
             customerId: customerId,
-            title: 'Appointment Moved to Tomorrow',
-            body:
-                'Your appointment has been moved to ${_formatDateForDisplay(newLocalDate)} at 9:00 AM (Queue #1).',
-            data: {'type': 'moved', 'new_date': newDate},
+            newDate: _formatDateForDisplay(newLocalDate),
+            queueNumber: 1,
+            appointmentId: appointment['id'],
+            bookingNumber: appointment['booking_number'] ?? '',
+            oldDate: dateFormatted,
           );
           break;
 
@@ -417,11 +418,13 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
             appointment['id'],
             'Customer cancelled due to barber leave',
           );
-          await _notificationService.sendAppointmentNotification(
+          // ✅ Use customer-specific method
+          await _notificationService.sendAppointmentCancelled(
             customerId: customerId,
-            title: 'Appointment Cancelled',
-            body: 'Your appointment has been cancelled as requested.',
-            data: {'type': 'cancelled'},
+            reason: 'Customer cancelled due to barber leave',
+            appointmentId: appointment['id'],
+            bookingNumber: appointment['booking_number'] ?? '',
+            cancelledBy: 'System',
           );
           break;
       }
