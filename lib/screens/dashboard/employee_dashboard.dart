@@ -23,7 +23,7 @@ class EmployeeDashboard extends StatefulWidget {
   State<EmployeeDashboard> createState() => _EmployeeDashboardState();
 }
 
-class _EmployeeDashboardState extends State<EmployeeDashboard> {
+class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   final NotificationService _notificationService = NotificationService();
@@ -44,18 +44,23 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
   int _monthlyEarnings = 0;
   double _rating = 0.0;
   String _employeeName = 'Loading...';
-  final String _employeeRole = 'Barber';
   String _employeeId = '';
   String _employeeEmail = '';
-  int? _salonBarberId;
-  int? _salonId;
+  String _employeeAvatar = '';
 
-  // Break time status
+  // Salon information
+  List<Map<String, dynamic>> _assignedSalons = [];
+  int? _selectedSalonId;
+  String _selectedSalonName = '';
+
+  // Break status
   bool _isOnBreak = false;
-  TimeOfDay? _breakStartTime;
 
   // Appointments list
   List<Map<String, dynamic>> _todaysAppointmentsList = [];
+
+  // Notification count
+  int _unreadNotificationCount = 0;
 
   // ==================== TIMEZONE VARIABLES ====================
   String _userTimezone = '';
@@ -65,11 +70,37 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
   @override
   void initState() {
     super.initState();
-    _initializeTimezone();
-    _loadEmployeeData();
-    _loadData();
+    _initialize();
+  }
+
+  Future<void> _initialize() async {
+    await _initializeTimezone();
+    await _loadEmployeeData();
+    await _loadData();
     _setupNotificationListeners();
     debugPrint('🔄 EmployeeDashboard initState completed');
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route is PageRoute) {
+      routeObserver.subscribe(this, route);
+    }
+    _checkTimezoneChange();
+  }
+
+  @override
+  void dispose() {
+    routeObserver.unsubscribe(this);
+    super.dispose();
+  }
+
+  @override
+  void didPopNext() {
+    debugPrint('🔄 Returning to EmployeeDashboard - Auto refresh');
+    _loadData();
   }
 
   // ==================== TIMEZONE INITIALIZATION ====================
@@ -78,9 +109,16 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
     await TimezoneService.initialize();
 
     final prefs = await SharedPreferences.getInstance();
-    _userTimezone =
-        prefs.getString('cached_timezone') ??
-        TimezoneService.getCurrentTimezone();
+    
+    String cachedTimezone = prefs.getString('cached_timezone') ?? '';
+    
+    if (cachedTimezone.isNotEmpty) {
+      _userTimezone = cachedTimezone;
+    } else {
+      _userTimezone = TimezoneService.getCurrentTimezone();
+      await prefs.setString('cached_timezone', _userTimezone);
+    }
+    
     await TimezoneService.setTimezone(_userTimezone);
     _lastTimezone = _userTimezone;
 
@@ -89,12 +127,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
     });
 
     debugPrint('✅ User timezone: $_userTimezone');
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _checkTimezoneChange();
   }
 
   void _checkTimezoneChange() async {
@@ -110,17 +142,169 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
     _lastTimezone = currentTimezone;
   }
 
-  bool _isDST() {
-    final timezone = _userTimezone;
-    if (!timezone.contains('America/') && !timezone.contains('Europe/')) {
-      return false;
+  // ==================== UTC TO LOCAL CONVERSION ====================
+
+  String _utcToLocalTimeString(String utcTime) {
+    try {
+      return TimezoneService.utcToLocalTimeRecurring(utcTime);
+    } catch (e) {
+      debugPrint('Error converting UTC to local: $e');
+      return _formatTimeString(utcTime);
     }
-    final now = DateTime.now();
-    final month = now.month;
-    return month > 3 && month < 11;
   }
 
-  // ==================== ADVANCED TIMEZONE PICKER ====================
+  String _formatTimeString(String timeStr) {
+    try {
+      final parts = timeStr.split(':');
+      final hour = int.parse(parts[0]);
+      final minute = int.parse(parts[1]);
+      final period = hour >= 12 ? 'PM' : 'AM';
+      final displayHour = hour % 12 == 0 ? 12 : hour % 12;
+      return '$displayHour:${minute.toString().padLeft(2, '0')} $period';
+    } catch (e) {
+      return timeStr;
+    }
+  }
+
+  String _formatDateDisplay(String dateStr) {
+    try {
+      final date = DateTime.parse(dateStr);
+      final now = DateTime.now();
+      
+      if (date.year == now.year && date.month == now.month && date.day == now.day) {
+        return 'Today';
+      }
+      
+      final tomorrow = now.add(const Duration(days: 1));
+      if (date.year == tomorrow.year && date.month == tomorrow.month && date.day == tomorrow.day) {
+        return 'Tomorrow';
+      }
+      
+      final dayDiff = date.difference(now).inDays;
+      if (dayDiff <= 7) {
+        final weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+        return weekdays[date.weekday - 1];
+      }
+      
+      return '${date.day}/${date.month}';
+    } catch (e) {
+      return dateStr;
+    }
+  }
+
+  String _getMonthName() {
+    const months = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'
+    ];
+    return months[DateTime.now().month - 1];
+  }
+
+  // ==================== LOAD BREAK STATUS ====================
+
+  Future<void> _loadBreakStatus() async {
+    if (_employeeId.isEmpty) return;
+
+    try {
+      final today = DateTime.now().toIso8601String().split('T').first;
+      
+      final specialBreak = await supabase
+          .from('barber_special_breaks')
+          .select('''
+            id,
+            break_date,
+            start_time,
+            end_time,
+            break_type,
+            reason
+          ''')
+          .eq('barber_id', _employeeId)
+          .eq('break_date', today)
+          .eq('break_type', 'lunch')
+          .maybeSingle();
+
+      if (specialBreak != null) {
+        final startTime = specialBreak['start_time'] as String;
+        final endTime = specialBreak['end_time'] as String;
+        final now = DateTime.now();
+        final nowStr = '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:00';
+        
+        final isOnBreakNow = nowStr.compareTo(startTime) >= 0 && nowStr.compareTo(endTime) < 0;
+        
+        setState(() {
+          _isOnBreak = isOnBreakNow;
+        });
+        
+        debugPrint('✅ Loaded SPECIAL break');
+        return;
+      }
+
+      final dayOfWeek = DateTime.now().weekday;
+      
+      final regularBreak = await supabase
+          .from('barber_breaks')
+          .select('''
+            id,
+            day_of_week,
+            start_time,
+            end_time,
+            break_type
+          ''')
+          .eq('barber_id', _employeeId)
+          .eq('day_of_week', dayOfWeek)
+          .eq('break_type', 'lunch')
+          .maybeSingle();
+
+      if (regularBreak != null) {
+        final startTime = regularBreak['start_time'] as String;
+        final endTime = regularBreak['end_time'] as String;
+        final now = DateTime.now();
+        final nowStr = '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:00';
+        
+        final isOnBreakNow = nowStr.compareTo(startTime) >= 0 && nowStr.compareTo(endTime) < 0;
+        
+        setState(() {
+          _isOnBreak = isOnBreakNow;
+        });
+        
+        debugPrint('✅ Loaded REGULAR break');
+        return;
+      }
+
+      setState(() {
+        _isOnBreak = false;
+      });
+      
+      debugPrint('ℹ️ No break found - Working');
+
+    } catch (e) {
+      debugPrint('❌ Error loading break status: $e');
+      setState(() {
+        _isOnBreak = false;
+      });
+    }
+  }
+
+  // ==================== LOAD NOTIFICATION COUNT ====================
+
+  Future<void> _loadNotificationCount() async {
+    if (_employeeId.isEmpty) return;
+
+    try {
+      final count = await _notificationService.getUnreadCountWithRole(
+        userId: _employeeId,
+        role: 'barber',
+      );
+      setState(() {
+        _unreadNotificationCount = count;
+      });
+      debugPrint('✅ Unread notifications: $count');
+    } catch (e) {
+      debugPrint('❌ Error loading notification count: $e');
+    }
+  }
+
+  // ==================== TIMEZONE PICKER METHODS ====================
 
   Future<void> _showTimezonePickerDialog() async {
     final allTimezones = TimezoneService.getAllAvailableTimezones();
@@ -201,19 +385,12 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                           });
                         },
                         decoration: InputDecoration(
-                          hintText:
-                              '🔍 Search by country, city, or timezone...',
+                          hintText: '🔍 Search by country, city, or timezone...',
                           hintStyle: TextStyle(color: Colors.grey[400]),
-                          prefixIcon: const Icon(
-                            Icons.search,
-                            color: Colors.grey,
-                          ),
+                          prefixIcon: const Icon(Icons.search, color: Colors.grey),
                           suffixIcon: searchQuery.isNotEmpty
                               ? IconButton(
-                                  icon: const Icon(
-                                    Icons.clear,
-                                    color: Colors.grey,
-                                  ),
+                                  icon: const Icon(Icons.clear, color: Colors.grey),
                                   onPressed: () {
                                     searchController.clear();
                                     setDialogState(() {
@@ -264,18 +441,14 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                                         fontSize: 13,
                                       ),
                                       tabs: continentGroups.keys
-                                          .map(
-                                            (continent) => Tab(text: continent),
-                                          )
+                                          .map((continent) => Tab(text: continent))
                                           .toList(),
                                     ),
                                   ),
                                   const SizedBox(height: 8),
                                   Expanded(
                                     child: TabBarView(
-                                      children: continentGroups.values.map((
-                                        timezones,
-                                      ) {
+                                      children: continentGroups.values.map((timezones) {
                                         return ListView.builder(
                                           itemCount: timezones.length,
                                           itemBuilder: (context, index) {
@@ -284,16 +457,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                                                 .split('/')
                                                 .last
                                                 .replaceAll('_', ' ');
-                                            final countryCode =
-                                                _extractCountryCode(tz);
-                                            final flag = _getFlagByCountryCode(
-                                              countryCode,
-                                            );
-                                            return _buildTimezoneTile(
-                                              tz,
-                                              displayName,
-                                              flag,
-                                            );
+                                            final countryCode = _extractCountryCode(tz);
+                                            final flag = _getFlagByCountryCode(countryCode);
+                                            return _buildTimezoneTile(tz, displayName, flag);
                                           },
                                         );
                                       }).toList(),
@@ -306,9 +472,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                           ? ListView.builder(
                               itemCount: filteredGroups.keys.length,
                               itemBuilder: (context, index) {
-                                final continent = filteredGroups.keys.elementAt(
-                                  index,
-                                );
+                                final continent = filteredGroups.keys.elementAt(index);
                                 final items = filteredGroups[continent]!;
                                 return Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -322,9 +486,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                                         children: [
                                           Text(
                                             _getContinentEmoji(continent),
-                                            style: const TextStyle(
-                                              fontSize: 18,
-                                            ),
+                                            style: const TextStyle(fontSize: 18),
                                           ),
                                           const SizedBox(width: 8),
                                           Text(
@@ -335,17 +497,14 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                                             ),
                                           ),
                                           Container(
-                                            margin: const EdgeInsets.only(
-                                              left: 8,
-                                            ),
+                                            margin: const EdgeInsets.only(left: 8),
                                             padding: const EdgeInsets.symmetric(
                                               horizontal: 6,
                                               vertical: 2,
                                             ),
                                             decoration: BoxDecoration(
                                               color: Colors.grey[200],
-                                              borderRadius:
-                                                  BorderRadius.circular(10),
+                                              borderRadius: BorderRadius.circular(10),
                                             ),
                                             child: Text(
                                               '${items.length}',
@@ -723,82 +882,91 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
     );
   }
 
+  // ==================== TIMEZONE SELECTOR ====================
+
   Widget _buildTimezoneSelector() {
+    final isDSTActive = TimezoneService.isDST();
+    final flag = TimezoneService.getCurrentFlag();
+    final displayName = TimezoneService.getTimezoneDisplayName();
+
     return GestureDetector(
       onTap: _showTimezonePickerDialog,
       child: Container(
-        margin: const EdgeInsets.only(right: 8),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        margin: const EdgeInsets.only(right: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         decoration: BoxDecoration(
           color: Colors.white.withValues(alpha: 0.2),
-          borderRadius: BorderRadius.circular(25),
+          borderRadius: BorderRadius.circular(16),
+          border: isDSTActive
+              ? Border.all(color: Colors.amber, width: 1)
+              : null,
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
+            Text(flag, style: const TextStyle(fontSize: 12)),
+            const SizedBox(width: 4),
             Text(
-              TimezoneService.getCurrentFlag(),
-              style: const TextStyle(fontSize: 16),
-            ),
-            const SizedBox(width: 6),
-            Text(
-              TimezoneService.getTimezoneDisplayName(),
+              displayName,
               style: const TextStyle(
-                fontSize: 13,
+                fontSize: 10,
                 color: Colors.white,
                 fontWeight: FontWeight.w500,
               ),
             ),
-            const SizedBox(width: 4),
-            const Icon(Icons.arrow_drop_down, size: 20, color: Colors.white),
-            if (_isDST()) ...[
+            if (isDSTActive) ...[
               const SizedBox(width: 4),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
                 decoration: BoxDecoration(
                   color: Colors.amber.shade100,
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(4),
                 ),
                 child: Text(
                   'DST',
                   style: TextStyle(
-                    fontSize: 8,
+                    fontSize: 7,
                     color: Colors.amber.shade800,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
               ),
             ],
+            const Icon(Icons.arrow_drop_down, size: 16, color: Colors.white),
           ],
         ),
       ),
     );
   }
 
-  // ==================== UTC TO LOCAL CONVERSION ====================
+  // ==================== PROFILE IMAGE ====================
 
-  /// Convert UTC time string to local time string for display
-  String _utcToLocalTimeString(String utcTime) {
-    try {
-      return TimezoneService.utcToLocalTime(utcTime, DateTime.now());
-    } catch (e) {
-      debugPrint('Error converting UTC to local: $e');
-      return _formatTimeString(utcTime);
-    }
-  }
-
-  /// Format time string (fallback)
-  String _formatTimeString(String timeStr) {
-    try {
-      final parts = timeStr.split(':');
-      final hour = int.parse(parts[0]);
-      final minute = int.parse(parts[1]);
-      final period = hour >= 12 ? 'PM' : 'AM';
-      final displayHour = hour % 12 == 0 ? 12 : hour % 12;
-      return '$displayHour:${minute.toString().padLeft(2, '0')} $period';
-    } catch (e) {
-      return timeStr;
-    }
+  Widget _buildProfileImage() {
+    return GestureDetector(
+      onTap: () {
+        context.push('/employee/profile');
+      },
+      child: Container(
+        margin: const EdgeInsets.only(right: 4),
+        child: CircleAvatar(
+          radius: 18,
+          backgroundColor: Colors.white.withValues(alpha: 0.2),
+          backgroundImage: _employeeAvatar.isNotEmpty
+              ? NetworkImage(_employeeAvatar)
+              : null,
+          child: _employeeAvatar.isEmpty
+              ? Text(
+                  _employeeName.isNotEmpty ? _employeeName[0].toUpperCase() : '?',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                )
+              : null,
+        ),
+      ),
+    );
   }
 
   // ==================== LOAD EMPLOYEE DATA ====================
@@ -813,10 +981,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
 
       _employeeId = currentUser.id;
       _employeeEmail = currentUser.email ?? '';
-      debugPrint(
-        '📋 Loading employee data for user: $_employeeId, email: $_employeeEmail',
-      );
+      debugPrint('📋 Loading employee data for user: $_employeeId, email: $_employeeEmail');
 
+      // Check if user has barber role
       final userRolesResponse = await supabase
           .from('user_roles')
           .select('role_id, roles!inner(name)')
@@ -847,6 +1014,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
         }
       }
 
+      // Load profile
       final profileResponse = await supabase
           .from('profiles')
           .select('full_name, email, avatar_url')
@@ -863,40 +1031,22 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
               profileResponse['email'].toString().isNotEmpty) {
             _employeeEmail = profileResponse['email'].toString();
           }
+          _employeeAvatar = profileResponse['avatar_url'] ?? '';
         });
-        debugPrint(
-          '✅ Profile loaded: name=$_employeeName, email=$_employeeEmail',
-        );
+        debugPrint('✅ Profile loaded: name=$_employeeName, email=$_employeeEmail');
       } else {
         final profile = await SessionManager.getProfileByEmail(_employeeEmail);
         if (profile != null) {
           setState(() {
             _employeeName = profile['name'] ?? _employeeEmail.split('@').first;
+            _employeeAvatar = profile['avatar'] ?? '';
           });
-          debugPrint(
-            '✅ Profile loaded from SessionManager: name=$_employeeName',
-          );
+          debugPrint('✅ Profile loaded from SessionManager: name=$_employeeName');
         }
       }
 
-      final salonBarberResponse = await supabase
-          .from('salon_barbers')
-          .select('id, salon_id, status')
-          .eq('barber_id', _employeeId)
-          .eq('status', 'active')
-          .maybeSingle();
-
-      if (salonBarberResponse != null) {
-        setState(() {
-          _salonBarberId = salonBarberResponse['id'];
-          _salonId = salonBarberResponse['salon_id'];
-        });
-        debugPrint(
-          '✅ Found salon_barber: id=$_salonBarberId, salon_id=$_salonId',
-        );
-      } else {
-        debugPrint('⚠️ No active salon_barber record found');
-      }
+      // Load ALL assigned salons for this barber
+      await _loadAssignedSalons();
     } catch (e) {
       debugPrint('❌ Error loading employee data: $e');
 
@@ -908,10 +1058,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
             setState(() {
               _employeeEmail = email;
               _employeeName = profile['name'] ?? email.split('@').first;
+              _employeeAvatar = profile['avatar'] ?? '';
             });
-            debugPrint(
-              '✅ Fallback profile loaded: name=$_employeeName, email=$_employeeEmail',
-            );
+            debugPrint('✅ Fallback profile loaded: name=$_employeeName, email=$_employeeEmail');
           }
         }
       } catch (fallbackError) {
@@ -920,7 +1069,118 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
     }
   }
 
-  // ==================== LOAD DASHBOARD DATA ====================
+  // Load assigned salons for the barber
+  Future<void> _loadAssignedSalons() async {
+    try {
+      final response = await supabase
+          .from('salon_barbers')
+          .select('''
+            id,
+            salon_id,
+            status,
+            salons!inner (
+              id,
+              name,
+              address,
+              phone,
+              logo_url,
+              cover_url,
+              open_time,
+              close_time,
+              is_active
+            )
+          ''')
+          .eq('barber_id', _employeeId)
+          .eq('status', 'active');
+
+      debugPrint('📊 Found ${response.length} assigned salons');
+
+      final List<Map<String, dynamic>> salons = [];
+
+      for (var item in response) {
+        final salonData = item['salons'] as Map?;
+        if (salonData != null) {
+          final salon = {
+            'id': salonData['id'],
+            'name': salonData['name'],
+            'address': salonData['address'],
+            'phone': salonData['phone'],
+            'logo_url': salonData['logo_url'],
+            'cover_url': salonData['cover_url'],
+            'open_time': salonData['open_time'],
+            'close_time': salonData['close_time'],
+            'is_active': salonData['is_active'],
+            'barber_salon_id': item['id'],
+          };
+          salons.add(salon);
+
+          // First active salon becomes selected
+          if (_selectedSalonId == null && salonData['is_active'] == true) {
+            _selectedSalonId = salonData['id'];
+            _selectedSalonName = salonData['name'];
+          }
+        }
+      }
+
+      setState(() {
+        _assignedSalons = salons;
+        if (_selectedSalonId == null && salons.isNotEmpty) {
+          _selectedSalonId = salons[0]['id'] as int;
+          _selectedSalonName = salons[0]['name'] ?? '';
+        } else if (salons.isNotEmpty) {
+          final selected = salons.firstWhere(
+            (s) => s['id'] == _selectedSalonId,
+            orElse: () => {},
+          );
+          _selectedSalonName = selected['name'] ?? '';
+        }
+      });
+
+      debugPrint('✅ Selected salon: $_selectedSalonName (ID: $_selectedSalonId)');
+      debugPrint('✅ Total assigned salons: ${_assignedSalons.length}');
+    } catch (e) {
+      debugPrint('❌ Error loading assigned salons: $e');
+    }
+  }
+
+  // ==================== SALON SELECTION ====================
+
+  void _selectSalon(int salonId) {
+    setState(() {
+      _selectedSalonId = salonId;
+      final selected = _assignedSalons.firstWhere(
+        (s) => s['id'] == salonId,
+        orElse: () => {},
+      );
+      _selectedSalonName = selected['name'] ?? '';
+    });
+    _loadDataForSelectedSalon();
+  }
+
+  Future<void> _loadDataForSelectedSalon() async {
+    if (_selectedSalonId == null) return;
+    
+    setState(() => _isLoading = true);
+    
+    try {
+      await _loadAppointments();
+      await _loadStatistics();
+      await _loadBreakStatus();
+      await _loadNotificationCount();
+      
+      if (mounted) {
+        setState(() => _isLoading = false);
+        debugPrint('✅ Data loaded for salon: $_selectedSalonName');
+      }
+    } catch (e) {
+      debugPrint('❌ Error loading data for salon: $e');
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  // ==================== LOAD DASHBOARD DATA - MAIN ====================
 
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
@@ -938,14 +1198,17 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
         _showPermissionCard = false;
       }
 
-      if (_salonBarberId != null) {
+      if (_employeeId.isNotEmpty) {
         await _loadAppointments();
         await _loadStatistics();
+        await _loadBreakStatus();
+        await _loadNotificationCount();
       }
 
       if (mounted) {
         setState(() => _isLoading = false);
         debugPrint('✅ Employee data loaded successfully');
+        debugPrint('📊 Today: $_todaysAppointments, Pending: $_pendingAppointments, Monthly: $_monthlyEarnings, Customers: $_totalCustomers');
       }
     } catch (e) {
       debugPrint('❌ Error loading employee data: $e');
@@ -961,14 +1224,34 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
     }
   }
 
-  // ==================== LOAD APPOINTMENTS (WITH LOCAL TIME CONVERSION) ====================
-
+  // =====================================================
+  // ✅ LOAD APPOINTMENTS - DIRECT QUERY (NO RPC)
+  // =====================================================
   Future<void> _loadAppointments() async {
     try {
+      final salonId = _selectedSalonId;
+
+      if (salonId == null) {
+        debugPrint('⚠️ No salon selected');
+        setState(() {
+          _todaysAppointmentsList = [];
+          _todaysAppointments = 0;
+          _completedToday = 0;
+          _pendingAppointments = 0;
+          _todayEarnings = 0;
+        });
+        return;
+      }
+
       final today = DateTime.now();
       final todayStr = today.toIso8601String().split('T').first;
+      final futureDate = today.add(const Duration(days: 30));
+      final futureStr = futureDate.toIso8601String().split('T').first;
 
-      final appointmentsResponse = await supabase
+      debugPrint('📊 Loading appointments from $todayStr to $futureStr');
+
+      // ✅ DIRECT QUERY - NO RPC
+      final response = await supabase
           .from('appointments')
           .select('''
             id,
@@ -981,6 +1264,14 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
             price,
             service_id,
             variant_id,
+            salon_id,
+            queue_number,
+            queue_token,
+            is_vip,
+            salons!inner (
+              id,
+              name
+            ),
             services!inner (
               name
             ),
@@ -997,93 +1288,142 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
             )
           ''')
           .eq('barber_id', _employeeId)
-          .eq('appointment_date', todayStr)
-          .order('start_time');
+          .eq('salon_id', salonId)
+          .gte('appointment_date', todayStr)
+          .lte('appointment_date', futureStr)
+          .neq('status', 'cancelled')
+          .neq('status', 'no_show')
+          .order('appointment_date', ascending: true)
+          .order('start_time', ascending: true);
 
-      debugPrint(
-        '📊 Found ${appointmentsResponse.length} appointments for today',
-      );
+      debugPrint('📊 Found ${response.length} appointments');
 
-      final List<Map<String, dynamic>> appointments = [];
-      int completed = 0;
-      int pending = 0;
-      int earnings = 0;
+      final List<Map<String, dynamic>> allAppointments = [];
+      
+      // Counters
+      int todayTotal = 0;
+      int todayCompleted = 0;
+      int todayEarnings = 0;
+      int totalPendingAll = 0;
 
-      for (var apt in appointmentsResponse) {
+      for (var apt in response) {
         final service = apt['services'] as Map?;
         final variant = apt['service_variants'] as Map?;
         final customer = apt['profiles'] as Map?;
+        final salon = apt['salons'] as Map?;
 
         final status = apt['status'] as String? ?? 'pending';
+        final aptDate = apt['appointment_date'] as String;
+        final isToday = aptDate == todayStr;
+        
         final price =
             (apt['price'] as num?)?.toDouble() ??
             (variant?['price'] as num?)?.toDouble() ??
             0.0;
 
-        // ✅ Convert UTC times to local for display
         final startTimeLocal = _utcToLocalTimeString(apt['start_time']);
         final endTimeLocal = _utcToLocalTimeString(apt['end_time']);
 
-        if (status == 'completed') {
-          completed++;
-          earnings += price.toInt();
-        } else if (status == 'pending' || status == 'confirmed') {
-          pending++;
+        // Count TODAY's appointments
+        if (isToday) {
+          todayTotal++;
+          if (status == 'completed') {
+            todayCompleted++;
+            todayEarnings += price.toInt();
+          }
         }
 
-        appointments.add({
+        // Count ALL PENDING (today + future)
+        if (status == 'pending' || status == 'confirmed' || status == 'in_progress') {
+          totalPendingAll++;
+        }
+
+        allAppointments.add({
           'id': apt['id'],
           'booking_number': apt['booking_number'],
           'customer_name': customer?['full_name'] ?? 'Unknown Customer',
           'customer_phone': customer?['phone'] ?? '',
           'service_name': service?['name'] ?? 'Unknown Service',
-          'variant_name': variant != null
-              ? '${variant['salon_genders']?['display_name'] ?? ''} • ${variant['salon_age_categories']?['display_name'] ?? ''}'
-              : null,
+          'salon_name': salon?['name'] ?? 'Unknown Salon',
+          'appointment_date': aptDate,
+          'is_today': isToday,
+          'display_date': _formatDateDisplay(aptDate),
           'start_time': startTimeLocal,
           'end_time': endTimeLocal,
           'status': status,
           'price': price,
           'duration': variant?['duration'] ?? 30,
+          'is_vip': apt['is_vip'] ?? false,
+          'queue_number': apt['queue_number'],
+          'queue_token': apt['queue_token'],
         });
       }
 
       setState(() {
-        _todaysAppointmentsList = appointments;
-        _todaysAppointments = appointments.length;
-        _completedToday = completed;
-        _pendingAppointments = pending;
-        _todayEarnings = earnings;
+        _todaysAppointmentsList = allAppointments;
+        _todaysAppointments = todayTotal;
+        _completedToday = todayCompleted;
+        _pendingAppointments = totalPendingAll;
+        _todayEarnings = todayEarnings;
       });
+
+      debugPrint('✅ Today: $_todaysAppointments appointments');
+      debugPrint('✅ Today Completed: $_completedToday');
+      debugPrint('✅ TOTAL Pending (All dates): $_pendingAppointments');
+      debugPrint('✅ Total appointments in list: ${allAppointments.length}');
+
     } catch (e) {
       debugPrint('❌ Error loading appointments: $e');
+      setState(() {
+        _todaysAppointmentsList = [];
+        _todaysAppointments = 0;
+        _completedToday = 0;
+        _pendingAppointments = 0;
+        _todayEarnings = 0;
+      });
     }
   }
 
-  // ==================== LOAD STATISTICS ====================
-
+  // =====================================================
+  // ✅ LOAD STATISTICS - DIRECT QUERY (NO RPC)
+  // =====================================================
   Future<void> _loadStatistics() async {
     try {
+      final salonId = _selectedSalonId;
+
+      if (salonId == null) {
+        debugPrint('⚠️ No salon selected for statistics');
+        setState(() {
+          _totalCustomers = 0;
+          _monthlyEarnings = 0;
+          _rating = 0.0;
+        });
+        return;
+      }
+
+      debugPrint('📊 Loading statistics for salon: $salonId');
+
+      // 1. TOTAL CUSTOMERS SERVED
       final customersResponse = await supabase
           .from('appointments')
           .select('customer_id')
           .eq('barber_id', _employeeId)
-          .eq('status', 'completed');
+          .eq('status', 'completed')
+          .eq('salon_id', salonId);
 
       final uniqueCustomers = customersResponse
           .map((a) => a['customer_id'])
           .toSet()
           .length;
-      setState(() {
-        _totalCustomers = uniqueCustomers;
-      });
-
+      
+      // 2. MONTHLY EARNINGS
       final firstDayOfMonth = DateTime(
         DateTime.now().year,
         DateTime.now().month,
         1,
       );
       final firstDayStr = firstDayOfMonth.toIso8601String().split('T').first;
+      
       final lastDayOfMonth = DateTime(
         DateTime.now().year,
         DateTime.now().month + 1,
@@ -1096,6 +1436,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
           .select('price')
           .eq('barber_id', _employeeId)
           .eq('status', 'completed')
+          .eq('salon_id', salonId)
           .gte('appointment_date', firstDayStr)
           .lte('appointment_date', lastDayStr);
 
@@ -1103,26 +1444,38 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
       for (var apt in monthlyResponse) {
         monthlyTotal += (apt['price'] as num?)?.toInt() ?? 0;
       }
-      setState(() {
-        _monthlyEarnings = monthlyTotal;
-      });
 
+      // 3. AVERAGE RATING
       final reviewsResponse = await supabase
           .from('reviews')
           .select('overall_rating')
-          .eq('barber_id', _employeeId);
+          .eq('barber_id', _employeeId)
+          .eq('salon_id', salonId);
 
+      double avgRating = 0.0;
       if (reviewsResponse.isNotEmpty) {
         double totalRating = 0;
         for (var review in reviewsResponse) {
           totalRating += (review['overall_rating'] as num?)?.toDouble() ?? 0;
         }
-        setState(() {
-          _rating = totalRating / reviewsResponse.length;
-        });
+        avgRating = totalRating / reviewsResponse.length;
       }
+
+      setState(() {
+        _totalCustomers = uniqueCustomers;
+        _monthlyEarnings = monthlyTotal;
+        _rating = avgRating;
+      });
+
+      debugPrint('✅ Stats - Customers: $uniqueCustomers, Monthly: $monthlyTotal, Rating: $avgRating');
+      
     } catch (e) {
       debugPrint('❌ Error loading statistics: $e');
+      setState(() {
+        _totalCustomers = 0;
+        _monthlyEarnings = 0;
+        _rating = 0.0;
+      });
     }
   }
 
@@ -1307,174 +1660,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
     await _permissionManager.markPermissionShown('employee_dashboard');
   }
 
-  // ==================== BREAK MANAGEMENT ====================
-
-  void _toggleBreak() {
-    setState(() {
-      _isOnBreak = !_isOnBreak;
-      if (_isOnBreak) {
-        _breakStartTime = TimeOfDay.now();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Row(
-              children: [
-                Icon(Icons.free_breakfast, color: Colors.white),
-                SizedBox(width: 8),
-                Text('Break started'),
-              ],
-            ),
-            backgroundColor: Colors.orange,
-            duration: Duration(seconds: 3),
-          ),
-        );
-      } else {
-        final breakEndTime = TimeOfDay.now();
-        final breakDuration = _calculateBreakDuration(
-          _breakStartTime!,
-          breakEndTime,
-        );
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Break ended • Duration: $breakDuration'),
-            backgroundColor: Colors.green,
-          ),
-        );
-        _breakStartTime = null;
-      }
-    });
-  }
-
-  String _calculateBreakDuration(TimeOfDay start, TimeOfDay end) {
-    int startMinutes = start.hour * 60 + start.minute;
-    int endMinutes = end.hour * 60 + end.minute;
-    int duration = endMinutes - startMinutes;
-
-    int hours = duration ~/ 60;
-    int minutes = duration % 60;
-
-    if (hours > 0) {
-      return '$hours h $minutes m';
-    } else {
-      return '$minutes m';
-    }
-  }
-
-  // ==================== ATTENDANCE ====================
-
-  void _handleAttendance() {
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text(
-              'Attendance',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 20),
-            Row(
-              children: [
-                Expanded(
-                  child: _buildAttendanceOption(
-                    icon: Icons.login,
-                    label: 'Check In',
-                    time: _getCurrentTime(),
-                    color: Colors.green,
-                    onTap: () {
-                      Navigator.pop(context);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('✅ Checked in at ${_getCurrentTime()}'),
-                          backgroundColor: Colors.green,
-                        ),
-                      );
-                    },
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: _buildAttendanceOption(
-                    icon: Icons.logout,
-                    label: 'Check Out',
-                    time: _getCurrentTime(),
-                    color: Colors.red,
-                    onTap: () {
-                      Navigator.pop(context);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            '✅ Checked out at ${_getCurrentTime()}',
-                          ),
-                          backgroundColor: Colors.orange,
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  String _getCurrentTime() {
-    final now = DateTime.now();
-    int hour = now.hour;
-    final minute = now.minute.toString().padLeft(2, '0');
-    final ampm = hour >= 12 ? 'PM' : 'AM';
-    hour = hour > 12 ? hour - 12 : hour;
-    if (hour == 0) hour = 12;
-    return '$hour:$minute $ampm';
-  }
-
-  Widget _buildAttendanceOption({
-    required IconData icon,
-    required String label,
-    required String time,
-    required Color color,
-    required VoidCallback onTap,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.1),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: color.withValues(alpha: 0.3)),
-        ),
-        child: Column(
-          children: [
-            Icon(icon, color: color, size: 32),
-            const SizedBox(height: 8),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-                color: color,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(time, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
-          ],
-        ),
-      ),
-    );
-  }
-
   // ==================== NAVIGATION ====================
 
   void _viewMySchedule() {
@@ -1491,6 +1676,10 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
 
   void _viewUpcomingAppointments() {
     context.push('/employee/appointments');
+  }
+
+  void _viewNotifications() {
+    context.push('/notifications?role=barber');
   }
 
   void _viewBookingDetails(String customerName) {
@@ -1653,44 +1842,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
 
   // ==================== UI BUILDERS ====================
 
-  Widget _buildStatusIndicator() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: _isOnBreak
-            ? Colors.orange.withValues(alpha: 0.1)
-            : Colors.green.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: _isOnBreak ? Colors.orange : Colors.green,
-          width: 1,
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 8,
-            height: 8,
-            decoration: BoxDecoration(
-              color: _isOnBreak ? Colors.orange : Colors.green,
-              shape: BoxShape.circle,
-            ),
-          ),
-          const SizedBox(width: 6),
-          Text(
-            _isOnBreak ? 'On Break' : 'Working',
-            style: TextStyle(
-              color: _isOnBreak ? Colors.orange : Colors.green,
-              fontWeight: FontWeight.w500,
-              fontSize: 12,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildQuickAction({
     required IconData icon,
     required String label,
@@ -1747,6 +1898,81 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
     );
   }
 
+  // ==================== SALON SELECTOR DIALOG ====================
+
+  Future<void> _showSalonSelectorDialog() async {
+    await showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Select Salon',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Choose a salon to view its data',
+              style: TextStyle(fontSize: 14, color: Colors.grey),
+            ),
+            const SizedBox(height: 16),
+            ..._assignedSalons.map((salon) {
+              final isSelected = salon['id'] == _selectedSalonId;
+              return ListTile(
+                leading: CircleAvatar(
+                  radius: 20,
+                  backgroundColor: isSelected
+                      ? const Color(0xFFFF6B8B)
+                      : Colors.grey[200],
+                  backgroundImage: salon['logo_url'] != null
+                      ? NetworkImage(salon['logo_url'])
+                      : null,
+                  child: salon['logo_url'] == null
+                      ? Icon(
+                          Icons.store,
+                          color: isSelected ? Colors.white : Colors.grey[600],
+                          size: 20,
+                        )
+                      : null,
+                ),
+                title: Text(
+                  salon['name'] ?? 'Unknown Salon',
+                  style: TextStyle(
+                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                  ),
+                ),
+                subtitle: Text(
+                  salon['address'] ?? '',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                trailing: isSelected
+                    ? const Icon(Icons.check_circle, color: Color(0xFFFF6B8B))
+                    : null,
+                onTap: () {
+                  Navigator.pop(context);
+                  _selectSalon(salon['id'] as int);
+                },
+              );
+            }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // =====================================================
+  // ✅ BUILD METHOD
+  // =====================================================
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
@@ -1777,7 +2003,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
     return Scaffold(
       key: _scaffoldKey,
       appBar: AppBar(
-        title: const Text('Employee Dashboard'),
         backgroundColor: const Color(0xFFFF6B8B),
         foregroundColor: Colors.white,
         elevation: 0,
@@ -1790,28 +2015,19 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
         ),
         actions: [
           _buildTimezoneSelector(),
-          IconButton(
-            icon: Icon(_isOnBreak ? Icons.free_breakfast : Icons.coffee),
-            onPressed: _toggleBreak,
-            tooltip: _isOnBreak ? 'End Break' : 'Take Break',
-            color: _isOnBreak ? Colors.orange : Colors.white,
-          ),
-          IconButton(
-            icon: const Icon(Icons.access_time),
-            onPressed: _handleAttendance,
-            tooltip: 'Attendance',
-          ),
           Stack(
             clipBehavior: Clip.none,
             children: [
               IconButton(
-                icon: const Icon(Icons.notifications_outlined),
-                onPressed: _viewUpcomingAppointments,
+                icon: const Icon(Icons.notifications_outlined, size: 22),
+                onPressed: _viewNotifications,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
               ),
-              if (_pendingAppointments > 0)
+              if (_unreadNotificationCount > 0)
                 Positioned(
-                  right: 8,
-                  top: 8,
+                  right: 2,
+                  top: 2,
                   child: Container(
                     padding: const EdgeInsets.all(2),
                     decoration: const BoxDecoration(
@@ -1819,14 +2035,14 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                       shape: BoxShape.circle,
                     ),
                     constraints: const BoxConstraints(
-                      minWidth: 18,
-                      minHeight: 18,
+                      minWidth: 16,
+                      minHeight: 16,
                     ),
                     child: Text(
-                      '$_pendingAppointments',
+                      _unreadNotificationCount > 99 ? '99+' : '$_unreadNotificationCount',
                       style: const TextStyle(
                         color: Colors.white,
-                        fontSize: 10,
+                        fontSize: 8,
                         fontWeight: FontWeight.bold,
                       ),
                       textAlign: TextAlign.center,
@@ -1835,14 +2051,14 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                 ),
             ],
           ),
-          IconButton(icon: const Icon(Icons.refresh), onPressed: _loadData),
+          _buildProfileImage(),
         ],
       ),
       drawer: SideMenu(
         userRole: 'barber',
         userName: _employeeName,
         userEmail: _employeeEmail,
-        profileImageUrl: null,
+        profileImageUrl: _employeeAvatar.isNotEmpty ? _employeeAvatar : null,
         onMenuItemSelected: () => _loadData(),
       ),
       body: _isLoading
@@ -1854,6 +2070,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
               color: const Color(0xFFFF6B8B),
               child: SingleChildScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.only(bottom: 20),
                 child: Column(
                   children: [
                     if (_showPermissionCard && !_hasPermission)
@@ -1865,6 +2082,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                             'Get instant notifications for new bookings and schedule changes',
                         compact: false,
                       ),
+                    
+                    // Welcome Section
                     Padding(
                       padding: const EdgeInsets.all(16),
                       child: Row(
@@ -1872,15 +2091,15 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                'Welcome back,',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  color: Colors.grey[600],
-                                ),
-                              ),
                               Row(
                                 children: [
+                                  Text(
+                                    'Welcome, ',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: Colors.grey[600],
+                                    ),
+                                  ),
                                   Text(
                                     _employeeName,
                                     style: const TextStyle(
@@ -1888,25 +2107,110 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                                       fontWeight: FontWeight.bold,
                                     ),
                                   ),
-                                  const SizedBox(width: 8),
+                                ],
+                              ),
+                              const SizedBox(height: 2),
+                              Row(
+                                children: [
                                   Container(
                                     padding: const EdgeInsets.symmetric(
                                       horizontal: 8,
-                                      vertical: 4,
+                                      vertical: 2,
                                     ),
                                     decoration: BoxDecoration(
-                                      color: Colors.purple.withValues(
-                                        alpha: 0.1,
-                                      ),
-                                      borderRadius: BorderRadius.circular(12),
+                                      color: Colors.purple.withValues(alpha: 0.1),
+                                      borderRadius: BorderRadius.circular(10),
                                     ),
                                     child: Text(
-                                      _employeeRole,
-                                      style: const TextStyle(
-                                        fontSize: 12,
-                                        color: Colors.purple,
+                                      'Barber',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        color: Colors.purple[700],
                                         fontWeight: FontWeight.w500,
                                       ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  GestureDetector(
+                                    onTap: _assignedSalons.length > 1
+                                        ? _showSalonSelectorDialog
+                                        : null,
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 2,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: Colors.blue.withValues(alpha: 0.1),
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            Icons.store,
+                                            size: 10,
+                                            color: Colors.blue[700],
+                                          ),
+                                          const SizedBox(width: 2),
+                                          Text(
+                                            _selectedSalonName.isNotEmpty
+                                                ? _selectedSalonName
+                                                : 'No Salon',
+                                            style: TextStyle(
+                                              fontSize: 10,
+                                              color: Colors.blue[700],
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                          if (_assignedSalons.length > 1)
+                                            const Icon(
+                                              Icons.arrow_drop_down,
+                                              size: 14,
+                                              color: Colors.blue,
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                  // Status indicator
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 6,
+                                      vertical: 2,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: _isOnBreak
+                                          ? Colors.orange.withValues(alpha: 0.1)
+                                          : Colors.green.withValues(alpha: 0.1),
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Container(
+                                          width: 6,
+                                          height: 6,
+                                          decoration: BoxDecoration(
+                                            color: _isOnBreak
+                                                ? Colors.orange
+                                                : Colors.green,
+                                            shape: BoxShape.circle,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 2),
+                                        Text(
+                                          _isOnBreak ? 'Break' : 'Working',
+                                          style: TextStyle(
+                                            fontSize: 8,
+                                            color: _isOnBreak
+                                                ? Colors.orange
+                                                : Colors.green,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ),
                                 ],
@@ -1914,10 +2218,10 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                             ],
                           ),
                           const Spacer(),
-                          _buildStatusIndicator(),
                         ],
                       ),
                     ),
+
                     // Rating Card
                     Container(
                       margin: const EdgeInsets.symmetric(horizontal: 16),
@@ -1964,7 +2268,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                               Row(
                                 children: [
                                   Text(
-                                    _rating.toStringAsFixed(1),
+                                    _rating > 0 ? _rating.toStringAsFixed(1) : '0.0',
                                     style: const TextStyle(
                                       fontSize: 28,
                                       fontWeight: FontWeight.bold,
@@ -2015,7 +2319,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                       ),
                     ),
                     const SizedBox(height: 16),
-                    // Stats Cards
+                    
+                    // Stats Cards - Row 1
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
                       child: Row(
@@ -2045,6 +2350,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                       ),
                     ),
                     const SizedBox(height: 12),
+                    
+                    // Stats Cards - Row 2
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
                       child: Row(
@@ -2061,11 +2368,11 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                           const SizedBox(width: 12),
                           Expanded(
                             child: DashboardStatCard(
-                              title: 'Monthly',
+                              title: 'Monthly Earnings',
                               value: 'Rs. $_monthlyEarnings',
                               icon: Icons.trending_up,
                               color: Colors.purple,
-                              subtitle: 'This month',
+                              subtitle: '${_getMonthName()} ${DateTime.now().year}',
                               onTap: _viewTodayEarnings,
                             ),
                           ),
@@ -2073,6 +2380,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                       ),
                     ),
                     const SizedBox(height: 12),
+                    
+                    // Stats Cards - Row 3
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
                       child: DashboardStatCard(
@@ -2086,6 +2395,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                       ),
                     ),
                     const SizedBox(height: 16),
+                    
+                    // Quick Actions
                     const SectionHeader(title: 'Quick Actions', actionText: ''),
                     const SizedBox(height: 8),
                     Padding(
@@ -2130,6 +2441,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                       ),
                     ),
                     const SizedBox(height: 16),
+                    
+                    // Today's Schedule
                     const SectionHeader(
                       title: 'Today\'s Schedule',
                       actionText: 'View All',
@@ -2137,7 +2450,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                     const SizedBox(height: 8),
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: _todaysAppointmentsList.isEmpty
+                      child: _todaysAppointmentsList.where((a) => a['is_today'] == true).isEmpty
                           ? Container(
                               padding: const EdgeInsets.all(32),
                               decoration: BoxDecoration(
@@ -2152,38 +2465,46 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                               ),
                             )
                           : Column(
-                              children: _todaysAppointmentsList.map((apt) {
-                                Color statusColor;
-                                switch (apt['status']) {
-                                  case 'completed':
-                                    statusColor = Colors.green;
-                                    break;
-                                  case 'confirmed':
-                                    statusColor = Colors.blue;
-                                    break;
-                                  case 'cancelled':
-                                    statusColor = Colors.red;
-                                    break;
-                                  default:
-                                    statusColor = Colors.orange;
-                                }
-                                return BookingTile(
-                                  customerName: apt['customer_name'],
-                                  serviceName: apt['service_name'],
-                                  time: apt['start_time'],
-                                  status: apt['status'],
-                                  statusColor: statusColor,
-                                  barberName: 'You',
-                                  price: apt['price'],
-                                  showActions: apt['status'] != 'completed',
-                                  onTap: () =>
-                                      _viewBookingDetails(apt['customer_name']),
-                                  onComplete: _markAppointmentComplete,
-                                );
-                              }).toList(),
+                              children: _todaysAppointmentsList
+                                  .where((a) => a['is_today'] == true)
+                                  .map((apt) {
+                                    Color statusColor;
+                                    switch (apt['status']) {
+                                      case 'completed':
+                                        statusColor = Colors.green;
+                                        break;
+                                      case 'confirmed':
+                                        statusColor = Colors.blue;
+                                        break;
+                                      case 'cancelled':
+                                        statusColor = Colors.red;
+                                        break;
+                                      default:
+                                        statusColor = Colors.orange;
+                                    }
+                                    return BookingTile(
+                                      customerName: apt['customer_name'],
+                                      serviceName: apt['service_name'],
+                                      time: apt['start_time'],
+                                      status: apt['status'],
+                                      statusColor: statusColor,
+                                      barberName: 'You',
+                                      price: apt['price'],
+                                      salonName: apt['salon_name'],
+                                      isVip: apt['is_vip'] ?? false,
+                                      queueNumber: apt['queue_number'],
+                                      queueToken: apt['queue_token'],
+                                      showActions: apt['status'] != 'completed',
+                                      onTap: () =>
+                                          _viewBookingDetails(apt['customer_name']),
+                                      onComplete: _markAppointmentComplete,
+                                    );
+                                  }).toList(),
                             ),
                     ),
                     const SizedBox(height: 16),
+                    
+                    // Performance Card
                     Container(
                       margin: const EdgeInsets.all(16),
                       padding: const EdgeInsets.all(16),
@@ -2234,38 +2555,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
                         ],
                       ),
                     ),
-                    if (_hasPermission)
-                      Container(
-                        margin: const EdgeInsets.only(bottom: 16),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 8,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.green.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              Icons.notifications_active,
-                              size: 16,
-                              color: Colors.green[700],
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              'Notifications active',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.green[700],
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
+                    const SizedBox(height: 20),
                   ],
                 ),
               ),
@@ -2273,3 +2563,5 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
     );
   }
 }
+
+final RouteObserver<ModalRoute<void>> routeObserver = RouteObserver<ModalRoute<void>>();

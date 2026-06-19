@@ -980,7 +980,7 @@ GoRouter _createRouter() {
           final salon = state.extra as Map<String, dynamic>?;
           return BookingFlowScreen(initialSalon: salon);
         },
-      ),    
+      ),
       GoRoute(
         path: '/customer/vip-booking',
         builder: (context, state) => const VIPBookingScreen(),
@@ -1017,9 +1017,11 @@ GoRouter _createRouter() {
         builder: (context, state) => const OffersScreen(),
       ),
       GoRoute(
-        path: '/customer/notifications',
-        name: 'customer-notifications',
-        builder: (context, state) => const NotificationScreen(),
+        path: '/notifications',
+        builder: (context, state) {
+          final role = state.uri.queryParameters['role'] ?? 'customer';
+          return NotificationScreen(role: role);
+        },
       ),
 
       // ============================================

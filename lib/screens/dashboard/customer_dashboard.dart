@@ -1720,7 +1720,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   Future<void> _viewNotifications() async {
     debugPrint('🔔 Navigating to notifications page');
 
-    final result = await context.push('/customer/notifications');
+    final result = await context.push('/notifications?role=customer');
 
     debugPrint('🔔 Returning from notifications page, refreshing count');
     await _refreshUnreadCount();
