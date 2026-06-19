@@ -13,10 +13,13 @@ class BookingTile extends StatelessWidget {
   final bool showActions;
   final VoidCallback? onComplete;
   
-  // 🔥 NEW PARAMETERS
+  // VIP and Queue parameters
   final bool isVip;
   final int? queueNumber;
   final String? queueToken;
+  
+  // Salon name parameter
+  final String? salonName;  // ✅ Use this instead of subtitle
 
   const BookingTile({
     super.key,
@@ -31,9 +34,10 @@ class BookingTile extends StatelessWidget {
     this.imageUrl,
     this.showActions = false,
     this.onComplete,
-    this.isVip = false,           // Default false
-    this.queueNumber,            // Optional
-    this.queueToken,             // Optional
+    this.isVip = false,
+    this.queueNumber,
+    this.queueToken,
+    this.salonName,  // ✅ NEW: Optional salon name
   });
 
   @override
@@ -99,7 +103,7 @@ class BookingTile extends StatelessWidget {
                             ),
                           ),
                         ),
-                        // 🔥 VIP Badge
+                        // VIP Badge
                         if (isVip)
                           Container(
                             padding: const EdgeInsets.symmetric(
@@ -137,6 +141,32 @@ class BookingTile extends StatelessWidget {
                       ],
                     ),
                     const SizedBox(height: 4),
+
+                    // ✅ Salon Name (NEW)
+                    if (salonName != null && salonName!.isNotEmpty) ...[
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.store,
+                            size: 12,
+                            color: Colors.blue[600],
+                          ),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              salonName!,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.blue[700],
+                                fontWeight: FontWeight.w500,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                    ],
 
                     // Service and Barber
                     Row(
@@ -216,7 +246,7 @@ class BookingTile extends StatelessWidget {
                           ),
                         ),
                         
-                        // 🔥 Queue Number / Token
+                        // Queue Number / Token
                         if (queueNumber != null)
                           Container(
                             padding: const EdgeInsets.symmetric(
