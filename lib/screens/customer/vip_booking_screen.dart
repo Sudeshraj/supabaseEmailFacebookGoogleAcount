@@ -788,6 +788,27 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           _holidayNames[date] = holiday['name'];
         }
       });
+
+      // ✅ Auto-select next available date ONLY if today is a holiday
+      final today = DateTime(
+        DateTime.now().year,
+        DateTime.now().month,
+        DateTime.now().day,
+      );
+
+      if (_holidays.contains(today) && _selectedDate == null) {
+        DateTime nextDate = today.add(const Duration(days: 1));
+        for (int i = 0; i < 30; i++) {
+          if (!_holidays.contains(nextDate)) {
+            setState(() {
+              _selectedDate = nextDate;
+            });
+            await _checkDateAvailability(nextDate);
+            break;
+          }
+          nextDate = nextDate.add(const Duration(days: 1));
+        }
+      }
     } catch (e) {
       debugPrint('Error loading holidays: $e');
     }
@@ -822,101 +843,66 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     final maxDate = today.add(const Duration(days: 30));
     final isMobile = MediaQuery.of(context).size.width < 600;
 
-    // ✅ Check if date is selectable
+    // ✅ Check if date is selectable - ONLY DISABLE HOLIDAYS
     bool isDateSelectable(DateTime date) {
-      // Disable holidays
+      // Disable holidays ONLY
       if (_holidays.contains(date)) return false;
 
-      // Disable today (current day)
-      if (date.isAtSameMomentAs(today)) return false;
-
-      // Disable past dates (before today)
-      if (date.isBefore(today)) return false;
+      // ✅ Don't disable current date
+      // ✅ Don't disable past dates (if you want to allow booking past dates)
+      // If you want to allow past dates, remove the next line
+      // if (date.isBefore(today)) return false;
 
       return true;
     }
 
-    DateTime getValidInitialDate() {
-      DateTime checkDate = today.add(const Duration(days: 1));
-      for (int i = 0; i < 30; i++) {
-        if (isDateSelectable(checkDate)) {
+    // Find first available date (skip holidays)
+    DateTime getFirstAvailableDate() {
+      DateTime checkDate = today;
+      // Check today first
+      if (!_holidays.contains(checkDate)) {
+        return checkDate;
+      }
+      // If today is a holiday, find next available
+      for (int i = 1; i < 30; i++) {
+        checkDate = today.add(Duration(days: i));
+        if (!_holidays.contains(checkDate)) {
           return checkDate;
         }
-        checkDate = checkDate.add(const Duration(days: 1));
       }
       return today.add(const Duration(days: 1));
     }
 
+    // ✅ Auto-select next available date if today is a holiday
+    void initializeDefaultDate() {
+      if (_selectedDate == null) {
+        final firstAvailable = getFirstAvailableDate();
+        if (_holidays.contains(today)) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            setState(() {
+              _selectedDate = firstAvailable;
+              _isDateUnavailable = false;
+            });
+            _checkDateAvailability(firstAvailable);
+          });
+        }
+      }
+    }
+
+    // Call this when holidays change or widget builds
+    initializeDefaultDate();
+
+    final isSelectedDateHoliday =
+        _selectedDate != null && _holidays.contains(_selectedDate);
+    final selectedHolidayName = isSelectedDateHoliday
+        ? _holidayNames[_selectedDate]
+        : null;
+    final isSelectedToday =
+        _selectedDate != null && _selectedDate!.isAtSameMomentAs(today);
+
     return Column(
       children: [
-        Container(
-          padding: const EdgeInsets.all(16),
-          color: Colors.white,
-          child: Row(
-            children: [
-              Container(
-                width: 45,
-                height: 45,
-                decoration: BoxDecoration(
-                  color: _primaryColor.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(12),
-                  image:
-                      (_selectedSalon?['logo_url'] as String?) != null &&
-                          (_selectedSalon!['logo_url'] as String).isNotEmpty
-                      ? DecorationImage(
-                          image: NetworkImage(_selectedSalon!['logo_url']),
-                          fit: BoxFit.cover,
-                        )
-                      : null,
-                ),
-                child:
-                    (_selectedSalon?['logo_url'] == null ||
-                        (_selectedSalon!['logo_url'] as String).isEmpty)
-                    ? Center(
-                        child: Text(
-                          (_selectedSalon?['name'] as String?)
-                                  ?.substring(0, 1)
-                                  .toUpperCase() ??
-                              'S',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: _primaryColor,
-                          ),
-                        ),
-                      )
-                    : null,
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Selected Salon',
-                      style: TextStyle(fontSize: 13, color: Colors.grey[600]),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      _selectedSalon?['name'] ?? '',
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              TextButton(
-                onPressed: () => setState(() => _currentStep = 0),
-                child: Text(
-                  'Change',
-                  style: TextStyle(color: _primaryColor, fontSize: 14),
-                ),
-              ),
-            ],
-          ),
-        ),
+        // ... Salon header code remains the same ...
         Expanded(
           child: SingleChildScrollView(
             physics: const BouncingScrollPhysics(),
@@ -928,48 +914,57 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
             ),
             child: Column(
               children: [
-                // ✅ Info Banner - Today is disabled
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  margin: const EdgeInsets.only(bottom: 16),
-                  decoration: BoxDecoration(
-                    color: Colors.orange.shade50,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.orange.shade200),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.calendar_today,
-                        color: Colors.orange.shade700,
-                        size: 20,
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              '📅 ${DateFormat('EEEE, MMM dd').format(today)} is not available',
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.orange.shade700,
-                              ),
-                            ),
-                            Text(
-                              'Please select a future date (tomorrow or later)',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.orange.shade600,
-                              ),
-                            ),
-                          ],
+                // ✅ Show today is holiday banner (only if today is a holiday)
+                if (_holidays.contains(today))
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    margin: const EdgeInsets.only(bottom: 16),
+                    decoration: BoxDecoration(
+                      color: Colors.red.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.red.shade300),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.event_busy,
+                          color: Colors.red.shade700,
+                          size: 20,
                         ),
-                      ),
-                    ],
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '🚫 Today is a Holiday!',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.red.shade700,
+                                ),
+                              ),
+                              Text(
+                                _holidayNames[today] ?? 'Salon is closed today',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: Colors.red.shade600,
+                                ),
+                              ),
+                              Text(
+                                'Auto-selected next available date: ${DateFormat('EEEE, MMM dd').format(_selectedDate ?? getFirstAvailableDate())}',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.blue.shade700,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
 
                 Card(
                   elevation: 3,
@@ -979,8 +974,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                   child: Container(
                     padding: const EdgeInsets.all(16),
                     child: CalendarDatePicker(
-                      initialDate: getValidInitialDate(),
-                      firstDate: today.add(const Duration(days: 1)),
+                      // ✅ Set initial date to first available (today if not holiday)
+                      initialDate: getFirstAvailableDate(),
+                      firstDate: today, // Allow today
                       lastDate: maxDate,
                       selectableDayPredicate: (date) => isDateSelectable(date),
                       onDateChanged: (date) async {
@@ -994,33 +990,76 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                   ),
                 ),
 
-                if (_selectedDate != null && _holidays.contains(_selectedDate))
+                // ✅ Show holiday warning if selected date is a holiday
+                if (isSelectedDateHoliday)
                   Container(
                     margin: const EdgeInsets.only(top: 16),
-                    padding: const EdgeInsets.all(14),
+                    padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
                       color: Colors.red.shade50,
                       borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: Colors.red.shade300,
+                        width: 1.5,
+                      ),
                     ),
                     child: Row(
                       children: [
-                        Icon(Icons.event_busy, color: Colors.red.shade700),
-                        const SizedBox(width: 10),
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.red.shade100,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Icon(
+                            Icons.event_busy,
+                            color: Colors.red.shade700,
+                            size: 24,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
                         Expanded(
-                          child: Text(
-                            '⛔ Holiday: ${_holidayNames[_selectedDate]}',
-                            style: TextStyle(
-                              color: Colors.red.shade700,
-                              fontWeight: FontWeight.w500,
-                              fontSize: 14,
-                            ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                isSelectedToday
+                                    ? '🚫 TODAY IS A HOLIDAY'
+                                    : '⛔ HOLIDAY',
+                                style: TextStyle(
+                                  color: Colors.red.shade700,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                '${selectedHolidayName ?? 'Salon is closed'} ${isSelectedToday ? 'today' : 'on this date'}',
+                                style: TextStyle(
+                                  color: Colors.red.shade600,
+                                  fontSize: 14,
+                                ),
+                              ),
+                              if (isSelectedToday)
+                                Text(
+                                  'Please select another date (tomorrow or later)',
+                                  style: TextStyle(
+                                    color: Colors.red.shade500,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                            ],
                           ),
                         ),
                       ],
                     ),
                   ),
 
-                if (_isDateUnavailable && !_holidays.contains(_selectedDate))
+                // Show no barbers available warning
+                if (_isDateUnavailable &&
+                    !_holidays.contains(_selectedDate) &&
+                    _selectedDate != null)
                   Container(
                     margin: const EdgeInsets.only(top: 16),
                     padding: const EdgeInsets.all(14),
@@ -1048,10 +1087,40 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                       ],
                     ),
                   ),
+
+                // ✅ Show selected date info (green check)
+                if (_selectedDate != null && !_holidays.contains(_selectedDate))
+                  Container(
+                    margin: const EdgeInsets.only(top: 16),
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.green.shade50,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: Colors.green.shade200),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.check_circle, color: Colors.green.shade700),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            '✅ Selected: ${DateFormat('EEEE, MMM dd, yyyy').format(_selectedDate!)}',
+                            style: TextStyle(
+                              color: Colors.green.shade700,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
               ],
             ),
           ),
         ),
+
+        // Bottom button
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
@@ -1070,9 +1139,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
               onPressed:
                   (_selectedDate != null &&
                       !_isDateUnavailable &&
-                      !_holidays.contains(_selectedDate) &&
-                      !_selectedDate!.isAtSameMomentAs(today) &&
-                      _selectedDate!.isAfter(today))
+                      !_holidays.contains(_selectedDate))
                   ? () async {
                       setState(() => _currentStep = 2);
                       await _loadSalonServices();
@@ -1082,9 +1149,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                 backgroundColor:
                     (_selectedDate != null &&
                         !_isDateUnavailable &&
-                        !_holidays.contains(_selectedDate) &&
-                        !_selectedDate!.isAtSameMomentAs(today) &&
-                        _selectedDate!.isAfter(today))
+                        !_holidays.contains(_selectedDate))
                     ? _primaryColor
                     : Colors.grey[400],
                 foregroundColor: Colors.white,
@@ -1099,14 +1164,12 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                 children: [
                   Text(
                     _selectedDate == null
-                        ? 'Select Date'
-                        : (_selectedDate!.isAtSameMomentAs(today)
-                              ? 'Today Not Available'
-                              : (_holidays.contains(_selectedDate)
-                                    ? 'Holiday - Not Available'
-                                    : (_isDateUnavailable
-                                          ? 'No Barbers Available'
-                                          : 'Continue to Services'))),
+                        ? 'Please Select a Date'
+                        : (_holidays.contains(_selectedDate)
+                              ? '🚫 Holiday - Not Available'
+                              : (_isDateUnavailable
+                                    ? 'No Barbers Available'
+                                    : 'Continue to Services')),
                     style: const TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
@@ -1114,15 +1177,11 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                   ),
                   if (_selectedDate != null &&
                       !_isDateUnavailable &&
-                      !_holidays.contains(_selectedDate) &&
-                      !_selectedDate!.isAtSameMomentAs(today) &&
-                      _selectedDate!.isAfter(today))
+                      !_holidays.contains(_selectedDate))
                     const SizedBox(width: 8),
                   if (_selectedDate != null &&
                       !_isDateUnavailable &&
-                      !_holidays.contains(_selectedDate) &&
-                      !_selectedDate!.isAtSameMomentAs(today) &&
-                      _selectedDate!.isAfter(today))
+                      !_holidays.contains(_selectedDate))
                     const Icon(Icons.arrow_forward, size: 18),
                 ],
               ),

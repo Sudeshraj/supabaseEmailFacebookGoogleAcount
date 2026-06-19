@@ -145,7 +145,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     _finalTotalPrice = _originalTotalPrice - _discountAmount;
     if (_finalTotalPrice < 0) _finalTotalPrice = 0;
 
-    debugPrint('💰 Discount calculated: $_discountAmount, Final: $_finalTotalPrice');
+    debugPrint(
+      '💰 Discount calculated: $_discountAmount, Final: $_finalTotalPrice',
+    );
   }
 
   void _updateTotalAndDiscount() {
@@ -189,7 +191,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     await TimezoneService.initialize();
 
     final prefs = await SharedPreferences.getInstance();
-    _userTimezone = prefs.getString('cached_timezone') ?? TimezoneService.getCurrentTimezone();
+    _userTimezone =
+        prefs.getString('cached_timezone') ??
+        TimezoneService.getCurrentTimezone();
     await TimezoneService.setTimezone(_userTimezone);
 
     _lastTimezone = _userTimezone;
@@ -204,7 +208,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
 
   void _checkTimezoneChange() async {
     final prefs = await SharedPreferences.getInstance();
-    final currentTimezone = prefs.getString('cached_timezone') ?? TimezoneService.getCurrentTimezone();
+    final currentTimezone =
+        prefs.getString('cached_timezone') ??
+        TimezoneService.getCurrentTimezone();
 
     if (_lastTimezone != currentTimezone && _lastTimezone.isNotEmpty) {
       _userTimezone = currentTimezone;
@@ -460,7 +466,11 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.store_mall_directory, size: 80, color: Colors.grey[300]),
+                    Icon(
+                      Icons.store_mall_directory,
+                      size: 80,
+                      color: Colors.grey[300],
+                    ),
                     const SizedBox(height: 20),
                     Text(
                       'No salons followed yet',
@@ -487,7 +497,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                   ],
                 ),
               )
-            : _searchResults.isEmpty && !_isSearching && _followedSalons.isNotEmpty
+            : _searchResults.isEmpty &&
+                  !_isSearching &&
+                  _followedSalons.isNotEmpty
             ? Center(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -555,7 +567,10 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                 child: logoUrl == null || logoUrl.isEmpty
                     ? Center(
                         child: Text(
-                          (salon['name'] as String?)?.substring(0, 1).toUpperCase() ?? 'S',
+                          (salon['name'] as String?)
+                                  ?.substring(0, 1)
+                                  .toUpperCase() ??
+                              'S',
                           style: TextStyle(
                             fontSize: 28,
                             fontWeight: FontWeight.bold,
@@ -609,22 +624,24 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                         const SizedBox(width: 4),
                         Text(
                           _getSalonLocalTime(salon),
-                          style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                          ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 4),
                     Row(
                       children: [
-                        Icon(
-                          Icons.people,
-                          size: 14,
-                          color: Colors.grey[500],
-                        ),
+                        Icon(Icons.people, size: 14, color: Colors.grey[500]),
                         const SizedBox(width: 4),
                         Text(
                           '$followerCount followers',
-                          style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.grey[500],
+                          ),
                         ),
                         const SizedBox(width: 12),
                         Icon(
@@ -635,7 +652,10 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                         const SizedBox(width: 4),
                         Text(
                           '$bookingCount bookings',
-                          style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.grey[500],
+                          ),
                         ),
                       ],
                     ),
@@ -714,6 +734,27 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           _holidayNames[date] = holiday['name'];
         }
       });
+
+      // ✅ Auto-select next available date ONLY if today is a holiday
+      final today = DateTime(
+        DateTime.now().year,
+        DateTime.now().month,
+        DateTime.now().day,
+      );
+
+      if (_holidays.contains(today) && _selectedDate == null) {
+        DateTime nextDate = today.add(const Duration(days: 1));
+        for (int i = 0; i < 30; i++) {
+          if (!_holidays.contains(nextDate)) {
+            setState(() {
+              _selectedDate = nextDate;
+            });
+            await _checkDateAvailability(nextDate);
+            break;
+          }
+          nextDate = nextDate.add(const Duration(days: 1));
+        }
+      }
     } catch (e) {
       debugPrint('Error loading holidays: $e');
     }
@@ -739,313 +780,362 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     }
   }
 
-Widget _buildDateSelectionStep() {
-  final today = DateTime(
-    DateTime.now().year,
-    DateTime.now().month,
-    DateTime.now().day,
-  );
-  final maxDate = today.add(const Duration(days: 30));
-  final isMobile = MediaQuery.of(context).size.width < 600;
+  Widget _buildDateSelectionStep() {
+    final today = DateTime(
+      DateTime.now().year,
+      DateTime.now().month,
+      DateTime.now().day,
+    );
+    final maxDate = today.add(const Duration(days: 30));
+    final isMobile = MediaQuery.of(context).size.width < 600;
 
-  // ✅ Check if date is selectable
-  bool isDateSelectable(DateTime date) {
-    // Disable holidays
-    if (_holidays.contains(date)) return false;
-    
-    // Disable today (current day)
-    if (date.isAtSameMomentAs(today)) return false;
-    
-    // Disable past dates (before today)
-    if (date.isBefore(today)) return false;
-    
-    return true;
-  }
+    // ✅ Check if date is selectable - ONLY DISABLE HOLIDAYS
+    bool isDateSelectable(DateTime date) {
+      // ✅ Only disable holidays
+      if (_holidays.contains(date)) return false;
 
-  DateTime getValidInitialDate() {
-    DateTime checkDate = today.add(const Duration(days: 1));
-    for (int i = 0; i < 30; i++) {
-      if (isDateSelectable(checkDate)) {
+      // ✅ Allow past dates? If not, keep this check
+      // If you want to allow past dates too, remove this
+      if (date.isBefore(today)) return false;
+
+      return true;
+    }
+
+    // Find first available date (skip holidays)
+    DateTime getFirstAvailableDate() {
+      DateTime checkDate = today;
+      // Check today first
+      if (!_holidays.contains(checkDate)) {
         return checkDate;
       }
-      checkDate = checkDate.add(const Duration(days: 1));
+      // If today is a holiday, find next available
+      for (int i = 1; i < 30; i++) {
+        checkDate = today.add(Duration(days: i));
+        if (!_holidays.contains(checkDate)) {
+          return checkDate;
+        }
+      }
+      return today.add(const Duration(days: 1));
     }
-    return today.add(const Duration(days: 1));
-  }
 
-  return Column(
-    children: [
-      Container(
-        padding: const EdgeInsets.all(16),
-        color: Colors.white,
-        child: Row(
-          children: [
-            Container(
-              width: 45,
-              height: 45,
-              decoration: BoxDecoration(
-                color: _primaryColor.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(12),
-                image: (_selectedSalon?['logo_url'] as String?) != null && (_selectedSalon!['logo_url'] as String).isNotEmpty
-                    ? DecorationImage(
-                        image: NetworkImage(_selectedSalon!['logo_url']),
-                        fit: BoxFit.cover,
-                      )
-                    : null,
-              ),
-              child: (_selectedSalon?['logo_url'] == null || (_selectedSalon!['logo_url'] as String).isEmpty)
-                  ? Center(
-                      child: Text(
-                        (_selectedSalon?['name'] as String?)?.substring(0, 1).toUpperCase() ?? 'S',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: _primaryColor,
-                        ),
-                      ),
-                    )
-                  : null,
+    // ✅ Auto-select next available date if today is a holiday
+    void initializeDefaultDate() {
+      if (_selectedDate == null) {
+        final firstAvailable = getFirstAvailableDate();
+        if (_holidays.contains(today)) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            setState(() {
+              _selectedDate = firstAvailable;
+              _isDateUnavailable = false;
+            });
+            _checkDateAvailability(firstAvailable);
+          });
+        }
+      }
+    }
+
+    // Call this when holidays change or widget builds
+    initializeDefaultDate();
+
+    final isSelectedDateHoliday =
+        _selectedDate != null && _holidays.contains(_selectedDate);
+    final selectedHolidayName = isSelectedDateHoliday
+        ? _holidayNames[_selectedDate]
+        : null;
+    final isSelectedToday =
+        _selectedDate != null && _selectedDate!.isAtSameMomentAs(today);
+
+    return Column(
+      children: [
+        // ... Salon header code remains the same ...
+        Expanded(
+          child: SingleChildScrollView(
+            physics: const BouncingScrollPhysics(),
+            padding: EdgeInsets.only(
+              left: 16,
+              right: 16,
+              top: 16,
+              bottom: isMobile ? 100 : 16,
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Selected Salon',
-                    style: TextStyle(fontSize: 13, color: Colors.grey[600]),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    _selectedSalon?['name'] ?? '',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            TextButton(
-              onPressed: () => setState(() => _currentStep = 0),
-              child: Text(
-                'Change',
-                style: TextStyle(color: _primaryColor, fontSize: 14),
-              ),
-            ),
-          ],
-        ),
-      ),
-      Expanded(
-        child: SingleChildScrollView(
-          physics: const BouncingScrollPhysics(),
-          padding: EdgeInsets.only(
-            left: 16,
-            right: 16,
-            top: 16,
-            bottom: isMobile ? 100 : 16,
-          ),
-          child: Column(
-            children: [
-              // ✅ Info Banner - Today is disabled
-              Container(
-                padding: const EdgeInsets.all(12),
-                margin: const EdgeInsets.only(bottom: 16),
-                decoration: BoxDecoration(
-                  color: Colors.orange.shade50,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.orange.shade200),
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.calendar_today, color: Colors.orange.shade700, size: 20),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            '📅 ${DateFormat('EEEE, MMM dd').format(today)} is not available',
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.orange.shade700,
-                            ),
-                          ),
-                          Text(
-                            'Please select a future date (tomorrow or later)',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.orange.shade600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              
-              Card(
-                elevation: 3,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Container(
-                  padding: const EdgeInsets.all(16),
-                  child: CalendarDatePicker(
-                    initialDate: getValidInitialDate(),
-                    firstDate: today.add(const Duration(days: 1)),
-                    lastDate: maxDate,
-                    selectableDayPredicate: (date) => isDateSelectable(date),
-                    onDateChanged: (date) async {
-                      setState(() {
-                        _selectedDate = date;
-                        _isDateUnavailable = false;
-                      });
-                      await _checkDateAvailability(date);
-                    },
-                  ),
-                ),
-              ),
-              
-              if (_selectedDate != null && _holidays.contains(_selectedDate))
-                Container(
-                  margin: const EdgeInsets.only(top: 16),
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: Colors.red.shade50,
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.event_busy, color: Colors.red.shade700),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          '⛔ Holiday: ${_holidayNames[_selectedDate]}',
-                          style: TextStyle(
-                            color: Colors.red.shade700,
-                            fontWeight: FontWeight.w500,
-                            fontSize: 14,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              
-              if (_isDateUnavailable && !_holidays.contains(_selectedDate))
-                Container(
-                  margin: const EdgeInsets.only(top: 16),
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: Colors.orange.shade50,
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.warning_amber,
-                        color: Colors.orange.shade700,
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          _unavailableReason ?? '⚠️ No barbers available on this day',
-                          style: TextStyle(
-                            color: Colors.orange.shade700,
-                            fontSize: 14,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ),
-      Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.grey.withValues(alpha: 0.1),
-              blurRadius: 8,
-              offset: const Offset(0, -2),
-            ),
-          ],
-        ),
-        child: SizedBox(
-          width: double.infinity,
-          child: ElevatedButton(
-            onPressed:
-                (_selectedDate != null &&
-                    !_isDateUnavailable &&
-                    !_holidays.contains(_selectedDate) &&
-                    !_selectedDate!.isAtSameMomentAs(today) &&
-                    _selectedDate!.isAfter(today))
-                ? () async {
-                    setState(() => _currentStep = 2);
-                    await _loadSalonServices();
-                  }
-                : null,
-            style: ElevatedButton.styleFrom(
-              backgroundColor:
-                  (_selectedDate != null &&
-                      !_isDateUnavailable &&
-                      !_holidays.contains(_selectedDate) &&
-                      !_selectedDate!.isAtSameMomentAs(today) &&
-                      _selectedDate!.isAfter(today))
-                  ? _primaryColor
-                  : Colors.grey[400],
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
-              ),
-              elevation: 2,
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+            child: Column(
               children: [
-                Text(
-                  _selectedDate == null
-                      ? 'Select Date'
-                      : (_selectedDate!.isAtSameMomentAs(today)
-                          ? 'Today Not Available'
-                          : (_holidays.contains(_selectedDate)
-                              ? 'Holiday - Not Available'
-                              : (_isDateUnavailable
-                                  ? 'No Barbers Available'
-                                  : 'Continue to Services'))),
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
+                // ✅ Show today is holiday banner (only if today is a holiday)
+                if (_holidays.contains(today))
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    margin: const EdgeInsets.only(bottom: 16),
+                    decoration: BoxDecoration(
+                      color: Colors.red.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.red.shade300),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.event_busy,
+                          color: Colors.red.shade700,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '🚫 Today is a Holiday!',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.red.shade700,
+                                ),
+                              ),
+                              Text(
+                                _holidayNames[today] ?? 'Salon is closed today',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: Colors.red.shade600,
+                                ),
+                              ),
+                              Text(
+                                'Auto-selected next available date: ${DateFormat('EEEE, MMM dd').format(_selectedDate ?? getFirstAvailableDate())}',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.blue.shade700,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                Card(
+                  elevation: 3,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    child: CalendarDatePicker(
+                      // ✅ Set initial date to first available (today if not holiday)
+                      initialDate: getFirstAvailableDate(),
+                      firstDate: today, // Allow today
+                      lastDate: maxDate,
+                      selectableDayPredicate: (date) => isDateSelectable(date),
+                      onDateChanged: (date) async {
+                        setState(() {
+                          _selectedDate = date;
+                          _isDateUnavailable = false;
+                        });
+                        await _checkDateAvailability(date);
+                      },
+                    ),
                   ),
                 ),
-                if (_selectedDate != null &&
-                    !_isDateUnavailable &&
+
+                // ✅ Show holiday warning if selected date is a holiday
+                if (isSelectedDateHoliday)
+                  Container(
+                    margin: const EdgeInsets.only(top: 16),
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.red.shade50,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: Colors.red.shade300,
+                        width: 1.5,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.red.shade100,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Icon(
+                            Icons.event_busy,
+                            color: Colors.red.shade700,
+                            size: 24,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                isSelectedToday
+                                    ? '🚫 TODAY IS A HOLIDAY'
+                                    : '⛔ HOLIDAY',
+                                style: TextStyle(
+                                  color: Colors.red.shade700,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                '${selectedHolidayName ?? 'Salon is closed'} ${isSelectedToday ? 'today' : 'on this date'}',
+                                style: TextStyle(
+                                  color: Colors.red.shade600,
+                                  fontSize: 14,
+                                ),
+                              ),
+                              if (isSelectedToday)
+                                Text(
+                                  'Please select another date (tomorrow or later)',
+                                  style: TextStyle(
+                                    color: Colors.red.shade500,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                // Show no barbers available warning
+                if (_isDateUnavailable &&
                     !_holidays.contains(_selectedDate) &&
-                    !_selectedDate!.isAtSameMomentAs(today) &&
-                    _selectedDate!.isAfter(today))
-                  const SizedBox(width: 8),
-                if (_selectedDate != null &&
-                    !_isDateUnavailable &&
-                    !_holidays.contains(_selectedDate) &&
-                    !_selectedDate!.isAtSameMomentAs(today) &&
-                    _selectedDate!.isAfter(today))
-                  const Icon(Icons.arrow_forward, size: 18),
+                    _selectedDate != null)
+                  Container(
+                    margin: const EdgeInsets.only(top: 16),
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.shade50,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.warning_amber,
+                          color: Colors.orange.shade700,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            _unavailableReason ??
+                                '⚠️ No barbers available on this day',
+                            style: TextStyle(
+                              color: Colors.orange.shade700,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                // ✅ Show selected date info (green check)
+                if (_selectedDate != null && !_holidays.contains(_selectedDate))
+                  Container(
+                    margin: const EdgeInsets.only(top: 16),
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.green.shade50,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: Colors.green.shade200),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.check_circle, color: Colors.green.shade700),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            '✅ Selected: ${DateFormat('EEEE, MMM dd, yyyy').format(_selectedDate!)}',
+                            style: TextStyle(
+                              color: Colors.green.shade700,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
               ],
             ),
           ),
         ),
-      ),
-    ],
-  );
-}
+
+        // Bottom button
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.grey.withValues(alpha: 0.1),
+                blurRadius: 8,
+                offset: const Offset(0, -2),
+              ),
+            ],
+          ),
+          child: SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed:
+                  (_selectedDate != null &&
+                      !_isDateUnavailable &&
+                      !_holidays.contains(_selectedDate))
+                  ? () async {
+                      setState(() => _currentStep = 2);
+                      await _loadSalonServices();
+                    }
+                  : null,
+              style: ElevatedButton.styleFrom(
+                backgroundColor:
+                    (_selectedDate != null &&
+                        !_isDateUnavailable &&
+                        !_holidays.contains(_selectedDate))
+                    ? _primaryColor
+                    : Colors.grey[400],
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                elevation: 2,
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    _selectedDate == null
+                        ? 'Please Select a Date'
+                        : (_holidays.contains(_selectedDate)
+                              ? '🚫 Holiday - Not Available'
+                              : (_isDateUnavailable
+                                    ? 'No Barbers Available'
+                                    : 'Continue to Services')),
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  if (_selectedDate != null &&
+                      !_isDateUnavailable &&
+                      !_holidays.contains(_selectedDate))
+                    const SizedBox(width: 8),
+                  if (_selectedDate != null &&
+                      !_isDateUnavailable &&
+                      !_holidays.contains(_selectedDate))
+                    const Icon(Icons.arrow_forward, size: 18),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 
   // ==================== STEP 3: SERVICE SELECTION ====================
 
@@ -1100,7 +1190,7 @@ Widget _buildDateSelectionStep() {
   // }
 
   //--------------------without view----------------------
-   Future<void> _loadSalonServices() async {
+  Future<void> _loadSalonServices() async {
     if (_servicesLoaded) return;
     setState(() => _isLoadingServices = true);
 
@@ -1340,7 +1430,8 @@ Widget _buildDateSelectionStep() {
                       : ListView.separated(
                           controller: scrollController,
                           itemCount: _selectedServices.length,
-                          separatorBuilder: (context, index) => const Divider(height: 1),
+                          separatorBuilder: (context, index) =>
+                              const Divider(height: 1),
                           itemBuilder: (context, index) {
                             final service = _selectedServices[index];
                             return _buildSelectedServiceItem(service, index);
@@ -1353,7 +1444,9 @@ Widget _buildDateSelectionStep() {
                   decoration: BoxDecoration(
                     color: _primaryColor.withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: _primaryColor.withValues(alpha: 0.2)),
+                    border: Border.all(
+                      color: _primaryColor.withValues(alpha: 0.2),
+                    ),
                   ),
                   child: Column(
                     children: [
@@ -1460,10 +1553,7 @@ Widget _buildDateSelectionStep() {
                 const SizedBox(height: 2),
                 Text(
                   '$gender $age • $duration min',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: Colors.grey[600],
-                  ),
+                  style: TextStyle(fontSize: 11, color: Colors.grey[600]),
                 ),
               ],
             ),
@@ -1490,11 +1580,7 @@ Widget _buildDateSelectionStep() {
                 color: Colors.red.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: const Icon(
-                Icons.close,
-                size: 16,
-                color: Colors.red,
-              ),
+              child: const Icon(Icons.close, size: 16, color: Colors.red),
             ),
           ),
         ],
@@ -1531,17 +1617,24 @@ Widget _buildDateSelectionStep() {
                 decoration: BoxDecoration(
                   color: _primaryColor.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(12),
-                  image: (_selectedSalon?['logo_url'] as String?) != null && (_selectedSalon!['logo_url'] as String).isNotEmpty
+                  image:
+                      (_selectedSalon?['logo_url'] as String?) != null &&
+                          (_selectedSalon!['logo_url'] as String).isNotEmpty
                       ? DecorationImage(
                           image: NetworkImage(_selectedSalon!['logo_url']),
                           fit: BoxFit.cover,
                         )
                       : null,
                 ),
-                child: (_selectedSalon?['logo_url'] == null || (_selectedSalon!['logo_url'] as String).isEmpty)
+                child:
+                    (_selectedSalon?['logo_url'] == null ||
+                        (_selectedSalon!['logo_url'] as String).isEmpty)
                     ? Center(
                         child: Text(
-                          (_selectedSalon?['name'] as String?)?.substring(0, 1).toUpperCase() ?? 'S',
+                          (_selectedSalon?['name'] as String?)
+                                  ?.substring(0, 1)
+                                  .toUpperCase() ??
+                              'S',
                           style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
@@ -1631,7 +1724,10 @@ Widget _buildDateSelectionStep() {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          _selectedServices.map((s) => s['name']?.toString() ?? '').take(2).join(', '),
+                          _selectedServices
+                              .map((s) => s['name']?.toString() ?? '')
+                              .take(2)
+                              .join(', '),
                           style: TextStyle(
                             fontSize: 11,
                             color: Colors.white.withValues(alpha: 0.8),
@@ -1643,7 +1739,10 @@ Widget _buildDateSelectionStep() {
                     ),
                   ),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.white.withValues(alpha: 0.2),
                       borderRadius: BorderRadius.circular(20),
@@ -1796,11 +1895,18 @@ Widget _buildDateSelectionStep() {
     );
   }
 
-  Widget _buildServiceCard(Map<String, dynamic> service, int index, bool isMobile) {
+  Widget _buildServiceCard(
+    Map<String, dynamic> service,
+    int index,
+    bool isMobile,
+  ) {
     final variants = service['variants'] as List? ?? [];
-    final isAnyVariantSelected = _selectedServices.any((s) => s['id'] == service['id']);
+    final isAnyVariantSelected = _selectedServices.any(
+      (s) => s['id'] == service['id'],
+    );
     final int serviceId = service['id'] as int; // ✅ FIXED: Cast to int
-    final isExpanded = _expandedServiceId == serviceId; // ✅ FIXED: Compare int? == int
+    final isExpanded =
+        _expandedServiceId == serviceId; // ✅ FIXED: Compare int? == int
 
     final String serviceName = service['name']?.toString() ?? 'Service';
     final String categoryName = service['category_name']?.toString() ?? '';
@@ -1829,7 +1935,8 @@ Widget _buildDateSelectionStep() {
                     if (isExpanded) {
                       _expandedServiceId = null;
                     } else {
-                      _expandedServiceId = serviceId; // ✅ FIXED: Assign int, not String
+                      _expandedServiceId =
+                          serviceId; // ✅ FIXED: Assign int, not String
                     }
                   });
                 }
@@ -1900,7 +2007,9 @@ Widget _buildDateSelectionStep() {
                     ),
                     if (isMobile && variants.isNotEmpty)
                       Icon(
-                        isExpanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                        isExpanded
+                            ? Icons.keyboard_arrow_up
+                            : Icons.keyboard_arrow_down,
                         color: Colors.grey[500],
                         size: 24,
                       ),
@@ -2055,7 +2164,11 @@ Widget _buildDateSelectionStep() {
                       Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.currency_rupee, size: 12, color: Colors.grey[500]),
+                          Icon(
+                            Icons.currency_rupee,
+                            size: 12,
+                            color: Colors.grey[500],
+                          ),
                           const SizedBox(width: 2),
                           if (_discountAmount > 0 && isSelected)
                             Text(
@@ -2072,7 +2185,9 @@ Widget _buildDateSelectionStep() {
                             discountedPrice.toStringAsFixed(0),
                             style: TextStyle(
                               fontSize: 12,
-                              fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                              fontWeight: isSelected
+                                  ? FontWeight.w600
+                                  : FontWeight.normal,
                               color: _discountAmount > 0 && isSelected
                                   ? Colors.green.shade700
                                   : Colors.grey[700],
@@ -2155,7 +2270,11 @@ Widget _buildDateSelectionStep() {
               color: Colors.green.shade100,
               borderRadius: BorderRadius.circular(10),
             ),
-            child: Icon(Icons.local_offer, color: Colors.green.shade700, size: 20),
+            child: Icon(
+              Icons.local_offer,
+              color: Colors.green.shade700,
+              size: 20,
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -2187,9 +2306,7 @@ Widget _buildDateSelectionStep() {
           ),
           TextButton(
             onPressed: _removeOffer,
-            style: TextButton.styleFrom(
-              foregroundColor: Colors.green.shade700,
-            ),
+            style: TextButton.styleFrom(foregroundColor: Colors.green.shade700),
             child: const Text('Remove'),
           ),
         ],
@@ -2284,17 +2401,24 @@ Widget _buildDateSelectionStep() {
                 decoration: BoxDecoration(
                   color: _primaryColor.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(12),
-                  image: (_selectedSalon?['logo_url'] as String?) != null && (_selectedSalon!['logo_url'] as String).isNotEmpty
+                  image:
+                      (_selectedSalon?['logo_url'] as String?) != null &&
+                          (_selectedSalon!['logo_url'] as String).isNotEmpty
                       ? DecorationImage(
                           image: NetworkImage(_selectedSalon!['logo_url']),
                           fit: BoxFit.cover,
                         )
                       : null,
                 ),
-                child: (_selectedSalon?['logo_url'] == null || (_selectedSalon!['logo_url'] as String).isEmpty)
+                child:
+                    (_selectedSalon?['logo_url'] == null ||
+                        (_selectedSalon!['logo_url'] as String).isEmpty)
                     ? Center(
                         child: Text(
-                          (_selectedSalon?['name'] as String?)?.substring(0, 1).toUpperCase() ?? 'S',
+                          (_selectedSalon?['name'] as String?)
+                                  ?.substring(0, 1)
+                                  .toUpperCase() ??
+                              'S',
                           style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
@@ -2534,7 +2658,9 @@ Widget _buildDateSelectionStep() {
                           Icon(Icons.star, size: 16, color: Colors.amber[700]),
                           const SizedBox(width: 4),
                           Text(
-                            avgRating > 0 ? avgRating.toStringAsFixed(1) : 'New',
+                            avgRating > 0
+                                ? avgRating.toStringAsFixed(1)
+                                : 'New',
                             style: const TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w500,
@@ -2762,7 +2888,11 @@ Widget _buildDateSelectionStep() {
                 radius: 22,
                 backgroundColor: _primaryColor.withValues(alpha: 0.1),
                 child: Text(
-                  _selectedBarber?['full_name']?.toString().substring(0, 1).toUpperCase() ?? 'B',
+                  _selectedBarber?['full_name']
+                          ?.toString()
+                          .substring(0, 1)
+                          .toUpperCase() ??
+                      'B',
                   style: TextStyle(
                     color: _primaryColor,
                     fontSize: 20,
@@ -2784,10 +2914,7 @@ Widget _buildDateSelectionStep() {
                     ),
                     Text(
                       '${_calculateTotalDuration()} min service • Rs. ${_getDisplayTotalPrice().toStringAsFixed(2)}',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: Colors.grey[600],
-                      ),
+                      style: TextStyle(fontSize: 13, color: Colors.grey[600]),
                     ),
                   ],
                 ),
@@ -2807,11 +2934,7 @@ Widget _buildDateSelectionStep() {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: Row(
               children: [
-                Icon(
-                  Icons.calendar_today,
-                  size: 18,
-                  color: _secondaryColor,
-                ),
+                Icon(Icons.calendar_today, size: 18, color: _secondaryColor),
                 const SizedBox(width: 8),
                 Text(
                   DateFormat('EEEE, MMM dd, yyyy').format(_selectedDate!),
@@ -3334,7 +3457,10 @@ Widget _buildDateSelectionStep() {
                 ),
                 child: Text(
                   '$time min',
-                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
               );
             }).toList(),
@@ -3465,8 +3591,14 @@ Widget _buildDateSelectionStep() {
       String utcStart = data['new_start_time']?.toString() ?? '--:--';
       String utcEnd = data['new_end_time']?.toString() ?? '--:--';
 
-      String localStart = TimezoneService.utcToLocalTimeForDate(utcStart, _selectedDate!);
-      String localEnd = TimezoneService.utcToLocalTimeForDate(utcEnd, _selectedDate!);
+      String localStart = TimezoneService.utcToLocalTimeForDate(
+        utcStart,
+        _selectedDate!,
+      );
+      String localEnd = TimezoneService.utcToLocalTimeForDate(
+        utcEnd,
+        _selectedDate!,
+      );
 
       final queueNum = data['new_queue_number'] is int
           ? data['new_queue_number']
@@ -3535,7 +3667,11 @@ Widget _buildDateSelectionStep() {
                 radius: 22,
                 backgroundColor: _primaryColor.withValues(alpha: 0.1),
                 child: Text(
-                  _selectedBarber?['full_name']?.toString().substring(0, 1).toUpperCase() ?? 'B',
+                  _selectedBarber?['full_name']
+                          ?.toString()
+                          .substring(0, 1)
+                          .toUpperCase() ??
+                      'B',
                   style: TextStyle(
                     color: _primaryColor,
                     fontSize: 20,
@@ -3557,10 +3693,7 @@ Widget _buildDateSelectionStep() {
                     ),
                     Text(
                       '${_calculateTotalDuration()} min service • Rs. ${_getDisplayTotalPrice().toStringAsFixed(2)}',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: Colors.grey[600],
-                      ),
+                      style: TextStyle(fontSize: 13, color: Colors.grey[600]),
                     ),
                   ],
                 ),
@@ -4000,7 +4133,11 @@ Widget _buildDateSelectionStep() {
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.access_time, size: 20, color: Colors.blue),
+                      const Icon(
+                        Icons.access_time,
+                        size: 20,
+                        color: Colors.blue,
+                      ),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
@@ -4042,13 +4179,12 @@ Widget _buildDateSelectionStep() {
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      ..._selectedServices
-                          .map(
-                            (s) => Text(
-                              '• ${s['name']?.toString() ?? 'Service'}',
-                              style: const TextStyle(fontSize: 13),
-                            ),
-                          ),
+                      ..._selectedServices.map(
+                        (s) => Text(
+                          '• ${s['name']?.toString() ?? 'Service'}',
+                          style: const TextStyle(fontSize: 13),
+                        ),
+                      ),
                       const SizedBox(height: 8),
                       Text(
                         'Total: Rs. ${_calculateTotalPrice().toStringAsFixed(2)}',
