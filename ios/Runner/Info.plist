@@ -96,24 +96,31 @@
         <string>applinks:localhost</string>
     </array>
     
-    <!-- Background Modes (if needed) -->
-    <!--
+    <!-- Background Modes-->
+    
     <key>UIBackgroundModes</key>
     <array>
         <string>fetch</string>
         <string>remote-notification</string>
     </array>
-    -->
+   
     
     <!-- Privacy Descriptions -->
+    <!-- Camera Permission -->
     <key>NSCameraUsageDescription</key>
-    <string>This app needs camera access</string>
+    <string>We need camera access to take profile photos</string>
     
+    <!-- Photo Library Permission -->
     <key>NSPhotoLibraryUsageDescription</key>
-    <string>This app needs photo library access</string>
+    <string>We need photo library access to select profile photos</string>
     
+    <!-- Photo Library Add Only Permission (iOS 11+) -->
+    <key>NSPhotoLibraryAddUsageDescription</key>
+    <string>We need permission to save photos to your library</string>
+    
+    <!-- Microphone Permission (if needed) -->
     <key>NSMicrophoneUsageDescription</key>
-    <string>This app needs microphone access</string>
+    <string>We need microphone access for video recording</string>
     
     <key>NSLocationWhenInUseUsageDescription</key>
     <string>This app needs location access</string>
