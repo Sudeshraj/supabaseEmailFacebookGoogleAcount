@@ -944,7 +944,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
   Widget _buildProfileImage() {
     return GestureDetector(
       onTap: () {
-        context.push('/employee/profile');
+        context.push('/profile');
       },
       child: Container(
         margin: const EdgeInsets.only(right: 4),

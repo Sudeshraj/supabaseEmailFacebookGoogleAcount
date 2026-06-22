@@ -14,10 +14,11 @@ import '../../services/profile_service.dart';
 // =====================================================
 class ProfileImagePicker extends StatelessWidget {
   final String? currentImageUrl;
-  final dynamic tempImage; //  Temporary image for preview
+  final dynamic tempImage;  // Temporary image for preview
   final String? fullName;
   final bool isLoading;
-  final Function(dynamic) onImageSelected; // File or Uint8List
+  final bool isEditing;  // ✅ Added: Check if in edit mode
+  final Function(dynamic) onImageSelected;  // File or Uint8List
   final Function() onRemoveImage;
 
   const ProfileImagePicker({
@@ -26,6 +27,7 @@ class ProfileImagePicker extends StatelessWidget {
     this.tempImage,
     this.fullName,
     this.isLoading = false,
+    this.isEditing = false,  // ✅ Default false
     required this.onImageSelected,
     required this.onRemoveImage,
   });
@@ -52,7 +54,10 @@ class ProfileImagePicker extends StatelessWidget {
             const SizedBox(height: 16),
             const Text(
               'Change Profile Photo',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
             ),
             const SizedBox(height: 16),
             ListTile(
@@ -118,9 +123,9 @@ class ProfileImagePicker extends StatelessWidget {
     );
   }
 
-  // ✅ Get image to display (priority: tempImage > currentImageUrl)
+  // Get image to display (priority: tempImage > currentImageUrl)
   ImageProvider? _getImageProvider() {
-    // ✅ If there's a temporary image (selected but not uploaded)
+    // If there's a temporary image (selected but not uploaded)
     if (tempImage != null) {
       if (kIsWeb && tempImage is Uint8List) {
         return MemoryImage(tempImage as Uint8List);
@@ -128,21 +133,21 @@ class ProfileImagePicker extends StatelessWidget {
         return FileImage(tempImage as File);
       }
     }
-
-    // ✅ If there's a current image URL
+    
+    // If there's a current image URL
     if (currentImageUrl != null && currentImageUrl!.isNotEmpty) {
       return NetworkImage(currentImageUrl!);
     }
-
+    
     return null;
   }
 
   @override
   Widget build(BuildContext context) {
     final imageProvider = _getImageProvider();
-
+    
     return GestureDetector(
-      onTap: isLoading ? null : () => _pickImage(context),
+      onTap: (isLoading || !isEditing) ? null : () => _pickImage(context),
       child: Stack(
         children: [
           CircleAvatar(
@@ -179,7 +184,7 @@ class ProfileImagePicker extends StatelessWidget {
                 ),
               ),
             )
-          else
+          else if (isEditing)  // ✅ Only show camera icon when editing
             Positioned(
               bottom: 0,
               right: 0,
@@ -209,7 +214,11 @@ class RoleBadge extends StatelessWidget {
   final String role;
   final bool isSelected;
 
-  const RoleBadge({super.key, required this.role, this.isSelected = false});
+  const RoleBadge({
+    super.key,
+    required this.role,
+    this.isSelected = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -221,9 +230,7 @@ class RoleBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: isSelected
-            ? color.withValues(alpha: 0.15)
-            : Colors.grey.withValues(alpha: 0.1),
+        color: isSelected ? color.withValues(alpha: 0.15) : Colors.grey.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
           color: isSelected ? color : Colors.grey.withValues(alpha: 0.3),
@@ -233,7 +240,10 @@ class RoleBadge extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(icon, style: const TextStyle(fontSize: 14)),
+          Text(
+            icon,
+            style: const TextStyle(fontSize: 14),
+          ),
           const SizedBox(width: 4),
           Text(
             displayName,
@@ -279,15 +289,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
   List<String> _roles = [];
   String _joinedDate = '';
 
-  // ✅ Temporary variables for editing
+  // Temporary variables for editing
   String tempFullName = '';
   String tempPhone = '';
   String tempBio = '';
   String tempAddress = '';
   String tempCity = '';
-
-  // ✅ Temporary image data for preview
-  dynamic _tempSelectedImage; // File (mobile) or Uint8List (web)
+  
+  // Temporary image data for preview
+  dynamic _tempSelectedImage;  // File (mobile) or Uint8List (web)
   bool _hasImageChanged = false;
   bool _isImageRemoved = false;
 
@@ -299,10 +309,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final TextEditingController _cityController = TextEditingController();
 
   // Image picker state
-  final bool _isUploadingImage = false;
+  bool isUploadingImage = false;
 
   // Which role is currently selected for display
-  final int _selectedRoleIndex = 0;
+  int selectedRoleIndex = 0;
 
   @override
   void initState() {
@@ -358,7 +368,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _bioController.text = _bio;
         _addressController.text = _address;
         _cityController.text = _city;
-
+        
         // Set temp values
         tempFullName = _fullName;
         tempPhone = _phone;
@@ -374,6 +384,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         setState(() => _isLoading = false);
       }
     } catch (e) {
+      debugPrint('❌ Error loading profile: $e');
       if (mounted) {
         setState(() => _isLoading = false);
         ScaffoldMessenger.of(context).showSnackBar(
@@ -405,8 +416,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _hasImageChanged = true;
       _isImageRemoved = false;
     });
-
-    // ✅ Show preview immediately
+    
     _showSnackBar('📸 Image selected. Tap Save to update.', Colors.blue);
   }
 
@@ -417,13 +427,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _isImageRemoved = true;
     });
     _showSnackBar('🗑️ Image will be removed on Save.', Colors.orange);
-  }
+  }  
 
   // =====================================================
-  // ✅ PROFILE SAVE - UPLOAD IMAGE HERE
+  // ✅ PROFILE SAVE - OLD IMAGE AUTO REMOVED
   // =====================================================
   Future<void> _saveProfile() async {
-    // ✅ Validate changes
+    // Validate changes
     final newFullName = _fullNameController.text.trim();
     final newPhone = _phoneController.text.trim();
     final newBio = _bioController.text.trim();
@@ -437,7 +447,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (newBio != _bio) hasTextChanges = true;
     if (newAddress != _address) hasTextChanges = true;
     if (newCity != _city) hasTextChanges = true;
-
+    
     if (!hasTextChanges && !_hasImageChanged && !_isImageRemoved) {
       _showSnackBar('No changes to save', Colors.orange);
       return;
@@ -448,15 +458,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
     try {
       String? newAvatarUrl = _avatarUrl;
 
-      // ✅ Upload image ONLY if changed
+      // Handle image changes
       if (_isImageRemoved) {
         // Remove image
         if (_avatarUrl.isNotEmpty) {
           await _profileService.deleteOldImage(_avatarUrl);
         }
         newAvatarUrl = '';
+        _showSnackBar('🔄 Removing old image...', Colors.orange);
+        
       } else if (_hasImageChanged && _tempSelectedImage != null) {
-        // ✅ Show loading dialog (only during save)
+        // Upload new image (Old image will be auto-removed)
         _showSavingDialog();
 
         // Get file name for web
@@ -465,7 +477,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           fileName = '${_userId}_${DateTime.now().millisecondsSinceEpoch}.jpg';
         }
 
-        // Upload image
+        // Upload new image (old image deletion handled inside uploadProfileImage)
         final imageUrl = await _profileService.uploadProfileImage(
           userId: _userId,
           imageFile: _tempSelectedImage!,
@@ -478,17 +490,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
         }
 
         if (imageUrl != null) {
-          // Delete old image if exists
-          if (_avatarUrl.isNotEmpty) {
-            await _profileService.deleteOldImage(_avatarUrl);
-          }
           newAvatarUrl = imageUrl;
         } else {
           throw Exception('Failed to upload image');
         }
       }
 
-      // ✅ Update profile with all changes
+      // Update profile with all changes
       final success = await _profileService.updateProfile(
         userId: _userId,
         fullName: newFullName,
@@ -500,7 +508,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       );
 
       if (success && mounted) {
-        // ✅ Update state with new values
+        // Update state with new values
         setState(() {
           _fullName = newFullName;
           _phone = newPhone;
@@ -510,8 +518,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _avatarUrl = newAvatarUrl!;
           _isEditing = false;
           _isSaving = false;
-
-          // ✅ Reset temp values
+          
+          // Reset temp values
           _tempSelectedImage = null;
           _hasImageChanged = false;
           _isImageRemoved = false;
@@ -523,13 +531,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _showSnackBar('Failed to update profile', Colors.red);
       }
     } catch (e) {
+      debugPrint('❌ Error saving profile: $e');
       setState(() => _isSaving = false);
-
+      
       // Close loading dialog if open
       if (mounted && Navigator.canPop(context)) {
         Navigator.pop(context);
       }
-
+      
       _showSnackBar('Error: $e', Colors.red);
     }
   }
@@ -577,7 +586,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
               const SizedBox(height: 8),
               const Text(
                 'Please wait...',
-                style: TextStyle(fontSize: 14, color: Colors.grey),
+                style: TextStyle(
+                  fontSize: 14,
+                  color: Colors.grey,
+                ),
               ),
               const SizedBox(height: 16),
               ClipRRect(
@@ -615,8 +627,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _bioController.text = _bio;
       _addressController.text = _address;
       _cityController.text = _city;
-
-      // ✅ Reset temp image changes
+      
+      // Reset temp image changes
       _tempSelectedImage = null;
       _hasImageChanged = false;
       _isImageRemoved = false;
@@ -685,10 +697,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             borderRadius: BorderRadius.circular(12),
             borderSide: const BorderSide(color: Color(0xFFFF6B8B), width: 2),
           ),
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 16,
-            vertical: 14,
-          ),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         ),
       ),
     );
@@ -698,13 +707,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
   // BUILD METHOD
   // =====================================================
   @override
-  Widget build(BuildContext context) {
-    // ✅ Get display image for preview
+  Widget build(BuildContext context) { 
     return Scaffold(
       appBar: AppBar(
         title: const Text(
           'My Profile',
-          style: TextStyle(fontWeight: FontWeight.bold),
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+          ),
         ),
         backgroundColor: const Color(0xFFFF6B8B),
         foregroundColor: Colors.white,
@@ -757,22 +767,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
               padding: const EdgeInsets.all(16),
               child: Column(
                 children: [
-                  // ✅ Profile Image Section with Preview
+                  // ✅ Profile Image Section - Camera icon only in edit mode
                   Center(
                     child: Column(
                       children: [
                         ProfileImagePicker(
                           currentImageUrl: _isImageRemoved ? null : _avatarUrl,
-                          tempImage:
-                              _tempSelectedImage, // ✅ Pass temp image for preview
+                          tempImage: _tempSelectedImage,
                           fullName: _fullName,
-                          isLoading: _isUploadingImage || _isSaving,
+                          isLoading: isUploadingImage || _isSaving,
+                          isEditing: _isEditing,  // ✅ Pass edit mode
                           onImageSelected: _handleImageSelected,
                           onRemoveImage: _handleRemoveImage,
                         ),
                         const SizedBox(height: 12),
-
-                        // ✅ Show preview status
+                        
+                        // Show preview status only in edit mode
                         if (_isEditing && _hasImageChanged)
                           Container(
                             padding: const EdgeInsets.symmetric(
@@ -780,12 +790,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               vertical: 6,
                             ),
                             decoration: BoxDecoration(
-                              color: _isImageRemoved
+                              color: _isImageRemoved 
                                   ? Colors.red.withValues(alpha: 0.1)
                                   : Colors.blue.withValues(alpha: 0.1),
                               borderRadius: BorderRadius.circular(12),
                               border: Border.all(
-                                color: _isImageRemoved
+                                color: _isImageRemoved 
                                     ? Colors.red.withValues(alpha: 0.3)
                                     : Colors.blue.withValues(alpha: 0.3),
                               ),
@@ -794,31 +804,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 Icon(
-                                  _isImageRemoved
+                                  _isImageRemoved 
                                       ? Icons.warning_amber_rounded
                                       : Icons.photo_library,
                                   size: 16,
-                                  color: _isImageRemoved
-                                      ? Colors.red
-                                      : Colors.blue,
+                                  color: _isImageRemoved ? Colors.red : Colors.blue,
                                 ),
                                 const SizedBox(width: 6),
                                 Text(
-                                  _isImageRemoved
-                                      ? 'Image will be removed'
+                                  _isImageRemoved 
+                                      ? 'Image will be removed' 
                                       : 'New image selected (preview)',
                                   style: TextStyle(
                                     fontSize: 12,
-                                    color: _isImageRemoved
-                                        ? Colors.red
-                                        : Colors.blue,
+                                    color: _isImageRemoved ? Colors.red : Colors.blue,
                                     fontWeight: FontWeight.w500,
                                   ),
                                 ),
                               ],
                             ),
                           ),
-
+                        
                         const SizedBox(height: 8),
                         Text(
                           _fullName.isEmpty ? 'Add your name' : _fullName,
@@ -841,6 +847,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             style: TextStyle(
                               fontSize: 12,
                               color: Colors.grey[500],
+                            ),
+                          ),
+                        
+                        // ✅ Edit hint - only show when NOT in edit mode
+                        if (!_isEditing && !_isLoading)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Text(
+                              'Tap ✏️ Edit to change your photo',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.grey[500],
+                                fontStyle: FontStyle.italic,
+                              ),
                             ),
                           ),
                       ],
@@ -872,7 +892,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               final role = entry.value;
                               return RoleBadge(
                                 role: role,
-                                isSelected: index == _selectedRoleIndex,
+                                isSelected: index == selectedRoleIndex,
                               );
                             }).toList(),
                           ),
@@ -885,7 +905,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   const SizedBox(height: 16),
 
                   // Profile Details
-                  if (_isEditing) _buildEditForm() else _buildViewMode(),
+                  if (_isEditing)
+                    _buildEditForm()
+                  else
+                    _buildViewMode(),
 
                   const SizedBox(height: 24),
                 ],
@@ -911,10 +934,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             const Divider(),
             _buildInfoRow('Bio', _bio.isEmpty ? 'No bio added' : _bio),
             const Divider(),
-            _buildInfoRow(
-              'Address',
-              _address.isEmpty ? 'No address added' : _address,
-            ),
+            _buildInfoRow('Address', _address.isEmpty ? 'No address added' : _address),
             const Divider(),
             _buildInfoRow('City', _city.isEmpty ? 'No city added' : _city),
           ],

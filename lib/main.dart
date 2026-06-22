@@ -32,6 +32,7 @@ import 'package:flutter_application_1/screens/owner/edit_salon.dart';
 import 'package:flutter_application_1/screens/owner/owner_offers_screen.dart';
 import 'package:flutter_application_1/screens/owner/salon_holidays_screen.dart';
 import 'package:flutter_application_1/screens/owner/service_management.dart';
+import 'package:flutter_application_1/screens/settings/profile_screen.dart';
 import 'package:flutter_application_1/services/notification_service.dart';
 import 'package:flutter_application_1/services/timezone_service.dart';
 import 'package:go_router/go_router.dart';
@@ -760,7 +761,11 @@ GoRouter _createRouter() {
           return ResetPasswordConfirmScreen(email: extra?['email'] ?? '');
         },
       ),
-
+      GoRoute(
+        path: '/profile',
+        name: 'profile',
+        builder: (context, state) => const ProfileScreen(),
+      ),
       // ============================================
       // OWNER ROUTES
       // ============================================
