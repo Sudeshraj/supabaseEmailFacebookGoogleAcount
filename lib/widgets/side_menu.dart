@@ -30,7 +30,7 @@ class _SideMenuState extends State<SideMenu> {
   List<Map<String, dynamic>> _availableProfiles = [];
   List<String> _allUserRoles = [];
   bool _isLoading = false;
-  
+
   final supabase = Supabase.instance.client;
 
   @override
@@ -60,7 +60,7 @@ class _SideMenuState extends State<SideMenu> {
   // ============================================================
   Future<void> _loadUserRolesFromDatabase() async {
     if (!mounted) return;
-    
+
     setState(() => _isLoading = true);
 
     try {
@@ -91,9 +91,9 @@ class _SideMenuState extends State<SideMenu> {
           roleNames.add(role['name'].toString());
         }
       }
-      
+
       _allUserRoles = roleNames.toSet().toList();
-      
+
       debugPrint('📋 User roles from database: $_allUserRoles');
 
       final List<Map<String, dynamic>> profiles = [];
@@ -104,7 +104,7 @@ class _SideMenuState extends State<SideMenu> {
             .select('id')
             .eq('name', roleName)
             .single();
-        
+
         final roleId = roleResponse['id'];
 
         final profileResponse = await supabase
@@ -123,17 +123,21 @@ class _SideMenuState extends State<SideMenu> {
 
         if (profileResponse != null) {
           final isCurrent = roleName == widget.userRole;
-          
+
           String displayName = profileResponse['full_name'] ?? widget.userName;
           if (displayName.isEmpty) {
-            displayName = profileResponse['extra_data']?['full_name'] ?? 
-                         profileResponse['extra_data']?['company_name'] ?? 
-                         widget.userName;
+            displayName =
+                profileResponse['extra_data']?['full_name'] ??
+                profileResponse['extra_data']?['company_name'] ??
+                widget.userName;
           }
-          
+
           profiles.add({
             'id': profileResponse['id'],
-            'email': profileResponse['email'] ?? widget.userEmail ?? currentUser.email,
+            'email':
+                profileResponse['email'] ??
+                widget.userEmail ??
+                currentUser.email,
             'role': roleName,
             'role_id': roleId,
             'name': displayName,
@@ -166,11 +170,11 @@ class _SideMenuState extends State<SideMenu> {
   }
 
   // ============================================================
-  // 🔥 SWITCH PROFILE
+  // 🔥 SWITCH PROFILE - FIXED (Navigate First, Then Refresh)
   // ============================================================
   Future<void> _switchProfile(Map<String, dynamic> profile) async {
     if (!mounted) return;
-    
+
     if (profile['is_current'] == true) {
       setState(() => _showProfileSwitcher = false);
       return;
@@ -204,43 +208,88 @@ class _SideMenuState extends State<SideMenu> {
 
     try {
       debugPrint('🔄 Switching to profile: ${profile['role']}');
-      
+
       final currentUser = supabase.auth.currentUser;
       final email = widget.userEmail ?? currentUser?.email;
-      
+
       if (email == null) throw Exception('No email found');
-      
+
+      // ✅ Step 1: Save current role to SessionManager
       await SessionManager.updateUserRole(profile['role']);
-      
+      debugPrint('✅ Role saved to SessionManager: ${profile['role']}');
+
+      // ✅ Step 2: Update user metadata in Supabase
       if (currentUser != null) {
         final currentMetadata = currentUser.userMetadata ?? {};
         await supabase.auth.updateUser(
           UserAttributes(
-            data: {
-              ...currentMetadata,
-              'current_role': profile['role'],
-            },
+            data: {...currentMetadata, 'current_role': profile['role']},
           ),
         );
+        debugPrint('✅ User metadata updated with role: ${profile['role']}');
       }
-      
+
       if (!mounted) return;
-      
+
+      // Close the drawer
       Navigator.pop(context);
-      
+
+      // Show success message
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Switched to ${_getRoleDisplayName(profile['role'])} profile'),
+          content: Text(
+            'Switched to ${_getRoleDisplayName(profile['role'])} profile',
+          ),
           backgroundColor: Colors.green,
           duration: const Duration(seconds: 2),
         ),
       );
-      
-      await appState.refreshState();
-      
-      if (!mounted) return;
-      
-      _navigateToDashboard(profile['role']);
+
+      // ✅ Step 3: Navigate IMMEDIATELY (before refresh)
+      // This ensures GoRouter doesn't redirect to role-selector
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+
+        try {
+          switch (profile['role']) {
+            case 'owner':
+              debugPrint('👑 Navigating to owner dashboard (immediate)');
+              context.go('/owner');
+              break;
+            case 'barber':
+              debugPrint('💇 Navigating to barber dashboard (immediate)');
+              context.go('/barber');
+              break;
+            case 'customer':
+              debugPrint('👤 Navigating to customer dashboard (immediate)');
+              context.go('/customer');
+              break;
+            default:
+              debugPrint('❌ Unknown role: ${profile['role']}');
+              context.go('/');
+          }
+        } catch (e) {
+          debugPrint('❌ Navigation error: $e');
+        }
+      });
+
+      // ✅ Step 4: Refresh app state in BACKGROUND
+      // Don't await - let it happen in background
+      appState
+          .refreshState()
+          .then((_) {
+            debugPrint('✅ App state refreshed in background');
+          })
+          .catchError((e) {
+            debugPrint('❌ Background refresh error: $e');
+          });
+
+      // ✅ Step 5: Clear loading state after delay
+      Future.delayed(const Duration(milliseconds: 300), () {
+        if (mounted) {
+          setState(() => _isLoading = false);
+        }
+      });
     } catch (e) {
       debugPrint('❌ Error switching profile: $e');
       if (mounted) {
@@ -260,9 +309,9 @@ class _SideMenuState extends State<SideMenu> {
   // ============================================================
   Future<void> _createNewProfile() async {
     if (!mounted) return;
-    
+
     setState(() => _showProfileSwitcher = false);
-    
+
     final allRoles = ['owner', 'barber', 'customer'];
     final availableRoles = allRoles
         .where((role) => !_allUserRoles.contains(role))
@@ -279,7 +328,7 @@ class _SideMenuState extends State<SideMenu> {
       }
       return;
     }
-    
+
     final selectedRole = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
@@ -291,16 +340,18 @@ class _SideMenuState extends State<SideMenu> {
             children: [
               const Text('What type of profile would you like to create?'),
               const SizedBox(height: 20),
-              ...availableRoles.map((role) => Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: _buildProfileTypeOption(
-                  icon: _getRoleIcon(role),
-                  color: _getRoleColor(role),
-                  title: _getRoleDisplayName(role),
-                  description: _getRoleDescription(role),
-                  role: role,
+              ...availableRoles.map(
+                (role) => Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: _buildProfileTypeOption(
+                    icon: _getRoleIcon(role),
+                    color: _getRoleColor(role),
+                    title: _getRoleDisplayName(role),
+                    description: _getRoleDescription(role),
+                    role: role,
+                  ),
                 ),
-              )),
+              ),
             ],
           ),
         ),
@@ -318,13 +369,13 @@ class _SideMenuState extends State<SideMenu> {
     debugPrint('🔄 Selected role for new profile: $selectedRole');
 
     Navigator.pop(context);
-    
+
     await Future.delayed(const Duration(milliseconds: 100));
-    
+
     if (!mounted) return;
 
     debugPrint('➡️ Navigating to registration flow for role: $selectedRole');
-    
+
     context.push('/reg?role=$selectedRole&new=true');
   }
 
@@ -333,37 +384,53 @@ class _SideMenuState extends State<SideMenu> {
   // ============================================================
   IconData _getRoleIcon(String role) {
     switch (role) {
-      case 'owner': return Icons.work_outline;
-      case 'barber': return Icons.content_cut;
-      case 'customer': return Icons.person_outline;
-      default: return Icons.error_outline;
+      case 'owner':
+        return Icons.work_outline;
+      case 'barber':
+        return Icons.content_cut;
+      case 'customer':
+        return Icons.person_outline;
+      default:
+        return Icons.error_outline;
     }
   }
 
   Color _getRoleColor(String role) {
     switch (role) {
-      case 'owner': return Colors.blue;
-      case 'barber': return Colors.orange;
-      case 'customer': return Colors.green;
-      default: return Colors.grey;
+      case 'owner':
+        return Colors.blue;
+      case 'barber':
+        return Colors.orange;
+      case 'customer':
+        return Colors.green;
+      default:
+        return Colors.grey;
     }
   }
 
   String _getRoleDescription(String role) {
     switch (role) {
-      case 'owner': return 'Manage your salon';
-      case 'barber': return 'Work as a barber';
-      case 'customer': return 'Book appointments';
-      default: return '';
+      case 'owner':
+        return 'Manage your salon';
+      case 'barber':
+        return 'Work as a barber';
+      case 'customer':
+        return 'Book appointments';
+      default:
+        return '';
     }
   }
 
   String _getRoleDisplayName(String role) {
     switch (role) {
-      case 'owner': return 'Owner';
-      case 'barber': return 'Barber';
-      case 'customer': return 'Customer';
-      default: return role;
+      case 'owner':
+        return 'Owner';
+      case 'barber':
+        return 'Barber';
+      case 'customer':
+        return 'Customer';
+      default:
+        return role;
     }
   }
 
@@ -408,10 +475,7 @@ class _SideMenuState extends State<SideMenu> {
                   ),
                   Text(
                     description,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey[600],
-                    ),
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                   ),
                 ],
               ),
@@ -420,28 +484,6 @@ class _SideMenuState extends State<SideMenu> {
         ),
       ),
     );
-  }
-
-  void _navigateToDashboard(String role) {
-    if (!mounted) return;
-    
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      
-      switch (role) {
-        case 'owner':
-          context.go('/owner');
-          break;
-        case 'barber':
-          context.go('/barber');
-          break;
-        case 'customer':
-          context.go('/customer');
-          break;
-        default:
-          context.go('/');
-      }
-    });
   }
 
   // ============================================================
@@ -492,18 +534,26 @@ class _SideMenuState extends State<SideMenu> {
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             border: Border.all(color: Colors.white, width: 3),
-                            image: (widget.profileImageUrl != null && widget.profileImageUrl!.isNotEmpty)
+                            image:
+                                (widget.profileImageUrl != null &&
+                                    widget.profileImageUrl!.isNotEmpty)
                                 ? DecorationImage(
-                                    image: NetworkImage(widget.profileImageUrl!),
+                                    image: NetworkImage(
+                                      widget.profileImageUrl!,
+                                    ),
                                     fit: BoxFit.cover,
                                   )
                                 : null,
                           ),
-                          child: (widget.profileImageUrl == null || widget.profileImageUrl!.isEmpty)
+                          child:
+                              (widget.profileImageUrl == null ||
+                                  widget.profileImageUrl!.isEmpty)
                               ? CircleAvatar(
                                   backgroundColor: Colors.white,
                                   child: Text(
-                                    widget.userName.isNotEmpty ? widget.userName[0].toUpperCase() : 'U',
+                                    widget.userName.isNotEmpty
+                                        ? widget.userName[0].toUpperCase()
+                                        : 'U',
                                     style: const TextStyle(
                                       fontSize: 28,
                                       fontWeight: FontWeight.bold,
@@ -523,7 +573,10 @@ class _SideMenuState extends State<SideMenu> {
                               decoration: BoxDecoration(
                                 color: Colors.blue,
                                 shape: BoxShape.circle,
-                                border: Border.all(color: Colors.white, width: 2),
+                                border: Border.all(
+                                  color: Colors.white,
+                                  width: 2,
+                                ),
                               ),
                               child: Text(
                                 '+$otherProfilesCount',
@@ -565,7 +618,8 @@ class _SideMenuState extends State<SideMenu> {
                                 onTap: () {
                                   if (mounted) {
                                     setState(() {
-                                      _showProfileSwitcher = !_showProfileSwitcher;
+                                      _showProfileSwitcher =
+                                          !_showProfileSwitcher;
                                     });
                                   }
                                 },
@@ -576,7 +630,7 @@ class _SideMenuState extends State<SideMenu> {
                                     shape: BoxShape.circle,
                                   ),
                                   child: Icon(
-                                    _showProfileSwitcher 
+                                    _showProfileSwitcher
                                         ? Icons.keyboard_arrow_up
                                         : Icons.swap_horiz,
                                     color: Colors.white,
@@ -590,7 +644,8 @@ class _SideMenuState extends State<SideMenu> {
                                 onTap: () {
                                   if (mounted) {
                                     setState(() {
-                                      _showProfileSwitcher = !_showProfileSwitcher;
+                                      _showProfileSwitcher =
+                                          !_showProfileSwitcher;
                                     });
                                   }
                                 },
@@ -601,7 +656,7 @@ class _SideMenuState extends State<SideMenu> {
                                     shape: BoxShape.circle,
                                   ),
                                   child: Icon(
-                                    _showProfileSwitcher 
+                                    _showProfileSwitcher
                                         ? Icons.keyboard_arrow_up
                                         : Icons.add,
                                     color: Colors.white,
@@ -611,7 +666,8 @@ class _SideMenuState extends State<SideMenu> {
                               ),
                           ],
                         ),
-                        if (widget.userEmail != null && widget.userEmail!.isNotEmpty) ...[
+                        if (widget.userEmail != null &&
+                            widget.userEmail!.isNotEmpty) ...[
                           const SizedBox(height: 4),
                           Text(
                             widget.userEmail!,
@@ -649,7 +705,8 @@ class _SideMenuState extends State<SideMenu> {
                 ],
               ),
               // Profile Switcher Section
-              if (_showProfileSwitcher && (hasMultipleProfiles || canCreateNewProfile))
+              if (_showProfileSwitcher &&
+                  (hasMultipleProfiles || canCreateNewProfile))
                 _buildProfileSwitcherSection(),
             ],
           ),
@@ -665,7 +722,7 @@ class _SideMenuState extends State<SideMenu> {
     final otherProfiles = _availableProfiles
         .where((p) => p['is_current'] != true)
         .toList();
-    
+
     final hasMultipleProfiles = _availableProfiles.length > 1;
     final canCreateNewProfile = _allUserRoles.length < 3;
 
@@ -688,11 +745,12 @@ class _SideMenuState extends State<SideMenu> {
         children: [
           // Show other profiles if multiple profiles exist
           if (hasMultipleProfiles && otherProfiles.isNotEmpty)
-            ...otherProfiles.map((profile) => _buildProfileSwitcherItem(profile)),
-          
+            ...otherProfiles.map(
+              (profile) => _buildProfileSwitcherItem(profile),
+            ),
+
           // Show Create New Profile button if user doesn't have all roles
-          if (canCreateNewProfile)
-            _buildCreateNewProfileItem(),
+          if (canCreateNewProfile) _buildCreateNewProfileItem(),
         ],
       ),
     );
@@ -718,14 +776,18 @@ class _SideMenuState extends State<SideMenu> {
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: _getRoleColor(profile['role']).withValues(alpha: 0.1),
-                image: profile['photo'] != null && profile['photo'].toString().isNotEmpty
+                image:
+                    profile['photo'] != null &&
+                        profile['photo'].toString().isNotEmpty
                     ? DecorationImage(
                         image: NetworkImage(profile['photo']),
                         fit: BoxFit.cover,
                       )
                     : null,
               ),
-              child: profile['photo'] == null || profile['photo'].toString().isEmpty
+              child:
+                  profile['photo'] == null ||
+                      profile['photo'].toString().isEmpty
                   ? Center(
                       child: Text(
                         profile['name'][0].toUpperCase(),
@@ -764,7 +826,9 @@ class _SideMenuState extends State<SideMenu> {
                           vertical: 3,
                         ),
                         decoration: BoxDecoration(
-                          color: _getRoleColor(profile['role']).withValues(alpha: 0.1),
+                          color: _getRoleColor(
+                            profile['role'],
+                          ).withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Text(
@@ -778,7 +842,10 @@ class _SideMenuState extends State<SideMenu> {
                       ),
                       if (profile['is_active'] == false)
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 3,
+                          ),
                           decoration: BoxDecoration(
                             color: Colors.orange,
                             borderRadius: BorderRadius.circular(8),
@@ -790,7 +857,10 @@ class _SideMenuState extends State<SideMenu> {
                         ),
                       if (profile['is_blocked'] == true)
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 3,
+                          ),
                           decoration: BoxDecoration(
                             color: Colors.red,
                             borderRadius: BorderRadius.circular(8),
@@ -805,10 +875,7 @@ class _SideMenuState extends State<SideMenu> {
                   const SizedBox(height: 4),
                   Text(
                     profile['email'] ?? '',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey[500],
-                    ),
+                    style: TextStyle(fontSize: 12, color: Colors.grey[500]),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -857,11 +924,7 @@ class _SideMenuState extends State<SideMenu> {
                 color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(
-                Icons.add,
-                size: 18,
-                color: Color(0xFFFF6B8B),
-              ),
+              child: const Icon(Icons.add, size: 18, color: Color(0xFFFF6B8B)),
             ),
             const SizedBox(width: 10),
             const Text(
@@ -885,10 +948,7 @@ class _SideMenuState extends State<SideMenu> {
     return Container(
       decoration: BoxDecoration(
         border: Border(
-          top: BorderSide(
-            color: Colors.grey.withValues(alpha: 0.15),
-            width: 1,
-          ),
+          top: BorderSide(color: Colors.grey.withValues(alpha: 0.15), width: 1),
         ),
       ),
       child: Column(
@@ -901,7 +961,11 @@ class _SideMenuState extends State<SideMenu> {
                 color: Colors.grey.withValues(alpha: 0.08),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.settings_outlined, color: Colors.grey, size: 22),
+              child: const Icon(
+                Icons.settings_outlined,
+                color: Colors.grey,
+                size: 22,
+              ),
             ),
             title: const Text('Settings', style: TextStyle(fontSize: 15)),
             onTap: () {
@@ -962,7 +1026,7 @@ class _SideMenuState extends State<SideMenu> {
       if (item['color'] != null) {
         itemColor = item['color'] as Color;
       }
-      
+
       return Column(
         children: [
           if (item['divider'] == true)
@@ -992,7 +1056,10 @@ class _SideMenuState extends State<SideMenu> {
             ),
             trailing: item['badge'] != null
                 ? Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.red,
                       borderRadius: BorderRadius.circular(12),
@@ -1006,7 +1073,11 @@ class _SideMenuState extends State<SideMenu> {
                       ),
                     ),
                   )
-                : Icon(Icons.arrow_forward_ios, size: 14, color: Colors.grey[400]),
+                : Icon(
+                    Icons.arrow_forward_ios,
+                    size: 14,
+                    color: Colors.grey[400],
+                  ),
             onTap: () {
               Navigator.pop(context);
               if (widget.onMenuItemSelected != null) {
@@ -1024,44 +1095,149 @@ class _SideMenuState extends State<SideMenu> {
 
   List<Map<String, dynamic>> _getOwnerMenuItems() {
     return [
-      {'icon': Icons.dashboard_outlined, 'title': 'Dashboard', 'route': '/owner', 'color': Colors.blue},
-      {'icon': Icons.calendar_month_outlined, 'title': 'Appointments', 'route': '/owner/appointments', 'color': Colors.green, 'badge': 5},
-      {'icon': Icons.people_outline, 'title': 'Customers', 'route': '/owner/customers', 'color': Colors.purple},
-      {'icon': Icons.content_cut_outlined, 'title': 'Barbers', 'route': '/owner/barbers', 'color': Colors.orange},
-      {'icon': Icons.inventory_2_outlined, 'title': 'Services', 'route': '/owner/services', 'color': Colors.teal},
-      {'icon': Icons.attach_money_outlined, 'title': 'Revenue', 'route': '/owner/revenue', 'color': Colors.green},
+      {
+        'icon': Icons.dashboard_outlined,
+        'title': 'Dashboard',
+        'route': '/owner',
+        'color': Colors.blue,
+      },
+      {
+        'icon': Icons.calendar_month_outlined,
+        'title': 'Appointments',
+        'route': '/owner/appointments',
+        'color': Colors.green,
+        'badge': 5,
+      },
+      {
+        'icon': Icons.people_outline,
+        'title': 'Customers',
+        'route': '/owner/customers',
+        'color': Colors.purple,
+      },
+      {
+        'icon': Icons.content_cut_outlined,
+        'title': 'Barbers',
+        'route': '/owner/barbers',
+        'color': Colors.orange,
+      },
+      {
+        'icon': Icons.inventory_2_outlined,
+        'title': 'Services',
+        'route': '/owner/services',
+        'color': Colors.teal,
+      },
+      {
+        'icon': Icons.attach_money_outlined,
+        'title': 'Revenue',
+        'route': '/owner/revenue',
+        'color': Colors.green,
+      },
       {'divider': true},
     ];
   }
 
   List<Map<String, dynamic>> _getBarberMenuItems() {
     return [
-      {'icon': Icons.dashboard_outlined, 'title': 'My Dashboard', 'route': '/barber', 'color': Colors.blue},
-      {'icon': Icons.calendar_month_outlined, 'title': 'My Schedule', 'route': '/barber/schedule', 'color': Colors.green},
-      {'icon': Icons.pending_actions_outlined, 'title': 'Pending Jobs', 'route': '/barber/pending', 'color': Colors.orange, 'badge': 3},
-      {'icon': Icons.history_outlined, 'title': 'Completed', 'route': '/barber/completed', 'color': Colors.purple},
-      {'icon': Icons.star_outline, 'title': 'My Reviews', 'route': '/barber/reviews', 'color': Colors.amber, 'badge': '4.8'},
+      {
+        'icon': Icons.dashboard_outlined,
+        'title': 'My Dashboard',
+        'route': '/barber',
+        'color': Colors.blue,
+      },
+      {
+        'icon': Icons.calendar_month_outlined,
+        'title': 'My Schedule',
+        'route': '/barber/schedule',
+        'color': Colors.green,
+      },
+      {
+        'icon': Icons.pending_actions_outlined,
+        'title': 'Pending Jobs',
+        'route': '/barber/pending',
+        'color': Colors.orange,
+        'badge': 3,
+      },
+      {
+        'icon': Icons.history_outlined,
+        'title': 'Completed',
+        'route': '/barber/completed',
+        'color': Colors.purple,
+      },
+      {
+        'icon': Icons.star_outline,
+        'title': 'My Reviews',
+        'route': '/barber/reviews',
+        'color': Colors.amber,
+        'badge': '4.8',
+      },
       {'divider': true},
     ];
   }
 
   List<Map<String, dynamic>> _getCustomerMenuItems() {
     return [
-      {'icon': Icons.home_outlined, 'title': 'Home', 'route': '/customer', 'color': Colors.blue},
-      {'icon': Icons.calendar_month_outlined, 'title': 'My Bookings', 'route': '/customer/bookings', 'color': Colors.green, 'badge': 2},
-      {'icon': Icons.history_outlined, 'title': 'History', 'route': '/customer/history', 'color': Colors.orange},
-      {'icon': Icons.favorite_outline, 'title': 'Favorite Barbers', 'route': '/customer/favorites', 'color': Colors.red},
-      {'icon': Icons.notifications_outlined, 'title': 'Notifications', 'route': '/customer/notifications', 'color': Colors.purple, 'badge': 3},
+      {
+        'icon': Icons.home_outlined,
+        'title': 'Home',
+        'route': '/customer',
+        'color': Colors.blue,
+      },
+      {
+        'icon': Icons.calendar_month_outlined,
+        'title': 'My Bookings',
+        'route': '/customer/bookings',
+        'color': Colors.green,
+        'badge': 2,
+      },
+      {
+        'icon': Icons.history_outlined,
+        'title': 'History',
+        'route': '/customer/history',
+        'color': Colors.orange,
+      },
+      {
+        'icon': Icons.favorite_outline,
+        'title': 'Favorite Barbers',
+        'route': '/customer/favorites',
+        'color': Colors.red,
+      },
+      {
+        'icon': Icons.notifications_outlined,
+        'title': 'Notifications',
+        'route': '/customer/notifications',
+        'color': Colors.purple,
+        'badge': 3,
+      },
       {'divider': true},
     ];
   }
 
   List<Map<String, dynamic>> _getCommonMenuItems() {
     return [
-      {'icon': Icons.info_outline, 'title': 'About Us', 'route': '/about', 'color': Colors.blueGrey},
-      {'icon': Icons.help_outline, 'title': 'Help & Support', 'route': '/help', 'color': Colors.grey},
-      {'icon': Icons.privacy_tip_outlined, 'title': 'Privacy Policy', 'route': '/privacy', 'color': Colors.grey},
-      {'icon': Icons.description_outlined, 'title': 'Terms & Conditions', 'route': '/terms', 'color': Colors.grey},
+      {
+        'icon': Icons.info_outline,
+        'title': 'About Us',
+        'route': '/about',
+        'color': Colors.blueGrey,
+      },
+      {
+        'icon': Icons.help_outline,
+        'title': 'Help & Support',
+        'route': '/help',
+        'color': Colors.grey,
+      },
+      {
+        'icon': Icons.privacy_tip_outlined,
+        'title': 'Privacy Policy',
+        'route': '/privacy',
+        'color': Colors.grey,
+      },
+      {
+        'icon': Icons.description_outlined,
+        'title': 'Terms & Conditions',
+        'route': '/terms',
+        'color': Colors.grey,
+      },
     ];
   }
 
@@ -1076,10 +1252,17 @@ class _SideMenuState extends State<SideMenu> {
   void _navigateToSettings(BuildContext context) {
     try {
       switch (widget.userRole) {
-        case 'owner': context.push('/owner/settings'); break;
-        case 'barber': context.push('/barber/settings'); break;
-        case 'customer': context.push('/customer/settings'); break;
-        default: context.push('/settings');
+        case 'owner':
+          context.push('/owner/settings');
+          break;
+        case 'barber':
+          context.push('/barber/settings');
+          break;
+        case 'customer':
+          context.push('/customer/settings');
+          break;
+        default:
+          context.push('/settings');
       }
     } catch (e) {
       debugPrint('Settings navigation error: $e');
@@ -1146,9 +1329,7 @@ class _SideMenuState extends State<SideMenu> {
     return Drawer(
       child: _isLoading
           ? const Center(
-              child: CircularProgressIndicator(
-                color: Color(0xFFFF6B8B),
-              ),
+              child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
             )
           : Container(
               color: Colors.white,
