@@ -30,7 +30,7 @@ class SessionManager {
   static bool _isSavingProfile = false;
   static bool _isSavingRoles = false;
   static bool _isUpdatingAvailableProfiles = false;
-  static Map<String, DateTime> _lastOperationTimes = {};
+  static Map<String, DateTime> lastOperationTimes = {};
 
   // Initialize
   static Future<void> init() async {
@@ -166,7 +166,7 @@ class SessionManager {
     // 🔥 THROTTLE: Prevent too frequent saves
     final operationKey = 'profile_$email';
     final now = DateTime.now();
-    final lastOp = _lastOperationTimes[operationKey];
+    final lastOp = lastOperationTimes[operationKey];
     if (lastOp != null && now.difference(lastOp) < Duration(milliseconds: 500)) {
       debugPrint('⏭️ Too frequent save for $email, skipping');
       return;
@@ -174,7 +174,7 @@ class SessionManager {
 
     // Set locks
     _isSavingProfile = true;
-    _lastOperationTimes[operationKey] = now;
+    lastOperationTimes[operationKey] = now;
     
     debugPrint('📝 Saving profile for: $email');
     debugPrint('📸 Photo URL provided: ${photo ?? "NULL"}');   
@@ -440,14 +440,14 @@ class SessionManager {
     // 🔥 THROTTLE
     final operationKey = 'roles_$email';
     final now = DateTime.now();
-    final lastOp = _lastOperationTimes[operationKey];
+    final lastOp = lastOperationTimes[operationKey];
     if (lastOp != null && now.difference(lastOp) < Duration(milliseconds: 500)) {
       debugPrint('⏭️ Too frequent roles save for $email, skipping');
       return;
     }
 
     _isSavingRoles = true;
-    _lastOperationTimes[operationKey] = now;
+    lastOperationTimes[operationKey] = now;
 
     try {
       debugPrint('📝 SessionManager.saveUserRoles START');  

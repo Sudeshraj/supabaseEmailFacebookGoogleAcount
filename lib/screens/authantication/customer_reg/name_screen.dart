@@ -72,10 +72,10 @@ class _NameEntryState extends State<NameEntry>
     super.dispose();
   }
 
-  void _handleBack(BuildContext context) {
-    // Simply pop to go back to DataConsentScreen
-    Navigator.of(context).pop();
-  }
+  // void _handleBack(BuildContext context) {
+  //   // Simply pop to go back to DataConsentScreen
+  //   Navigator.of(context).pop();
+  // }
 
   @override
   Widget build(BuildContext context) {
