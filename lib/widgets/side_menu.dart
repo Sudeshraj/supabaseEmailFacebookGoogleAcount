@@ -72,6 +72,7 @@ class _SideMenuState extends State<SideMenu> {
 
       debugPrint('📋 Loading roles for user: ${currentUser.id}');
 
+      // ✅ Get user roles with status
       final userRolesResponse = await supabase
           .from('user_roles')
           .select('''
@@ -80,57 +81,63 @@ class _SideMenuState extends State<SideMenu> {
               id,
               name,
               description
-            )
+            ),
+            status
           ''')
-          .eq('user_id', currentUser.id);
+          .eq('user_id', currentUser.id)
+          .eq('status', 'active'); // ✅ Only active roles
 
       final List<String> roleNames = [];
+      final List<Map<String, dynamic>> roleData = [];
+
       for (var roleEntry in userRolesResponse) {
         final role = roleEntry['roles'] as Map?;
         if (role != null && role['name'] != null) {
-          roleNames.add(role['name'].toString());
+          final roleName = role['name'].toString();
+          roleNames.add(roleName);
+          roleData.add({
+            'role_id': roleEntry['role_id'],
+            'name': roleName,
+            'status': roleEntry['status'] ?? 'active',
+          });
         }
       }
 
       _allUserRoles = roleNames.toSet().toList();
+      debugPrint('📋 Active user roles: $_allUserRoles');
 
-      debugPrint('📋 User roles from database: $_allUserRoles');
+      // ✅ Get profile data
+      final profileResponse = await supabase
+          .from('profiles')
+          .select('''
+            id,
+            full_name,
+            avatar_url,
+            email,
+            extra_data,
+            is_active,
+            is_blocked
+          ''')
+          .eq('id', currentUser.id)
+          .maybeSingle();
 
       final List<Map<String, dynamic>> profiles = [];
 
-      for (var roleName in _allUserRoles) {
-        final roleResponse = await supabase
-            .from('roles')
-            .select('id')
-            .eq('name', roleName)
-            .single();
+      if (profileResponse != null) {
+        final extraData =
+            profileResponse['extra_data'] as Map<String, dynamic>? ?? {};
 
-        final roleId = roleResponse['id'];
-
-        final profileResponse = await supabase
-            .from('profiles')
-            .select('''
-              id,
-              full_name,
-              avatar_url,
-              email,
-              extra_data,
-              is_active,
-              is_blocked
-            ''')
-            .eq('id', currentUser.id)
-            .maybeSingle();
-
-        if (profileResponse != null) {
-          final isCurrent = roleName == widget.userRole;
+        for (var roleName in _allUserRoles) {
+          final roleKey = 'profile_$roleName';
+          final roleStatus =
+              extraData[roleKey]?['status'] as String? ?? 'active';
 
           String displayName = profileResponse['full_name'] ?? widget.userName;
           if (displayName.isEmpty) {
-            displayName =
-                profileResponse['extra_data']?['full_name'] ??
-                profileResponse['extra_data']?['company_name'] ??
-                widget.userName;
+            displayName = extraData['full_name'] ?? widget.userName;
           }
+
+          final isCurrent = roleName == widget.userRole;
 
           profiles.add({
             'id': profileResponse['id'],
@@ -139,13 +146,17 @@ class _SideMenuState extends State<SideMenu> {
                 widget.userEmail ??
                 currentUser.email,
             'role': roleName,
-            'role_id': roleId,
+            'role_id': roleData.firstWhere(
+              (r) => r['name'] == roleName,
+              orElse: () => {'role_id': 0},
+            )['role_id'],
             'name': displayName,
             'photo': profileResponse['avatar_url'] ?? widget.profileImageUrl,
             'is_current': isCurrent,
-            'is_active': profileResponse['is_active'] ?? true,
+            'is_active': roleStatus == 'active',
             'is_blocked': profileResponse['is_blocked'] ?? false,
-            'extra_data': profileResponse['extra_data'],
+            'status': roleStatus,
+            'extra_data': extraData,
           });
         }
       }
@@ -170,7 +181,7 @@ class _SideMenuState extends State<SideMenu> {
   }
 
   // ============================================================
-  // 🔥 SWITCH PROFILE - FIXED (Navigate First, Then Refresh)
+  // 🔥 SWITCH PROFILE
   // ============================================================
   Future<void> _switchProfile(Map<String, dynamic> profile) async {
     if (!mounted) return;
@@ -245,27 +256,25 @@ class _SideMenuState extends State<SideMenu> {
         ),
       );
 
-      // ✅ Step 3: Navigate IMMEDIATELY (before refresh)
-      // This ensures GoRouter doesn't redirect to role-selector
+      // ✅ Step 3: Navigate IMMEDIATELY
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
 
         try {
           switch (profile['role']) {
             case 'owner':
-              debugPrint('👑 Navigating to owner dashboard (immediate)');
+              debugPrint('👑 Navigating to owner dashboard');
               context.go('/owner');
               break;
             case 'barber':
-              debugPrint('💇 Navigating to barber dashboard (immediate)');
+              debugPrint('💇 Navigating to barber dashboard');
               context.go('/barber');
               break;
             case 'customer':
-              debugPrint('👤 Navigating to customer dashboard (immediate)');
+              debugPrint('👤 Navigating to customer dashboard');
               context.go('/customer');
               break;
             default:
-              debugPrint('❌ Unknown role: ${profile['role']}');
               context.go('/');
           }
         } catch (e) {
@@ -274,7 +283,6 @@ class _SideMenuState extends State<SideMenu> {
       });
 
       // ✅ Step 4: Refresh app state in BACKGROUND
-      // Don't await - let it happen in background
       appState
           .refreshState()
           .then((_) {
@@ -305,7 +313,7 @@ class _SideMenuState extends State<SideMenu> {
   }
 
   // ============================================================
-  // 🔥 CREATE NEW PROFILE
+  // 🔥 CREATE NEW PROFILE - DIRECT (No Registration Flow)
   // ============================================================
   Future<void> _createNewProfile() async {
     if (!mounted) return;
@@ -329,6 +337,7 @@ class _SideMenuState extends State<SideMenu> {
       return;
     }
 
+    // ✅ Show role selection dialog only (NO NAME INPUT)
     final selectedRole = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
@@ -366,17 +375,282 @@ class _SideMenuState extends State<SideMenu> {
 
     if (selectedRole == null || !mounted) return;
 
-    debugPrint('🔄 Selected role for new profile: $selectedRole');
+    debugPrint('🔄 Creating new profile for role: $selectedRole');
 
-    Navigator.pop(context);
+    // ✅ Create profile directly (NO INPUT FIELDS)
+    await _createProfileDirectly(selectedRole);
+  }
 
-    await Future.delayed(const Duration(milliseconds: 100));
+  // ============================================================
+  // 🔥 CREATE PROFILE DIRECTLY - FIXED (No Role Selector)
+  // ============================================================
+// ============================================================
+// 🔥 CREATE PROFILE DIRECTLY - FIXED
+// ============================================================
+Future<void> _createProfileDirectly(String role) async {
+  if (!mounted) return;
 
-    if (!mounted) return;
+  setState(() => _isLoading = true);
 
-    debugPrint('➡️ Navigating to registration flow for role: $selectedRole');
+  try {
+    final currentUser = supabase.auth.currentUser;
+    if (currentUser == null) {
+      throw Exception('User not logged in');
+    }
 
-    context.push('/reg?role=$selectedRole&new=true');
+    final email = currentUser.email;
+    if (email == null) throw Exception('No email found');
+
+    debugPrint('📝 Creating new $role profile for user: ${currentUser.id}');
+
+    // ✅ 1. Get role ID
+    final roleResponse = await supabase
+        .from('roles')
+        .select('id')
+        .eq('name', role)
+        .single();
+
+    final roleId = roleResponse['id'];
+
+    // ✅ 2. Get existing profile
+    final existingProfile = await supabase
+        .from('profiles')
+        .select()
+        .eq('id', currentUser.id)
+        .maybeSingle();
+
+    Map<String, dynamic> extraData = {};
+    String fullName = widget.userName;
+
+    if (existingProfile != null) {
+      extraData = existingProfile['extra_data'] as Map<String, dynamic>? ?? {};
+      fullName = existingProfile['full_name'] ?? widget.userName;
+      debugPrint('📋 Existing profile found, updating extra_data');
+    } else {
+      debugPrint('📋 No existing profile, creating new');
+    }
+
+    // ✅ 3. Update extra_data with new role
+    final roleKey = 'profile_$role';
+    extraData[roleKey] = {
+      'role': role,
+      'status': 'active',
+      'created_at': DateTime.now().toIso8601String(),
+    };
+
+    if (!extraData.containsKey('full_name')) {
+      extraData['full_name'] = fullName;
+    }
+
+    debugPrint('📝 Extra data updated: ${extraData.keys}');
+
+    // ✅ 4. Update or Insert profile
+    if (existingProfile == null) {
+      await supabase.from('profiles').insert({
+        'id': currentUser.id,
+        'email': email,
+        'full_name': fullName,
+        'avatar_url': currentUser.userMetadata?['avatar_url'] ?? 
+                     currentUser.userMetadata?['picture'],
+        'extra_data': extraData,
+        'is_active': true,
+        'is_blocked': false,
+        'created_at': DateTime.now().toIso8601String(),
+        'updated_at': DateTime.now().toIso8601String(),
+      });
+      debugPrint('✅ New profile created');
+    } else {
+      await supabase
+          .from('profiles')
+          .update({
+            'full_name': fullName,
+            'extra_data': extraData,
+            'updated_at': DateTime.now().toIso8601String(),
+          })
+          .eq('id', currentUser.id);
+      debugPrint('✅ Profile updated with new role');
+    }
+
+    // ✅ 5. Check if user already has this role
+    final existingRole = await supabase
+        .from('user_roles')
+        .select()
+        .eq('user_id', currentUser.id)
+        .eq('role_id', roleId)
+        .maybeSingle();
+
+    if (existingRole == null) {
+      // ✅ Insert with status 'active'
+      await supabase.from('user_roles').insert({
+        'user_id': currentUser.id,
+        'role_id': roleId,
+        'status': 'active',
+        'created_at': DateTime.now().toIso8601String(),
+        'updated_at': DateTime.now().toIso8601String(),
+      });
+      debugPrint('✅ Role assigned: $role (status: active)');
+    } else {
+      // ✅ If role exists but inactive, reactivate
+      if (existingRole['status'] != 'active') {
+        await supabase
+            .from('user_roles')
+            .update({
+              'status': 'active',
+              'updated_at': DateTime.now().toIso8601String(),
+            })
+            .eq('user_id', currentUser.id)
+            .eq('role_id', roleId);
+        debugPrint('✅ Role reactivated: $role');
+      } else {
+        debugPrint('⚠️ Role already exists: $role');
+      }
+    }
+
+    // ✅ 6. Get all active user roles
+    final userRolesResponse = await supabase
+        .from('user_roles')
+        .select('''
+          role_id,
+          roles!inner (name),
+          status
+        ''')
+        .eq('user_id', currentUser.id)
+        .eq('status', 'active');
+
+    final List<String> userRoles = userRolesResponse
+        .map((r) => r['roles']['name'] as String)
+        .toList();
+
+    debugPrint('📝 Active user roles after update: $userRoles');
+
+    // ✅ 7. Update user metadata
+    final currentMetadata = currentUser.userMetadata ?? {};
+    await supabase.auth.updateUser(
+      UserAttributes(
+        data: {
+          ...currentMetadata,
+          'roles': userRoles,
+          'current_role': role,
+          'profile_updated_at': DateTime.now().toIso8601String(),
+        },
+      ),
+    );
+    debugPrint('✅ User metadata updated');
+
+    // ✅ 8. Save to SessionManager
+    debugPrint('📱 Saving to SessionManager');
+
+    final photoUrl = currentUser.userMetadata?['avatar_url'] ?? 
+                     currentUser.userMetadata?['picture'];
+
+    await SessionManager.saveUserProfile(
+      email: email,
+      userId: currentUser.id,
+      name: fullName,
+      photo: photoUrl,
+      roles: userRoles,
+      rememberMe: true,
+      provider: await _getUserProvider(currentUser, photoUrl),
+    );
+
+    await SessionManager.saveCurrentRole(role);   
+
+
+    // ✅ Refresh available profiles
+    await _loadUserRolesFromDatabase();
+
+    // ============================================================
+    // 🔥 CRITICAL FIX: Navigate FIRST, then refresh in background
+    // ============================================================
+
+    // ✅ Step 9: Show success message
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '✅ ${_getRoleDisplayName(role)} profile created successfully!',
+          ),
+          backgroundColor: Colors.green,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
+
+    // ✅ Step 10: Navigate IMMEDIATELY (before refresh)
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+
+      debugPrint('🎯 Navigating directly to dashboard: $role');
+
+      try {
+        switch (role) {
+          case 'owner':
+            context.go('/owner');
+            break;
+          case 'barber':
+            context.go('/barber');
+            break;
+          case 'customer':
+            context.go('/customer');
+            break;
+          default:
+            context.go('/');
+        }
+      } catch (e) {
+        debugPrint('❌ Navigation error: $e');
+      }
+    });
+
+    // ✅ Step 11: Refresh app state in BACKGROUND
+    appState
+        .refreshState()
+        .then((_) {
+          debugPrint('✅ App state refreshed in background');
+        })
+        .catchError((e) {
+          debugPrint('❌ Background refresh error: $e');
+        });
+
+    // ✅ Step 12: Clear loading state after delay
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    });
+  } catch (e) {
+    debugPrint('❌ Error creating profile directly: $e');
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error creating profile: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+    if (mounted) {
+      setState(() => _isLoading = false);
+    }
+  }
+}
+
+  // ============================================================
+  // 🔥 HELPER: Get user provider
+  // ============================================================
+  Future<String> _getUserProvider(User user, String? photoUrl) async {
+    if (photoUrl != null && photoUrl.isNotEmpty) {
+      if (photoUrl.contains('googleusercontent.com')) return 'google';
+      if (photoUrl.contains('fbcdn.net') ||
+          photoUrl.contains('facebook.com') ||
+          photoUrl.contains('platform-lookaside.fbsbx.com')) {
+        return 'facebook';
+      }
+      if (photoUrl.contains('apple.com')) return 'apple';
+    }
+
+    final provider = user.appMetadata['provider'];
+    if (provider != null) return provider.toString();
+
+    return 'email';
   }
 
   // ============================================================
@@ -487,12 +761,12 @@ class _SideMenuState extends State<SideMenu> {
   }
 
   // ============================================================
-  // 🔥 UPDATED PROFILE HEADER - FIXED OVERFLOW
+  // 🔥 PROFILE HEADER
   // ============================================================
   Widget _buildProfileHeader() {
     final hasMultipleProfiles = _availableProfiles.length > 1;
     final otherProfilesCount = _availableProfiles
-        .where((p) => p['is_current'] != true)
+        .where((p) => p['is_current'] != true && p['is_active'] == true)
         .length;
     final canCreateNewProfile = _allUserRoles.length < 3;
 
@@ -511,7 +785,6 @@ class _SideMenuState extends State<SideMenu> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Profile Row - FIXED OVERFLOW
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -563,7 +836,6 @@ class _SideMenuState extends State<SideMenu> {
                                 )
                               : null,
                         ),
-                        // Multiple profiles badge
                         if (hasMultipleProfiles)
                           Positioned(
                             bottom: 0,
@@ -592,12 +864,10 @@ class _SideMenuState extends State<SideMenu> {
                     ),
                   ),
                   const SizedBox(width: 16),
-                  // Profile Info - Expanded takes remaining space
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // Name row with buttons
                         Row(
                           children: [
                             Expanded(
@@ -612,7 +882,6 @@ class _SideMenuState extends State<SideMenu> {
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),
-                            // Show SWAP icon only when multiple profiles exist
                             if (hasMultipleProfiles)
                               GestureDetector(
                                 onTap: () {
@@ -638,7 +907,6 @@ class _SideMenuState extends State<SideMenu> {
                                   ),
                                 ),
                               ),
-                            // Show ADD icon when single profile but can create new
                             if (!hasMultipleProfiles && canCreateNewProfile)
                               GestureDetector(
                                 onTap: () {
@@ -680,7 +948,6 @@ class _SideMenuState extends State<SideMenu> {
                           ),
                         ],
                         const SizedBox(height: 8),
-                        // Role badge
                         Container(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 10,
@@ -704,7 +971,6 @@ class _SideMenuState extends State<SideMenu> {
                   ),
                 ],
               ),
-              // Profile Switcher Section
               if (_showProfileSwitcher &&
                   (hasMultipleProfiles || canCreateNewProfile))
                 _buildProfileSwitcherSection(),
@@ -716,11 +982,11 @@ class _SideMenuState extends State<SideMenu> {
   }
 
   // ============================================================
-  // 🔥 PROFILE SWITCHER SECTION - CLEAN MODERN DESIGN
+  // 🔥 PROFILE SWITCHER SECTION
   // ============================================================
   Widget _buildProfileSwitcherSection() {
     final otherProfiles = _availableProfiles
-        .where((p) => p['is_current'] != true)
+        .where((p) => p['is_current'] != true && p['is_active'] == true)
         .toList();
 
     final hasMultipleProfiles = _availableProfiles.length > 1;
@@ -743,13 +1009,10 @@ class _SideMenuState extends State<SideMenu> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Show other profiles if multiple profiles exist
           if (hasMultipleProfiles && otherProfiles.isNotEmpty)
             ...otherProfiles.map(
               (profile) => _buildProfileSwitcherItem(profile),
             ),
-
-          // Show Create New Profile button if user doesn't have all roles
           if (canCreateNewProfile) _buildCreateNewProfileItem(),
         ],
       ),
@@ -757,7 +1020,7 @@ class _SideMenuState extends State<SideMenu> {
   }
 
   // ============================================================
-  // 🔥 PROFILE SWITCHER ITEM - MODERN DESIGN
+  // 🔥 PROFILE SWITCHER ITEM
   // ============================================================
   Widget _buildProfileSwitcherItem(Map<String, dynamic> profile) {
     return InkWell(
@@ -769,7 +1032,6 @@ class _SideMenuState extends State<SideMenu> {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         child: Row(
           children: [
-            // Profile image
             Container(
               width: 50,
               height: 50,
@@ -801,12 +1063,10 @@ class _SideMenuState extends State<SideMenu> {
                   : null,
             ),
             const SizedBox(width: 14),
-            // Profile details - Expanded to prevent overflow
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Name and badges row - FIXED: Wrap instead of Row
                   Wrap(
                     crossAxisAlignment: WrapCrossAlignment.center,
                     spacing: 6,
@@ -840,33 +1100,18 @@ class _SideMenuState extends State<SideMenu> {
                           ),
                         ),
                       ),
-                      if (profile['is_active'] == false)
+                      if (profile['is_current'] == true)
                         Container(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 6,
                             vertical: 3,
                           ),
                           decoration: BoxDecoration(
-                            color: Colors.orange,
+                            color: Colors.green,
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: const Text(
-                            'Inactive',
-                            style: TextStyle(fontSize: 8, color: Colors.white),
-                          ),
-                        ),
-                      if (profile['is_blocked'] == true)
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 3,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.red,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: const Text(
-                            'Blocked',
+                            'Active',
                             style: TextStyle(fontSize: 8, color: Colors.white),
                           ),
                         ),
@@ -882,7 +1127,6 @@ class _SideMenuState extends State<SideMenu> {
                 ],
               ),
             ),
-            // Arrow icon
             Container(
               padding: const EdgeInsets.all(6),
               decoration: BoxDecoration(
@@ -1251,19 +1495,20 @@ class _SideMenuState extends State<SideMenu> {
 
   void _navigateToSettings(BuildContext context) {
     try {
-      switch (widget.userRole) {
-        case 'owner':
-          context.push('/owner/settings');
-          break;
-        case 'barber':
-          context.push('/barber/settings');
-          break;
-        case 'customer':
-          context.push('/customer/settings');
-          break;
-        default:
-          context.push('/settings');
-      }
+       context.push('/settings');
+      // switch (widget.userRole) {
+      //   case 'owner':
+      //     context.push('/owner/settings');
+      //     break;
+      //   case 'barber':
+      //     context.push('/barber/settings');
+      //     break;
+      //   case 'customer':
+      //     context.push('/customer/settings');
+      //     break;
+      //   default:
+      //     context.push('/settings');
+      // }
     } catch (e) {
       debugPrint('Settings navigation error: $e');
     }

@@ -4,7 +4,6 @@ import 'package:flutter_application_1/screens/authantication/command/welcome.dar
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:universal_platform/universal_platform.dart';
 import 'package:go_router/go_router.dart';
-// import 'package:flutter_application_1/screens/authantication/business_reg/company_name_screen.dart';
 import 'package:flutter_application_1/screens/authantication/customer_reg/name_screen.dart';
 import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
 import 'package:flutter_application_1/screens/authantication/functions/loading_overlay.dart';
@@ -33,13 +32,11 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
   String? roles;
   String? firstName;
   String? lastName;
-  String? companyName;
   String? phone;
 
   // Flags
   bool _isNewProfile = false;
   bool _isLoading = false;
-
   bool _didCheckQueryParams = false;
 
   // Cache role IDs
@@ -49,7 +46,6 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
   void initState() {
     super.initState();
     debugPrint('📍 RegistrationFlow initState');
-
     _controller = PageController(initialPage: 0);
     _loadRoleIds();
   }
@@ -74,7 +70,6 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-
     if (!_didCheckQueryParams) {
       _didCheckQueryParams = true;
       _checkQueryParameters();
@@ -93,9 +88,7 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
   void _checkQueryParameters() {
     try {
       final GoRouterState state = GoRouterState.of(context);
-
       debugPrint('📍 GoRouterState path: ${state.path}');
-      debugPrint('📍 GoRouterState full URI: ${state.uri.toString()}');
       debugPrint('📍 GoRouterState query params: ${state.uri.queryParameters}');
 
       final role = state.uri.queryParameters['role'];
@@ -121,7 +114,6 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
           roles = null;
           _isNewProfile = false;
         });
-
         debugPrint('📱 First time registration - showing welcome screen');
       }
     } catch (e) {
@@ -144,7 +136,6 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
 
     if (_isNewProfile) {
       debugPrint('📍 New profile - going to $roles dashboard');
-
       if (context.canPop()) {
         context.pop();
       } else {
@@ -166,11 +157,9 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
       if (_controller.hasClients) {
         if (_controller.page! > 0) {
           debugPrint('📍 Going to previous page in flow');
-
           setState(() {
             roles = null;
           });
-
           _controller
               .previousPage(
                 duration: const Duration(milliseconds: 300),
@@ -220,6 +209,7 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
                 else
                   const SizedBox.shrink(),
 
+                // PAGE 1: NAME ENTRY
                 NameEntry(
                   onNext: (f, l) {
                     setState(() {
@@ -231,48 +221,6 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
                   controller: _controller,
                   onBack: _handleBack,
                 ),
-
-                // // PAGE 1: ROLE-SPECIFIC FORMS
-                // if (roles == 'customer') ...[
-                //   NameEntry(
-                //     onNext: (f, l) {
-                //       setState(() {
-                //         firstName = f;
-                //         lastName = l;
-                //       });
-                //       _createProfile();
-                //     },
-                //     controller: _controller,
-                //     onBack: _handleBack,
-                //   ),
-                // ],
-
-                // if (roles == 'owner') ...[
-                //   CompanyNameScreen(
-                //     onNext: (n) {
-                //       setState(() {
-                //         companyName = n;
-                //       });
-                //       _createProfile();
-                //     },
-                //     controller: _controller,
-                //     onBack: _handleBack,
-                //   ),
-                // ],
-
-                // if (roles == 'barber') ...[
-                //   NameEntry(
-                //     onNext: (f, l) {
-                //       setState(() {
-                //         firstName = f;
-                //         lastName = l;
-                //       });
-                //       _createProfile();
-                //     },
-                //     controller: _controller,
-                //     onBack: _handleBack,
-                //   ),
-                // ],
               ],
             ),
     );
@@ -282,12 +230,10 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
   // 🔥 GET ROLE ID FROM CACHE OR DATABASE
   // ============================================================
   Future<int> _getRoleId(String roleName) async {
-    // Check cache first
     if (_roleIds != null && _roleIds!.containsKey(roleName)) {
       return _roleIds![roleName]!;
     }
 
-    // If not in cache, fetch from database
     final response = await Supabase.instance.client
         .from('roles')
         .select('id')
@@ -317,7 +263,7 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
   }
 
   // ============================================================
-  // 🔥 GET USER'S EXISTING ROLES
+  // 🔥 GET USER'S EXISTING ROLES (Only active ones)
   // ============================================================
   Future<List<String>> _getUserRoles(String userId) async {
     try {
@@ -325,15 +271,39 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
           .from('user_roles')
           .select('''
             role_id,
-            roles!inner (
-              name
-            )
+            roles!inner (name),
+            status
           ''')
-          .eq('user_id', userId);
+          .eq('user_id', userId)
+          .eq('status', 'active'); // ✅ Only get active roles
 
       return response.map((r) => r['roles']['name'] as String).toList();
     } catch (e) {
       debugPrint('Error getting user roles: $e');
+      return [];
+    }
+  }
+
+  // ============================================================
+  // 🔥 GET USER'S ALL ROLES (Including inactive)
+  // ============================================================
+  Future<List<Map<String, dynamic>>> _getAllUserRolesWithStatus(String userId) async {
+    try {
+      final response = await Supabase.instance.client
+          .from('user_roles')
+          .select('''
+            role_id,
+            roles!inner (name),
+            status
+          ''')
+          .eq('user_id', userId);
+
+      return response.map((r) => {
+        'role': r['roles']['name'] as String,
+        'status': r['status'] as String? ?? 'active',
+      }).toList();
+    } catch (e) {
+      debugPrint('Error getting all user roles: $e');
       return [];
     }
   }
@@ -383,51 +353,17 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
       return;
     }
 
-    // Role-specific validation
-    // if (roles == 'owner') {
-    //   if (companyName == null || companyName!.isEmpty) {
-    //     if (mounted) {
-    //       await showCustomAlert(
-    //         context: context,
-    //         title: "Error",
-    //         message: "Please enter your company name.",
-    //         isError: true,
-    //       );
-    //     }
-    //     return;
-    //   }
-    // } else if (roles == 'barber' || roles == 'customer') {
-    //   if (firstName == null ||
-    //       lastName == null ||
-    //       firstName!.isEmpty ||
-    //       lastName!.isEmpty) {
-    //     if (mounted) {
-    //       await showCustomAlert(
-    //         context: context,
-    //         title: "Error",
-    //         message: "Please enter your full name.",
-    //         isError: true,
-    //       );
-    //     }
-    //     return;
-    //   }
-    // }
-
-    if (roles == 'barber' || roles == 'customer') {
-      if (firstName == null ||
-          lastName == null ||
-          firstName!.isEmpty ||
-          lastName!.isEmpty) {
-        if (mounted) {
-          await showCustomAlert(
-            context: context,
-            title: "Error",
-            message: "Please enter your full name.",
-            isError: true,
-          );
-        }
-        return;
+    // ✅ Validation
+    if (firstName == null || lastName == null || firstName!.isEmpty || lastName!.isEmpty) {
+      if (mounted) {
+        await showCustomAlert(
+          context: context,
+          title: "Error",
+          message: "Please enter your full name.",
+          isError: true,
+        );
       }
+      return;
     }
 
     if (!mounted) return;
@@ -441,41 +377,32 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
       final roleId = await _getRoleId(roles!);
 
       // 🔥 Generate full name
-      String? fullName;
-      Map<String, dynamic> extraData = {};
+      final fullName = "${firstName!.trim()} ${lastName!.trim()}";
 
-      // if (roles == 'owner') {
-      //   fullName = companyName!.trim();
-      //   extraData = {
-      //     'company_name': companyName!.trim(),
-      //     'business_type': 'salon',
-      //     'registration_date': DateTime.now().toIso8601String(),
-      //     'role': 'owner',
-      //   };
-      //   if (phone != null && phone!.isNotEmpty) extraData['phone'] = phone;
-      // } else {
-      //   fullName = "${firstName!.trim()} ${lastName!.trim()}";
-      //   extraData = {
-      //     'full_name': fullName,
-      //     'first_name': firstName!.trim(),
-      //     'last_name': lastName!.trim(),
-      //     'registered_at': DateTime.now().toIso8601String(),
-      //     'role': roles,
-      //   };
-      //   if (phone != null && phone!.isNotEmpty) extraData['phone'] = phone;
-      // }
-
-      fullName = "${firstName!.trim()} ${lastName!.trim()}";
-      extraData = {
+      // 🔥 Build extra_data with role and status
+      final Map<String, dynamic> extraData = {
         'full_name': fullName,
         'first_name': firstName!.trim(),
         'last_name': lastName!.trim(),
         'registered_at': DateTime.now().toIso8601String(),
         'role': roles,
+        // ✅ Store role with status in extra_data (Role Level Status)
+        'profile_${roles}': {
+          'role': roles,
+          'status': 'active',
+          'created_at': DateTime.now().toIso8601String(),
+        },
+        // ✅ Also set profile level status to active
+        'profile_status': {
+          'status': 'active',
+          'created_at': DateTime.now().toIso8601String(),
+          'updated_at': DateTime.now().toIso8601String(),
+        }
       };
+
       if (phone != null && phone!.isNotEmpty) extraData['phone'] = phone;
 
-      String platform = isWeb
+      final platform = isWeb
           ? 'web'
           : (isAndroid ? 'android' : (isIOS ? 'ios' : 'mobile'));
 
@@ -487,7 +414,7 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
           .maybeSingle();
 
       if (existingProfile == null) {
-        // 🔥 NEW USER - Create profile first
+        // 🔥 NEW USER - Create profile
         debugPrint('➕ Creating new profile for user');
 
         await supabase.from('profiles').insert({
@@ -510,19 +437,33 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
         final existingExtra =
             existingProfile['extra_data'] as Map<String, dynamic>? ?? {};
 
+        // ✅ Merge extra_data keeping existing profile data
+        final mergedExtra = {
+          ...existingExtra,
+          ...extraData,
+        };
+
+        // ✅ Update profile level status if exists
+        if (!mergedExtra.containsKey('profile_status')) {
+          mergedExtra['profile_status'] = {
+            'status': 'active',
+            'created_at': DateTime.now().toIso8601String(),
+            'updated_at': DateTime.now().toIso8601String(),
+          };
+        } else {
+          final profileStatus = mergedExtra['profile_status'] as Map<String, dynamic>;
+          profileStatus['status'] = 'active';
+          profileStatus['updated_at'] = DateTime.now().toIso8601String();
+        }
+
         await supabase
             .from('profiles')
             .update({
               'email': email,
               'full_name': fullName,
               'avatar_url':
-                  user.userMetadata?['avatar_url'] ??
-                  user.userMetadata?['picture'],
-              'extra_data': {
-                ...existingExtra,
-                ...extraData,
-                'updated_at': DateTime.now().toIso8601String(),
-              },
+                  user.userMetadata?['avatar_url'] ?? user.userMetadata?['picture'],
+              'extra_data': mergedExtra,
               'platform': platform,
               'is_active': true,
               'updated_at': DateTime.now().toIso8601String(),
@@ -534,22 +475,38 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
       final hasRole = await _userHasRole(user.id, roleId);
 
       if (!hasRole) {
-        // 🔥 Assign role to user
-        debugPrint('➕ Assigning role ${roles!} to user');
+        // 🔥 Assign role to user with status 'active'
+        debugPrint('➕ Assigning role ${roles!} to user with status active');
 
         await supabase.from('user_roles').insert({
           'user_id': user.id,
           'role_id': roleId,
+          'status': 'active', // ✅ New: status column
           'created_at': DateTime.now().toIso8601String(),
+          'updated_at': DateTime.now().toIso8601String(),
         });
+      } else {
+        // ✅ If role exists but might be inactive, update status to active
+        debugPrint('🔄 Updating existing role status to active');
+        await supabase
+            .from('user_roles')
+            .update({
+              'status': 'active',
+              'updated_at': DateTime.now().toIso8601String(),
+            })
+            .eq('user_id', user.id)
+            .eq('role_id', roleId);
       }
 
-      // 🔥 STEP 3: Get all user roles
+      // 🔥 STEP 3: Get all active user roles
       final userRoles = await _getUserRoles(user.id);
+      debugPrint('📝 Active user roles: $userRoles');
 
-      debugPrint('📝 User roles after update: $userRoles');
+      // 🔥 STEP 4: Get all user roles with status (for SessionManager)
+      final allRolesWithStatus = await _getAllUserRolesWithStatus(user.id);
+      debugPrint('📝 All roles with status: $allRolesWithStatus');
 
-      // 🔥 STEP 4: Update user metadata
+      // 🔥 STEP 5: Update user metadata
       final currentMetadata = user.userMetadata ?? {};
       Map<String, dynamic> metadataUpdate = {
         ...currentMetadata,
@@ -563,10 +520,10 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
 
       await supabase.auth.updateUser(UserAttributes(data: metadataUpdate));
 
-      // 🔥 STEP 5: Save to SessionManager
+      // 🔥 STEP 6: Save to SessionManager
       debugPrint('📱 Saving profile to SessionManager');
 
-      String? photoUrl =
+      final photoUrl =
           user.userMetadata?['avatar_url'] ?? user.userMetadata?['picture'];
 
       await SessionManager.saveUserProfile(
@@ -580,6 +537,22 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
       );
 
       await SessionManager.saveCurrentRole(roles!);
+      
+      // ✅ Sync profile status with SessionManager
+      await SessionManager.syncProfileStatusWithDB(
+        email: email,
+        role: roles!,
+      );
+
+      // ✅ Check if any roles need auto-restore
+      for (String role in userRoles) {
+        await SessionManager.autoRestoreProfileOnLogin(
+          email: email,
+          role: role,
+        );
+      }
+
+      // ✅ Refresh app state
       await appState.refreshState();
 
       if (mounted) {
@@ -587,19 +560,17 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
         setState(() => _isLoading = false);
 
         // Show success message
-        String title;
-        String message;
-
-        if (roles == 'owner') {
-          title = "🎉 Business Created!";
-          message = "Your business profile has been created successfully.";
-        } else if (roles == 'barber') {
-          title = "👋 Welcome Barber!";
-          message = "Your barber profile has been created successfully.";
-        } else {
-          title = "🎉 Welcome!";
-          message = "Your profile has been created successfully.";
-        }
+        final title = roles == 'owner' 
+            ? "🎉 Business Created!" 
+            : roles == 'barber' 
+                ? "👋 Welcome Barber!" 
+                : "🎉 Welcome!";
+        
+        final message = roles == 'owner'
+            ? "Your business profile has been created successfully."
+            : roles == 'barber'
+                ? "Your barber profile has been created successfully."
+                : "Your profile has been created successfully.";
 
         await showCustomAlert(
           context: context,
@@ -608,20 +579,19 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
           isError: false,
         );
 
-        // 🔥 STEP 6: Navigate based on roles
-        // if (mounted) {
-        //   if (userRoles.length > 1 && !_isNewProfile) {
-        //     // Multiple roles - show role selector
-        //     context.go(
-        //       '/role-selector',
-        //       extra: {'roles': userRoles, 'email': email, 'userId': user.id},
-        //     );
-        //   } else {
-        //     // Single role - go to appropriate dashboard
-        //     _redirectBasedOnRole(roles!);
-        //   }
-        // }
-        _redirectBasedOnRole(roles!);
+        // 🔥 STEP 7: Navigate based on roles
+        if (mounted) {
+          if (userRoles.length > 1 && !_isNewProfile) {
+            // Multiple roles - show role selector
+            context.go(
+              '/role-selector',
+              extra: {'roles': userRoles, 'email': email, 'userId': user.id},
+            );
+          } else {
+            // Single role - go to appropriate dashboard
+            _redirectBasedOnRole(roles!);
+          }
+        }
       }
     } catch (e) {
       debugPrint('❌ Profile creation error: $e');
@@ -666,17 +636,43 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
   void _redirectBasedOnRole(String role) {
     if (!mounted) return;
 
-    switch (role) {
-      case 'owner':
-        context.go('/owner');
-        break;
-      case 'barber':
-        context.go('/barber');
-        break;
-      default:
-        context.go('/customer');
-        break;
-    }
+    // ✅ Check if user has valid session before redirect
+    SessionManager.isUserLoggedIn(widget.user?.email ?? '').then((isLoggedIn) {
+      if (!mounted) return;
+      
+      if (!isLoggedIn) {
+        debugPrint('⚠️ User not logged in, redirecting to login');
+        context.go('/login');
+        return;
+      }
+      
+      switch (role) {
+        case 'owner':
+          context.go('/owner');
+          break;
+        case 'barber':
+          context.go('/barber');
+          break;
+        default:
+          context.go('/customer');
+          break;
+      }
+    }).catchError((e) {
+      debugPrint('❌ Error checking session: $e');
+      if (mounted) {
+        switch (role) {
+          case 'owner':
+            context.go('/owner');
+            break;
+          case 'barber':
+            context.go('/barber');
+            break;
+          default:
+            context.go('/customer');
+            break;
+        }
+      }
+    });
   }
 
   void _nextPage() => _controller.nextPage(

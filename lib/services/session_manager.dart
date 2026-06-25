@@ -26,11 +26,11 @@ class SessionManager {
   // Current consent version
   static const String _currentConsentVersion = '2.1';
 
-  // 🔥 FIX: Operation locks to prevent infinite loops
+  // Operation locks to prevent infinite loops
   static bool _isSavingProfile = false;
   static bool _isSavingRoles = false;
   static bool _isUpdatingAvailableProfiles = false;
-  static Map<String, DateTime> lastOperationTimes = {};
+  static Map<String, DateTime> _lastOperationTimes = {};
 
   // Initialize
   static Future<void> init() async {
@@ -137,10 +137,9 @@ class SessionManager {
   }
 
   // =====================================================
-  // ✅ MAIN PROFILE FUNCTIONS - FIXED VERSION
+  // ✅ MAIN PROFILE FUNCTIONS
   // =====================================================
 
-  // 🔥 FIXED: Save COMPLETE user profile locally (with role array) - NO LOOP
   static Future<void> saveUserProfile({
     required String email,
     required String userId,
@@ -157,24 +156,21 @@ class SessionManager {
     DateTime? marketingConsentAt,
     String? appVersion,
   }) async {
-    // 🔥 PREVENT RECURSIVE CALLS
     if (_isSavingProfile) {
       debugPrint('⏭️ Already saving profile for $email, skipping recursive call');
       return;
     }
 
-    // 🔥 THROTTLE: Prevent too frequent saves
     final operationKey = 'profile_$email';
     final now = DateTime.now();
-    final lastOp = lastOperationTimes[operationKey];
+    final lastOp = _lastOperationTimes[operationKey];
     if (lastOp != null && now.difference(lastOp) < Duration(milliseconds: 500)) {
       debugPrint('⏭️ Too frequent save for $email, skipping');
       return;
     }
 
-    // Set locks
     _isSavingProfile = true;
-    lastOperationTimes[operationKey] = now;
+    _lastOperationTimes[operationKey] = now;
     
     debugPrint('📝 Saving profile for: $email');
     debugPrint('📸 Photo URL provided: ${photo ?? "NULL"}');   
@@ -186,7 +182,6 @@ class SessionManager {
       final index = profiles.indexWhere((p) => p['email'] == email);
       final existingProfile = index != -1 ? profiles[index] : <String, dynamic>{};
 
-      // MERGE roles properly - this is key for multiple roles
       List<String> userRoles = [];
       
       if (roles != null && roles.isNotEmpty) {
@@ -195,7 +190,6 @@ class SessionManager {
         userRoles = List<String>.from(existingProfile['roles'] as List);
       }
 
-      // If we have existing profile and new roles, MERGE them (no duplicates)
       if (index != -1 && roles != null && roles.isNotEmpty) {
         final existingRoles = List<String>.from(existingProfile['roles'] ?? []);
         userRoles = {...existingRoles.toSet(), ...roles.toSet()}.toList();
@@ -204,7 +198,6 @@ class SessionManager {
 
       debugPrint('📋 Final roles after merge: $userRoles');
 
-      // Photo handling
       String? finalPhoto;
       if (photo != null && photo.isNotEmpty) {
         finalPhoto = photo;
@@ -215,7 +208,6 @@ class SessionManager {
         finalPhoto = '';
       }
 
-      // Provider selection
       String actualProvider;
       if (provider != null && provider.isNotEmpty && provider != 'email') {
         actualProvider = provider;
@@ -236,15 +228,12 @@ class SessionManager {
         actualProvider = existingProfile['provider'] as String? ?? 'email';
       }
 
-      // 🔥 IMPORTANT: Get existing lastLogin or set new one
       String? lastLogin;
       
       if (existingProfile.containsKey('lastLogin') && existingProfile['lastLogin'] != null) {
-        // Update existing lastLogin
         lastLogin = now.toIso8601String();
         debugPrint('⏰ Updating lastLogin for $email from ${existingProfile['lastLogin']} to $lastLogin');
       } else {
-        // First time login
         lastLogin = now.toIso8601String();
         debugPrint('⏰ Setting first lastLogin for $email: $lastLogin');
       }
@@ -285,7 +274,6 @@ class SessionManager {
         print('   - LastLogin: $lastLogin');
       }
 
-      // Save or update profile in local storage
       if (index == -1) {
         if (rememberMe) {
           profiles.add(profileData);
@@ -303,12 +291,9 @@ class SessionManager {
 
       await _prefs.setString(_keyProfiles, jsonEncode(profiles));
 
-      // 🔥 FIX: Save roles WITHOUT triggering recursion
       if (rememberMe && userRoles.isNotEmpty) {
-        // Directly save to prefs without calling saveUserRoles
         await _prefs.setStringList('$email$_keyUserRoles', userRoles);
         
-        // Update available profiles WITHOUT recursion
         final currentUserId = await getCurrentUserId();
         if (currentUserId != null) {
           final existingProfiles = await getAvailableProfiles();
@@ -340,13 +325,11 @@ class SessionManager {
         }
       }
 
-      // Set current user
       if (rememberMe) {
         await setCurrentUser(email);
         await _prefs.setBool(_showContinueKey, true);
         debugPrint('👤 Continue screen enabled');
         
-        // Don't auto-set current role if multiple roles
         if (userRoles.length == 1) {
           await saveCurrentRole(userRoles.first);
         }
@@ -360,7 +343,6 @@ class SessionManager {
 
       await setRememberMe(rememberMe);
 
-      // Save tokens
       if (refreshToken != null && refreshToken.isNotEmpty) {
         await _secureStorage.write(
           key: '${userId}_refresh_token',
@@ -383,13 +365,11 @@ class SessionManager {
       debugPrint('📚 Stack trace: $stackTrace');
       rethrow;
     } finally {
-      // 🔥 IMPORTANT: Always release locks
       _isSavingProfile = false;
       debugPrint('🔓 Profile saving lock released for $email');
     }
   }
 
-  // Get all saved profiles
   static Future<List<Map<String, dynamic>>> getProfiles() async {
     try {
       final jsonString = _prefs.getString(_keyProfiles) ?? '[]';
@@ -408,7 +388,6 @@ class SessionManager {
     }
   }
 
-  // Get profile by email
   static Future<Map<String, dynamic>?> getProfileByEmail(String email) async {
     try {
       final profiles = await getProfiles();
@@ -423,31 +402,28 @@ class SessionManager {
   }
 
   // =====================================================
-  // ✅ ROLE MANAGEMENT FUNCTIONS - FIXED
+  // ✅ ROLE MANAGEMENT FUNCTIONS
   // =====================================================
 
-  // 🔥 FIXED: Save ALL user roles (with merge) - SAFE VERSION
   static Future<void> saveUserRoles({
     required String email,
     required List<String> roles,
   }) async {
-    // 🔥 PREVENT RECURSIVE CALLS
     if (_isSavingRoles) {
       debugPrint('⏭️ Already saving roles for $email, skipping recursive call');
       return;
     }
 
-    // 🔥 THROTTLE
     final operationKey = 'roles_$email';
     final now = DateTime.now();
-    final lastOp = lastOperationTimes[operationKey];
+    final lastOp = _lastOperationTimes[operationKey];
     if (lastOp != null && now.difference(lastOp) < Duration(milliseconds: 500)) {
       debugPrint('⏭️ Too frequent roles save for $email, skipping');
       return;
     }
 
     _isSavingRoles = true;
-    lastOperationTimes[operationKey] = now;
+    _lastOperationTimes[operationKey] = now;
 
     try {
       debugPrint('📝 SessionManager.saveUserRoles START');  
@@ -457,18 +433,15 @@ class SessionManager {
       final profiles = await getProfiles();
       final index = profiles.indexWhere((p) => p['email'] == email);
       
-      // Get existing roles and MERGE (no duplicates)
       List<String> mergedRoles;
       
       if (index != -1) {
         final existingRoles = List<String>.from(profiles[index]['roles'] ?? []);
         mergedRoles = {...existingRoles.toSet(), ...roles.toSet()}.toList();
         
-        // Update existing profile's roles
         profiles[index]['roles'] = mergedRoles;
         profiles[index]['roles_updated_at'] = DateTime.now().toIso8601String();
         
-        // Save updated profiles
         await _prefs.setString(_keyProfiles, jsonEncode(profiles));
         
         debugPrint('📋 Merged roles: $mergedRoles');
@@ -476,10 +449,8 @@ class SessionManager {
         mergedRoles = roles;
       }
       
-      // Save as separate key for quick access
       await _prefs.setStringList('$email$_keyUserRoles', mergedRoles);
       
-      // Update available profiles - SAFELY
       if (!_isUpdatingAvailableProfiles) {
         await _updateAvailableProfiles(email, mergedRoles);
       }
@@ -492,16 +463,13 @@ class SessionManager {
     }
   }
 
-  // Get all user roles
   static Future<List<String>> getUserRoles(String email) async {
     try {
-      // Try quick access first
       final quickRoles = _prefs.getStringList('$email$_keyUserRoles');
       if (quickRoles != null) {
         return quickRoles;
       }
       
-      // Fallback to profiles
       final profile = await getProfileByEmail(email);
       if (profile != null && profile['roles'] != null) {
         final roles = List<String>.from(profile['roles'] as List);
@@ -515,7 +483,6 @@ class SessionManager {
     }
   }
 
-  // 🔥 FIXED: Save current selected role - MOST IMPORTANT FUNCTION
   static Future<void> saveCurrentRole(String? role) async {
     try {
       debugPrint('💾 ===== saveCurrentRole called =====');
@@ -528,7 +495,6 @@ class SessionManager {
         await _prefs.remove(_keyCurrentRole);
         debugPrint('✅ Cleared current role');
       } else {
-        // Check if user has this role
         if (email != null) {
           final userRoles = await getUserRoles(email);
           debugPrint('💾 User roles from storage: $userRoles');
@@ -539,15 +505,12 @@ class SessionManager {
           }
         }
         
-        // Save to SharedPreferences
         await _prefs.setString(_keyCurrentRole, role);
         debugPrint('✅ Saved current role to SharedPreferences: $role');
         
-        // Verify it was saved
         final savedRole = _prefs.getString(_keyCurrentRole);
         debugPrint('✅ Verified saved role: $savedRole');
         
-        // Update available profiles with last_used
         if (email != null) {
           final profiles = await getAvailableProfiles();
           final updatedProfiles = profiles.map((p) {
@@ -560,7 +523,6 @@ class SessionManager {
           debugPrint('✅ Updated last_used for role: $role');
         }
         
-        // Refresh app state
         appState.refreshState(silent: true);
         debugPrint('✅ AppState refreshed');
       }
@@ -571,13 +533,11 @@ class SessionManager {
     }
   }
 
-  // 🔥 FIXED: Get current selected role
   static Future<String?> getCurrentRole() async {
     try {
       final role = _prefs.getString(_keyCurrentRole);
       debugPrint('📖 Getting current role from SharedPreferences: $role');
       
-      // Verify with user roles
       final email = await getCurrentUserEmail();
       if (email != null && role != null) {
         final userRoles = await getUserRoles(email);
@@ -595,7 +555,6 @@ class SessionManager {
     }
   }
 
-  // Update user role (switch role)
   static Future<void> updateUserRole(String newRole) async {
     try {
       debugPrint('🔄 SessionManager.updateUserRole: $newRole');
@@ -606,14 +565,12 @@ class SessionManager {
         return;
       }
       
-      // Check if user has this role
       final roles = await getUserRoles(email);
       if (!roles.contains(newRole)) {
         debugPrint('❌ User does not have role: $newRole');
         return;
       }
       
-      // Save as current role
       await saveCurrentRole(newRole);
       
       debugPrint('✅ Successfully updated user role to: $newRole');
@@ -622,13 +579,11 @@ class SessionManager {
     }
   }
 
-  // Check if user has multiple roles
   static Future<bool> hasMultipleRoles(String email) async {
     final roles = await getUserRoles(email);
     return roles.length > 1;
   }
 
-  // Get primary role (most used)
   static Future<String?> getPrimaryRole(String email) async {
     try {
       final roles = await getUserRoles(email);
@@ -655,7 +610,6 @@ class SessionManager {
     }
   }
 
-  // Clear user roles
   static Future<void> clearUserRoles(String email) async {
     try {
       await _prefs.remove('$email$_keyUserRoles');
@@ -682,10 +636,9 @@ class SessionManager {
   }
 
   // =====================================================
-  // ✅ AVAILABLE PROFILES FUNCTIONS - FIXED
+  // ✅ AVAILABLE PROFILES FUNCTIONS
   // =====================================================
 
-  // Save all available profiles
   static Future<void> saveAvailableProfiles(List<Map<String, dynamic>> profiles) async {
     try {
       await _prefs.setString(_keyAvailableProfiles, jsonEncode(profiles));
@@ -695,7 +648,6 @@ class SessionManager {
     }
   }
 
-  // Get all available profiles
   static Future<List<Map<String, dynamic>>> getAvailableProfiles() async {
     try {
       final jsonString = _prefs.getString(_keyAvailableProfiles);
@@ -709,9 +661,7 @@ class SessionManager {
     }
   }
 
-  // 🔥 FIXED: Update available profiles list - SAFE VERSION
   static Future<void> _updateAvailableProfiles(String email, List<String> roles) async {
-    // 🔥 PREVENT RECURSIVE CALLS
     if (_isUpdatingAvailableProfiles) {
       debugPrint('⏭️ Already updating available profiles, skipping');
       return;
@@ -726,7 +676,6 @@ class SessionManager {
       final existingProfiles = await getAvailableProfiles();
       final currentRole = await getCurrentRole();
       
-      // Create profile entries for each role
       for (String role in roles) {
         final profileData = {
           'id': currentUserId,
@@ -756,7 +705,6 @@ class SessionManager {
     }
   }
 
-  // Get role ID from role name
   static int _getRoleIdFromName(String role) {
     switch (role) {
       case 'owner': return 1;
@@ -770,17 +718,14 @@ class SessionManager {
   // ✅ SESSION MANAGEMENT FUNCTIONS
   // =====================================================
 
-  // Set current user
   static Future<void> setCurrentUser(String email) async {
     await _prefs.setString(_currentUserKey, email);
   }
 
-  // Get current user email
   static Future<String?> getCurrentUserEmail() async {
     return _prefs.getString(_currentUserKey);
   }
 
-  // Get current user ID
   static Future<String?> getCurrentUserId() async {
     try {
       final email = await getCurrentUserEmail();
@@ -794,7 +739,6 @@ class SessionManager {
     }
   }
 
-  // Save user role (legacy - single role)
   static Future<void> saveUserRole(String role) async {
     try {
       final email = await getCurrentUserEmail();
@@ -820,19 +764,16 @@ class SessionManager {
     }
   }
 
-  // Get user role (legacy)
   static Future<String?> getUserRole() async {
     return getCurrentRole();
   }
 
-  // Check if has any profiles
   static Future<bool> hasProfile() async {
     final profiles = await getProfiles();
     debugPrint('📋 Checking profiles, count: ${profiles.length}');
     return profiles.isNotEmpty;
   }
 
-  // 🔥 UPDATE LAST LOGIN - IMPORTANT FIX
   static Future<void> updateLastLogin(String email) async {
     try {
       final profiles = await getProfiles();
@@ -851,7 +792,6 @@ class SessionManager {
     }
   }
 
-  // Remove profile
   static Future<void> removeProfile(String email) async {
     try {
       final profiles = await getProfiles();
@@ -887,6 +827,7 @@ class SessionManager {
   // =====================================================
   // ✅ GET MOST RECENT PROFILE
   // =====================================================
+
   static Future<Map<String, dynamic>?> getMostRecentProfile() async {
     try {
       final profiles = await getProfiles();
@@ -928,6 +869,7 @@ class SessionManager {
   // =====================================================
   // ✅ REMEMBER ME & CONTINUE SCREEN
   // =====================================================
+
   static Future<void> setRememberMe(bool enabled) async {
     await _prefs.setBool(_rememberMeKey, enabled);
     debugPrint('✅ Remember Me set to: $enabled');
@@ -961,7 +903,6 @@ class SessionManager {
   // ✅ AUTO-LOGIN & SESSION MANAGEMENT
   // =====================================================
   
-  // 🔥 UPDATED AUTO-LOGIN METHOD
   static Future<bool> tryAutoLogin(String email) async {
     try {
       debugPrint('===== ATTEMPTING AUTO-LOGIN =====');
@@ -977,15 +918,12 @@ class SessionManager {
       final currentUser = supabase.auth.currentUser;
       final currentSession = supabase.auth.currentSession;
 
-      // 🔥 Check if already logged in with valid session
       if (currentUser?.email == email && currentSession != null) {
         if (isSessionValid(currentSession)) {
           debugPrint('✅ AUTO-LOGIN SUCCESS: Already logged in');
           
-          // Update lastLogin time
           await updateLastLogin(email);
           
-          // Update roles if needed
           final roles = await getUserRoles(email);
           if (roles.isNotEmpty && await getCurrentRole() == null) {
             final primaryRole = await getPrimaryRole(email);
@@ -1006,7 +944,6 @@ class SessionManager {
         return false;
       }
 
-      // 🔥 Try to refresh session using refresh token
       final refreshToken = await _secureStorage.read(
         key: '${userId}_refresh_token',
       );
@@ -1019,19 +956,14 @@ class SessionManager {
       try {
         debugPrint('🔄 Attempting to restore session with secure token...');
         
-        // First try to refresh the session
         final response = await supabase.auth.refreshSession();
         
         if (response.session != null && response.user?.email == email) {
           debugPrint('✅ AUTO-LOGIN SUCCESS: Session refreshed');
           
-          // Update lastLogin time
           await updateLastLogin(email);
-          
-          // Update secure tokens
           await _updateSecureTokens(userId, response.session!);
           
-          // Update roles
           final roles = await getUserRoles(email);
           if (roles.isNotEmpty && await getCurrentRole() == null) {
             final primaryRole = await getPrimaryRole(email);
@@ -1043,7 +975,6 @@ class SessionManager {
           return true;
         }
         
-        // If refresh fails, try setSession with refresh token
         debugPrint('🔄 Refresh failed, attempting setSession...');
         await supabase.auth.setSession(refreshToken);
         await Future.delayed(const Duration(milliseconds: 500));
@@ -1054,13 +985,9 @@ class SessionManager {
         if (restoredUser?.email == email && restoredSession != null) {
           debugPrint('✅ AUTO-LOGIN SUCCESS: Session restored securely');
           
-          // Update lastLogin time
           await updateLastLogin(email);
-          
-          // Update secure tokens
           await _updateSecureTokens(userId, restoredSession);
           
-          // Update roles
           final roles = await getUserRoles(email);
           if (roles.isNotEmpty && await getCurrentRole() == null) {
             final primaryRole = await getPrimaryRole(email);
@@ -1085,7 +1012,486 @@ class SessionManager {
     }
   }
 
-  // 🔥 UPDATED LOGOUT FOR CONTINUE
+  // =====================================================
+  // ✅ NEW: SESSION + DB CHECK METHODS
+  // =====================================================
+
+  /// ✅ Check if user can login (Session + DB Combined)
+  static Future<Map<String, dynamic>> checkLoginStatus(String email) async {
+    try {
+      final supabase = Supabase.instance.client;
+      final user = supabase.auth.currentUser;
+      final session = supabase.auth.currentSession;
+      
+      // ✅ 1. Check local session
+      bool hasValidSession = false;
+      if (user != null && session != null && user.email == email) {
+        if (session.expiresAt != null) {
+          final expiryTime = DateTime.fromMillisecondsSinceEpoch(
+            session.expiresAt!,
+          );
+          hasValidSession = DateTime.now().isBefore(expiryTime);
+        } else {
+          hasValidSession = true;
+        }
+      }
+      
+      debugPrint('📊 Session check: hasValidSession=$hasValidSession');
+      
+      // ✅ 2. Check database for user status
+      bool isActive = false;
+      bool isBlocked = false;
+      bool isScheduledForDeletion = false;
+      bool isInactive = false;
+      bool profileExists = false;
+      String statusMessage = '';
+      String statusType = 'active';
+      
+      // Check profile
+      if (user != null) {
+        final profileCheck = await supabase
+            .from('profiles')
+            .select('is_blocked, is_active, extra_data')
+            .eq('id', user.id)
+            .maybeSingle();
+        
+        if (profileCheck != null) {
+          profileExists = true;
+          isActive = profileCheck['is_active'] ?? false;
+          isBlocked = profileCheck['is_blocked'] ?? false;
+          
+          // Check extra_data for status
+          final extraData = profileCheck['extra_data'] as Map<String, dynamic>? ?? {};
+          
+          // Check profile level status
+          final profileStatus = extraData['profile_status'] as Map<String, dynamic>?;
+          if (profileStatus != null) {
+            final status = profileStatus['status'] as String?;
+            if (status == 'scheduled_for_deletion') {
+              isScheduledForDeletion = true;
+            } else if (status == 'inactive') {
+              isInactive = true;
+            }
+          }
+          
+          // If no profile level status, check role level
+          if (!isScheduledForDeletion && !isInactive) {
+            final rolesResponse = await supabase
+                .from('user_roles')
+                .select('status')
+                .eq('user_id', user.id);
+            
+            for (var roleEntry in rolesResponse) {
+              final status = roleEntry['status'] as String? ?? 'active';
+              if (status == 'scheduled_for_deletion') {
+                isScheduledForDeletion = true;
+              }
+              if (status == 'inactive') {
+                isInactive = true;
+              }
+            }
+          }
+        }
+      }
+      
+      // ✅ 3. Determine login status
+      bool canLogin = false;
+      
+      // ❌ Blocked - Never allow login
+      if (isBlocked) {
+        canLogin = false;
+        statusMessage = 'Your account has been blocked. Please contact support.';
+        statusType = 'blocked';
+      }
+      // ❌ Inactive (deactivated) - Not scheduled for deletion
+      else if (isInactive && !isScheduledForDeletion) {
+        canLogin = false;
+        statusMessage = 'Your profile is deactivated. Please contact support.';
+        statusType = 'inactive';
+      }
+      // ✅ Scheduled for deletion - Allow login with auto-restore
+      else if (isScheduledForDeletion) {
+        canLogin = true;
+        statusMessage = 'Your profile is scheduled for deletion. Login to restore it.';
+        statusType = 'scheduled';
+      }
+      // ✅ Active - Allow login
+      else if (isActive || !profileExists) {
+        canLogin = true;
+        statusMessage = profileExists ? 'Profile is active.' : 'No profile found. Please complete registration.';
+        statusType = profileExists ? 'active' : 'no_profile';
+      }
+      
+      // ✅ 4. Check if session exists but DB says inactive
+      bool needsLogout = false;
+      if (hasValidSession && !canLogin && !isScheduledForDeletion) {
+        needsLogout = true;
+        debugPrint('⚠️ Session exists but user is inactive - force logout');
+      }
+      
+      return {
+        'canLogin': canLogin,
+        'hasValidSession': hasValidSession,
+        'status': statusType,
+        'message': statusMessage,
+        'isActive': isActive,
+        'isBlocked': isBlocked,
+        'isInactive': isInactive,
+        'isScheduledForDeletion': isScheduledForDeletion,
+        'needsAutoRestore': isScheduledForDeletion,
+        'needsLogout': needsLogout,
+        'profileExists': profileExists,
+      };
+    } catch (e) {
+      debugPrint('❌ Error checking login status: $e');
+      return {
+        'canLogin': false,
+        'hasValidSession': false,
+        'status': 'error',
+        'message': 'Error checking login status: $e',
+        'needsLogout': false,
+        'needsAutoRestore': false,
+      };
+    }
+  }
+
+  /// ✅ Check if user has valid session (local only)
+  static Future<bool> hasValidSession() async {
+    try {
+      final supabase = Supabase.instance.client;
+      final session = supabase.auth.currentSession;
+      final user = supabase.auth.currentUser;
+      
+      if (session == null || user == null) {
+        debugPrint('❌ No active session found');
+        return false;
+      }
+      
+      if (session.expiresAt != null) {
+        final expiryTime = DateTime.fromMillisecondsSinceEpoch(
+          session.expiresAt!,
+        );
+        final now = DateTime.now();
+        
+        if (now.isAfter(expiryTime)) {
+          debugPrint('❌ Session expired at: $expiryTime');
+          return false;
+        }
+      }
+      
+      debugPrint('✅ Valid session found for user: ${user.email}');
+      return true;
+    } catch (e) {
+      debugPrint('❌ Error checking session: $e');
+      return false;
+    }
+  }
+
+  /// ✅ Check if user is logged in (Session + DB)
+  static Future<bool> isUserLoggedIn(String email) async {
+    try {
+      final status = await checkLoginStatus(email);
+      return status['canLogin'] == true && status['hasValidSession'] == true;
+    } catch (e) {
+      debugPrint('❌ Error checking user login status: $e');
+      return false;
+    }
+  }
+
+  /// ✅ Check if user has been logged out
+  static Future<bool> isUserLoggedOut(String email) async {
+    try {
+      final status = await checkLoginStatus(email);
+      return status['hasValidSession'] == false || status['needsLogout'] == true;
+    } catch (e) {
+      debugPrint('❌ Error checking logout status: $e');
+      return true;
+    }
+  }
+
+  /// ✅ Get session status with details
+  static Future<Map<String, dynamic>> getSessionStatus(String email) async {
+    try {
+      final supabase = Supabase.instance.client;
+      final user = supabase.auth.currentUser;
+      final session = supabase.auth.currentSession;
+      
+      final result = <String, dynamic>{
+        'email': email,
+        'has_user': user != null,
+        'has_session': session != null,
+        'is_logged_in': false,
+        'session_expired': false,
+        'user_matches': false,
+        'db_status': {},
+      };
+      
+      if (user != null) {
+        result['user_matches'] = user.email == email;
+        
+        // Check DB
+        try {
+          final response = await supabase.rpc(
+            'check_user_active_sessions',
+            params: {
+              'p_user_id': user.id,
+            },
+          );
+          if (response != null) {
+            result['db_status'] = response;
+          }
+        } catch (e) {
+          debugPrint('❌ DB session check failed: $e');
+        }
+        
+        // Check session
+        if (session != null) {
+          result['is_logged_in'] = true;
+          result['session_expires_at'] = session.expiresAt;
+          
+          if (session.expiresAt != null) {
+            final expiryTime = DateTime.fromMillisecondsSinceEpoch(
+              session.expiresAt!,
+            );
+            result['session_expired'] = DateTime.now().isAfter(expiryTime);
+            result['seconds_until_expiry'] = expiryTime.difference(DateTime.now()).inSeconds;
+          }
+        }
+        
+        // Combine with DB status
+        if (result['db_status']['is_logged_in'] == false && result['is_logged_in'] == true) {
+          result['is_logged_in'] = false;
+          result['stale_session'] = true;
+        }
+        
+        result['is_logged_in'] = result['is_logged_in'] && 
+                                 result['user_matches'] && 
+                                 !result['session_expired'];
+      }
+      
+      return result;
+    } catch (e) {
+      debugPrint('❌ Error getting session status: $e');
+      return {
+        'email': email,
+        'is_logged_in': false,
+        'error': e.toString(),
+      };
+    }
+  }
+
+  // =====================================================
+  // ✅ AUTO-RESTORE FUNCTIONS
+  // =====================================================
+
+  /// ✅ Auto-restore profile on login (Facebook style)
+  static Future<void> autoRestoreProfileOnLogin({
+    required String email,
+    required String role,
+  }) async {
+    try {
+      final supabase = Supabase.instance.client;
+      final user = supabase.auth.currentUser;
+      
+      if (user == null) return;
+      
+      debugPrint('🔄 Checking auto-restore for: $email - $role');
+      
+      // Call database function
+      final response = await supabase.rpc(
+        'auto_restore_role_on_login',
+        params: {
+          'p_user_id': user.id,
+          'p_role': role,
+        },
+      );
+      
+      final success = response['success'] as bool? ?? false;
+      
+      if (success && response['message']?.toString().contains('restored') == true) {
+        debugPrint('✅ Role auto-restored: $role');
+        
+        // Update local
+        await _updateLocalProfileStatus(email: email, role: role, status: 'active');
+        
+        // Add back to available profiles
+        final availableProfiles = await getAvailableProfiles();
+        final exists = availableProfiles.any((p) => 
+          p['email'] == email && p['role'] == role
+        );
+        
+        if (!exists) {
+          availableProfiles.add({
+            'id': user.id,
+            'email': email,
+            'role': role,
+            'role_id': _getRoleIdFromName(role),
+            'status': 'active',
+            'is_active': true,
+            'last_used': DateTime.now().toIso8601String(),
+            'restored_at': DateTime.now().toIso8601String(),
+          });
+          await saveAvailableProfiles(availableProfiles);
+        }
+        
+        // Remove schedule
+        await _prefs.remove('del_${email}_$role');
+        
+        // Refresh app state
+        appState.refreshState();
+      } else if (response['message']?.toString().contains('expired') == true) {
+        debugPrint('⚠️ Grace period expired for: $email - $role');
+      }
+      
+    } catch (e) {
+      debugPrint('❌ Error auto-restoring profile: $e');
+    }
+  }
+
+  /// ✅ Auto-restore entire profile on login
+  static Future<void> autoRestoreProfileLevelOnLogin({
+    required String email,
+  }) async {
+    try {
+      final supabase = Supabase.instance.client;
+      final user = supabase.auth.currentUser;
+      
+      if (user == null) return;
+      
+      debugPrint('🔄 Checking auto-restore for entire profile: $email');
+      
+      final response = await supabase.rpc(
+        'auto_restore_profile_level_on_login',
+        params: {
+          'p_user_id': user.id,
+        },
+      );
+      
+      final success = response['success'] as bool? ?? false;
+      
+      if (success && response['message']?.toString().contains('restored') == true) {
+        debugPrint('✅ Entire profile auto-restored');
+        await _updateLocalProfileLevelStatus(email: email, status: 'active');
+        await _prefs.remove('del_profile_$email');
+        appState.refreshState();
+      }
+      
+    } catch (e) {
+      debugPrint('❌ Error auto-restoring profile level: $e');
+    }
+  }
+
+  /// ✅ Update local profile status
+  static Future<void> _updateLocalProfileStatus({
+    required String email,
+    required String role,
+    required String status,
+  }) async {
+    try {
+      final availableProfiles = await getAvailableProfiles();
+      final updatedProfiles = availableProfiles.map((p) {
+        if (p['email'] == email && p['role'] == role) {
+          return {
+            ...p,
+            'status': status,
+            'is_active': status == 'active',
+            'is_scheduled_for_deletion': status == 'scheduled_for_deletion',
+            'status_updated_at': DateTime.now().toIso8601String(),
+          };
+        }
+        return p;
+      }).toList();
+      
+      final filteredProfiles = updatedProfiles.where((p) {
+        final status = p['status'] as String? ?? 'active';
+        return status == 'active';
+      }).toList();
+      
+      await saveAvailableProfiles(filteredProfiles);
+      debugPrint('✅ Local profile status updated: $role -> $status');
+      
+      if (status == 'deleted') {
+        final rolesKey = '$email$_keyUserRoles';
+        final cachedRoles = _prefs.getStringList(rolesKey) ?? [];
+        final updatedRoles = cachedRoles.where((r) => r != role).toList();
+        await _prefs.setStringList(rolesKey, updatedRoles);
+      }
+      
+    } catch (e) {
+      debugPrint('❌ Error updating local profile status: $e');
+    }
+  }
+
+  /// ✅ Update local profile level status
+  static Future<void> _updateLocalProfileLevelStatus({
+    required String email,
+    required String status,
+  }) async {
+    try {
+      final profiles = await getProfiles();
+      final index = profiles.indexWhere((p) => p['email'] == email);
+      
+      if (index != -1) {
+        final profile = profiles[index];
+        final extraData = profile['extra_data'] as Map<String, dynamic>? ?? {};
+        
+        if (!extraData.containsKey('profile_status')) {
+          extraData['profile_status'] = {};
+        }
+        
+        final profileStatus = extraData['profile_status'] as Map<String, dynamic>;
+        profileStatus['status'] = status;
+        profileStatus['updated_at'] = DateTime.now().toIso8601String();
+        
+        if (status == 'scheduled_for_deletion') {
+          final dueDate = DateTime.now().add(Duration(days: 90));
+          profileStatus['deletion_due_date'] = dueDate.toIso8601String();
+          profileStatus['deletion_scheduled_at'] = DateTime.now().toIso8601String();
+          profileStatus['grace_period_days'] = 90;
+        } else if (status == 'active') {
+          profileStatus.remove('deletion_due_date');
+          profileStatus.remove('deletion_scheduled_at');
+          profileStatus.remove('grace_period_days');
+          profileStatus['reactivated_at'] = DateTime.now().toIso8601String();
+        } else if (status == 'inactive') {
+          profileStatus['deactivated_at'] = DateTime.now().toIso8601String();
+        } else if (status == 'deleted') {
+          extraData.remove('profile_status');
+        }
+        
+        profile['extra_data'] = extraData;
+        profiles[index] = profile;
+        
+        await _prefs.setString(_keyProfiles, jsonEncode(profiles));
+        debugPrint('✅ Local profile level status updated: $status');
+      }
+    } catch (e) {
+      debugPrint('❌ Error updating local profile level status: $e');
+    }
+  }
+
+  /// ✅ Schedule entire profile for deletion
+  static Future<void> scheduleProfileLevelDeletion({
+    required String email,
+    int gracePeriodDays = 90,
+  }) async {
+    final deletionDate = DateTime.now().add(Duration(days: gracePeriodDays));
+    await _prefs.setString('del_profile_$email', deletionDate.toIso8601String());
+    debugPrint('🗑️ Entire profile scheduled for deletion: $email, due: $deletionDate');
+  }
+
+  /// ✅ Cancel profile level deletion
+  static Future<void> cancelProfileLevelDeletion({
+    required String email,
+  }) async {
+    await _prefs.remove('del_profile_$email');
+    debugPrint('✅ Profile deletion canceled: $email');
+  }
+
+  // =====================================================
+  // ✅ LOGOUT FUNCTIONS
+  // =====================================================
+
   static Future<void> logoutForContinue() async {
     try {
       final supabase = Supabase.instance.client;
@@ -1094,12 +1500,10 @@ class SessionManager {
       final rememberMe = await isRememberMeEnabled();
 
       if (user != null && email != null && email == user.email) {
-        // Get current session before logout
         final currentSession = supabase.auth.currentSession;
         final refreshToken = currentSession?.refreshToken;
 
         if (rememberMe && refreshToken != null) {
-          // Save refresh token BEFORE logout
           await saveUserProfile(
             email: email,
             userId: user.id,
@@ -1112,14 +1516,11 @@ class SessionManager {
         }
       }
 
-      // Sign out from Supabase
       await supabase.auth.signOut();
 
-      // 🔥 CRITICAL: Clear current role on logout
       await _prefs.remove(_keyCurrentRole);
       debugPrint('✅ Cleared current role on logout');
 
-      // Save current user for continue screen if remember me is enabled
       if (email != null && rememberMe) {
         await setCurrentUser(email);
         await _prefs.setBool(_showContinueKey, true);
@@ -1134,7 +1535,43 @@ class SessionManager {
     }
   }
 
-  // Clear all
+  static Future<void> logoutUser() async {
+    try {
+      final supabase = Supabase.instance.client;
+      final user = supabase.auth.currentUser;
+      
+      if (user != null) {
+        // Update last_logout in database
+        await supabase
+            .from('profiles')
+            .update({
+              'last_logout': DateTime.now().toIso8601String(),
+              'updated_at': DateTime.now().toIso8601String(),
+            })
+            .eq('id', user.id);
+        
+        debugPrint('✅ Updated last_logout for user: ${user.email}');
+      }
+      
+      await supabase.auth.signOut();
+      
+      final email = await getCurrentUserEmail();
+      if (email != null) {
+        await _prefs.remove(_keyCurrentRole);
+        await clearContinueScreen();
+      }
+      
+      debugPrint('✅ User logged out successfully');
+    } catch (e) {
+      debugPrint('❌ Error during logout: $e');
+      rethrow;
+    }
+  }
+
+  // =====================================================
+  // ✅ CLEAR ALL
+  // =====================================================
+
   static Future<void> clearAll() async {
     try {
       debugPrint('🧹 SessionManager.clearAll() started');
@@ -1161,7 +1598,6 @@ class SessionManager {
     }
   }
 
-  // Validate and refresh session
   static Future<void> validateAndRefreshSession() async {
     try {
       final supabase = Supabase.instance.client;
@@ -1197,6 +1633,7 @@ class SessionManager {
   // =====================================================
   // ✅ DEBUG FUNCTIONS
   // =====================================================
+
   static Future<void> debugPrintLocalProfiles() async {
     try {
       final profiles = await getProfiles();
@@ -1221,6 +1658,7 @@ class SessionManager {
   // =====================================================
   // ✅ PRIVATE HELPER METHODS
   // =====================================================
+
   static Future<void> _updateSecureTokens(
     String userId,
     Session session,
@@ -1283,7 +1721,6 @@ class SessionManager {
     synchronizable: true,
   );
 
-  // Check if user has valid Supabase session
   static Future<bool> hasValidSupabaseSession(String email) async {
     try {
       final supabase = Supabase.instance.client;
@@ -1307,12 +1744,10 @@ class SessionManager {
     }
   }
 
-  // Restore session from storage
   static Future<bool> restoreSessionFromStorage(String email) async {
     return tryAutoLogin(email);
   }
 
-  // Save refresh token
   static Future<void> saveRefreshToken(
     String email,
     String? refreshToken,
@@ -1344,7 +1779,6 @@ class SessionManager {
     }
   }
 
-  // Get refresh token
   static Future<String?> getRefreshToken(String email) async {
     try {
       final profile = await getProfileByEmail(email);
@@ -1360,7 +1794,6 @@ class SessionManager {
     }
   }
 
-  // Get active session count
   static Future<int> getActiveSessionCount() async {
     try {
       final profiles = await getProfiles();
@@ -1382,7 +1815,6 @@ class SessionManager {
     }
   }
 
-  // Clean up expired sessions
   static Future<void> cleanupExpiredSessions() async {
     try {
       final profiles = await getProfiles();
@@ -1409,6 +1841,7 @@ class SessionManager {
   // =====================================================
   // ✅ GDPR FUNCTIONS
   // =====================================================
+
   static Future<Map<String, dynamic>> exportUserData(String email) async {
     try {
       final profile = await getProfileByEmail(email);
@@ -1452,7 +1885,6 @@ class SessionManager {
     }
   }
 
-  // Secure storage health check
   static Future<bool> checkSecureStorageHealth() async {
     try {
       const testKey = 'health_check_key';
@@ -1474,4 +1906,503 @@ class SessionManager {
       return false;
     }
   }
+
+  // =====================================================
+// ✅ PROFILE STATUS SYNC METHODS - ADD TO SESSIONMANAGER
+// =====================================================
+
+/// ✅ Sync profile status with database
+static Future<void> syncProfileStatusWithDB({
+  required String email,
+  required String role,
+}) async {
+  try {
+    final supabase = Supabase.instance.client;
+    final user = supabase.auth.currentUser;
+    
+    if (user == null) {
+      debugPrint('⚠️ No user logged in, cannot sync');
+      return;
+    }
+    
+    debugPrint('🔄 Syncing profile status with DB: $email - $role');
+    
+    // ✅ Get status from database using RPC function
+    final response = await supabase.rpc(
+      'get_role_status',
+      params: {
+        'p_user_id': user.id,
+        'p_role': role,
+      },
+    );
+    
+    if (response != null) {
+      final status = response['status'] as String? ?? 'active';
+      final daysRemaining = response['days_remaining'] as int?;
+      
+      // ✅ Update local available profiles
+      final availableProfiles = await getAvailableProfiles();
+      final updatedProfiles = availableProfiles.map((p) {
+        if (p['email'] == email && p['role'] == role) {
+          return {
+            ...p,
+            'status': status,
+            'is_active': status == 'active',
+            'is_scheduled_for_deletion': status == 'scheduled_for_deletion',
+            'days_remaining': daysRemaining,
+            'db_synced_at': DateTime.now().toIso8601String(),
+          };
+        }
+        return p;
+      }).toList();
+      
+      await saveAvailableProfiles(updatedProfiles);
+      debugPrint('✅ Profile status synced: $status');
+    }
+    
+  } catch (e) {
+    debugPrint('❌ Error syncing profile status: $e');
+  }
+}
+
+/// ✅ Update profile status in database
+static Future<bool> updateProfileStatusInDB({
+  required String email,
+  required String role,
+  required String status, // 'active', 'inactive', 'scheduled_for_deletion', 'deleted'
+  int gracePeriodDays = 90,
+}) async {
+  try {
+    final supabase = Supabase.instance.client;
+    final user = supabase.auth.currentUser;
+    
+    if (user == null) {
+      debugPrint('⚠️ No user logged in');
+      return false;
+    }
+    
+    debugPrint('📝 Updating profile status in DB: $role -> $status');
+    
+    // ✅ Call database function
+    final response = await supabase.rpc(
+      'update_role_status',
+      params: {
+        'p_user_id': user.id,
+        'p_role': role,
+        'p_status': status,
+        'p_grace_period_days': gracePeriodDays,
+      },
+    );
+    
+    final success = response['success'] as bool? ?? false;
+    
+    if (success) {
+      debugPrint('✅ Profile status updated in DB: $status');
+      
+      // ✅ Update local SessionManager
+      await _updateLocalProfileStatus(email: email, role: role, status: status);
+      
+      return true;
+    } else {
+      debugPrint('❌ Failed to update status: ${response['message']}');
+      return false;
+    }
+  } catch (e) {
+    debugPrint('❌ Error updating profile status in DB: $e');
+    return false;
+  }
+}
+
+
+/// ✅ Deactivate profile
+static Future<void> deactivateProfile({
+  required String email,
+  required String role,
+}) async {
+  await updateProfileStatusInDB(
+    email: email,
+    role: role,
+    status: 'inactive',
+  );
+}
+
+/// ✅ Reactivate profile
+static Future<void> reactivateProfile({
+  required String email,
+  required String role,
+}) async {
+  await updateProfileStatusInDB(
+    email: email,
+    role: role,
+    status: 'active',
+  );
+}
+
+/// ✅ Schedule profile deletion
+static Future<void> scheduleProfileDeletion({
+  required String email,
+  required String role,
+  int gracePeriodDays = 90,
+}) async {
+  final success = await updateProfileStatusInDB(
+    email: email,
+    role: role,
+    status: 'scheduled_for_deletion',
+    gracePeriodDays: gracePeriodDays,
+  );
+  
+  if (success) {
+    // Save schedule for background processing
+    final deletionDate = DateTime.now().add(Duration(days: gracePeriodDays));
+    await _prefs.setString('del_${email}_$role', deletionDate.toIso8601String());
+    debugPrint('🗑️ Profile deletion scheduled: $email - $role, due: $deletionDate');
+  }
+}
+
+/// ✅ Cancel scheduled deletion
+static Future<void> cancelScheduledDeletion({
+  required String email,
+  required String role,
+}) async {
+  final success = await updateProfileStatusInDB(
+    email: email,
+    role: role,
+    status: 'active',
+  );
+  
+  if (success) {
+    await _prefs.remove('del_${email}_$role');
+    debugPrint('✅ Deletion canceled, profile reactivated: $email - $role');
+  }
+}
+
+// ============================================================
+// ✅ ADD THIS METHOD TO SESSIONMANAGER
+// ============================================================
+
+/// ✅ Update role status in database
+static Future<bool> updateRoleStatus({
+  required String email,
+  required String role,
+  required String status, // 'active', 'inactive', 'scheduled_for_deletion', 'deleted'
+  int gracePeriodDays = 90,
+}) async {
+  try {
+    final supabase = Supabase.instance.client;
+    final user = supabase.auth.currentUser;
+    
+    if (user == null) {
+      debugPrint('⚠️ No user logged in');
+      return false;
+    }
+    
+    debugPrint('📝 Updating role status: $role -> $status');
+    
+    // ✅ Call database function
+    final response = await supabase.rpc(
+      'update_role_status',
+      params: {
+        'p_user_id': user.id,
+        'p_role': role,
+        'p_status': status,
+        'p_grace_period_days': gracePeriodDays,
+      },
+    );
+    
+    final success = response['success'] as bool? ?? false;
+    
+    if (success) {
+      debugPrint('✅ Role status updated: $status');
+      
+      // ✅ Update local SessionManager
+      await _updateLocalProfileStatus(email: email, role: role, status: status);
+      
+      return true;
+    } else {
+      debugPrint('❌ Failed to update status: ${response['message']}');
+      return false;
+    }
+  } catch (e) {
+    debugPrint('❌ Error updating role status: $e');
+    return false;
+  }
+}
+
+// =====================================================
+// ✅ PROFILE LEVEL STATUS METHODS - ADD TO SESSIONMANAGER
+// =====================================================
+
+/// ✅ Update profile level status (entire profile)
+static Future<bool> updateProfileLevelStatus({
+  required String email,
+  required String status, // 'active', 'inactive', 'scheduled_for_deletion', 'deleted'
+  int gracePeriodDays = 90,
+}) async {
+  try {
+    final supabase = Supabase.instance.client;
+    final user = supabase.auth.currentUser;
+    
+    if (user == null) {
+      debugPrint('⚠️ No user logged in');
+      return false;
+    }
+    
+    debugPrint('📝 Updating profile level status: $status');
+    
+    // ✅ Call database function
+    final response = await supabase.rpc(
+      'update_profile_level_status',
+      params: {
+        'p_user_id': user.id,
+        'p_status': status,
+        'p_grace_period_days': gracePeriodDays,
+      },
+    );
+    
+    final success = response['success'] as bool? ?? false;
+    
+    if (success) {
+      debugPrint('✅ Profile level status updated: $status');
+      
+      // ✅ Update local SessionManager
+      await _updateLocalProfileLevelStatus(email: email, status: status);
+      
+      return true;
+    } else {
+      debugPrint('❌ Failed to update profile status: ${response['message']}');
+      return false;
+    }
+  } catch (e) {
+    debugPrint('❌ Error updating profile level status: $e');
+    return false;
+  }
+}
+
+
+/// ✅ Delete complete profile (all roles + profile data)
+static Future<bool> deleteCompleteProfile({
+  required String email,
+  required String userId,
+}) async {
+  try {
+    final supabase = Supabase.instance.client;
+    
+    debugPrint('🗑️ Deleting complete profile: $email (userId: $userId)');
+    
+    // ✅ 1. Call database function
+    final response = await supabase.rpc(
+      'delete_complete_profile',
+      params: {
+        'p_user_id': userId,
+      },
+    );
+    
+    final success = response['success'] as bool? ?? false;
+    
+    if (!success) {
+      debugPrint('❌ DB delete failed: ${response['message']}');
+      return false;
+    }
+    
+    debugPrint('✅ Database profile deleted successfully');
+    
+    // ✅ 2. Remove from SessionManager local storage
+    final profiles = await getProfiles();
+    final index = profiles.indexWhere((p) => p['email'] == email);
+    if (index != -1) {
+      profiles.removeAt(index);
+      await _prefs.setString(_keyProfiles, jsonEncode(profiles));
+      debugPrint('✅ Profile removed from local storage');
+    }
+    
+    // ✅ 3. Remove from available profiles
+    final availableProfiles = await getAvailableProfiles();
+    final updatedAvailable = availableProfiles
+        .where((p) => p['email'] != email)
+        .toList();
+    await saveAvailableProfiles(updatedAvailable);
+    debugPrint('✅ Profile removed from available profiles');
+    
+    // ✅ 4. Clear user roles
+    await _prefs.remove('$email$_keyUserRoles');
+    
+    // ✅ 5. Clear current role if this was the current user
+    final currentEmail = await getCurrentUserEmail();
+    if (currentEmail == email) {
+      await _prefs.remove(_currentUserKey);
+      await _prefs.remove(_keyCurrentRole);
+      await _prefs.setBool(_showContinueKey, false);
+      debugPrint('✅ Cleared current user data');
+    }
+    
+    // ✅ 6. Delete secure tokens
+    await _secureStorage.delete(key: '${userId}_refresh_token');
+    await _secureStorage.delete(key: '${userId}_access_token');
+    debugPrint('✅ Secure tokens deleted');
+    
+    // ✅ 7. Refresh app state
+    appState.refreshState();
+    
+    debugPrint('✅ Complete profile deletion successful');
+    return true;
+    
+  } catch (e) {
+    debugPrint('❌ Error deleting complete profile: $e');
+    return false;
+  }
+}
+
+/// ✅ Get remaining profiles after deletion
+static Future<List<Map<String, dynamic>>> getRemainingProfiles(String email) async {
+  try {
+    final profiles = await getProfiles();
+    return profiles.where((p) => p['email'] != email).toList();
+  } catch (e) {
+    debugPrint('❌ Error getting remaining profiles: $e');
+    return [];
+  }
+}
+
+// =====================================================
+// ✅ PROCESS EXPIRED DELETIONS - ADD TO SESSIONMANAGER
+// =====================================================
+
+/// 🔥 Process expired profile deletions (auto-delete after 90 days)
+static Future<void> processExpiredDeletions() async {
+  try {
+    final supabase = Supabase.instance.client;
+    
+    debugPrint('🧹 Processing expired deletions...');
+    
+    // ✅ Call database function for profile level deletions
+    final profileResponse = await supabase.rpc('process_expired_profile_deletions');
+    
+    if (profileResponse != null && profileResponse is List) {
+      for (var deleted in profileResponse) {
+        final userId = deleted['user_id'] as String?;
+        final email = deleted['email'] as String?;
+        
+        if (userId != null && email != null) {
+          debugPrint('🗑️ Auto-deleted expired profile: $email');
+          
+          // ✅ Remove from local storage
+          await removeProfile(email);
+          await _prefs.remove('del_profile_$email');
+        }
+      }
+      debugPrint('✅ Expired profile deletions processed: ${profileResponse.length} profiles');
+    }
+    
+    // ✅ Call database function for role level deletions
+    final roleResponse = await supabase.rpc('process_expired_role_deletions');
+    
+    if (roleResponse != null && roleResponse is List) {
+      for (var deleted in roleResponse) {
+        final userId = deleted['user_id'] as String?;
+        final role = deleted['role'] as String?;
+        
+        if (userId != null && role != null) {
+          debugPrint('🗑️ Auto-deleted expired role: $userId - $role');
+          
+          // ✅ Remove from local storage
+          final profiles = await getProfiles();
+          final index = profiles.indexWhere((p) => p['userId'] == userId);
+          
+          if (index != -1) {
+            final email = profiles[index]['email'] as String?;
+            if (email != null) {
+              // Remove from available profiles
+              final availableProfiles = await getAvailableProfiles();
+              final updatedAvailable = availableProfiles
+                  .where((p) => !(p['userId'] == userId && p['role'] == role))
+                  .toList();
+              await saveAvailableProfiles(updatedAvailable);
+              
+              // Remove schedule
+              await _prefs.remove('del_${email}_$role');
+            }
+          }
+        }
+      }
+      debugPrint('✅ Expired role deletions processed: ${roleResponse.length} roles');
+    }
+    
+  } catch (e) {
+    debugPrint('❌ Error processing expired deletions: $e');
+  }
+}
+
+/// 🔥 Process expired profile deletions (Profile Level)
+static Future<void> processExpiredProfileDeletions() async {
+  try {
+    final supabase = Supabase.instance.client;
+    
+    debugPrint('🧹 Processing expired profile deletions...');
+    
+    final response = await supabase.rpc('process_expired_profile_deletions');
+    
+    if (response != null && response is List) {
+      for (var deleted in response) {
+        final userId = deleted['user_id'] as String?;
+        final email = deleted['email'] as String?;
+        
+        if (userId != null && email != null) {
+          debugPrint('🗑️ Auto-deleted expired profile: $email');
+          
+          // ✅ Remove from local storage
+          await removeProfile(email);
+          await _prefs.remove('del_profile_$email');
+        }
+      }
+      debugPrint('✅ Expired profile deletions processed: ${response.length} profiles');
+    }
+  } catch (e) {
+    debugPrint('❌ Error processing expired profile deletions: $e');
+  }
+}
+
+/// 🔥 Process expired role deletions
+static Future<void> processExpiredRoleDeletions() async {
+  try {
+    final supabase = Supabase.instance.client;
+    
+    debugPrint('🧹 Processing expired role deletions...');
+    
+    final response = await supabase.rpc('process_expired_role_deletions');
+    
+    if (response != null && response is List) {
+      for (var deleted in response) {
+        final userId = deleted['user_id'] as String?;
+        final role = deleted['role'] as String?;
+        
+        if (userId != null && role != null) {
+          debugPrint('🗑️ Auto-deleted expired role: $userId - $role');
+          
+          // ✅ Remove from local storage
+          final profiles = await getProfiles();
+          final index = profiles.indexWhere((p) => p['userId'] == userId);
+          
+          if (index != -1) {
+            final email = profiles[index]['email'] as String?;
+            if (email != null) {
+              // Remove from available profiles
+              final availableProfiles = await getAvailableProfiles();
+              final updatedAvailable = availableProfiles
+                  .where((p) => !(p['userId'] == userId && p['role'] == role))
+                  .toList();
+              await saveAvailableProfiles(updatedAvailable);
+              
+              // Remove schedule
+              await _prefs.remove('del_${email}_$role');
+            }
+          }
+        }
+      }
+      debugPrint('✅ Expired role deletions processed: ${response.length} roles');
+    }
+  } catch (e) {
+    debugPrint('❌ Error processing expired role deletions: $e');
+  }
+}
+
 }
