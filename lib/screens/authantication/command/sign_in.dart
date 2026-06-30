@@ -72,6 +72,9 @@ class _SignInScreenState extends State<SignInScreen>
   bool _loadingApple = false;
   bool _userChangedRememberMe = false;
 
+  // ✅ Reset first load flag
+  bool _isFirstLoad = true;
+
   // Animation
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
@@ -101,16 +104,18 @@ class _SignInScreenState extends State<SignInScreen>
   void initState() {
     super.initState();
 
+    _isFirstLoad = true;
+
     // Initialize GoogleSignInService with check to prevent multiple initializations
     _googleSignInService = GoogleSignInService();
-    
+
     // Only initialize if not already initialized globally
     if (!_googleSdkInitialized) {
       _googleSignInService.initialize();
       _googleSdkInitialized = true;
-      if (kDebugMode) print('✅ Google Sign-In SDK initialized once');
+      debugPrint('✅ Google Sign-In SDK initialized once');
     } else {
-      if (kDebugMode) print('ℹ️ Google Sign-In SDK already initialized, skipping');
+      debugPrint('ℹ Google Sign-In SDK already initialized, skipping');
     }
 
     // Initialize controllers
@@ -312,7 +317,7 @@ class _SignInScreenState extends State<SignInScreen>
           final termsAccepted = profile['termsAcceptedAt'] != null;
           final privacyAccepted = profile['privacyAcceptedAt'] != null;
           final hasRememberMe = profile['rememberMe'] == true;
-          
+
           final existingRoles = profile['roles'] as List? ?? [];
 
           debugPrint('✅ Found returning user: $email for provider: $provider');
@@ -323,7 +328,9 @@ class _SignInScreenState extends State<SignInScreen>
             email: email,
             hasConsent: termsAccepted && privacyAccepted,
             hasAutoLoginSetting: hasRememberMe,
-            existingRoles: existingRoles.isNotEmpty ? List<String>.from(existingRoles) : null,
+            existingRoles: existingRoles.isNotEmpty
+                ? List<String>.from(existingRoles)
+                : null,
           );
         }
       }
@@ -382,7 +389,9 @@ class _SignInScreenState extends State<SignInScreen>
         finalMarketingConsent = marketingConsent;
         finalMarketingConsentAt = marketingConsent ? now : null;
 
-        debugPrint('📊 Using marketing consent from parameter: $finalMarketingConsent');
+        debugPrint(
+          '📊 Using marketing consent from parameter: $finalMarketingConsent',
+        );
 
         await supabase.auth.updateUser(
           UserAttributes(
@@ -391,13 +400,15 @@ class _SignInScreenState extends State<SignInScreen>
               'terms_accepted_at': now.toIso8601String(),
               'privacy_accepted_at': now.toIso8601String(),
               'marketing_consent': finalMarketingConsent,
-              'marketing_consent_at': finalMarketingConsentAt?.toIso8601String(),
+              'marketing_consent_at': finalMarketingConsentAt
+                  ?.toIso8601String(),
             },
           ),
         );
         debugPrint('✅ Updated auth metadata with marketing consent');
       } else {
-        finalMarketingConsent = userMetadata['marketing_consent'] as bool? ?? false;
+        finalMarketingConsent =
+            userMetadata['marketing_consent'] as bool? ?? false;
 
         if (userMetadata['marketing_consent_at'] != null) {
           try {
@@ -409,7 +420,9 @@ class _SignInScreenState extends State<SignInScreen>
           }
         }
 
-        debugPrint('📊 Using marketing consent from metadata: $finalMarketingConsent');
+        debugPrint(
+          '📊 Using marketing consent from metadata: $finalMarketingConsent',
+        );
       }
 
       String finalProvider = providerToSave;
@@ -455,17 +468,19 @@ class _SignInScreenState extends State<SignInScreen>
       }
 
       List<String> finalRoles = [];
-      
+
       try {
         final userRolesResponse = await supabase
             .from('user_roles')
             .select('''
-              role_id,
-              roles!inner (
-                name
-              )
-            ''')
-            .eq('user_id', user.id);
+        role_id,
+        roles!inner (
+          name
+        ),
+        status
+      ''')
+            .eq('user_id', user.id)
+            .eq('status', 'active'); // ✅ Only active roles
 
         for (var roleEntry in userRolesResponse) {
           final role = roleEntry['roles'] as Map?;
@@ -477,7 +492,9 @@ class _SignInScreenState extends State<SignInScreen>
         debugPrint('📊 Error fetching user roles: $e');
       }
 
-      if (finalRoles.isEmpty && existingRoles != null && existingRoles.isNotEmpty) {
+      if (finalRoles.isEmpty &&
+          existingRoles != null &&
+          existingRoles.isNotEmpty) {
         finalRoles = existingRoles;
       }
 
@@ -689,7 +706,11 @@ class _SignInScreenState extends State<SignInScreen>
                         children: [
                           Row(
                             children: [
-                              Icon(Icons.info, size: 16, color: Colors.blue.shade700),
+                              Icon(
+                                Icons.info,
+                                size: 16,
+                                color: Colors.blue.shade700,
+                              ),
                               const SizedBox(width: 8),
                               Expanded(
                                 child: Text(
@@ -714,7 +735,9 @@ class _SignInScreenState extends State<SignInScreen>
                                   vertical: 4,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: _getRoleColor(role).withValues(alpha: 0.1),
+                                  color: _getRoleColor(
+                                    role,
+                                  ).withValues(alpha: 0.1),
                                   borderRadius: BorderRadius.circular(12),
                                 ),
                                 child: Text(
@@ -1094,6 +1117,188 @@ class _SignInScreenState extends State<SignInScreen>
     }
   }
 
+  /// ✅ Check if session is valid before RPC calls
+  bool _hasValidSession() {
+    try {
+      final session = supabase.auth.currentSession;
+      if (session == null) return false;
+
+      if (session.expiresAt != null) {
+        final expiryTime = DateTime.fromMillisecondsSinceEpoch(
+          session.expiresAt!,
+        );
+        return DateTime.now().isBefore(expiryTime);
+      }
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // ============================================================
+  // ✅ CHECK AND RESTORE SCHEDULED PROFILES (COMPLETE)
+  // ============================================================
+  Future<void> _checkAndRestoreScheduledProfiles(
+    String userId,
+    String email,
+  ) async {
+    // ✅ Skip if not first load (prevents error on refresh)
+    if (!_isFirstLoad) {
+      debugPrint('⏭️ Skipping restore check on refresh');
+      return;
+    }
+
+    // ✅ Check if session is valid before RPC calls
+    if (!_hasValidSession()) {
+      debugPrint('⏭️ Skipping restore check (no valid session)');
+      _isFirstLoad = false;
+      return;
+    }
+    try {
+      debugPrint('🔍 Checking for scheduled profile deletions...');
+
+      // ✅ 1. Check role level scheduled deletions
+      final scheduledRoles = await supabase
+          .from('user_roles')
+          .select('''
+          role_id,
+          roles!inner (
+            id,
+            name,
+            description
+          ),
+          status,
+          created_at,
+          updated_at
+        ''')
+          .eq('user_id', userId)
+          .eq('status', 'scheduled_for_deletion');
+
+      // ✅ 2. Check profile level scheduled deletions
+      final profileCheck = await supabase
+          .from('profiles')
+          .select('''
+          id,
+          email,
+          full_name,
+          extra_data,
+          is_active,
+          is_blocked,
+          created_at,
+          updated_at
+        ''')
+          .eq('id', userId)
+          .maybeSingle();
+
+      // ✅ 3. Check if any scheduled deletions exist
+      bool hasScheduledDeletions = false;
+
+      // Check role level
+      if (scheduledRoles.isNotEmpty) {
+        hasScheduledDeletions = true;
+        debugPrint(
+          '🔄 Found ${scheduledRoles.length} scheduled role(s) to restore',
+        );
+
+        for (var roleEntry in scheduledRoles) {
+          final role = roleEntry['roles'] as Map?;
+          if (role != null && role['name'] != null) {
+            final roleName = role['name'].toString();
+            final roleId = roleEntry['role_id'];
+            final status =
+                roleEntry['status'] as String? ?? 'scheduled_for_deletion';
+
+            debugPrint(
+              '📋 Scheduled role: $roleName (ID: $roleId, Status: $status)',
+            );
+
+            // ✅ Auto-restore role
+            try {
+              await SessionManager.autoRestoreProfileOnLogin(
+                email: email,
+                role: roleName,
+              );
+              debugPrint('✅ Role auto-restored: $roleName');
+            } catch (e) {
+              debugPrint('⚠️ Failed to auto-restore role $roleName: $e');
+              // Continue with next role
+            }
+          }
+        }
+      }
+
+      // Check profile level
+      if (profileCheck != null) {
+        final extraData =
+            profileCheck['extra_data'] as Map<String, dynamic>? ?? {};
+        final profileStatus =
+            extraData['profile_status'] as Map<String, dynamic>?;
+
+        if (profileStatus != null &&
+            profileStatus['status'] == 'scheduled_for_deletion') {
+          hasScheduledDeletions = true;
+          final dueDate = profileStatus['deletion_due_date'] as String?;
+          final gracePeriodDays =
+              profileStatus['grace_period_days'] as int? ?? 90;
+
+          debugPrint(
+            '📋 Scheduled entire profile - Due: $dueDate, Grace: $gracePeriodDays days',
+          );
+
+          // ✅ Auto-restore entire profile
+          try {
+            await SessionManager.autoRestoreProfileLevelOnLogin(email: email);
+            debugPrint('✅ Entire profile auto-restored');
+          } catch (e) {
+            debugPrint('⚠️ Failed to auto-restore entire profile: $e');
+          }
+        }
+      }
+
+      // ✅ 4. If no scheduled deletions found
+      if (!hasScheduledDeletions) {
+        debugPrint('📭 No scheduled profiles to restore');
+      }
+
+      // ✅ 5. Update profile status in local storage if restored
+      if (hasScheduledDeletions) {
+        // Refresh available profiles
+        final availableProfiles = await SessionManager.getAvailableProfiles();
+        final updatedProfiles = availableProfiles.map((p) {
+          if (p['email'] == email) {
+            return {
+              ...p,
+              'status': 'active',
+              'is_active': true,
+              'is_scheduled_for_deletion': false,
+              'restored_at': DateTime.now().toIso8601String(),
+            };
+          }
+          return p;
+        }).toList();
+        await SessionManager.saveAvailableProfiles(updatedProfiles);
+        debugPrint('✅ Available profiles updated after restoration');
+
+        // Show success message if any profiles were restored
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('✅ Your profiles have been restored!'),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ Error restoring scheduled profiles: $e');
+      // Don't throw - just log error
+    } finally {
+      // ✅ Mark as done after first run (prevents error on refresh)
+      _isFirstLoad = false;
+    }
+  }
+
   Future<void> _signInWithGoogle() async {
     if (_loadingGoogle) return;
 
@@ -1107,7 +1312,9 @@ class _SignInScreenState extends State<SignInScreen>
       debugPrint('Returning User Check - Google:');
       debugPrint('   Email: ${returningUserCheck.email}');
       debugPrint('   Has Consent: ${returningUserCheck.hasConsent}');
-      debugPrint('   Auto Login Setting: ${returningUserCheck.hasAutoLoginSetting}');
+      debugPrint(
+        '   Auto Login Setting: ${returningUserCheck.hasAutoLoginSetting}',
+      );
       debugPrint('   Existing Roles: ${returningUserCheck.existingRoles}');
 
       final result = await _showCombinedOAuthDialog(
@@ -1279,7 +1486,7 @@ class _SignInScreenState extends State<SignInScreen>
     List<String>? existingRoles,
   }) async {
     if (!mounted) return;
-    
+
     await _saveOAuthProfile(
       user: user,
       providerToSave: 'google',
@@ -1297,6 +1504,9 @@ class _SignInScreenState extends State<SignInScreen>
         consentedAt: DateTime.now(),
       );
     }
+
+    // ✅ Check for scheduled deletions and auto-restore - HERE
+    await _checkAndRestoreScheduledProfiles(user.id, user.email!);
 
     final userRolesResponse = await supabase
         .from('user_roles')
@@ -1463,7 +1673,7 @@ class _SignInScreenState extends State<SignInScreen>
     List<String>? existingRoles,
   }) async {
     if (!mounted) return;
-    
+
     await _saveOAuthProfile(
       user: user,
       providerToSave: 'facebook',
@@ -1481,7 +1691,8 @@ class _SignInScreenState extends State<SignInScreen>
         consentedAt: DateTime.now(),
       );
     }
-
+    // ✅ Check for scheduled deletions and auto-restore - HERE
+    await _checkAndRestoreScheduledProfiles(user.id, user.email!);
     final userRolesResponse = await supabase
         .from('user_roles')
         .select('role_id')
@@ -1682,7 +1893,8 @@ class _SignInScreenState extends State<SignInScreen>
         consentedAt: DateTime.now(),
       );
     }
-
+    // ✅ Check for scheduled deletions and auto-restore - HERE
+    await _checkAndRestoreScheduledProfiles(user.id, user.email!);
     final userRolesResponse = await supabase
         .from('user_roles')
         .select('role_id')
@@ -1753,14 +1965,16 @@ class _SignInScreenState extends State<SignInScreen>
       final userRolesResponse = await supabase
           .from('user_roles')
           .select('''
-            role_id,
-            roles!inner (
-              name
-            )
-          ''')
-          .eq('user_id', userId);
+      role_id,
+      roles!inner (
+        name
+      ),
+      status
+    ''')
+          .eq('user_id', userId)
+          .eq('status', 'active'); // ✅ Only active roles
 
-      debugPrint('📋 userRolesResponse: $userRolesResponse');
+      debugPrint('📋 Active user roles response: $userRolesResponse');
 
       final List<String> roleNames = [];
       for (var roleEntry in userRolesResponse) {
@@ -1846,7 +2060,6 @@ class _SignInScreenState extends State<SignInScreen>
       debugPrint('⚠️ Fallback - refreshing app state');
       appState.refreshState();
       if (mounted) context.go('/');
-
     } catch (e) {
       debugPrint('❌ Post-login error: $e');
       appState.refreshState();

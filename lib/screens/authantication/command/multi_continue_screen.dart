@@ -20,7 +20,7 @@ class ContinueScreen extends StatefulWidget {
 class _ContinueScreenState extends State<ContinueScreen> {
   final EnvironmentManager _env = EnvironmentManager();
   List<Map<String, dynamic>> profiles = [];
-  final bool _loading = false;
+  bool _loading = true;
   String? _selectedEmail;
   final Map<String, bool> _profileLoadingStates = {};
   bool _isGoogleImageRateLimited = false;
@@ -38,95 +38,430 @@ class _ContinueScreenState extends State<ContinueScreen> {
   }
 
   // ============================================================
-  // 🔥 GET DISPLAY NAME FROM PROFILE - HELPER FUNCTION
+  // 🔥 GET DISPLAY NAME FROM PROFILE
   // ============================================================
   String _getDisplayName(Map<String, dynamic> profile) {
     final email = profile['email'] as String? ?? 'User';
-    
-    // 1. Try to get from full_name (database column)
-    if (profile['full_name'] != null && profile['full_name'].toString().isNotEmpty) {
+
+    if (profile['full_name'] != null &&
+        profile['full_name'].toString().isNotEmpty) {
       return profile['full_name'].toString();
     }
-    
-    // 2. Try to get from name field
+
     if (profile['name'] != null && profile['name'].toString().isNotEmpty) {
       return profile['name'].toString();
     }
-    
-    // 3. Try to get from extra_data
+
     if (profile['extra_data'] != null) {
       final extraData = profile['extra_data'] as Map<String, dynamic>;
-      
-      if (extraData['full_name'] != null && extraData['full_name'].toString().isNotEmpty) {
+      if (extraData['full_name'] != null &&
+          extraData['full_name'].toString().isNotEmpty) {
         return extraData['full_name'].toString();
       }
-      
-      if (extraData['company_name'] != null && extraData['company_name'].toString().isNotEmpty) {
+      if (extraData['company_name'] != null &&
+          extraData['company_name'].toString().isNotEmpty) {
         return extraData['company_name'].toString();
       }
-      
-      if (extraData['name'] != null && extraData['name'].toString().isNotEmpty) {
+      if (extraData['name'] != null &&
+          extraData['name'].toString().isNotEmpty) {
         return extraData['name'].toString();
       }
     }
-    
-    // 4. Try to get from user_metadata
+
     if (profile['user_metadata'] != null) {
       final metadata = profile['user_metadata'] as Map<String, dynamic>;
-      if (metadata['full_name'] != null && metadata['full_name'].toString().isNotEmpty) {
+      if (metadata['full_name'] != null &&
+          metadata['full_name'].toString().isNotEmpty) {
         return metadata['full_name'].toString();
       }
       if (metadata['name'] != null && metadata['name'].toString().isNotEmpty) {
         return metadata['name'].toString();
       }
     }
-    
-    // 5. Fallback to email username
+
     return email.split('@').first;
   }
 
+  /// session validation add
+  bool _hasValidSession() {
+    try {
+      final session = supabase.auth.currentSession;
+      if (session == null) return false;
+
+      if (session.expiresAt != null) {
+        final expiryTime = DateTime.fromMillisecondsSinceEpoch(
+          session.expiresAt!,
+        );
+        return DateTime.now().isBefore(expiryTime);
+      }
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
   // ============================================================
-  // 🔥 LOAD PROFILES
+  // 🔥 CHECK IF PROFILE HAS ACTIVE ROLES (SAFE VERSION)
+  // ============================================================
+  /// ✅ Check if profile has active roles - HYBRID VERSION
+  Future<bool> _hasActiveRoles(String email, List<String> roles) async {
+    try {
+      if (roles.isEmpty) return false;
+
+      // ✅ Step 1: Check SessionManager (Fast - No network call)
+      final availableProfiles = await SessionManager.getAvailableProfiles();
+      debugPrint(
+        '📊 Available profiles from SessionManager: $availableProfiles',
+      );
+
+      // Check if any role exists in available profiles
+      for (String role in roles) {
+        final exists = availableProfiles.any(
+          (p) => p['email'] == email && p['role'] == role,
+        );
+        if (exists) {
+          debugPrint('✅ Role $role found in available profiles');
+          return true;
+        }
+      }
+
+      // Check from SessionManager profiles
+      final allProfiles = await SessionManager.getProfiles();
+      for (var profile in allProfiles) {
+        if (profile['email'] == email) {
+          final profileRoles = profile['roles'] as List? ?? [];
+          if (profileRoles.isNotEmpty) {
+            debugPrint('✅ Profile has roles in SessionManager: $profileRoles');
+            return true;
+          }
+        }
+      }
+
+      // ✅ Step 2: If not found in SessionManager, check DB (Only if session is valid)
+      final currentUser = supabase.auth.currentUser;
+      final session = supabase.auth.currentSession;
+
+      if (currentUser != null && session != null) {
+        // Check if session is valid
+        bool sessionValid = true;
+        if (session.expiresAt != null) {
+          final expiryTime = DateTime.fromMillisecondsSinceEpoch(
+            session.expiresAt!,
+          );
+          sessionValid = DateTime.now().isBefore(expiryTime);
+        }
+
+        if (sessionValid) {
+          debugPrint('🔄 Valid session found, checking DB for roles...');
+          int activeCount = 0;
+          for (String role in roles) {
+            try {
+              final response = await supabase.rpc(
+                'get_role_status',
+                params: {'p_user_id': currentUser.id, 'p_role': role},
+              );
+
+              if (response != null) {
+                final status = response['status'] as String? ?? 'active';
+                debugPrint('📊 Role $role status from DB: $status');
+                if (status == 'active' || status == 'scheduled_for_deletion') {
+                  activeCount++;
+                }
+              }
+            } catch (e) {
+              debugPrint('⚠️ Error checking role $role in DB: $e');
+              // On error, count as active (safe fallback)
+              activeCount++;
+            }
+          }
+          return activeCount > 0;
+        } else {
+          debugPrint('⏭️ Session expired, skipping DB check');
+        }
+      } else {
+        debugPrint('⏭️ No valid session, skipping DB check');
+      }
+
+      debugPrint('⚠️ No active roles found for $email');
+      return false;
+    } catch (e) {
+      debugPrint('❌ Error checking active roles: $e');
+      // Safe fallback - show profile
+      return true;
+    }
+  }
+
+  // ============================================================
+  // 🔥 GET PROFILE STATUS FROM DB (SAFE VERSION)
+  // ============================================================
+  /// ✅ Get profile status - HYBRID VERSION
+  Future<Map<String, dynamic>?> _getProfileStatus(
+    String email,
+    String role,
+  ) async {
+    try {
+      // ✅ Step 1: Check SessionManager first (Fast)
+      final availableProfiles = await SessionManager.getAvailableProfiles();
+
+      Map<String, dynamic>? cachedProfile = availableProfiles.firstWhere(
+        (p) => p['email'] == email && p['role'] == role,
+        orElse: () => {},
+      );
+
+      // Step 2: If found in available profiles, use it
+      if (cachedProfile.isNotEmpty) {
+        final status = cachedProfile['status'] as String? ?? 'active';
+
+        // ✅ Step 3: If status is not 'active', check DB for latest
+        if (status != 'active') {
+          final currentUser = supabase.auth.currentUser;
+          final session = supabase.auth.currentSession;
+
+          if (currentUser != null && session != null) {
+            // Check if session is valid
+            bool sessionValid = true;
+            if (session.expiresAt != null) {
+              final expiryTime = DateTime.fromMillisecondsSinceEpoch(
+                session.expiresAt!,
+              );
+              sessionValid = DateTime.now().isBefore(expiryTime);
+            }
+
+            if (sessionValid) {
+              debugPrint(
+                '🔄 Valid session found, checking DB for latest status...',
+              );
+              try {
+                final response = await supabase.rpc(
+                  'get_role_status',
+                  params: {'p_user_id': currentUser.id, 'p_role': role},
+                );
+
+                if (response != null) {
+                  debugPrint('✅ Got latest status from DB: $response');
+                  return response as Map<String, dynamic>?;
+                }
+              } catch (e) {
+                debugPrint('⚠️ RPC failed, using cached status: $e');
+              }
+            } else {
+              debugPrint('⏭️ Session expired, using cached status');
+            }
+          } else {
+            debugPrint('⏭️ No valid session, using cached status');
+          }
+        }
+
+        // Return cached status (with extra data)
+        return {
+          'status': status,
+          'days_remaining': cachedProfile['days_remaining'],
+          'deletion_due_date': cachedProfile['deletion_due_date'],
+          'source': 'cache',
+        };
+      }
+
+      // ✅ Step 4: Not in available profiles, check all profiles
+      final allProfiles = await SessionManager.getProfiles();
+      for (var profile in allProfiles) {
+        if (profile['email'] == email) {
+          final extraData =
+              profile['extra_data'] as Map<String, dynamic>? ?? {};
+          final roleKey = 'profile_$role';
+
+          if (extraData.containsKey(roleKey)) {
+            final roleData = extraData[roleKey] as Map<String, dynamic>? ?? {};
+            final status = roleData['status'] as String? ?? 'active';
+
+            return {
+              'status': status,
+              'days_remaining': roleData['days_remaining'],
+              'deletion_due_date': roleData['deletion_due_date'],
+              'source': 'extra_data',
+            };
+          }
+        }
+      }
+
+      // ✅ Step 5: If not found anywhere, try DB (Only if session is valid)
+      final currentUser = supabase.auth.currentUser;
+      final session = supabase.auth.currentSession;
+
+      if (currentUser != null && session != null) {
+        bool sessionValid = true;
+        if (session.expiresAt != null) {
+          final expiryTime = DateTime.fromMillisecondsSinceEpoch(
+            session.expiresAt!,
+          );
+          sessionValid = DateTime.now().isBefore(expiryTime);
+        }
+
+        if (sessionValid) {
+          debugPrint('🔄 Checking DB for status (not found in cache)...');
+          try {
+            final response = await supabase.rpc(
+              'get_role_status',
+              params: {'p_user_id': currentUser.id, 'p_role': role},
+            );
+
+            if (response != null) {
+              debugPrint('✅ Got status from DB: $response');
+              return response as Map<String, dynamic>?;
+            }
+          } catch (e) {
+            debugPrint('⚠️ RPC failed: $e');
+          }
+        }
+      }
+
+      // ✅ Final fallback
+      return {'status': 'active', 'source': 'fallback'};
+    } catch (e) {
+      debugPrint('⚠️ Error getting profile status: $e');
+      return {'status': 'active', 'source': 'error_fallback'};
+    }
+  }
+
+  // ============================================================
+  // 🔥 LOAD PROFILES (UPDATED - PRODUCTION READY)
   // ============================================================
   Future<void> _loadProfiles() async {
     try {
+      setState(() => _loading = true);
+
+      // ✅ Check if session is valid
+      final bool hasValidSession = _hasValidSession();
+      debugPrint('📊 Has valid session: $hasValidSession');
+
       final allProfiles = await SessionManager.getProfiles();
       debugPrint('📥 All profiles loaded: ${allProfiles.length}');
+
+      if (allProfiles.isEmpty) {
+        debugPrint('⚠️ No profiles found');
+        setState(() {
+          profiles = [];
+          _loading = false;
+        });
+        return;
+      }
 
       final List<Map<String, dynamic>> expandedProfiles = [];
 
       for (var profile in allProfiles.where((p) => p['rememberMe'] == true)) {
-        final roles = profile['roles'] as List? ?? [];
+        final dynamic rolesDynamic = profile['roles'];
+        final List<String> roles = rolesDynamic is List
+            ? rolesDynamic.map((e) => e.toString()).toList()
+            : [];
+
         final email = profile['email'] as String? ?? 'unknown';
         final profileLastLogin = profile['lastLogin'] as String?;
-        
+
         final displayName = _getDisplayName(profile);
         profile['display_name'] = displayName;
 
-        debugPrint('📋 Processing profile: $email, name: $displayName, roles: $roles, lastLogin: $profileLastLogin');
+        debugPrint(
+          '📋 Processing profile: $email, name: $displayName, roles: $roles',
+        );
 
         if (roles.isEmpty) {
+          debugPrint('  → Skipping profile with no roles: $email');
+          continue;
+        }
+
+        // ✅ Only call _hasActiveRoles if session is valid
+        bool hasActiveRoles = true;
+        if (hasValidSession) {
+          try {
+            hasActiveRoles = await _hasActiveRoles(email, roles);
+          } catch (e) {
+            debugPrint('⚠️ _hasActiveRoles error for $email: $e');
+            hasActiveRoles = true; // Safe fallback
+          }
+        } else {
+          debugPrint(
+            '⏭️ Skipping _hasActiveRoles (no valid session) for $email',
+          );
+        }
+
+        if (!hasActiveRoles) {
+          debugPrint('  → Skipping profile with no active roles: $email');
+          continue;
+        }
+
+        debugPrint('  → Profile has active roles: $roles');
+
+        if (roles.length == 1) {
           final newProfile = Map<String, dynamic>.from(profile);
           newProfile['lastLogin'] = profileLastLogin;
           newProfile['display_name'] = displayName;
+          newProfile['roles'] = [roles.first];
+
+          // ✅ Only call _getProfileStatus if session is valid
+          Map<String, dynamic>? statusInfo;
+          if (hasValidSession) {
+            try {
+              statusInfo = await _getProfileStatus(email, roles.first);
+            } catch (e) {
+              debugPrint('⚠️ _getProfileStatus error for $email: $e');
+              statusInfo = {'status': 'active'};
+            }
+          } else {
+            debugPrint(
+              '⏭️ Skipping _getProfileStatus (no valid session) for $email',
+            );
+            statusInfo = {'status': 'active'};
+          }
+
+          if (statusInfo != null) {
+            newProfile['status'] = statusInfo['status'] ?? 'active';
+            newProfile['days_remaining'] = statusInfo['days_remaining'];
+            newProfile['deletion_due_date'] = statusInfo['deletion_due_date'];
+          } else {
+            newProfile['status'] = 'active';
+          }
+
           expandedProfiles.add(newProfile);
-          debugPrint('  → Added profile with no roles, name: $displayName');
-        } else if (roles.length == 1) {
-          final newProfile = Map<String, dynamic>.from(profile);
-          newProfile['lastLogin'] = profileLastLogin;
-          newProfile['display_name'] = displayName;
-          expandedProfiles.add(newProfile);
-          debugPrint('  → Added profile with single role: ${roles.first}, name: $displayName');
+          debugPrint(
+            '  → Added profile with single role: ${roles.first}, name: $displayName, status: ${newProfile['status']}',
+          );
         } else {
           debugPrint('  → Splitting into ${roles.length} profiles');
 
           for (var role in roles) {
             final roleProfile = Map<String, dynamic>.from(profile);
-            roleProfile['roles'] = [role.toString()];
+            roleProfile['roles'] = [role];
             roleProfile['lastLogin'] = profileLastLogin;
             roleProfile['display_name'] = displayName;
+
+            // ✅ Only call _getProfileStatus if session is valid
+            Map<String, dynamic>? statusInfo;
+            if (hasValidSession) {
+              try {
+                statusInfo = await _getProfileStatus(email, role);
+              } catch (e) {
+                debugPrint('⚠️ _getProfileStatus error for $email - $role: $e');
+                statusInfo = {'status': 'active'};
+              }
+            } else {
+              debugPrint(
+                '⏭️ Skipping _getProfileStatus (no valid session) for $email - $role',
+              );
+              statusInfo = {'status': 'active'};
+            }
+
+            if (statusInfo != null) {
+              roleProfile['status'] = statusInfo['status'] ?? 'active';
+              roleProfile['days_remaining'] = statusInfo['days_remaining'];
+              roleProfile['deletion_due_date'] =
+                  statusInfo['deletion_due_date'];
+            } else {
+              roleProfile['status'] = 'active';
+            }
+
             expandedProfiles.add(roleProfile);
-            debugPrint('    → Created profile for role: $role, name: $displayName');
+            debugPrint(
+              '    → Created profile for role: $role, name: $displayName, status: ${roleProfile['status']}',
+            );
           }
         }
       }
@@ -148,15 +483,19 @@ class _ContinueScreenState extends State<ContinueScreen> {
       if (!mounted) return;
       setState(() {
         profiles = expandedProfiles;
+        _loading = false;
         debugPrint('✅ Final profiles count: ${expandedProfiles.length}');
         for (var i = 0; i < expandedProfiles.length; i++) {
           debugPrint(
-            '  Profile $i: ${expandedProfiles[i]['email']} - Name: ${expandedProfiles[i]['display_name']} - Role: ${expandedProfiles[i]['roles']?.first}',
+            '  Profile $i: ${expandedProfiles[i]['email']} - Name: ${expandedProfiles[i]['display_name']} - Role: ${expandedProfiles[i]['roles']?.first} - Status: ${expandedProfiles[i]['status']}',
           );
         }
       });
     } catch (e) {
       debugPrint('❌ Error loading profiles: $e');
+      if (mounted) {
+        setState(() => _loading = false);
+      }
     }
   }
 
@@ -242,7 +581,69 @@ class _ContinueScreenState extends State<ContinueScreen> {
   }
 
   // ============================================================
-  // 🔥 HANDLE PROFILE LOGIN
+  // 🔥 SHOW RESTORE DIALOG
+  // ============================================================
+  Future<bool?> _showRestoreDialog(String role, int? daysRemaining) async {
+    return await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1C1F26),
+        title: const Text(
+          "🔄 Profile Scheduled for Deletion",
+          style: TextStyle(color: Colors.orange),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              "Your $role profile is scheduled for deletion.",
+              style: const TextStyle(color: Colors.white70),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              "Login now to restore it within the grace period.",
+              style: TextStyle(
+                color: Colors.orange,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            if (daysRemaining != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                "$daysRemaining days remaining",
+                style: TextStyle(
+                  color: Colors.orange.withValues(alpha: 0.7),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text(
+              "Cancel",
+              style: TextStyle(color: Colors.white70),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.orange,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text("Restore & Login"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ============================================================
+  // 🔥 HANDLE PROFILE LOGIN (UPDATED)
   // ============================================================
   Future<void> _handleProfileLogin(
     Map<String, dynamic> profile,
@@ -256,10 +657,49 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
     final email = profile['email'] as String?;
     final provider = profile['provider'] as String?;
+    final status = profile['status'] as String? ?? 'active';
 
     if (email == null) {
       debugPrint('❌ No email found');
       return;
+    }
+
+    // ✅ Check status before login
+    if (status == 'inactive') {
+      if (mounted) {
+        await showCustomAlert(
+          context: context,
+          title: "Profile Inactive",
+          message: "This profile is inactive. Please contact support.",
+          isError: true,
+        );
+      }
+      return;
+    }
+
+    if (status == 'deleted') {
+      if (mounted) {
+        await showCustomAlert(
+          context: context,
+          title: "Profile Deleted",
+          message: "This profile has been permanently deleted.",
+          isError: true,
+        );
+      }
+      return;
+    }
+
+    // ✅ If scheduled for deletion, show restore dialog
+    if (status == 'scheduled_for_deletion') {
+      final daysRemaining = profile['days_remaining'] as int?;
+      final shouldRestore = await _showRestoreDialog(
+        _getRoleDisplayName(role),
+        daysRemaining,
+      );
+      if (shouldRestore != true) {
+        return;
+      }
+      debugPrint('🔄 User confirmed restore on login');
     }
 
     setState(() {
@@ -276,6 +716,15 @@ class _ContinueScreenState extends State<ContinueScreen> {
       if (autoSuccess) {
         debugPrint('✅ Auto login successful!');
         loginSuccess = true;
+
+        // ✅ If status was scheduled_for_deletion, cancel it
+        if (status == 'scheduled_for_deletion') {
+          await SessionManager.cancelScheduledDeletion(
+            email: email,
+            role: role,
+          );
+          debugPrint('✅ Deletion canceled on login');
+        }
       } else if (provider == 'email') {
         debugPrint('🔐 Email login flow started (auto-login failed)');
         SessionManager.setLocationContinuesc(true);
@@ -287,11 +736,29 @@ class _ContinueScreenState extends State<ContinueScreen> {
           );
           loginSuccess = response.user != null;
           debugPrint('📊 Email login success: $loginSuccess');
+
+          if (loginSuccess && status == 'scheduled_for_deletion') {
+            await SessionManager.cancelScheduledDeletion(
+              email: email,
+              role: role,
+            );
+            debugPrint('✅ Deletion canceled on login');
+          }
         }
       } else {
-        debugPrint('🔐 OAuth login flow started for $provider (auto-login failed)');
+        debugPrint(
+          '🔐 OAuth login flow started for $provider (auto-login failed)',
+        );
         loginSuccess = await _handleOAuthLoginForProfile(profile);
         debugPrint('📊 OAuth login success: $loginSuccess');
+
+        if (loginSuccess && status == 'scheduled_for_deletion') {
+          await SessionManager.cancelScheduledDeletion(
+            email: email,
+            role: role,
+          );
+          debugPrint('✅ Deletion canceled on login');
+        }
       }
 
       if (loginSuccess && mounted) {
@@ -307,10 +774,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
         if (currentUser != null) {
           await supabase.auth.updateUser(
             UserAttributes(
-              data: {
-                ...currentUser.userMetadata ?? {},
-                'current_role': role,
-              },
+              data: {...currentUser.userMetadata ?? {}, 'current_role': role},
             ),
           );
           debugPrint('📝 Updated user metadata with role: $role');
@@ -332,7 +796,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
         }
 
         debugPrint('📍 Redirecting to: $dashboardRoute');
-        
+
         if (mounted) {
           context.go(dashboardRoute);
         }
@@ -416,7 +880,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
           return true;
         }
       }
-      
+
       return false;
     } catch (e) {
       debugPrint('OAuth error: $e');
@@ -529,7 +993,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
   }
 
   // ============================================================
-  // 🔥 PROFILE CARD - FIXED OVERFLOW
+  // 🔥 PROFILE CARD (UPDATED WITH STATUS)
   // ============================================================
   Widget _buildProfileCard(Map<String, dynamic> profile, int index) {
     final email = profile['email'] as String? ?? 'Unknown';
@@ -540,14 +1004,22 @@ class _ContinueScreenState extends State<ContinueScreen> {
     final isLoading = _profileLoadingStates[uniqueId] == true;
     final isSelected = _selectedProfiles.contains(uniqueId);
     final photoUrl = profile['photo'] as String?;
-    final displayName = profile['display_name'] as String? ?? email.split('@').first;
-    
+    final displayName =
+        profile['display_name'] as String? ?? email.split('@').first;
+
     final hasPhoto = photoUrl != null && photoUrl.isNotEmpty;
     final lastLogin = profile['lastLogin'] as String?;
     final roleColor = _getRoleColor(profileRole);
     final roleIcon = _getRoleIcon(profileRole);
     final roleDisplayName = _getRoleDisplayName(profileRole);
     final providerColor = _getProviderColor(provider);
+
+    // ✅ Get status
+    final status = profile['status'] as String? ?? 'active';
+    final isActive = status == 'active';
+    final isScheduledForDeletion = status == 'scheduled_for_deletion';
+    final isInactive = status == 'inactive';
+    final daysRemaining = profile['days_remaining'] as int?;
 
     return GestureDetector(
       onTap: () {
@@ -574,6 +1046,8 @@ class _ContinueScreenState extends State<ContinueScreen> {
               ? roleColor.withValues(alpha: 0.15)
               : isLoading
               ? roleColor.withValues(alpha: 0.1)
+              : isInactive
+              ? Colors.grey.withValues(alpha: 0.05)
               : Colors.white.withValues(alpha: 0.05),
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
@@ -581,6 +1055,10 @@ class _ContinueScreenState extends State<ContinueScreen> {
                 ? roleColor
                 : isSelected
                 ? roleColor.withValues(alpha: 0.5)
+                : isScheduledForDeletion
+                ? Colors.orange.withValues(alpha: 0.3)
+                : isInactive
+                ? Colors.grey.withValues(alpha: 0.2)
                 : Colors.white.withValues(alpha: 0.1),
             width: isLoading ? 2 : 1.5,
           ),
@@ -590,7 +1068,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              // Profile Image with Icons (Fixed width)
+              // Profile Image with Icons
               SizedBox(
                 width: 70,
                 child: Stack(
@@ -602,12 +1080,22 @@ class _ContinueScreenState extends State<ContinueScreen> {
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         border: Border.all(
-                          color: roleColor.withValues(alpha: 0.3),
+                          color: isScheduledForDeletion
+                              ? Colors.orange.withValues(alpha: 0.5)
+                              : isInactive
+                              ? Colors.grey.withValues(alpha: 0.3)
+                              : roleColor.withValues(alpha: 0.3),
                           width: 2,
                         ),
                         boxShadow: [
                           BoxShadow(
-                            color: roleColor.withValues(alpha: 0.2),
+                            color:
+                                (isScheduledForDeletion
+                                        ? Colors.orange
+                                        : isInactive
+                                        ? Colors.grey
+                                        : roleColor)
+                                    .withValues(alpha: 0.2),
                             blurRadius: 8,
                             spreadRadius: 0,
                           ),
@@ -658,21 +1146,35 @@ class _ContinueScreenState extends State<ContinueScreen> {
                           height: 28,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            color: roleColor,
+                            color: isScheduledForDeletion
+                                ? Colors.orange
+                                : isInactive
+                                ? Colors.grey
+                                : roleColor,
                             border: Border.all(
                               color: const Color(0xFF0F1820),
                               width: 2.5,
                             ),
                             boxShadow: [
                               BoxShadow(
-                                color: roleColor.withValues(alpha: 0.5),
+                                color:
+                                    (isScheduledForDeletion
+                                            ? Colors.orange
+                                            : isInactive
+                                            ? Colors.grey
+                                            : roleColor)
+                                        .withValues(alpha: 0.5),
                                 blurRadius: 4,
                                 spreadRadius: 0,
                               ),
                             ],
                           ),
                           child: Center(
-                            child: Icon(roleIcon, color: Colors.white, size: 16),
+                            child: Icon(
+                              roleIcon,
+                              color: Colors.white,
+                              size: 16,
+                            ),
                           ),
                         ),
                       ),
@@ -731,21 +1233,58 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
               const SizedBox(width: 16),
 
-              // Profile Info - Expanded to take remaining space
+              // Profile Info
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      displayName,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 16,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            displayName,
+                            style: TextStyle(
+                              color: isInactive ? Colors.grey : Colors.white,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 16,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        // ✅ Status Badge
+                        if (!isActive)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: isScheduledForDeletion
+                                  ? Colors.orange.withValues(alpha: 0.2)
+                                  : Colors.grey.withValues(alpha: 0.2),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: isScheduledForDeletion
+                                    ? Colors.orange.withValues(alpha: 0.3)
+                                    : Colors.grey.withValues(alpha: 0.3),
+                              ),
+                            ),
+                            child: Text(
+                              isScheduledForDeletion
+                                  ? '⚠️ Deleting'
+                                  : '⏸ Inactive',
+                              style: TextStyle(
+                                color: isScheduledForDeletion
+                                    ? Colors.orange
+                                    : Colors.grey,
+                                fontSize: 9,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                     const SizedBox(height: 6),
                     Wrap(
@@ -759,13 +1298,23 @@ class _ContinueScreenState extends State<ContinueScreen> {
                             vertical: 2,
                           ),
                           decoration: BoxDecoration(
-                            color: roleColor.withValues(alpha: 0.15),
+                            color:
+                                (isScheduledForDeletion
+                                        ? Colors.orange
+                                        : isInactive
+                                        ? Colors.grey
+                                        : roleColor)
+                                    .withValues(alpha: 0.15),
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Text(
                             roleDisplayName,
                             style: TextStyle(
-                              color: roleColor,
+                              color: isScheduledForDeletion
+                                  ? Colors.orange
+                                  : isInactive
+                                  ? Colors.grey
+                                  : roleColor,
                               fontSize: 11,
                               fontWeight: FontWeight.w600,
                             ),
@@ -775,8 +1324,19 @@ class _ContinueScreenState extends State<ContinueScreen> {
                           Text(
                             _formatLastLogin(lastLogin),
                             style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.5),
+                              color: isInactive
+                                  ? Colors.grey.withValues(alpha: 0.5)
+                                  : Colors.white.withValues(alpha: 0.5),
                               fontSize: 11,
+                            ),
+                          ),
+                        if (isScheduledForDeletion && daysRemaining != null)
+                          Text(
+                            '${daysRemaining}d left',
+                            style: TextStyle(
+                              color: Colors.orange.withValues(alpha: 0.7),
+                              fontSize: 10,
+                              fontWeight: FontWeight.w500,
                             ),
                           ),
                       ],
@@ -785,18 +1345,30 @@ class _ContinueScreenState extends State<ContinueScreen> {
                 ),
               ),
 
-              // Arrow indicator - Fixed size
+              // Arrow indicator
               if (!isLoading && !_selectionMode)
                 Container(
                   width: 32,
                   height: 32,
                   decoration: BoxDecoration(
-                    color: roleColor.withValues(alpha: 0.1),
+                    color:
+                        (isScheduledForDeletion
+                                ? Colors.orange
+                                : isInactive
+                                ? Colors.grey
+                                : roleColor)
+                            .withValues(alpha: 0.1),
                     shape: BoxShape.circle,
                   ),
                   child: Icon(
                     Icons.arrow_forward_ios,
-                    color: roleColor.withValues(alpha: 0.7),
+                    color:
+                        (isScheduledForDeletion
+                                ? Colors.orange
+                                : isInactive
+                                ? Colors.grey
+                                : roleColor)
+                            .withValues(alpha: 0.7),
                     size: 14,
                   ),
                 ),
@@ -865,7 +1437,8 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
   Widget _getFallbackAvatar(Map<String, dynamic> profile, String? provider) {
     final email = profile['email'] as String? ?? 'Unknown';
-    final displayName = profile['display_name'] as String? ?? email.split('@').first;
+    final displayName =
+        profile['display_name'] as String? ?? email.split('@').first;
     final isOAuth = provider != 'email';
 
     if (isOAuth) {
@@ -1225,7 +1798,10 @@ class _ContinueScreenState extends State<ContinueScreen> {
                                           horizontal: 12,
                                           vertical: 8,
                                         ),
-                                        child: _buildProfileCard(profiles[index], index),
+                                        child: _buildProfileCard(
+                                          profiles[index],
+                                          index,
+                                        ),
                                       );
                                     },
                                   ),
@@ -1457,7 +2033,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
 }
 
 // ============================================================
-// 🔥 PASSWORD DIALOG - FIXED OVERFLOW
+// 🔥 PASSWORD DIALOG
 // ============================================================
 class SecurityCompliantPasswordDialog extends StatefulWidget {
   final String email;
