@@ -645,112 +645,124 @@ class _ContinueScreenState extends State<ContinueScreen> {
   // ============================================================
   // 🔥 HANDLE PROFILE LOGIN (UPDATED)
   // ============================================================
-  Future<void> _handleProfileLogin(
-    Map<String, dynamic> profile,
-    String role,
-    String uniqueId,
-  ) async {
-    debugPrint('🔐 ===== _handleProfileLogin START =====');
-    debugPrint('🔐 Role: $role, UniqueId: $uniqueId');
-    debugPrint('📧 Email: ${profile['email']}');
-    debugPrint('🔑 Provider: ${profile['provider']}');
+Future<void> _handleProfileLogin(
+  Map<String, dynamic> profile,
+  String role,
+  String uniqueId,
+) async {
+  // ✅ FIX #1: Guard පළමුවෙන්ම දාන්න - status check/dialog await points වලට කලින්
+  // මේකෙන් double-tap එකෙන් OAuth flow එක දෙපාරක් trigger වෙන එක (PKCE code_verifier
+  // localStorage එකේ overwrite වෙන bug එක) වළක්වනවා
+  if (_profileLoadingStates[uniqueId] == true) {
+    debugPrint('⏭️ Already processing login for $uniqueId, ignoring tap');
+    return;
+  }
 
-    final email = profile['email'] as String?;
-    final provider = profile['provider'] as String?;
-    final status = profile['status'] as String? ?? 'active';
+  // ✅ FIX #2: Loading flag එක synchronous විදිහට, immediately set කරනවා
+  setState(() {
+    _profileLoadingStates[uniqueId] = true;
+  });
 
-    if (email == null) {
-      debugPrint('❌ No email found');
-      return;
-    }
+  debugPrint('🔐 ===== _handleProfileLogin START =====');
+  debugPrint('🔐 Role: $role, UniqueId: $uniqueId');
+  debugPrint('📧 Email: ${profile['email']}');
+  debugPrint('🔑 Provider: ${profile['provider']}');
 
-    // ✅ Check status before login
-    if (status == 'inactive') {
-      if (mounted) {
-        await showCustomAlert(
-          context: context,
-          title: "Profile Inactive",
-          message: "This profile is inactive. Please contact support.",
-          isError: true,
-        );
-      }
-      return;
-    }
+  final email = profile['email'] as String?;
+  final provider = profile['provider'] as String?;
+  final status = profile['status'] as String? ?? 'active';
 
-    if (status == 'deleted') {
-      if (mounted) {
-        await showCustomAlert(
-          context: context,
-          title: "Profile Deleted",
-          message: "This profile has been permanently deleted.",
-          isError: true,
-        );
-      }
-      return;
-    }
+  if (email == null) {
+    debugPrint('❌ No email found');
+    // ✅ FIX: early return - loading flag එක reset කරන්න
+    setState(() => _profileLoadingStates[uniqueId] = false);
+    return;
+  }
 
-    // ✅ If scheduled for deletion, show restore dialog
-    if (status == 'scheduled_for_deletion') {
-      final daysRemaining = profile['days_remaining'] as int?;
-      final shouldRestore = await _showRestoreDialog(
-        _getRoleDisplayName(role),
-        daysRemaining,
+  // ✅ Check status before login
+  if (status == 'inactive') {
+    if (mounted) {
+      await showCustomAlert(
+        context: context,
+        title: "Profile Inactive",
+        message: "This profile is inactive. Please contact support.",
+        isError: true,
       );
-      if (shouldRestore != true) {
-        return;
-      }
-      debugPrint('🔄 User confirmed restore on login');
     }
+    // ✅ FIX: early return - loading flag එක reset කරන්න
+    if (mounted) {
+      setState(() => _profileLoadingStates[uniqueId] = false);
+    }
+    return;
+  }
 
-    setState(() {
-      _profileLoadingStates[uniqueId] = true;
-      _selectedEmail = email;
-    });
+  if (status == 'deleted') {
+    if (mounted) {
+      await showCustomAlert(
+        context: context,
+        title: "Profile Deleted",
+        message: "This profile has been permanently deleted.",
+        isError: true,
+      );
+    }
+    // ✅ FIX: early return - loading flag එක reset කරන්න
+    if (mounted) {
+      setState(() => _profileLoadingStates[uniqueId] = false);
+    }
+    return;
+  }
 
-    try {
-      bool loginSuccess = false;
+  // ✅ If scheduled for deletion, show restore dialog
+  if (status == 'scheduled_for_deletion') {
+    final daysRemaining = profile['days_remaining'] as int?;
+    final shouldRestore = await _showRestoreDialog(
+      _getRoleDisplayName(role),
+      daysRemaining,
+    );
+    if (shouldRestore != true) {
+      // ✅ FIX: early return (user cancelled restore) - loading flag එක reset කරන්න
+      if (mounted) {
+        setState(() => _profileLoadingStates[uniqueId] = false);
+      }
+      return;
+    }
+    debugPrint('🔄 User confirmed restore on login');
+  }
 
-      debugPrint('🔄 Attempting auto login for: $email');
-      final autoSuccess = await SessionManager.tryAutoLogin(email);
+  // ✅ NOTE: loading state දැනටමත් true, selectedEmail විතරක් set කරනවා
+  setState(() {
+    _selectedEmail = email;
+  });
 
-      if (autoSuccess) {
-        debugPrint('✅ Auto login successful!');
-        loginSuccess = true;
+  try {
+    bool loginSuccess = false;
 
-        // ✅ If status was scheduled_for_deletion, cancel it
-        if (status == 'scheduled_for_deletion') {
-          await SessionManager.cancelScheduledDeletion(
-            email: email,
-            role: role,
-          );
-          debugPrint('✅ Deletion canceled on login');
-        }
-      } else if (provider == 'email') {
-        debugPrint('🔐 Email login flow started (auto-login failed)');
-        SessionManager.setLocationContinuesc(true);
-        final password = await _showPasswordDialog(email);
-        if (password != null) {
-          final response = await supabase.auth.signInWithPassword(
-            email: email,
-            password: password,
-          );
-          loginSuccess = response.user != null;
-          debugPrint('📊 Email login success: $loginSuccess');
+    debugPrint('🔄 Attempting auto login for: $email');
+    final autoSuccess = await SessionManager.tryAutoLogin(email);
 
-          if (loginSuccess && status == 'scheduled_for_deletion') {
-            await SessionManager.cancelScheduledDeletion(
-              email: email,
-              role: role,
-            );
-            debugPrint('✅ Deletion canceled on login');
-          }
-        }
-      } else {
-        debugPrint(
-          '🔐 OAuth login flow started for $provider (auto-login failed)',
+    if (autoSuccess) {
+      debugPrint('✅ Auto login successful!');
+      loginSuccess = true;
+
+      // ✅ If status was scheduled_for_deletion, cancel it
+      if (status == 'scheduled_for_deletion') {
+        await SessionManager.cancelScheduledDeletion(
+          email: email,
+          role: role,
         );
-        loginSuccess = await _handleOAuthLoginForProfile(profile);
-        debugPrint('📊 OAuth login success: $loginSuccess');
+        debugPrint('✅ Deletion canceled on login');
+      }
+    } else if (provider == 'email') {
+      debugPrint('🔐 Email login flow started (auto-login failed)');
+      SessionManager.setLocationContinuesc(true);
+      final password = await _showPasswordDialog(email);
+      if (password != null) {
+        final response = await supabase.auth.signInWithPassword(
+          email: email,
+          password: password,
+        );
+        loginSuccess = response.user != null;
+        debugPrint('📊 Email login success: $loginSuccess');
 
         if (loginSuccess && status == 'scheduled_for_deletion') {
           await SessionManager.cancelScheduledDeletion(
@@ -760,77 +772,96 @@ class _ContinueScreenState extends State<ContinueScreen> {
           debugPrint('✅ Deletion canceled on login');
         }
       }
+    } else {
+      debugPrint(
+        '🔐 OAuth login flow started for $provider (auto-login failed)',
+      );
+      loginSuccess = await _handleOAuthLoginForProfile(profile);
+      debugPrint('📊 OAuth login success: $loginSuccess');
 
-      if (loginSuccess && mounted) {
-        debugPrint('✅ Login successful for role: $role');
-        await SessionManager.setCurrentUser(email);
-        await SessionManager.saveCurrentRole(role);
-        debugPrint('💾 Saved role: $role to SessionManager');
-
-        final savedRole = await SessionManager.getCurrentRole();
-        debugPrint('✅ Verified saved role: $savedRole');
-
-        final currentUser = supabase.auth.currentUser;
-        if (currentUser != null) {
-          await supabase.auth.updateUser(
-            UserAttributes(
-              data: {...currentUser.userMetadata ?? {}, 'current_role': role},
-            ),
-          );
-          debugPrint('📝 Updated user metadata with role: $role');
-        }
-
-        await appState.refreshState();
-        await Future.delayed(const Duration(milliseconds: 300));
-
-        String dashboardRoute;
-        switch (role) {
-          case 'owner':
-            dashboardRoute = '/owner';
-            break;
-          case 'barber':
-            dashboardRoute = '/barber';
-            break;
-          default:
-            dashboardRoute = '/customer';
-        }
-
-        debugPrint('📍 Redirecting to: $dashboardRoute');
-
-        if (mounted) {
-          context.go(dashboardRoute);
-        }
-      } else {
-        debugPrint('❌ Login failed for role: $role');
-        if (mounted) {
-          await showCustomAlert(
-            context: context,
-            title: "Login Failed",
-            message: "Could not log in with this profile. Please try again.",
-            isError: true,
-          );
-        }
+      if (loginSuccess && status == 'scheduled_for_deletion') {
+        await SessionManager.cancelScheduledDeletion(
+          email: email,
+          role: role,
+        );
+        debugPrint('✅ Deletion canceled on login');
       }
-    } catch (e) {
-      debugPrint('❌ Login error: $e');
+    }
+
+    if (loginSuccess && mounted) {
+      debugPrint('✅ Login successful for role: $role');
+
+      // ✅ FIX: correct email එක current user විදිහට set කරන්න role save කරන්න කලින්
+      // (getCurrentRole() එකේ stale email validation එකෙන් role clear වෙන bug එකට fix)
+      await SessionManager.setCurrentUser(email);
+
+      await SessionManager.saveCurrentRole(role);
+      debugPrint('💾 Saved role: $role to SessionManager');
+
+      final savedRole = await SessionManager.getCurrentRole();
+      debugPrint('✅ Verified saved role: $savedRole');
+
+      final currentUser = supabase.auth.currentUser;
+      if (currentUser != null) {
+        await supabase.auth.updateUser(
+          UserAttributes(
+            data: {...currentUser.userMetadata ?? {}, 'current_role': role},
+          ),
+        );
+        debugPrint('📝 Updated user metadata with role: $role');
+      }
+
+      await appState.refreshState();
+      await Future.delayed(const Duration(milliseconds: 300));
+
+      String dashboardRoute;
+      switch (role) {
+        case 'owner':
+          dashboardRoute = '/owner';
+          break;
+        case 'barber':
+          dashboardRoute = '/barber';
+          break;
+        default:
+          dashboardRoute = '/customer';
+      }
+
+      debugPrint('📍 Redirecting to: $dashboardRoute');
+
+      if (mounted) {
+        context.go(dashboardRoute);
+      }
+    } else {
+      debugPrint('❌ Login failed for role: $role');
       if (mounted) {
         await showCustomAlert(
           context: context,
           title: "Login Failed",
-          message: e.toString(),
+          message: "Could not log in with this profile. Please try again.",
           isError: true,
         );
       }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _profileLoadingStates[uniqueId] = false;
-          _selectedEmail = null;
-        });
-      }
-      debugPrint('🔐 ===== _handleProfileLogin END =====');
     }
+  } catch (e) {
+    debugPrint('❌ Login error: $e');
+    if (mounted) {
+      await showCustomAlert(
+        context: context,
+        title: "Login Failed",
+        message: e.toString(),
+        isError: true,
+      );
+    }
+  } finally {
+    if (mounted) {
+      setState(() {
+        _profileLoadingStates[uniqueId] = false;
+        _selectedEmail = null;
+      });
+    }
+    debugPrint('🔐 ===== _handleProfileLogin END =====');
   }
+}
 
   Future<bool> _handleOAuthLoginForProfile(Map<String, dynamic> profile) async {
     final email = profile['email'] as String?;
