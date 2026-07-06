@@ -49,6 +49,33 @@ class SessionManager {
     return timeUntilExpiry.inMinutes > 2;
   }
 
+  static const String _pendingRoleKey = 'pending_oauth_role';
+static const String _pendingEmailKey = 'pending_oauth_email';
+
+/// ✅ OAuth redirect එකට කලින් තෝරාගත්ත role එක save කරනවා
+static Future<void> setPendingRoleSelection({
+  required String email,
+  required String role,
+}) async {
+  await _prefs.setString(_pendingRoleKey, role);
+  await _prefs.setString(_pendingEmailKey, email);
+  debugPrint('📌 Pending role saved before OAuth redirect: $email -> $role');
+}
+
+/// ✅ OAuth callback එකෙන් ආපහු ආවම, pending role එක ගන්නවා (once only)
+static Future<String?> consumePendingRoleSelection(String email) async {
+  final pendingEmail = _prefs.getString(_pendingEmailKey);
+  final pendingRole = _prefs.getString(_pendingRoleKey);
+
+  if (pendingEmail == email && pendingRole != null) {
+    await _prefs.remove(_pendingRoleKey);
+    await _prefs.remove(_pendingEmailKey);
+    debugPrint('✅ Consumed pending role: $email -> $pendingRole');
+    return pendingRole;
+  }
+  return null;
+}
+
   // =====================================================
   // ✅ CONSENT MANAGEMENT FUNCTIONS
   // =====================================================
@@ -556,29 +583,31 @@ class SessionManager {
     }
   }
 
-  static Future<String?> getCurrentRole() async {
-    try {
-      final role = _prefs.getString(_keyCurrentRole);
-      debugPrint('📖 Getting current role from SharedPreferences: $role');
+static Future<String?> getCurrentRole() async {
+  try {
+    final role = _prefs.getString(_keyCurrentRole);
+    debugPrint('📖 Getting current role from SharedPreferences: $role');
 
-      final email = await getCurrentUserEmail();
-      if (email != null && role != null) {
-        final userRoles = await getUserRoles(email);
-        if (!userRoles.contains(role)) {
-          debugPrint(
-            '⚠️ Stored role $role not in user roles $userRoles, clearing',
-          );
-          await _prefs.remove(_keyCurrentRole);
-          return null;
-        }
+    // ✅ FIX: SessionManager pref එකේ තියෙන stale email එකට වඩා 
+    // actual authenticated supabase user email එක use කරන්න
+    final email = Supabase.instance.client.auth.currentUser?.email 
+        ?? await getCurrentUserEmail();
+
+    if (email != null && role != null) {
+      final userRoles = await getUserRoles(email);
+      if (!userRoles.contains(role)) {
+        debugPrint('⚠️ Stored role $role not in user roles $userRoles, clearing');
+        await _prefs.remove(_keyCurrentRole);
+        return null;
       }
-
-      return role;
-    } catch (e) {
-      debugPrint('❌ Error getting current role: $e');
-      return null;
     }
+
+    return role;
+  } catch (e) {
+    debugPrint('❌ Error getting current role: $e');
+    return null;
   }
+}
 
   static Future<void> updateUserRole(String newRole) async {
     try {

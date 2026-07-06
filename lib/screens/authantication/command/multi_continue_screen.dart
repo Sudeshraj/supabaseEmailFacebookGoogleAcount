@@ -763,7 +763,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
       if (loginSuccess && mounted) {
         debugPrint('✅ Login successful for role: $role');
-
+        await SessionManager.setCurrentUser(email);
         await SessionManager.saveCurrentRole(role);
         debugPrint('💾 Saved role: $role to SessionManager');
 
@@ -836,7 +836,8 @@ class _ContinueScreenState extends State<ContinueScreen> {
     final email = profile['email'] as String?;
     final provider = profile['provider'] as String?;
     if (email == null || provider == null) return false;
-
+  final roles = profile['roles'] as List? ?? [];
+  final role = roles.isNotEmpty ? roles.first.toString() : 'customer';
     try {
       final currentUser = supabase.auth.currentUser;
       if (currentUser?.email == email) return true;
@@ -844,6 +845,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
       final autoSuccess = await SessionManager.tryAutoLogin(email);
       if (autoSuccess) return true;
 
+  await SessionManager.setPendingRoleSelection(email: email, role: role);
       switch (provider) {
         case 'google':
           await supabase.auth.signInWithOAuth(

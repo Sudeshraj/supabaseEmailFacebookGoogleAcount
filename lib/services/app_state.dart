@@ -586,7 +586,7 @@ class AppState extends ChangeNotifier {
 
       // Remove duplicates (just in case)
       final uniqueRoles = roleNames.toSet().toList();
-      
+
       // Check if user has any roles
       _setProfileCompleted(uniqueRoles.isNotEmpty);
       _setRoles(uniqueRoles);
@@ -625,8 +625,7 @@ class AppState extends ChangeNotifier {
           userId: user.id,
           name: user.userMetadata?['full_name'] ?? email.split('@').first,
           photo:
-              user.userMetadata?['avatar_url'] ??
-              user.userMetadata?['picture'],
+              user.userMetadata?['avatar_url'] ?? user.userMetadata?['picture'],
           roles: uniqueRoles,
           rememberMe: rememberMe,
           provider: provider,
@@ -637,6 +636,19 @@ class AppState extends ChangeNotifier {
 
       // 🔥 FIX: Get current role from SessionManager
       String? savedCurrentRole = await SessionManager.getCurrentRole();
+
+      if (savedCurrentRole == null) {
+        final pendingRole = await SessionManager.consumePendingRoleSelection(
+          email,
+        );
+        if (pendingRole != null && uniqueRoles.contains(pendingRole)) {
+          debugPrint(
+            '🔄 Applying pending role from OAuth redirect: $pendingRole',
+          );
+          savedCurrentRole = pendingRole;
+          await SessionManager.saveCurrentRole(pendingRole);
+        }
+      }
 
       // If saved role is valid, use it
       if (savedCurrentRole != null && uniqueRoles.contains(savedCurrentRole)) {
