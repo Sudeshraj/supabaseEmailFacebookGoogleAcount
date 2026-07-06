@@ -287,7 +287,9 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
   // ============================================================
   // 🔥 GET USER'S ALL ROLES (Including inactive)
   // ============================================================
-  Future<List<Map<String, dynamic>>> _getAllUserRolesWithStatus(String userId) async {
+  Future<List<Map<String, dynamic>>> _getAllUserRolesWithStatus(
+    String userId,
+  ) async {
     try {
       final response = await Supabase.instance.client
           .from('user_roles')
@@ -298,10 +300,14 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
           ''')
           .eq('user_id', userId);
 
-      return response.map((r) => {
-        'role': r['roles']['name'] as String,
-        'status': r['status'] as String? ?? 'active',
-      }).toList();
+      return response
+          .map(
+            (r) => {
+              'role': r['roles']['name'] as String,
+              'status': r['status'] as String? ?? 'active',
+            },
+          )
+          .toList();
     } catch (e) {
       debugPrint('Error getting all user roles: $e');
       return [];
@@ -354,7 +360,10 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
     }
 
     // ✅ Validation
-    if (firstName == null || lastName == null || firstName!.isEmpty || lastName!.isEmpty) {
+    if (firstName == null ||
+        lastName == null ||
+        firstName!.isEmpty ||
+        lastName!.isEmpty) {
       if (mounted) {
         await showCustomAlert(
           context: context,
@@ -397,7 +406,7 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
           'status': 'active',
           'created_at': DateTime.now().toIso8601String(),
           'updated_at': DateTime.now().toIso8601String(),
-        }
+        },
       };
 
       if (phone != null && phone!.isNotEmpty) extraData['phone'] = phone;
@@ -438,10 +447,7 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
             existingProfile['extra_data'] as Map<String, dynamic>? ?? {};
 
         // ✅ Merge extra_data keeping existing profile data
-        final mergedExtra = {
-          ...existingExtra,
-          ...extraData,
-        };
+        final mergedExtra = {...existingExtra, ...extraData};
 
         // ✅ Update profile level status if exists
         if (!mergedExtra.containsKey('profile_status')) {
@@ -451,7 +457,8 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
             'updated_at': DateTime.now().toIso8601String(),
           };
         } else {
-          final profileStatus = mergedExtra['profile_status'] as Map<String, dynamic>;
+          final profileStatus =
+              mergedExtra['profile_status'] as Map<String, dynamic>;
           profileStatus['status'] = 'active';
           profileStatus['updated_at'] = DateTime.now().toIso8601String();
         }
@@ -462,7 +469,8 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
               'email': email,
               'full_name': fullName,
               'avatar_url':
-                  user.userMetadata?['avatar_url'] ?? user.userMetadata?['picture'],
+                  user.userMetadata?['avatar_url'] ??
+                  user.userMetadata?['picture'],
               'extra_data': mergedExtra,
               'platform': platform,
               'is_active': true,
@@ -537,12 +545,9 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
       );
 
       await SessionManager.saveCurrentRole(roles!);
-      
+
       // ✅ Sync profile status with SessionManager
-      await SessionManager.syncProfileStatusWithDB(
-        email: email,
-        role: roles!,
-      );
+      await SessionManager.syncProfileStatusWithDB(email: email, role: roles!);
 
       // ✅ Check if any roles need auto-restore
       for (String role in userRoles) {
@@ -560,17 +565,17 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
         setState(() => _isLoading = false);
 
         // Show success message
-        final title = roles == 'owner' 
-            ? "🎉 Business Created!" 
-            : roles == 'barber' 
-                ? "👋 Welcome Barber!" 
-                : "🎉 Welcome!";
-        
+        final title = roles == 'owner'
+            ? "🎉 Business Created!"
+            : roles == 'barber'
+            ? "👋 Welcome Barber!"
+            : "🎉 Welcome!";
+
         final message = roles == 'owner'
             ? "Your business profile has been created successfully."
             : roles == 'barber'
-                ? "Your barber profile has been created successfully."
-                : "Your profile has been created successfully.";
+            ? "Your barber profile has been created successfully."
+            : "Your profile has been created successfully.";
 
         await showCustomAlert(
           context: context,
@@ -636,43 +641,28 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
   void _redirectBasedOnRole(String role) {
     if (!mounted) return;
 
-    // ✅ Check if user has valid session before redirect
-    SessionManager.isUserLoggedIn(widget.user?.email ?? '').then((isLoggedIn) {
-      if (!mounted) return;
-      
-      if (!isLoggedIn) {
-        debugPrint('⚠️ User not logged in, redirecting to login');
-        context.go('/login');
-        return;
-      }
-      
-      switch (role) {
-        case 'owner':
-          context.go('/owner');
-          break;
-        case 'barber':
-          context.go('/barber');
-          break;
-        default:
-          context.go('/customer');
-          break;
-      }
-    }).catchError((e) {
-      debugPrint('❌ Error checking session: $e');
-      if (mounted) {
-        switch (role) {
-          case 'owner':
-            context.go('/owner');
-            break;
-          case 'barber':
-            context.go('/barber');
-            break;
-          default:
-            context.go('/customer');
-            break;
-        }
-      }
-    });
+    // ✅ Session check එක අයින් කරන්න
+    // Registration flow complete වෙලා user එක logged in වෙලා ඉන්නවා
+
+    final email = widget.user?.email ?? supabase.auth.currentUser?.email;
+
+    if (email == null) {
+      context.go('/login');
+      return;
+    }
+
+    // ✅ Role එක අනුව redirect කරන්න
+    switch (role) {
+      case 'owner':
+        context.go('/owner');
+        break;
+      case 'barber':
+        context.go('/barber');
+        break;
+      default:
+        context.go('/customer');
+        break;
+    }
   }
 
   void _nextPage() => _controller.nextPage(
