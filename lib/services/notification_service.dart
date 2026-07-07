@@ -406,16 +406,30 @@ class NotificationService {
     }
   }
 
-  // ============= ROLE-BASED NOTIFICATION METHODS (NEW) =============
+  // ============= ROLE-BASED NOTIFICATION METHODS (UPDATED) =============
 
-  /// Get notifications filtered by role
+  /// ✅ Updated: Get notifications filtered by role with status check
   Future<List<Map<String, dynamic>>> getNotificationsWithRole({
     required String userId,
-    required String role, // 'customer', 'barber', 'owner'
+    required String role,
     int limit = 50,
     bool unreadOnly = false,
   }) async {
     try {
+      // ✅ Check if user has active role
+      final userRoles = await supabase
+          .from('user_roles')
+          .select('status')
+          .eq('user_id', userId)
+          .eq('roles.name', role)
+          .eq('status', 'active')
+          .maybeSingle();
+
+      if (userRoles == null) {
+        debugPrint('⚠️ User $userId does not have active $role role.');
+        return [];
+      }
+
       // Get all notifications via RPC
       final result = await supabase.rpc(
         'get_user_notifications',
@@ -427,7 +441,7 @@ class NotificationService {
         notifications = List<Map<String, dynamic>>.from(result);
       }
 
-      // ✅ Filter by role
+      // Filter by role
       notifications = notifications.where((n) {
         final data = n['data'] as Map? ?? {};
         final notificationRole = data['role'] ?? 'customer';
@@ -455,7 +469,7 @@ class NotificationService {
     }
   }
 
-  /// Get unread notification count with role filter
+  /// ✅ Updated: Get unread notification count with role filter
   Future<int> getUnreadCountWithRole({
     required String userId,
     required String role,
@@ -473,7 +487,7 @@ class NotificationService {
     }
   }
 
-  /// Send notification to specific user with role data
+  /// ✅ Updated: Send notification to specific user with role status check
   Future<void> sendNotificationWithRole({
     required String userId,
     required String title,
@@ -483,6 +497,20 @@ class NotificationService {
     required String role,
   }) async {
     try {
+      // ✅ Check if user has active role
+      final userRoles = await supabase
+          .from('user_roles')
+          .select('status')
+          .eq('user_id', userId)
+          .eq('roles.name', role)
+          .eq('status', 'active')
+          .maybeSingle();
+
+      if (userRoles == null) {
+        debugPrint('⚠️ User $userId does not have active $role role. Skipping notification.');
+        return;
+      }
+
       // 1. Save to database
       await supabase.from('notifications').insert({
         'user_id': userId,
@@ -509,7 +537,6 @@ class NotificationService {
     }
   }
 
-  /// Send push notification using FCM token
   /// Send push notification using FCM token via Edge Function
   Future<void> _sendPushNotificationWithToken({
     required String userId,
@@ -548,16 +575,10 @@ class NotificationService {
         },
       );
 
-      // ✅ Use result to check success
       if (result.status == 200) {
         final responseData = result.data as Map<String, dynamic>?;
         if (responseData?['success'] == true) {
           debugPrint('✅ Push notification sent successfully to $userId');
-          if (responseData?['result'] != null) {
-            debugPrint(
-              '📤 FCM Message ID: ${responseData?['result']?['name']}',
-            );
-          }
         } else {
           debugPrint(
             '⚠️ Push notification failed: ${responseData?['message']}',
@@ -565,10 +586,126 @@ class NotificationService {
         }
       } else {
         debugPrint('⚠️ Edge Function returned status: ${result.status}');
-        debugPrint('📤 Response: ${result.data}');
       }
     } catch (e) {
       debugPrint('❌ Error sending push notification: $e');
+    }
+  }
+
+  // ============= NEW: BULK NOTIFICATION METHODS =============
+
+  /// ✅ NEW: Send notification to all active users with a specific role
+  Future<void> sendNotificationToActiveUsers({
+    required String role,
+    required String title,
+    required String body,
+    String type = 'general',
+    Map<String, dynamic>? data,
+    int? salonId,
+  }) async {
+    try {
+      // Get all active users with the specified role
+      var query = supabase
+          .from('user_roles')
+          .select('user_id, profiles!inner (id, fcm_token)')
+          .eq('roles.name', role)
+          .eq('status', 'active');
+
+      if (salonId != null && role == 'owner') {
+        query = query.eq('salons.id', salonId);
+      }
+
+      final users = await query;
+
+      debugPrint('📤 Sending notification to ${users.length} active $role users');
+
+      for (var user in users) {
+        final userId = user['user_id'] as String;
+        final fcmToken = user['profiles']?['fcm_token'] as String?;
+
+        if (fcmToken != null && fcmToken.isNotEmpty) {
+          await sendNotificationWithRole(
+            userId: userId,
+            title: title,
+            body: body,
+            type: type,
+            role: role,
+            data: data,
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ Error sending to active users: $e');
+    }
+  }
+
+  /// ✅ NEW: Get all active users by role
+  Future<List<Map<String, dynamic>>> getActiveUsersByRole({
+    required String role,
+    int? salonId,
+  }) async {
+    try {
+      var query = supabase
+          .from('user_roles')
+          .select('''
+            user_id,
+            profiles!inner (
+              id,
+              full_name,
+              email,
+              fcm_token,
+              is_active
+            )
+          ''')
+          .eq('roles.name', role)
+          .eq('status', 'active');
+
+      if (salonId != null && role == 'owner') {
+        query = query.eq('salons.id', salonId);
+      }
+
+      final response = await query;
+
+      List<Map<String, dynamic>> users = [];
+      for (var item in response) {
+        final profile = item['profiles'] as Map?;
+        if (profile != null && profile['is_active'] == true) {
+          users.add({
+            'userId': item['user_id'],
+            'fullName': profile['full_name'],
+            'email': profile['email'],
+            'fcmToken': profile['fcm_token'],
+            'isActive': profile['is_active'],
+          });
+        }
+      }
+
+      debugPrint('✅ Found ${users.length} active $role users');
+      return users;
+    } catch (e) {
+      debugPrint('❌ Error getting active users: $e');
+      return [];
+    }
+  }
+
+  /// ✅ NEW: Check if user has active role before sending notification
+  Future<bool> hasActiveRole({
+    required String userId,
+    required String role,
+  }) async {
+    try {
+      final result = await supabase
+          .from('user_roles')
+          .select('status')
+          .eq('user_id', userId)
+          .eq('roles.name', role)
+          .eq('status', 'active')
+          .maybeSingle();
+
+      return result != null;
+    } catch (e) {
+      debugPrint('❌ Error checking active role: $e');
+      return false;
     }
   }
 
@@ -1289,7 +1426,7 @@ class NotificationService {
     required String barberId,
     required String leaveDate,
     required String leaveType,
-    required String status, // 'approved' or 'rejected'
+    required String status,
     required String? reason,
     required int leaveId,
   }) async {
@@ -1500,7 +1637,7 @@ class NotificationService {
     required String userId,
     required String title,
     required String body,
-    required String role, // 'customer', 'barber', 'owner'
+    required String role,
     String screen = 'home',
     Map<String, dynamic>? extraData,
   }) async {

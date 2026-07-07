@@ -329,51 +329,69 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// Check if user can access a route
-  bool canAccessRoute(String route) {
-    if (_loading) return false;
+/// Check if user can access a route
+bool canAccessRoute(String route) {
+  if (_loading) return false;
 
+  // ✅ Check if user has any active roles
+  if (_loggedIn && _roles.isEmpty) {
+    // User is logged in but has no active roles
     switch (route) {
-      case '/owner':
-        return _loggedIn &&
-            _emailVerified &&
-            _profileCompleted &&
-            _currentRole == 'owner';
-
-      case '/barber':
-        return _loggedIn &&
-            _emailVerified &&
-            _profileCompleted &&
-            _currentRole == 'barber';
-
-      case '/customer':
-        return _loggedIn &&
-            _emailVerified &&
-            _profileCompleted &&
-            (_currentRole == 'customer' || _currentRole == null);
-
       case '/reg':
-        return _loggedIn && _emailVerified && !_profileCompleted;
-
-      case '/verify-email':
-        return _loggedIn && !_emailVerified;
-
-      case '/role-selector':
-        return _loggedIn &&
-            _emailVerified &&
-            _profileCompleted &&
-            _roles.length > 1; // Only show if multiple roles
-
-      case '/login':
-      case '/signup':
-      case '/continue':
-      case '/clear-data':
-        return !_loggedIn;
-
-      default:
         return true;
+      case '/logout':
+        return true;
+      case '/verify-email':
+        return true;
+      default:
+        return false;
     }
   }
+
+  switch (route) {
+    case '/owner':
+      return _loggedIn &&
+          _emailVerified &&
+          _profileCompleted &&
+          _currentRole == 'owner' &&
+          _roles.contains('owner');
+
+    case '/barber':
+      return _loggedIn &&
+          _emailVerified &&
+          _profileCompleted &&
+          _currentRole == 'barber' &&
+          _roles.contains('barber');
+
+    case '/customer':
+      return _loggedIn &&
+          _emailVerified &&
+          _profileCompleted &&
+          (_currentRole == 'customer' || _currentRole == null) &&
+          _roles.contains('customer');
+
+    case '/reg':
+      return _loggedIn && _emailVerified && !_profileCompleted;
+
+    case '/verify-email':
+      return _loggedIn && !_emailVerified;
+
+    case '/role-selector':
+      return _loggedIn &&
+          _emailVerified &&
+          _profileCompleted &&
+          _roles.length > 1;
+
+    case '/login':
+    case '/signup':
+    case '/continue':
+    case '/clear-data':
+      return !_loggedIn;
+
+    default:
+      return true;
+  }
+}
 
   /// Get user info
   Map<String, dynamic>? getCurrentUserInfo() {
@@ -544,135 +562,163 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  // 🔥 FIXED: Update user profile with multiple roles using user_roles table
-  Future<void> _updateUserProfile() async {
-    if (!_loggedIn) {
-      _setProfileCompleted(false);
-      _setRoles([]);
-      _setCurrentRole(null);
-      _setLoginProvider(null);
-      return;
+// 🔥 FIXED: Update user profile with multiple roles using user_roles table
+Future<void> _updateUserProfile() async {
+  if (!_loggedIn) {
+    _setProfileCompleted(false);
+    _setRoles([]);
+    _setCurrentRole(null);
+    _setLoginProvider(null);
+    return;
+  }
+
+  try {
+    final supabase = Supabase.instance.client;
+    final user = supabase.auth.currentUser!;
+    final email = user.email!;
+
+    final provider =
+        user.userMetadata?['provider']?.toString().toLowerCase() ?? 'email';
+    _setLoginProvider(provider);
+    _setCurrentEmail(email);
+
+    // ✅ UPDATED: Get ONLY active user roles
+    final userRolesResponse = await supabase
+        .from('user_roles')
+        .select('''
+          role_id,
+          roles!inner (
+            name
+          ),
+          status
+        ''')
+        .eq('user_id', user.id)
+        .eq('status', 'active');
+
+    // Extract role names from active roles only
+    final List<String> roleNames = [];
+    for (var roleEntry in userRolesResponse) {
+      final role = roleEntry['roles'] as Map?;
+      if (role != null && role['name'] != null) {
+        roleNames.add(role['name'].toString());
+      }
     }
 
-    try {
-      final supabase = Supabase.instance.client;
-      final user = supabase.auth.currentUser!;
-      final email = user.email!;
+    // Remove duplicates
+    final uniqueRoles = roleNames.toSet().toList();
 
-      final provider =
-          user.userMetadata?['provider']?.toString().toLowerCase() ?? 'email';
-      _setLoginProvider(provider);
-      _setCurrentEmail(email);
+    // Check if user has any active roles
+    _setProfileCompleted(uniqueRoles.isNotEmpty);
+    _setRoles(uniqueRoles);
 
-      // 🔥 NEW: Get user roles from user_roles table (multiple roles)
-      final userRolesResponse = await supabase
-          .from('user_roles')
-          .select('''
-            role_id,
-            roles!inner (
-              name
-            )
-          ''')
-          .eq('user_id', user.id);
+    // Get profile data for additional info
+    if (uniqueRoles.isNotEmpty) {
+      final profile = await supabase
+          .from('profiles')
+          .select('is_blocked, is_active, extra_data')
+          .eq('id', user.id)
+          .maybeSingle();
 
-      // Extract role names
-      final List<String> roleNames = [];
-      for (var roleEntry in userRolesResponse) {
-        final role = roleEntry['roles'] as Map?;
-        if (role != null && role['name'] != null) {
-          roleNames.add(role['name'].toString());
+      if (profile != null) {
+        if (profile['is_blocked'] == true) {
+          _setErrorMessage('Account blocked');
+          await logout();
+          return;
         }
-      }
 
-      // Remove duplicates (just in case)
-      final uniqueRoles = roleNames.toSet().toList();
-
-      // Check if user has any roles
-      _setProfileCompleted(uniqueRoles.isNotEmpty);
-      _setRoles(uniqueRoles);
-
-      // Get profile data for additional info (blocked, active status)
-      if (uniqueRoles.isNotEmpty) {
-        // Check if any profile is blocked/inactive (using profiles table)
-        final profile = await supabase
-            .from('profiles')
-            .select('is_blocked, is_active')
-            .eq('id', user.id)
-            .maybeSingle();
-
-        if (profile != null) {
-          if (profile['is_blocked'] == true) {
-            _setErrorMessage('Account blocked');
-            await logout();
-            return;
-          }
-
-          if (profile['is_active'] == false) {
+        if (profile['is_active'] == false) {
+          // ✅ Check if scheduled for deletion
+          final extraData = profile['extra_data'] as Map<String, dynamic>? ?? {};
+          final profileStatus = extraData['profile_status'] as Map<String, dynamic>?;
+          
+          if (profileStatus != null && profileStatus['status'] == 'scheduled_for_deletion') {
+            // Auto-restore on refresh
+            debugPrint('🔄 Auto-restoring scheduled profile in AppState');
+            await SessionManager.autoRestoreProfileLevelOnLogin(email: email);
+            
+            // Refresh roles after restore
+            final restoredRoles = await supabase
+                .from('user_roles')
+                .select('''
+                  role_id,
+                  roles!inner (name),
+                  status
+                ''')
+                .eq('user_id', user.id)
+                .eq('status', 'active');
+            
+            final List<String> restoredRoleNames = [];
+            for (var roleEntry in restoredRoles) {
+              final role = roleEntry['roles'] as Map?;
+              if (role != null && role['name'] != null) {
+                restoredRoleNames.add(role['name'].toString());
+              }
+            }
+            _setRoles(restoredRoleNames);
+            _setProfileCompleted(restoredRoleNames.isNotEmpty);
+          } else {
             _setErrorMessage('Account inactive');
             await logout();
             return;
           }
         }
       }
-
-      // Handle remember me
-      final rememberMe = await SessionManager.isRememberMeEnabled();
-      if (rememberMe && uniqueRoles.isNotEmpty) {
-        final session = supabase.auth.currentSession;
-
-        await SessionManager.saveUserProfile(
-          email: email,
-          userId: user.id,
-          name: user.userMetadata?['full_name'] ?? email.split('@').first,
-          photo:
-              user.userMetadata?['avatar_url'] ?? user.userMetadata?['picture'],
-          roles: uniqueRoles,
-          rememberMe: rememberMe,
-          provider: provider,
-          accessToken: session?.accessToken,
-          refreshToken: session?.refreshToken,
-        );
-      }
-
-      // 🔥 FIX: Get current role from SessionManager
-      String? savedCurrentRole = await SessionManager.getCurrentRole();
-
-      if (savedCurrentRole == null) {
-        final pendingRole = await SessionManager.consumePendingRoleSelection(
-          email,
-        );
-        if (pendingRole != null && uniqueRoles.contains(pendingRole)) {
-          debugPrint(
-            '🔄 Applying pending role from OAuth redirect: $pendingRole',
-          );
-          savedCurrentRole = pendingRole;
-          await SessionManager.saveCurrentRole(pendingRole);
-        }
-      }
-
-      // If saved role is valid, use it
-      if (savedCurrentRole != null && uniqueRoles.contains(savedCurrentRole)) {
-        _setCurrentRole(savedCurrentRole);
-      }
-      // If no saved role or saved role invalid, set first role in memory only
-      else {
-        final defaultRole = uniqueRoles.isNotEmpty ? uniqueRoles.first : null;
-        _setCurrentRole(defaultRole);
-        // Don't save to SessionManager here
-      }
-
-      developer.log(
-        'Profile updated: roles=$uniqueRoles, current=$_currentRole, provider=$provider',
-        name: 'AppState',
-      );
-    } catch (e) {
-      developer.log('Profile update error: $e', name: 'AppState');
-      _setProfileCompleted(false);
-      _setRoles([]);
-      _setCurrentRole(null);
-      _setLoginProvider(null);
     }
+
+    // Handle remember me
+    final rememberMe = await SessionManager.isRememberMeEnabled();
+    if (rememberMe && uniqueRoles.isNotEmpty) {
+      final session = supabase.auth.currentSession;
+
+      await SessionManager.saveUserProfile(
+        email: email,
+        userId: user.id,
+        name: user.userMetadata?['full_name'] ?? email.split('@').first,
+        photo:
+            user.userMetadata?['avatar_url'] ?? user.userMetadata?['picture'],
+        roles: uniqueRoles,
+        rememberMe: rememberMe,
+        provider: provider,
+        accessToken: session?.accessToken,
+        refreshToken: session?.refreshToken,
+      );
+    }
+
+    // Get current role from SessionManager
+    String? savedCurrentRole = await SessionManager.getCurrentRole();
+
+    if (savedCurrentRole == null) {
+      final pendingRole = await SessionManager.consumePendingRoleSelection(
+        email,
+      );
+      if (pendingRole != null && uniqueRoles.contains(pendingRole)) {       
+        savedCurrentRole = pendingRole;
+        await SessionManager.saveCurrentRole(pendingRole);
+      }
+    }
+
+    // If saved role is valid, use it
+    if (savedCurrentRole != null && uniqueRoles.contains(savedCurrentRole)) {
+      _setCurrentRole(savedCurrentRole);
+    }
+    // If no saved role or saved role invalid, set first role in memory only
+    else {
+      final defaultRole = uniqueRoles.isNotEmpty ? uniqueRoles.first : null;
+      _setCurrentRole(defaultRole);
+    }
+
+    developer.log(
+      'Profile updated: activeRoles=$uniqueRoles, current=$_currentRole, provider=$provider',
+      name: 'AppState',
+    );
+  } catch (e) {
+    developer.log('Profile update error: $e', name: 'AppState');
+    _setProfileCompleted(false);
+    _setRoles([]);
+    _setCurrentRole(null);
+    _setLoginProvider(null);
   }
+}
 
   /// Initialize user roles from database
   Future<void> initializeUserRole(String userId) async {
