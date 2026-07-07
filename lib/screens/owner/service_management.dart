@@ -58,6 +58,82 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
     setState(() => _isLoading = true);
 
     try {
+      final user = supabase.auth.currentUser;
+      if (user == null) {
+        if (mounted) {
+          _showSnackBar('Please login to manage services', Colors.orange);
+          setState(() => _isLoading = false);
+        }
+        return;
+      }
+
+      // ✅ STEP 1: Check if user has active owner role
+      final userRoleCheck = await supabase
+          .from('user_roles')
+          .select('status')
+          .eq('user_id', user.id)
+          .eq('role_id', 1) // owner role ID
+          .maybeSingle();
+
+      if (userRoleCheck == null || userRoleCheck['status'] != 'active') {
+        if (mounted) {
+          _showSnackBar(
+            'Your account is not active. Please contact support.',
+            Colors.red,
+          );
+          setState(() => _isLoading = false);
+        }
+        return;
+      }
+
+      // ✅ STEP 2: Check if profile is active and not blocked
+      final profileCheck = await supabase
+          .from('profiles')
+          .select('is_active, is_blocked')
+          .eq('id', user.id)
+          .maybeSingle();
+
+      if (profileCheck != null) {
+        if (profileCheck['is_blocked'] == true) {
+          if (mounted) {
+            _showSnackBar(
+              'Your account has been blocked. Please contact support.',
+              Colors.red,
+            );
+            setState(() => _isLoading = false);
+          }
+          return;
+        }
+        if (profileCheck['is_active'] == false) {
+          if (mounted) {
+            _showSnackBar(
+              'Your profile is inactive. Please contact support.',
+              Colors.red,
+            );
+            setState(() => _isLoading = false);
+          }
+          return;
+        }
+      }
+
+      // ✅ STEP 3: Check if user owns this salon
+      final salonCheck = await supabase
+          .from('salons')
+          .select('owner_id')
+          .eq('id', widget.salonId)
+          .maybeSingle();
+
+      if (salonCheck == null || salonCheck['owner_id'] != user.id) {
+        if (mounted) {
+          _showSnackBar(
+            'You do not have permission to manage this salon.',
+            Colors.red,
+          );
+          setState(() => _isLoading = false);
+        }
+        return;
+      }
+
       // Load categories
       final categoriesResponse = await supabase
           .from('salon_categories')

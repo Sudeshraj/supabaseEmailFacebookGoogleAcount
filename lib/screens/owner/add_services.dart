@@ -497,221 +497,239 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   // CREATE/UPDATE SERVICE
   // ============================================
 
-  Future<void> _createAndAddService() async {
-    // Validation
-    if (_mode == 'new_service' || widget.isEditing) {
-      final serviceName = _serviceNameController.text.trim();
-      if (serviceName.isEmpty) {
-        _showSnackBar('Service name is required', Colors.orange);
-        return;
-      }
+Future<void> _createAndAddService() async {
+  // Validation
+  if (_mode == 'new_service' || widget.isEditing) {
+    final serviceName = _serviceNameController.text.trim();
+    if (serviceName.isEmpty) {
+      _showSnackBar('Service name is required', Colors.orange);
+      return;
+    }
 
-      // Check for duplicate service name
-      if (_serviceNameError != null) {
-        _showSnackBar(_serviceNameError!, Colors.orange);
-        return;
-      }
-    } else {
-      if (_selectedExistingServiceId == null) {
-        _showSnackBar('Please select a service', Colors.orange);
+    // Check for duplicate service name
+    if (_serviceNameError != null) {
+      _showSnackBar(_serviceNameError!, Colors.orange);
+      return;
+    }
+  } else {
+    if (_selectedExistingServiceId == null) {
+      _showSnackBar('Please select a service', Colors.orange);
+      return;
+    }
+  }
+
+  setState(() => _isLoading = true);
+
+  try {
+    // ✅ STEP 1: Check if barber is active (if adding to a specific barber)
+    if (widget.salonBarberId != null && !widget.isEditing) {
+      final barberStatusCheck = await supabase
+          .from('user_roles')
+          .select('status')
+          .eq('user_id', widget.salonBarberId!)
+          .eq('role_id', 2)  // barber role ID
+          .maybeSingle();
+
+      if (barberStatusCheck == null || barberStatusCheck['status'] != 'active') {
+        _showSnackBar(
+          'This barber account is not active. Please reactivate the barber first.',
+          Colors.orange,
+        );
+        setState(() => _isLoading = false);
         return;
       }
     }
 
-    setState(() => _isLoading = true);
+    int serviceId;
 
-    try {
-      int serviceId;
+    if (_mode == 'new_service' || widget.isEditing) {
+      if (widget.isEditing && widget.serviceId != null) {
+        serviceId = widget.serviceId!;
 
-      if (_mode == 'new_service' || widget.isEditing) {
-        if (widget.isEditing && widget.serviceId != null) {
-          serviceId = widget.serviceId!;
+        final updateData = {
+          'name': _serviceNameController.text.trim(),
+          'description': _serviceDescriptionController.text.trim().isNotEmpty
+              ? _serviceDescriptionController.text.trim()
+              : null,
+          'category_id': _selectedCategoryId,
+          'icon_name': _selectedIcon,
+          'updated_at': DateTime.now().toIso8601String(),
+        };
 
-          final updateData = {
-            'name': _serviceNameController.text.trim(),
-            'description': _serviceDescriptionController.text.trim().isNotEmpty
-                ? _serviceDescriptionController.text.trim()
-                : null,
-            'category_id': _selectedCategoryId,
-            'icon_name': _selectedIcon,
-            'updated_at': DateTime.now().toIso8601String(),
-          };
+        await supabase
+            .from('services')
+            .update(updateData)
+            .eq('id', serviceId);
 
-          await supabase
-              .from('services')
-              .update(updateData)
-              .eq('id', serviceId);
-
-          // Delete existing variants if any
-          if (_variants.isNotEmpty) {
-            await supabase
-                .from('service_variants')
-                .delete()
-                .eq('service_id', serviceId);
-          }
-        } else {
-          // Check again for duplicate before inserting
-          final exists = _existingServices.any(
-            (service) =>
-                service['name'].toString().toLowerCase() ==
-                _serviceNameController.text.trim().toLowerCase(),
-          );
-
-          if (exists) {
-            setState(() {
-              _serviceNameError = 'A service with this name already exists';
-              _isLoading = false;
-            });
-            _showSnackBar(
-              'A service with this name already exists',
-              Colors.orange,
-            );
-            return;
-          }
-
-          final serviceData = {
-            'salon_id': widget.salonId,
-            'name': _serviceNameController.text.trim(),
-            'description': _serviceDescriptionController.text.trim().isNotEmpty
-                ? _serviceDescriptionController.text.trim()
-                : null,
-            'category_id': _selectedCategoryId,
-            'icon_name': _selectedIcon,
-            'is_active': true,
-            'created_by': supabase.auth.currentUser?.id,
-          };
-
-          final serviceResponse = await supabase
-              .from('services')
-              .insert(serviceData)
-              .select()
-              .single();
-
-          serviceId = serviceResponse['id'];
-        }
-      } else {
-        serviceId = _selectedExistingServiceId!;
-
-        // Delete existing variants for this service
+        // Delete existing variants if any
         if (_variants.isNotEmpty) {
           await supabase
               .from('service_variants')
               .delete()
               .eq('service_id', serviceId);
         }
-      }
-
-      // Create variants if any
-      if (_variants.isNotEmpty) {
-        for (var variant in _variants) {
-          final variantData = {
-            'service_id': serviceId,
-            'salon_gender_id': variant['gender_id'],
-            'salon_age_category_id': variant['age_category_id'],
-            'price': variant['price'],
-            'duration': variant['duration'],
-            'is_active': true,
-          };
-
-          final variantResponse = await supabase
-              .from('service_variants')
-              .insert(variantData)
-              .select()
-              .single();
-
-          final variantId = variantResponse['id'];
-
-          if (widget.salonBarberId != null) {
-            final existingBarberService = await supabase
-                .from('barber_services')
-                .select()
-                .eq('salon_barber_id', widget.salonBarberId!)
-                .eq('service_id', serviceId)
-                .eq('variant_id', variantId)
-                .maybeSingle();
-
-            if (existingBarberService == null) {
-              await supabase.from('barber_services').insert({
-                'salon_barber_id': widget.salonBarberId!,
-                'service_id': serviceId,
-                'variant_id': variantId,
-                'custom_price': variant['price'],
-                // 'status': 'active',
-              });
-            }
-          }
-        }
-      } else if (widget.salonBarberId != null) {
-        // For services without variants, add to barber_services without variant_id
-        final existingBarberService = await supabase
-            .from('barber_services')
-            .select()
-            .eq('salon_barber_id', widget.salonBarberId!)
-            .eq('service_id', serviceId)
-            .maybeSingle();
-
-        if (existingBarberService == null) {
-          final Map<String, dynamic> barberServiceData = {
-            'salon_barber_id': widget.salonBarberId!,
-            'service_id': serviceId,
-            // 'status': 'active',
-          };
-
-          await supabase.from('barber_services').insert(barberServiceData);
-        }
-      }
-
-      if (!mounted) return;
-
-      String successMessage;
-      if (_mode == 'new_service' || widget.isEditing) {
-        if (_variants.isNotEmpty) {
-          successMessage =
-              "${_serviceNameController.text.trim()} has been ${widget.isEditing ? 'updated' : 'added'} successfully.\n\n✅ ${_variants.length} variant${_variants.length > 1 ? 's' : ''} ${widget.isEditing ? 'updated' : 'added'}";
-        } else {
-          successMessage =
-              "${_serviceNameController.text.trim()} has been ${widget.isEditing ? 'updated' : 'added'} successfully.";
-        }
       } else {
-        if (_variants.isNotEmpty) {
-          successMessage =
-              "${_getServiceName(serviceId)} variants added successfully.\n\n✅ ${_variants.length} variant${_variants.length > 1 ? 's' : ''} added";
-        } else {
-          successMessage =
-              "${_getServiceName(serviceId)} has been added successfully.";
-        }
-      }
+        // Check again for duplicate before inserting
+        final exists = _existingServices.any(
+          (service) =>
+              service['name'].toString().toLowerCase() ==
+              _serviceNameController.text.trim().toLowerCase(),
+        );
 
-      await showCustomAlert(
-        context: context,
-        title: widget.isEditing ? "✅ Service Updated!" : "🎉 Service Added!",
-        message: successMessage,
-        isError: false,
-      );
-
-      if (!mounted) return;
-      Navigator.pop(context, true);
-    } catch (e) {
-      if (mounted) {
-        // Handle duplicate key error specifically
-        if (e.toString().contains(
-          'duplicate key value violates unique constraint',
-        )) {
-          _showSnackBar(
-            'A service with this name already exists. Please use a different name.',
-            Colors.orange,
-          );
+        if (exists) {
           setState(() {
             _serviceNameError = 'A service with this name already exists';
+            _isLoading = false;
           });
-        } else {
-          _showSnackBar('Error: $e', Colors.red);
+          _showSnackBar(
+            'A service with this name already exists',
+            Colors.orange,
+          );
+          return;
+        }
+
+        final serviceData = {
+          'salon_id': widget.salonId,
+          'name': _serviceNameController.text.trim(),
+          'description': _serviceDescriptionController.text.trim().isNotEmpty
+              ? _serviceDescriptionController.text.trim()
+              : null,
+          'category_id': _selectedCategoryId,
+          'icon_name': _selectedIcon,
+          'is_active': true,
+          'created_by': supabase.auth.currentUser?.id,
+        };
+
+        final serviceResponse = await supabase
+            .from('services')
+            .insert(serviceData)
+            .select()
+            .single();
+
+        serviceId = serviceResponse['id'];
+      }
+    } else {
+      serviceId = _selectedExistingServiceId!;
+
+      // Delete existing variants for this service
+      if (_variants.isNotEmpty) {
+        await supabase
+            .from('service_variants')
+            .delete()
+            .eq('service_id', serviceId);
+      }
+    }
+
+    // Create variants if any
+    if (_variants.isNotEmpty) {
+      for (var variant in _variants) {
+        final variantData = {
+          'service_id': serviceId,
+          'salon_gender_id': variant['gender_id'],
+          'salon_age_category_id': variant['age_category_id'],
+          'price': variant['price'],
+          'duration': variant['duration'],
+          'is_active': true,
+        };
+
+        final variantResponse = await supabase
+            .from('service_variants')
+            .insert(variantData)
+            .select()
+            .single();
+
+        final variantId = variantResponse['id'];
+
+        // ✅ STEP 2: Assign to barber with status check (already checked above)
+        if (widget.salonBarberId != null) {
+          final existingBarberService = await supabase
+              .from('barber_services')
+              .select()
+              .eq('salon_barber_id', widget.salonBarberId!)
+              .eq('service_id', serviceId)
+              .eq('variant_id', variantId)
+              .maybeSingle();
+
+          if (existingBarberService == null) {
+            await supabase.from('barber_services').insert({
+              'salon_barber_id': widget.salonBarberId!,
+              'service_id': serviceId,
+              'variant_id': variantId,
+              'custom_price': variant['price'],
+            });
+          }
         }
       }
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
+    } else if (widget.salonBarberId != null) {
+      // For services without variants, add to barber_services without variant_id
+      final existingBarberService = await supabase
+          .from('barber_services')
+          .select()
+          .eq('salon_barber_id', widget.salonBarberId!)
+          .eq('service_id', serviceId)
+          .maybeSingle();
+
+      if (existingBarberService == null) {
+        final Map<String, dynamic> barberServiceData = {
+          'salon_barber_id': widget.salonBarberId!,
+          'service_id': serviceId,
+        };
+
+        await supabase.from('barber_services').insert(barberServiceData);
+      }
     }
+
+    if (!mounted) return;
+
+    String successMessage;
+    if (_mode == 'new_service' || widget.isEditing) {
+      if (_variants.isNotEmpty) {
+        successMessage =
+            "${_serviceNameController.text.trim()} has been ${widget.isEditing ? 'updated' : 'added'} successfully.\n\n✅ ${_variants.length} variant${_variants.length > 1 ? 's' : ''} ${widget.isEditing ? 'updated' : 'added'}";
+      } else {
+        successMessage =
+            "${_serviceNameController.text.trim()} has been ${widget.isEditing ? 'updated' : 'added'} successfully.";
+      }
+    } else {
+      if (_variants.isNotEmpty) {
+        successMessage =
+            "${_getServiceName(serviceId)} variants added successfully.\n\n✅ ${_variants.length} variant${_variants.length > 1 ? 's' : ''} added";
+      } else {
+        successMessage =
+            "${_getServiceName(serviceId)} has been added successfully.";
+      }
+    }
+
+    await showCustomAlert(
+      context: context,
+      title: widget.isEditing ? "✅ Service Updated!" : "🎉 Service Added!",
+      message: successMessage,
+      isError: false,
+    );
+
+    if (!mounted) return;
+    Navigator.pop(context, true);
+  } catch (e) {
+    if (mounted) {
+      // Handle duplicate key error specifically
+      if (e.toString().contains(
+        'duplicate key value violates unique constraint',
+      )) {
+        _showSnackBar(
+          'A service with this name already exists. Please use a different name.',
+          Colors.orange,
+        );
+        setState(() {
+          _serviceNameError = 'A service with this name already exists';
+        });
+      } else {
+        _showSnackBar('Error: $e', Colors.red);
+      }
+    }
+  } finally {
+    if (mounted) setState(() => _isLoading = false);
   }
+}
 
   void _showSnackBar(String message, Color color) {
     ScaffoldMessenger.of(context).showSnackBar(

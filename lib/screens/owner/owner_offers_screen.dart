@@ -7,7 +7,7 @@ import '../../services/timezone_service.dart';
 
 class OwnerOffersScreen extends StatefulWidget {
   final String? salonId;
-  
+
   const OwnerOffersScreen({super.key, this.salonId});
 
   @override
@@ -17,78 +17,87 @@ class OwnerOffersScreen extends StatefulWidget {
 class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
   final supabase = Supabase.instance.client;
   final NotificationService _notificationService = NotificationService();
-  
+
   List<Map<String, dynamic>> _offers = [];
   bool _isLoading = true;
   bool _hasError = false;
   String _errorMessage = '';
   int? _currentSalonId;
   String? _currentSalonName;
-  
+
   // Filter
   String _selectedFilter = 'active';
-  
+
   // Notification option for new offer
   bool _sendNotificationToFollowers = true;
-  
+
   // Scroll controller for responsive behavior
   final ScrollController _scrollController = ScrollController();
   bool _showFloatingButton = true;
-  
+
   // ============================================
   // TIMEZONE VARIABLES
   // ============================================
   String _userTimezone = '';
   bool _isTimezoneLoaded = false;
-  
+
   @override
   void initState() {
     super.initState();
     _initializeTimezone();
     _scrollController.addListener(_onScroll);
   }
-  
+
   @override
   void dispose() {
     _scrollController.dispose();
     super.dispose();
   }
-  
+
   // ============================================
   // TIMEZONE INITIALIZATION
   // ============================================
-  
+
   Future<void> _initializeTimezone() async {
     await TimezoneService.initialize();
-    
+
     final prefs = await SharedPreferences.getInstance();
-    _userTimezone = prefs.getString('cached_timezone') ?? TimezoneService.getCurrentTimezone();
+    _userTimezone =
+        prefs.getString('cached_timezone') ??
+        TimezoneService.getCurrentTimezone();
     await TimezoneService.setTimezone(_userTimezone);
-    
+
     setState(() {
       _isTimezoneLoaded = true;
     });
-    
-      await _loadSalonAndOffers();
+
+    await _loadSalonAndOffers();
   }
-  
+
   // ============================================
   // TIMEZONE HELPER METHODS (FIXED)
   // ============================================
-  
+
   /// Convert UTC date string to local date for display
   DateTime _utcToLocalDate(String utcDateStr) {
     try {
       final utcDateTime = DateTime.parse(utcDateStr);
       // ✅ FIXED: Use utcToLocalDateTimeForDate instead of deprecated method
-      final localDateTime = TimezoneService.utcToLocalDateTimeForDate('12:00:00', utcDateTime);
-      return DateTime(localDateTime.year, localDateTime.month, localDateTime.day);
+      final localDateTime = TimezoneService.utcToLocalDateTimeForDate(
+        '12:00:00',
+        utcDateTime,
+      );
+      return DateTime(
+        localDateTime.year,
+        localDateTime.month,
+        localDateTime.day,
+      );
     } catch (e) {
       debugPrint('Error converting UTC to local: $e');
       return DateTime.parse(utcDateStr);
     }
   }
-  
+
   /// Format UTC date to local date string
   String _formatLocalDate(String utcDateStr) {
     try {
@@ -99,28 +108,28 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
       return utcDateStr;
     }
   }
-  
+
   /// Check if offer is active based on local date
   bool _isOfferActive(Map<String, dynamic> offer) {
     final now = DateTime.now();
-    final nowLocal = DateTime(now.year, now.month, now.day);    
-  
+    final nowLocal = DateTime(now.year, now.month, now.day);
+
     final validToLocal = _utcToLocalDate(offer['valid_to']);
-    
+
     return offer['is_active'] == true && validToLocal.isAfter(nowLocal);
   }
-  
+
   /// Check if offer is expired based on local date
   bool _isOfferExpired(Map<String, dynamic> offer) {
     final now = DateTime.now();
     final nowLocal = DateTime(now.year, now.month, now.day);
-    
+
     final validToLocal = _utcToLocalDate(offer['valid_to']);
     final validFromLocal = _utcToLocalDate(offer['valid_from']);
-    
+
     return validToLocal.isBefore(nowLocal) || validFromLocal.isAfter(nowLocal);
   }
-  
+
   /// Get days left in local timezone
   int _getDaysLeft(Map<String, dynamic> offer) {
     final now = DateTime.now();
@@ -128,15 +137,16 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
     final validToLocal = _utcToLocalDate(offer['valid_to']);
     return validToLocal.difference(nowLocal).inDays;
   }
-      
+
   void _onScroll() {
     if (_scrollController.position.pixels > 200 && _showFloatingButton) {
       setState(() => _showFloatingButton = false);
-    } else if (_scrollController.position.pixels <= 200 && !_showFloatingButton) {
+    } else if (_scrollController.position.pixels <= 200 &&
+        !_showFloatingButton) {
       setState(() => _showFloatingButton = true);
     }
   }
-  
+
   Future<void> _loadSalonAndOffers() async {
     try {
       final user = supabase.auth.currentUser;
@@ -149,7 +159,55 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
         });
         return;
       }
-      
+
+      // ✅ STEP 1: Check if user has active owner role
+      final ownerCheck = await supabase
+          .from('user_roles')
+          .select('status')
+          .eq('user_id', user.id)
+          .eq('role_id', 1) // owner role ID
+          .maybeSingle();
+
+      if (ownerCheck == null || ownerCheck['status'] != 'active') {
+        if (!mounted) return;
+        setState(() {
+          _hasError = true;
+          _errorMessage =
+              'Your account is not active as an owner. Please contact support.';
+          _isLoading = false;
+        });
+        return;
+      }
+
+      // ✅ STEP 2: Check if profile is active and not blocked
+      final profileCheck = await supabase
+          .from('profiles')
+          .select('is_active, is_blocked')
+          .eq('id', user.id)
+          .maybeSingle();
+
+      if (profileCheck != null) {
+        if (profileCheck['is_blocked'] == true) {
+          if (!mounted) return;
+          setState(() {
+            _hasError = true;
+            _errorMessage =
+                'Your account has been blocked. Please contact support.';
+            _isLoading = false;
+          });
+          return;
+        }
+        if (profileCheck['is_active'] == false) {
+          if (!mounted) return;
+          setState(() {
+            _hasError = true;
+            _errorMessage = 'Your profile is inactive. Please contact support.';
+            _isLoading = false;
+          });
+          return;
+        }
+      }
+
       if (widget.salonId != null && widget.salonId!.isNotEmpty) {
         final salonResult = await supabase
             .from('salons')
@@ -157,7 +215,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
             .eq('id', int.parse(widget.salonId!))
             .eq('owner_id', user.id)
             .maybeSingle();
-        
+
         if (salonResult != null) {
           setState(() {
             _currentSalonId = salonResult['id'] as int;
@@ -167,50 +225,51 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
           return;
         }
       }
-      
+
       final salonResult = await supabase
           .from('salons')
           .select('id, name')
           .eq('owner_id', user.id)
           .maybeSingle();
-      
+
       if (salonResult == null) {
         if (!mounted) return;
         setState(() {
           _hasError = true;
-          _errorMessage = 'You don\'t own any salon. Please create a salon first.';
+          _errorMessage =
+              'You don\'t own any salon. Please create a salon first.';
           _isLoading = false;
         });
         return;
       }
-      
+
       setState(() {
         _currentSalonId = salonResult['id'] as int;
         _currentSalonName = salonResult['name'];
       });
-      
+
       await _loadOffers();
-      
     } catch (e) {
       debugPrint('Error loading salon: $e');
       if (!mounted) return;
       setState(() {
         _hasError = true;
-        _errorMessage = 'Failed to load salon data. Please check your connection.';
+        _errorMessage =
+            'Failed to load salon data. Please check your connection.';
         _isLoading = false;
       });
     }
   }
-  
+
   Future<void> _loadOffers() async {
     final salonId = _currentSalonId;
     if (salonId == null) return;
-    
+
     setState(() {
       _isLoading = true;
       _hasError = false;
     });
-    
+
     try {
       final result = await supabase
           .from('offers')
@@ -233,13 +292,12 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
           ''')
           .eq('salon_id', salonId)
           .order('created_at', ascending: false);
-      
+
       if (!mounted) return;
       setState(() {
         _offers = List<Map<String, dynamic>>.from(result);
         _isLoading = false;
       });
-      
     } catch (e) {
       debugPrint('Error loading offers: $e');
       if (!mounted) return;
@@ -250,9 +308,9 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
       });
     }
   }
-  
+
   List<Map<String, dynamic>> get _filteredOffers {
-    switch(_selectedFilter) {
+    switch (_selectedFilter) {
       case 'active':
         return _offers.where((offer) => _isOfferActive(offer)).toList();
       case 'expired':
@@ -261,9 +319,9 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
         return _offers;
     }
   }
-  
+
   int get _activeCount => _offers.where((o) => _isOfferActive(o)).length;
-  
+
   Future<void> _createOffer() async {
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
@@ -275,12 +333,12 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
         },
       ),
     );
-    
+
     if (result != null && mounted) {
       await _saveOffer(result);
     }
   }
-  
+
   Future<void> _editOffer(Map<String, dynamic> offer) async {
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
@@ -291,18 +349,18 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
         onNotificationToggle: (value) {},
       ),
     );
-    
+
     if (result != null && mounted) {
       await _updateOffer(offer['id'], result);
     }
   }
-  
+
   Future<void> _saveOffer(Map<String, dynamic> offerData) async {
     final salonId = _currentSalonId;
     if (salonId == null) return;
-    
+
     setState(() => _isLoading = true);
-    
+
     try {
       // Prepare insert data (dates already in UTC format from dialog)
       final Map<String, dynamic> insertData = {
@@ -320,21 +378,22 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
         'used_count': 0,
         'created_at': DateTime.now().toUtc().toIso8601String(),
       };
-      
+
       // Add time range if provided
-      if (offerData['valid_from_time'] != null && offerData['valid_to_time'] != null) {
+      if (offerData['valid_from_time'] != null &&
+          offerData['valid_to_time'] != null) {
         insertData['valid_from_time'] = offerData['valid_from_time'];
         insertData['valid_to_time'] = offerData['valid_to_time'];
       }
-      
+
       final result = await supabase.from('offers').insert(insertData).select();
-      
+
       if (offerData['send_notification'] == true && result.isNotEmpty) {
         await _sendOfferNotificationsToFollowers(result.first);
       }
-      
+
       await _loadOffers();
-      
+
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -344,13 +403,14 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
           duration: Duration(seconds: 2),
         ),
       );
-      
     } catch (e) {
       debugPrint('Error creating offer: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('❌ Failed to create offer: ${e.toString().substring(0, 100)}'),
+          content: Text(
+            '❌ Failed to create offer: ${e.toString().substring(0, 100)}',
+          ),
           backgroundColor: Colors.red,
           behavior: SnackBarBehavior.floating,
         ),
@@ -359,22 +419,34 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
       if (mounted) setState(() => _isLoading = false);
     }
   }
-  
-  Future<void> _sendOfferNotificationsToFollowers(Map<String, dynamic> offer) async {
+
+  Future<void> _sendOfferNotificationsToFollowers(
+    Map<String, dynamic> offer,
+  ) async {
     final salonId = _currentSalonId;
     if (salonId == null) return;
-    
+
     try {
+      // ✅ Get followers with active customer role
       final followers = await supabase
           .from('salon_followers')
-          .select('customer_id')
-          .eq('salon_id', salonId);
-      
+          .select('''
+          customer_id,
+          profiles!inner (
+            user_roles!inner (
+              status
+            )
+          )
+        ''')
+          .eq('salon_id', salonId)
+          .eq('profiles.user_roles.role_id', 3) // customer role
+          .eq('profiles.user_roles.status', 'active'); // ✅ Added status check
+
       if (followers.isEmpty) {
-        debugPrint('No followers to notify');
+        debugPrint('No active followers to notify');
         return;
       }
-      
+
       String discountText = '';
       if (offer['discount_type'] == 'percentage') {
         discountText = '${offer['discount_value']}% OFF';
@@ -383,37 +455,46 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
       } else {
         discountText = 'FREE SERVICE';
       }
-      
+
+      int sentCount = 0;
       for (var follower in followers) {
-        await _notificationService.sendSpecialOffer(
-          customerId: follower['customer_id'],
-          offerTitle: offer['title'],
-          offerDescription: offer['description'] ?? '',
-          discountText: discountText,
-          offerId: offer['id'],
-          salonName: _currentSalonName ?? 'Salon',
-        );
-      }      
-          
+        try {
+          await _notificationService.sendSpecialOffer(
+            customerId: follower['customer_id'],
+            offerTitle: offer['title'],
+            offerDescription: offer['description'] ?? '',
+            discountText: discountText,
+            offerId: offer['id'],
+            salonName: _currentSalonName ?? 'Salon',
+          );
+          sentCount++;
+        } catch (e) {
+          debugPrint(
+            'Error sending notification to ${follower['customer_id']}: $e',
+          );
+        }
+      }
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('📢 Notifications sent to ${followers.length} followers'),
+            content: Text(
+              '📢 Notifications sent to $sentCount active followers',
+            ),
             backgroundColor: Colors.blue,
             behavior: SnackBarBehavior.floating,
             duration: const Duration(seconds: 2),
           ),
         );
       }
-      
     } catch (e) {
       debugPrint('Error sending notifications: $e');
     }
   }
-  
+
   Future<void> _updateOffer(int offerId, Map<String, dynamic> offerData) async {
     setState(() => _isLoading = true);
-    
+
     try {
       final Map<String, dynamic> updateData = {
         'title': offerData['title'],
@@ -427,23 +508,21 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
         'usage_limit': offerData['usage_limit'],
         'updated_at': DateTime.now().toUtc().toIso8601String(),
       };
-      
+
       // Add time range if provided
-      if (offerData['valid_from_time'] != null && offerData['valid_to_time'] != null) {
+      if (offerData['valid_from_time'] != null &&
+          offerData['valid_to_time'] != null) {
         updateData['valid_from_time'] = offerData['valid_from_time'];
         updateData['valid_to_time'] = offerData['valid_to_time'];
       } else {
         updateData['valid_from_time'] = null;
         updateData['valid_to_time'] = null;
       }
-      
-      await supabase
-          .from('offers')
-          .update(updateData)
-          .eq('id', offerId);
-      
+
+      await supabase.from('offers').update(updateData).eq('id', offerId);
+
       await _loadOffers();
-      
+
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -453,13 +532,14 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
           duration: Duration(seconds: 2),
         ),
       );
-      
     } catch (e) {
       debugPrint('Error updating offer: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('❌ Failed to update offer: ${e.toString().substring(0, 100)}'),
+          content: Text(
+            '❌ Failed to update offer: ${e.toString().substring(0, 100)}',
+          ),
           backgroundColor: Colors.red,
           behavior: SnackBarBehavior.floating,
         ),
@@ -468,10 +548,10 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
       if (mounted) setState(() => _isLoading = false);
     }
   }
-  
+
   Future<void> _toggleOfferStatus(int offerId, bool isActive) async {
     setState(() => _isLoading = true);
-    
+
     try {
       await supabase
           .from('offers')
@@ -480,19 +560,20 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
             'updated_at': DateTime.now().toUtc().toIso8601String(),
           })
           .eq('id', offerId);
-      
+
       await _loadOffers();
-      
+
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(!isActive ? '✅ Offer activated' : '⏸️ Offer deactivated'),
+          content: Text(
+            !isActive ? '✅ Offer activated' : '⏸️ Offer deactivated',
+          ),
           backgroundColor: !isActive ? Colors.green : Colors.orange,
           behavior: SnackBarBehavior.floating,
           duration: const Duration(seconds: 2),
         ),
       );
-      
     } catch (e) {
       debugPrint('Error toggling offer: $e');
       if (!mounted) return;
@@ -507,7 +588,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
       if (mounted) setState(() => _isLoading = false);
     }
   }
-  
+
   Future<void> _deleteOffer(int offerId) async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -537,22 +618,24 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.red,
               foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
             ),
             child: const Text('Delete'),
           ),
         ],
       ),
     );
-    
+
     if (confirm != true) return;
-    
+
     setState(() => _isLoading = true);
-    
+
     try {
       await supabase.from('offers').delete().eq('id', offerId);
       await _loadOffers();
-      
+
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -562,13 +645,14 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
           duration: Duration(seconds: 2),
         ),
       );
-      
     } catch (e) {
       debugPrint('Error deleting offer: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('❌ Failed to delete offer: ${e.toString().substring(0, 100)}'),
+          content: Text(
+            '❌ Failed to delete offer: ${e.toString().substring(0, 100)}',
+          ),
           backgroundColor: Colors.red,
           behavior: SnackBarBehavior.floating,
         ),
@@ -577,9 +661,9 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
       if (mounted) setState(() => _isLoading = false);
     }
   }
-  
+
   String _getDiscountText(Map<String, dynamic> offer) {
-    switch(offer['discount_type']) {
+    switch (offer['discount_type']) {
       case 'percentage':
         return '${offer['discount_value']}% OFF';
       case 'fixed':
@@ -588,25 +672,27 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
         return 'FREE SERVICE';
     }
   }
-  
+
   Color _getStatusColor(Map<String, dynamic> offer) {
     if (!offer['is_active']) return Colors.grey;
     if (_isOfferExpired(offer)) return Colors.red;
     return Colors.green;
   }
-  
+
   String _getStatusText(Map<String, dynamic> offer) {
     if (!offer['is_active']) return 'Inactive';
     if (_isOfferExpired(offer)) return 'Expired';
-    
+
     final daysLeft = _getDaysLeft(offer);
     return daysLeft == 0 ? 'Ends today' : '$daysLeft days left';
   }
-  
+
   String _getTimeRangeText(String? fromTime, String? toTime) {
     if (fromTime == null || toTime == null) return '';
     try {
-      final from = TimeOfDay.fromDateTime(DateTime.parse('2000-01-01 $fromTime'));
+      final from = TimeOfDay.fromDateTime(
+        DateTime.parse('2000-01-01 $fromTime'),
+      );
       final to = TimeOfDay.fromDateTime(DateTime.parse('2000-01-01 $toTime'));
       final fromFormatted = _formatTimeOfDay(from);
       final toFormatted = _formatTimeOfDay(to);
@@ -615,14 +701,14 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
       return '';
     }
   }
-  
+
   String _formatTimeOfDay(TimeOfDay time) {
     final hour = time.hourOfPeriod;
     final minute = time.minute.toString().padLeft(2, '0');
     final period = time.period == DayPeriod.am ? 'AM' : 'PM';
     return '$hour:$minute $period';
   }
-  
+
   String _getUsageLimitText(int? usageLimit, int usedCount) {
     if (usageLimit == null) return '♾️ Unlimited';
     final remaining = usageLimit - usedCount;
@@ -630,7 +716,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
     if (remaining <= 3) return '⚠️ Only $remaining left!';
     return '✅ $remaining uses left';
   }
-  
+
   Color _getUsageLimitColor(int? usageLimit, int usedCount) {
     if (usageLimit == null) return Colors.grey.shade600;
     final remaining = usageLimit - usedCount;
@@ -638,12 +724,12 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
     if (remaining <= 3) return Colors.orange;
     return Colors.green;
   }
-  
+
   @override
   Widget build(BuildContext context) {
     final isSmallScreen = MediaQuery.of(context).size.width < 600;
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
-    
+
     if (!_isTimezoneLoaded) {
       return Scaffold(
         appBar: AppBar(
@@ -664,7 +750,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
         ),
       );
     }
-    
+
     return Scaffold(
       backgroundColor: isDarkMode ? Colors.grey[900] : Colors.grey[50],
       appBar: AppBar(
@@ -678,7 +764,10 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
             if (_currentSalonName != null)
               Text(
                 _currentSalonName!,
-                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.normal),
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.normal,
+                ),
               ),
           ],
         ),
@@ -702,9 +791,10 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
       body: _isLoading && _offers.isEmpty
           ? _buildLoadingState()
           : _hasError
-              ? _buildErrorState()
-              : _buildMainContent(isSmallScreen, isDarkMode),
-      floatingActionButton: _showFloatingButton && !_isLoading && !_hasError && _offers.isNotEmpty
+          ? _buildErrorState()
+          : _buildMainContent(isSmallScreen, isDarkMode),
+      floatingActionButton:
+          _showFloatingButton && !_isLoading && !_hasError && _offers.isNotEmpty
           ? FloatingActionButton(
               onPressed: _createOffer,
               backgroundColor: const Color(0xFFFF6B8B),
@@ -713,7 +803,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
           : null,
     );
   }
-  
+
   Widget _buildLoadingState() {
     return const Center(
       child: Column(
@@ -726,7 +816,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
       ),
     );
   }
-  
+
   Widget _buildErrorState() {
     return Center(
       child: Padding(
@@ -749,8 +839,13 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFFFF6B8B),
                 foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 12,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
             ),
           ],
@@ -758,11 +853,11 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
       ),
     );
   }
-  
+
   Widget _buildMainContent(bool isSmallScreen, bool isDarkMode) {
     return Column(
       children: [
-        _buildSalonInfoCard(isDarkMode),      
+        _buildSalonInfoCard(isDarkMode),
         _buildFilterChips(isSmallScreen),
         Expanded(
           child: _filteredOffers.isEmpty
@@ -783,7 +878,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
       ],
     );
   }
-  
+
   Widget _buildSalonInfoCard(bool isDarkMode) {
     return Container(
       margin: const EdgeInsets.all(16),
@@ -862,7 +957,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
       ),
     );
   }
-  
+
   Widget _buildFilterChips(bool isSmallScreen) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -891,7 +986,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
             ),
     );
   }
-  
+
   Widget _buildFilterChip(String label, String value) {
     final isSelected = _selectedFilter == value;
     return FilterChip(
@@ -915,7 +1010,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
       ),
     );
   }
-  
+
   Widget _buildEmptyState(bool isSmallScreen) {
     return Center(
       child: SingleChildScrollView(
@@ -930,7 +1025,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
                 shape: BoxShape.circle,
               ),
               child: Icon(
-                _selectedFilter == 'active' 
+                _selectedFilter == 'active'
                     ? Icons.local_offer_outlined
                     : _selectedFilter == 'expired'
                     ? Icons.timer_off_outlined
@@ -952,10 +1047,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
             const SizedBox(height: 8),
             Text(
               _getEmptyStateSubMessage(),
-              style: TextStyle(
-                fontSize: 14,
-                color: Colors.grey[500],
-              ),
+              style: TextStyle(fontSize: 14, color: Colors.grey[500]),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 24),
@@ -967,7 +1059,10 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFFFF6B8B),
                   foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 12,
+                  ),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
@@ -978,9 +1073,9 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
       ),
     );
   }
-  
+
   String _getEmptyStateMessage() {
-    switch(_selectedFilter) {
+    switch (_selectedFilter) {
       case 'active':
         return 'No Active Offers';
       case 'expired':
@@ -989,38 +1084,41 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
         return _offers.isEmpty ? 'No Offers Yet' : 'No Offers Found';
     }
   }
-  
+
   String _getEmptyStateSubMessage() {
-    switch(_selectedFilter) {
+    switch (_selectedFilter) {
       case 'active':
         return 'Create a new offer to attract customers';
       case 'expired':
         return 'Your offers will appear here after they expire';
       default:
-        return _offers.isEmpty 
+        return _offers.isEmpty
             ? 'Tap the + button to create your first offer'
             : 'Try changing the filter to see more offers';
     }
   }
-  
+
   Widget _buildOfferCard(Map<String, dynamic> offer, bool isSmallScreen) {
     final statusColor = _getStatusColor(offer);
     final statusText = _getStatusText(offer);
     final discountText = _getDiscountText(offer);
-    
+
     // ✅ Use local date conversion for display
     final validFrom = _formatLocalDate(offer['valid_from']);
     final validTo = _formatLocalDate(offer['valid_to']);
-    
+
     final usageLimit = offer['usage_limit'];
     final usedCount = offer['used_count'] ?? 0;
-    
-    final timeRangeText = _getTimeRangeText(offer['valid_from_time'], offer['valid_to_time']);
+
+    final timeRangeText = _getTimeRangeText(
+      offer['valid_from_time'],
+      offer['valid_to_time'],
+    );
     final hasTimeRestriction = timeRangeText.isNotEmpty;
-    
+
     final usageLimitText = _getUsageLimitText(usageLimit, usedCount);
     final usageLimitColor = _getUsageLimitColor(usageLimit, usedCount);
-    
+
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       elevation: 2,
@@ -1038,10 +1136,16 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
                 children: [
                   Expanded(
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
-                          colors: [const Color(0xFFFF6B8B), const Color(0xFFFF6B8B).withValues(alpha: 0.7)],
+                          colors: [
+                            const Color(0xFFFF6B8B),
+                            const Color(0xFFFF6B8B).withValues(alpha: 0.7),
+                          ],
                         ),
                         borderRadius: BorderRadius.circular(20),
                       ),
@@ -1058,7 +1162,10 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
                   ),
                   const SizedBox(width: 8),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
                     decoration: BoxDecoration(
                       color: statusColor.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(12),
@@ -1089,7 +1196,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
                 ],
               ),
               const SizedBox(height: 12),
-              
+
               // Title
               Text(
                 offer['title'],
@@ -1099,9 +1206,10 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
                 ),
               ),
               const SizedBox(height: 8),
-              
+
               // Description
-              if (offer['description'] != null && offer['description'].isNotEmpty)
+              if (offer['description'] != null &&
+                  offer['description'].isNotEmpty)
                 Text(
                   offer['description'],
                   style: TextStyle(
@@ -1112,10 +1220,11 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
-              
-              if (offer['description'] != null && offer['description'].isNotEmpty)
+
+              if (offer['description'] != null &&
+                  offer['description'].isNotEmpty)
                 const SizedBox(height: 12),
-              
+
               // Details chips
               Wrap(
                 spacing: 8,
@@ -1123,7 +1232,10 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
                 children: [
                   if ((offer['points_required'] ?? 0) > 0)
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 5,
+                      ),
                       decoration: BoxDecoration(
                         color: Colors.amber.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(8),
@@ -1135,14 +1247,20 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
                           const SizedBox(width: 4),
                           Text(
                             '${offer['points_required']} pts',
-                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                            ),
                           ),
                         ],
                       ),
                     ),
-                  
+
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 5,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.grey[200],
                       borderRadius: BorderRadius.circular(8),
@@ -1150,19 +1268,29 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.calendar_today, size: 12, color: Colors.grey),
+                        const Icon(
+                          Icons.calendar_today,
+                          size: 12,
+                          color: Colors.grey,
+                        ),
                         const SizedBox(width: 4),
                         Text(
                           isSmallScreen ? validFrom : '$validFrom - $validTo',
-                          style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.grey[600],
+                          ),
                         ),
                       ],
                     ),
                   ),
-                  
+
                   if (hasTimeRestriction)
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 5,
+                      ),
                       decoration: BoxDecoration(
                         color: Colors.purple.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(8),
@@ -1170,7 +1298,11 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.access_time, size: 12, color: Colors.purple),
+                          const Icon(
+                            Icons.access_time,
+                            size: 12,
+                            color: Colors.purple,
+                          ),
                           const SizedBox(width: 4),
                           Text(
                             timeRangeText,
@@ -1183,9 +1315,12 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
                         ],
                       ),
                     ),
-                  
+
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 5,
+                    ),
                     decoration: BoxDecoration(
                       color: usageLimitColor.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(8),
@@ -1194,9 +1329,13 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Icon(
-                          usageLimitText.contains('♾️') ? Icons.unpublished : 
-                          usageLimitText.contains('🔴') ? Icons.cancel :
-                          usageLimitText.contains('⚠️') ? Icons.warning_amber : Icons.people,
+                          usageLimitText.contains('♾️')
+                              ? Icons.unpublished
+                              : usageLimitText.contains('🔴')
+                              ? Icons.cancel
+                              : usageLimitText.contains('⚠️')
+                              ? Icons.warning_amber
+                              : Icons.people,
                           size: 12,
                           color: usageLimitColor,
                         ),
@@ -1214,7 +1353,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
                   ),
                 ],
               ),
-              
+
               // Progress indicator
               if (usageLimit != null && usageLimit > 0) ...[
                 const SizedBox(height: 12),
@@ -1254,16 +1393,17 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
                   ],
                 ),
               ],
-              
+
               const SizedBox(height: 12),
-              
+
               // Action buttons
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   if (!isSmallScreen) ...[
                     _buildActionButton(
-                      onPressed: () => _toggleOfferStatus(offer['id'], offer['is_active']),
+                      onPressed: () =>
+                          _toggleOfferStatus(offer['id'], offer['is_active']),
                       icon: offer['is_active'] ? Icons.pause : Icons.play_arrow,
                       label: offer['is_active'] ? 'Deactivate' : 'Activate',
                       color: offer['is_active'] ? Colors.orange : Colors.green,
@@ -1284,8 +1424,12 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
                     ),
                   ] else ...[
                     IconButton(
-                      onPressed: () => _toggleOfferStatus(offer['id'], offer['is_active']),
-                      icon: Icon(offer['is_active'] ? Icons.pause : Icons.play_arrow, size: 20),
+                      onPressed: () =>
+                          _toggleOfferStatus(offer['id'], offer['is_active']),
+                      icon: Icon(
+                        offer['is_active'] ? Icons.pause : Icons.play_arrow,
+                        size: 20,
+                      ),
                       color: offer['is_active'] ? Colors.orange : Colors.green,
                       tooltip: offer['is_active'] ? 'Deactivate' : 'Activate',
                     ),
@@ -1310,7 +1454,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
       ),
     );
   }
-  
+
   Widget _buildActionButton({
     required VoidCallback onPressed,
     required IconData icon,
@@ -1325,13 +1469,11 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
         foregroundColor: color,
         side: BorderSide(color: color),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       ),
     );
   }
-  
+
   void _showFilterMenu() {
     showModalBottomSheet(
       context: context,
@@ -1356,12 +1498,17 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
       ),
     );
   }
-  
+
   Widget _buildFilterOption(String title, String value, IconData icon) {
     return ListTile(
-      leading: Icon(icon, color: _selectedFilter == value ? const Color(0xFFFF6B8B) : null),
+      leading: Icon(
+        icon,
+        color: _selectedFilter == value ? const Color(0xFFFF6B8B) : null,
+      ),
       title: Text(title),
-      trailing: _selectedFilter == value ? const Icon(Icons.check, color: Color(0xFFFF6B8B)) : null,
+      trailing: _selectedFilter == value
+          ? const Icon(Icons.check, color: Color(0xFFFF6B8B))
+          : null,
       onTap: () {
         setState(() => _selectedFilter = value);
         Navigator.pop(context);
@@ -1379,7 +1526,7 @@ class OfferFormDialog extends StatefulWidget {
   final Map<String, dynamic>? offer;
   final bool sendNotificationToFollowers;
   final Function(bool) onNotificationToggle;
-  
+
   const OfferFormDialog({
     super.key,
     required this.isEditing,
@@ -1387,38 +1534,40 @@ class OfferFormDialog extends StatefulWidget {
     required this.sendNotificationToFollowers,
     required this.onNotificationToggle,
   });
-  
+
   @override
   State<OfferFormDialog> createState() => _OfferFormDialogState();
 }
 
 class _OfferFormDialogState extends State<OfferFormDialog> {
   final _formKey = GlobalKey<FormState>();
-  
+
   late TextEditingController _titleController;
   late TextEditingController _descriptionController;
   late TextEditingController _discountValueController;
   late TextEditingController _pointsRequiredController;
   late TextEditingController _usageLimitController;
-  
+
   String _discountType = 'percentage';
   DateTime _validFrom = DateTime.now();
   DateTime _validTo = DateTime.now().add(const Duration(days: 30));
   bool _sendNotification = true;
-  
+
   // Time range variables
   bool _hasTimeRestriction = false;
   TimeOfDay? _validFromTime;
   TimeOfDay? _validToTime;
-  
+
   @override
   void initState() {
     super.initState();
     _sendNotification = widget.sendNotificationToFollowers;
-    
+
     if (widget.isEditing && widget.offer != null) {
       _titleController = TextEditingController(text: widget.offer!['title']);
-      _descriptionController = TextEditingController(text: widget.offer!['description'] ?? '');
+      _descriptionController = TextEditingController(
+        text: widget.offer!['description'] ?? '',
+      );
       _discountValueController = TextEditingController(
         text: widget.offer!['discount_value']?.toString() ?? '',
       );
@@ -1431,9 +1580,10 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
       _discountType = widget.offer!['discount_type'] ?? 'percentage';
       _validFrom = DateTime.parse(widget.offer!['valid_from']);
       _validTo = DateTime.parse(widget.offer!['valid_to']);
-      
+
       // Load time range if exists
-      if (widget.offer!.containsKey('valid_from_time') && widget.offer!['valid_from_time'] != null) {
+      if (widget.offer!.containsKey('valid_from_time') &&
+          widget.offer!['valid_from_time'] != null) {
         final fromTimeStr = widget.offer!['valid_from_time'].toString();
         final toTimeStr = widget.offer!['valid_to_time'].toString();
         if (fromTimeStr.isNotEmpty && toTimeStr.isNotEmpty) {
@@ -1450,14 +1600,14 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
       _usageLimitController = TextEditingController();
     }
   }
-  
+
   TimeOfDay _parseTimeString(String timeStr) {
     final parts = timeStr.split(':');
     final hour = int.parse(parts[0]);
     final minute = int.parse(parts[1]);
     return TimeOfDay(hour: hour, minute: minute);
   }
-  
+
   @override
   void dispose() {
     _titleController.dispose();
@@ -1467,21 +1617,18 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
     _usageLimitController.dispose();
     super.dispose();
   }
-  
+
   Future<void> _selectDateRange() async {
     final DateTimeRange? picked = await showDateRangePicker(
       context: context,
       firstDate: DateTime.now(),
       lastDate: DateTime.now().add(const Duration(days: 365)),
-      initialDateRange: DateTimeRange(
-        start: _validFrom,
-        end: _validTo,
-      ),
+      initialDateRange: DateTimeRange(start: _validFrom, end: _validTo),
       helpText: 'Select Offer Validity Period',
       confirmText: 'Apply',
       cancelText: 'Cancel',
     );
-    
+
     if (picked != null) {
       setState(() {
         _validFrom = picked.start;
@@ -1489,7 +1636,7 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
       });
     }
   }
-  
+
   Future<void> _selectFromTime() async {
     final TimeOfDay? picked = await showTimePicker(
       context: context,
@@ -1499,11 +1646,14 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
     if (picked != null) {
       setState(() {
         _validFromTime = picked;
-        _validToTime ??= TimeOfDay(hour: picked.hour + 1, minute: picked.minute);
+        _validToTime ??= TimeOfDay(
+          hour: picked.hour + 1,
+          minute: picked.minute,
+        );
       });
     }
   }
-  
+
   Future<void> _selectToTime() async {
     final TimeOfDay? picked = await showTimePicker(
       context: context,
@@ -1516,14 +1666,14 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
       });
     }
   }
-  
+
   String _formatTimeOfDay(TimeOfDay time) {
     final hour = time.hourOfPeriod;
     final minute = time.minute.toString().padLeft(2, '0');
     final period = time.period == DayPeriod.am ? 'AM' : 'PM';
     return '$hour:$minute $period';
   }
-  
+
   void _submit() {
     if (_formKey.currentState!.validate()) {
       if (_validTo.isBefore(_validFrom)) {
@@ -1535,7 +1685,7 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
         );
         return;
       }
-      
+
       if (_hasTimeRestriction) {
         if (_validFromTime == null || _validToTime == null) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -1547,34 +1697,36 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
           return;
         }
       }
-      
+
       Navigator.pop(context, {
         'title': _titleController.text.trim(),
         'description': _descriptionController.text.trim(),
         'discount_type': _discountType,
-        'discount_value': _discountType != 'free_service' ? double.parse(_discountValueController.text) : 0,
+        'discount_value': _discountType != 'free_service'
+            ? double.parse(_discountValueController.text)
+            : 0,
         'points_required': int.parse(_pointsRequiredController.text),
         'valid_from': _validFrom.toIso8601String().split('T')[0],
         'valid_to': _validTo.toIso8601String().split('T')[0],
-        'valid_from_time': _hasTimeRestriction && _validFromTime != null 
-            ? '${_validFromTime!.hour.toString().padLeft(2, '0')}:${_validFromTime!.minute.toString().padLeft(2, '0')}:00' 
+        'valid_from_time': _hasTimeRestriction && _validFromTime != null
+            ? '${_validFromTime!.hour.toString().padLeft(2, '0')}:${_validFromTime!.minute.toString().padLeft(2, '0')}:00'
             : null,
-        'valid_to_time': _hasTimeRestriction && _validToTime != null 
-            ? '${_validToTime!.hour.toString().padLeft(2, '0')}:${_validToTime!.minute.toString().padLeft(2, '0')}:00' 
+        'valid_to_time': _hasTimeRestriction && _validToTime != null
+            ? '${_validToTime!.hour.toString().padLeft(2, '0')}:${_validToTime!.minute.toString().padLeft(2, '0')}:00'
             : null,
         'image_url': null,
-        'usage_limit': _usageLimitController.text.isNotEmpty 
-            ? int.parse(_usageLimitController.text) 
+        'usage_limit': _usageLimitController.text.isNotEmpty
+            ? int.parse(_usageLimitController.text)
             : null,
         'send_notification': _sendNotification,
       });
     }
   }
-  
+
   @override
   Widget build(BuildContext context) {
     final isSmallScreen = MediaQuery.of(context).size.width < 600;
-    
+
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
       child: Container(
@@ -1621,7 +1773,7 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
               ],
             ),
             const SizedBox(height: 16),
-            
+
             // Form
             Expanded(
               child: SingleChildScrollView(
@@ -1633,7 +1785,10 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                       // Title
                       const Text(
                         'Offer Title *',
-                        style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 14,
+                        ),
                       ),
                       const SizedBox(height: 8),
                       TextFormField(
@@ -1645,7 +1800,10 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                           ),
                           filled: true,
                           fillColor: Colors.grey[50],
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 14,
+                          ),
                         ),
                         validator: (value) {
                           if (value == null || value.isEmpty) {
@@ -1658,7 +1816,7 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                         },
                       ),
                       const SizedBox(height: 16),
-                      
+
                       // Description
                       const Text('Description (Optional)'),
                       const SizedBox(height: 8),
@@ -1672,11 +1830,14 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                           ),
                           filled: true,
                           fillColor: Colors.grey[50],
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 14,
+                          ),
                         ),
                       ),
                       const SizedBox(height: 16),
-                      
+
                       // Discount Type
                       const Text('Discount Type *'),
                       const SizedBox(height: 8),
@@ -1687,9 +1848,13 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                               label: const Text('Percentage %'),
                               selected: _discountType == 'percentage',
                               onSelected: (selected) {
-                                if (selected) setState(() => _discountType = 'percentage');
+                                if (selected) {
+                                  setState(() => _discountType = 'percentage');
+                                }
                               },
-                              selectedColor: const Color(0xFFFF6B8B).withValues(alpha: 0.2),
+                              selectedColor: const Color(
+                                0xFFFF6B8B,
+                              ).withValues(alpha: 0.2),
                               backgroundColor: Colors.grey[100],
                             ),
                           ),
@@ -1699,9 +1864,13 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                               label: const Text('Fixed ₹'),
                               selected: _discountType == 'fixed',
                               onSelected: (selected) {
-                                if (selected) setState(() => _discountType = 'fixed');
+                                if (selected) {
+                                  setState(() => _discountType = 'fixed');
+                                }
                               },
-                              selectedColor: const Color(0xFFFF6B8B).withValues(alpha: 0.2),
+                              selectedColor: const Color(
+                                0xFFFF6B8B,
+                              ).withValues(alpha: 0.2),
                               backgroundColor: Colors.grey[100],
                             ),
                           ),
@@ -1711,16 +1880,22 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                               label: const Text('Free Service'),
                               selected: _discountType == 'free_service',
                               onSelected: (selected) {
-                                if (selected) setState(() => _discountType = 'free_service');
+                                if (selected) {
+                                  setState(
+                                    () => _discountType = 'free_service',
+                                  );
+                                }
                               },
-                              selectedColor: const Color(0xFFFF6B8B).withValues(alpha: 0.2),
+                              selectedColor: const Color(
+                                0xFFFF6B8B,
+                              ).withValues(alpha: 0.2),
                               backgroundColor: Colors.grey[100],
                             ),
                           ),
                         ],
                       ),
                       const SizedBox(height: 16),
-                      
+
                       // Discount Value
                       if (_discountType != 'free_service') ...[
                         const Text('Discount Value *'),
@@ -1729,14 +1904,21 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                           controller: _discountValueController,
                           keyboardType: TextInputType.number,
                           decoration: InputDecoration(
-                            hintText: _discountType == 'percentage' ? 'e.g., 20' : 'e.g., 500',
-                            prefixText: _discountType == 'percentage' ? '% ' : '₹ ',
+                            hintText: _discountType == 'percentage'
+                                ? 'e.g., 20'
+                                : 'e.g., 500',
+                            prefixText: _discountType == 'percentage'
+                                ? '% '
+                                : '₹ ',
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(12),
                             ),
                             filled: true,
                             fillColor: Colors.grey[50],
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 14,
+                            ),
                           ),
                           validator: (value) {
                             if (value == null || value.isEmpty) {
@@ -1757,7 +1939,7 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                         ),
                         const SizedBox(height: 16),
                       ],
-                      
+
                       // Points Required
                       const Text('Points Required'),
                       const SizedBox(height: 8),
@@ -1771,7 +1953,10 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                           ),
                           filled: true,
                           fillColor: Colors.grey[50],
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 14,
+                          ),
                         ),
                         validator: (value) {
                           if (value == null || value.isEmpty) return null;
@@ -1786,7 +1971,7 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                         },
                       ),
                       const SizedBox(height: 16),
-                      
+
                       // Usage Limit
                       const Text('Usage Limit (Optional)'),
                       const SizedBox(height: 8),
@@ -1801,7 +1986,10 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                           ),
                           filled: true,
                           fillColor: Colors.grey[50],
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 14,
+                          ),
                         ),
                         validator: (value) {
                           if (value == null || value.isEmpty) return null;
@@ -1816,14 +2004,17 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                         },
                       ),
                       const SizedBox(height: 16),
-                      
+
                       // Valid Period
                       const Text('Valid Period *'),
                       const SizedBox(height: 8),
                       InkWell(
                         onTap: _selectDateRange,
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 14,
+                          ),
                           decoration: BoxDecoration(
                             color: Colors.grey[50],
                             borderRadius: BorderRadius.circular(12),
@@ -1831,7 +2022,11 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                           ),
                           child: Row(
                             children: [
-                              const Icon(Icons.calendar_today, color: Color(0xFFFF6B8B), size: 20),
+                              const Icon(
+                                Icons.calendar_today,
+                                color: Color(0xFFFF6B8B),
+                                size: 20,
+                              ),
                               const SizedBox(width: 12),
                               Expanded(
                                 child: Text(
@@ -1839,19 +2034,24 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                                   style: const TextStyle(fontSize: 14),
                                 ),
                               ),
-                              const Icon(Icons.arrow_drop_down, color: Colors.grey),
+                              const Icon(
+                                Icons.arrow_drop_down,
+                                color: Colors.grey,
+                              ),
                             ],
                           ),
                         ),
                       ),
                       const SizedBox(height: 16),
-                      
+
                       // Time Range Section
                       Container(
                         decoration: BoxDecoration(
                           color: Colors.purple.withValues(alpha: 0.05),
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: Colors.purple.withValues(alpha: 0.2)),
+                          border: Border.all(
+                            color: Colors.purple.withValues(alpha: 0.2),
+                          ),
                         ),
                         child: Column(
                           children: [
@@ -1860,7 +2060,9 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                                 'Restrict to specific time range',
                                 style: TextStyle(fontWeight: FontWeight.w500),
                               ),
-                              subtitle: const Text('Offer valid only during selected hours'),
+                              subtitle: const Text(
+                                'Offer valid only during selected hours',
+                              ),
                               value: _hasTimeRestriction,
                               onChanged: (value) {
                                 setState(() {
@@ -1883,28 +2085,39 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                                       child: InkWell(
                                         onTap: _selectFromTime,
                                         child: Container(
-                                          padding: const EdgeInsets.symmetric(vertical: 12),
+                                          padding: const EdgeInsets.symmetric(
+                                            vertical: 12,
+                                          ),
                                           decoration: BoxDecoration(
                                             color: Colors.grey[50],
-                                            borderRadius: BorderRadius.circular(10),
-                                            border: Border.all(color: Colors.grey[300]!),
+                                            borderRadius: BorderRadius.circular(
+                                              10,
+                                            ),
+                                            border: Border.all(
+                                              color: Colors.grey[300]!,
+                                            ),
                                           ),
                                           child: Column(
                                             children: [
                                               const Text(
                                                 'Start Time',
-                                                style: TextStyle(fontSize: 12, color: Colors.grey),
+                                                style: TextStyle(
+                                                  fontSize: 12,
+                                                  color: Colors.grey,
+                                                ),
                                               ),
                                               const SizedBox(height: 4),
                                               Text(
-                                                _validFromTime != null 
-                                                    ? _formatTimeOfDay(_validFromTime!)
+                                                _validFromTime != null
+                                                    ? _formatTimeOfDay(
+                                                        _validFromTime!,
+                                                      )
                                                     : 'Select Time',
                                                 style: TextStyle(
                                                   fontSize: 16,
                                                   fontWeight: FontWeight.w500,
-                                                  color: _validFromTime != null 
-                                                      ? const Color(0xFFFF6B8B) 
+                                                  color: _validFromTime != null
+                                                      ? const Color(0xFFFF6B8B)
                                                       : Colors.grey,
                                                 ),
                                               ),
@@ -1914,34 +2127,48 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                                       ),
                                     ),
                                     const SizedBox(width: 16),
-                                    const Icon(Icons.arrow_forward, color: Colors.grey),
+                                    const Icon(
+                                      Icons.arrow_forward,
+                                      color: Colors.grey,
+                                    ),
                                     const SizedBox(width: 16),
                                     Expanded(
                                       child: InkWell(
                                         onTap: _selectToTime,
                                         child: Container(
-                                          padding: const EdgeInsets.symmetric(vertical: 12),
+                                          padding: const EdgeInsets.symmetric(
+                                            vertical: 12,
+                                          ),
                                           decoration: BoxDecoration(
                                             color: Colors.grey[50],
-                                            borderRadius: BorderRadius.circular(10),
-                                            border: Border.all(color: Colors.grey[300]!),
+                                            borderRadius: BorderRadius.circular(
+                                              10,
+                                            ),
+                                            border: Border.all(
+                                              color: Colors.grey[300]!,
+                                            ),
                                           ),
                                           child: Column(
                                             children: [
                                               const Text(
                                                 'End Time',
-                                                style: TextStyle(fontSize: 12, color: Colors.grey),
+                                                style: TextStyle(
+                                                  fontSize: 12,
+                                                  color: Colors.grey,
+                                                ),
                                               ),
                                               const SizedBox(height: 4),
                                               Text(
-                                                _validToTime != null 
-                                                    ? _formatTimeOfDay(_validToTime!)
+                                                _validToTime != null
+                                                    ? _formatTimeOfDay(
+                                                        _validToTime!,
+                                                      )
                                                     : 'Select Time',
                                                 style: TextStyle(
                                                   fontSize: 16,
                                                   fontWeight: FontWeight.w500,
-                                                  color: _validToTime != null 
-                                                      ? const Color(0xFFFF6B8B) 
+                                                  color: _validToTime != null
+                                                      ? const Color(0xFFFF6B8B)
                                                       : Colors.grey,
                                                 ),
                                               ),
@@ -1958,7 +2185,7 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                         ),
                       ),
                       const SizedBox(height: 16),
-                      
+
                       // Send Notification to Followers
                       if (!widget.isEditing)
                         Container(
@@ -1966,7 +2193,9 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                           decoration: BoxDecoration(
                             color: Colors.blue.withValues(alpha: 0.05),
                             borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Colors.blue.withValues(alpha: 0.2)),
+                            border: Border.all(
+                              color: Colors.blue.withValues(alpha: 0.2),
+                            ),
                           ),
                           child: Row(
                             children: [
@@ -2022,9 +2251,9 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                 ),
               ),
             ),
-            
+
             const SizedBox(height: 16),
-            
+
             // Action Buttons
             Row(
               children: [
@@ -2052,7 +2281,9 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                         borderRadius: BorderRadius.circular(12),
                       ),
                     ),
-                    child: Text(widget.isEditing ? 'Update Offer' : 'Create Offer'),
+                    child: Text(
+                      widget.isEditing ? 'Update Offer' : 'Create Offer',
+                    ),
                   ),
                 ),
               ],

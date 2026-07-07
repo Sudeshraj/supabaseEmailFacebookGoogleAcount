@@ -206,42 +206,61 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
 
       _holidays = List<Map<String, dynamic>>.from(holidaysResponse);
 
+      // ✅ Updated: Get barbers with user_roles.status check
       final salonBarbersResponse = await supabase
           .from('salon_barbers')
-          .select('barber_id')
+          .select('''
+            barber_id,
+            profiles:barber_id (
+                id,
+                full_name,
+                email,
+                avatar_url,
+                user_roles!inner (
+                    status
+                )
+            )
+        ''')
           .eq('salon_id', int.parse(widget.salonId!))
-          .eq('status', 'active');
+          .eq('salon_barbers.status', 'active')
+          .eq('profiles.user_roles.role_id', 2) // barber role
+          .eq('profiles.user_roles.status', 'active'); // ✅ Added
 
-      final barberIds = salonBarbersResponse
-          .map((sb) => sb['barber_id'] as String)
-          .toList();
+      // ✅ FIX: Convert Map<dynamic, dynamic> to Map<String, dynamic>
+      final List<Map<String, dynamic>> allProfiles = [];
+      for (var entry in salonBarbersResponse) {
+        final dynamic profileData = entry['profiles'];
+        if (profileData != null) {
+          // Convert to Map<String, dynamic>
+          final Map<String, dynamic> profile = Map<String, dynamic>.from(
+            profileData,
+          );
+          allProfiles.add(profile);
+        }
+      }
 
-      if (barberIds.isNotEmpty) {
-        final profilesResponse = await supabase
-            .from('profiles')
-            .select('id, full_name, email, avatar_url')
-            .inFilter('id', barberIds);
+      _barbers = allProfiles.map<Map<String, dynamic>>((p) {
+        return {
+          'id': p['id']?.toString() ?? '',
+          'name': p['full_name']?.toString() ?? 'Unknown',
+          'email': p['email']?.toString() ?? '',
+          'avatar': p['avatar_url']?.toString(),
+        };
+      }).toList();
 
-        final allProfiles = List<Map<String, dynamic>>.from(profilesResponse);
-
-        _barbers = allProfiles.map<Map<String, dynamic>>((p) {
-          return {
-            'id': p['id'],
-            'name': p['full_name'] ?? 'Unknown',
-            'email': p['email'],
-            'avatar': p['avatar_url'],
-          };
-        }).toList();
-
-        _barberProfiles = <String, Map<String, dynamic>>{};
-        for (var profile in allProfiles) {
-          final id = profile['id'] as String;
+      _barberProfiles = <String, Map<String, dynamic>>{};
+      for (var profile in allProfiles) {
+        final id = profile['id']?.toString() ?? '';
+        if (id.isNotEmpty) {
           _barberProfiles[id] = profile;
         }
+      }
 
+      final barberIds = _barbers.map((b) => b['id'] as String).toList();
+
+      if (barberIds.isNotEmpty) {
         await _loadLeavesWithFilters(barberIds);
       } else {
-        _barbers = [];
         _leaves = [];
       }
     } catch (e) {
@@ -308,15 +327,47 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
   Future<void> _applyFilters() async {
     setState(() => _isLoading = true);
 
+    // ✅ Updated: Get barbers with user_roles.status check
     final salonBarbersResponse = await supabase
         .from('salon_barbers')
-        .select('barber_id')
+        .select('''
+          barber_id,
+          profiles:barber_id (
+              user_roles!inner (
+                  status
+              )
+          )
+      ''')
         .eq('salon_id', int.parse(widget.salonId!))
-        .eq('status', 'active');
+        .eq('salon_barbers.status', 'active')
+        .eq('profiles.user_roles.role_id', 2)
+        .eq('profiles.user_roles.status', 'active');
 
-    final barberIds = salonBarbersResponse
-        .map((sb) => sb['barber_id'] as String)
-        .toList();
+    // ✅ FIX: Extract barber IDs safely
+    final List<String> barberIds = [];
+    for (var entry in salonBarbersResponse) {
+      final dynamic profileData = entry['profiles'];
+      if (profileData != null) {
+        final Map<String, dynamic> profile = Map<String, dynamic>.from(
+          profileData,
+        );
+        // Check if user_roles status is active (already filtered)
+        final userRoles = profile['user_roles'] as List? ?? [];
+        bool isActive = false;
+        for (var role in userRoles) {
+          if (role['status'] == 'active') {
+            isActive = true;
+            break;
+          }
+        }
+        if (isActive) {
+          final barberId = entry['barber_id']?.toString();
+          if (barberId != null && barberId.isNotEmpty) {
+            barberIds.add(barberId);
+          }
+        }
+      }
+    }
 
     await _loadLeavesWithFilters(barberIds);
 
@@ -469,15 +520,47 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     required int appointmentPriority,
   }) async {
     try {
+      // ✅ Updated: Get barbers with user_roles.status check
       final salonBarbers = await supabase
           .from('salon_barbers')
-          .select('barber_id')
+          .select('''
+            barber_id,
+            profiles:barber_id (
+                user_roles!inner (
+                    status
+                )
+            )
+        ''')
           .eq('salon_id', int.parse(salonId))
-          .eq('status', 'active');
+          .eq('salon_barbers.status', 'active')
+          .eq('profiles.user_roles.role_id', 2)
+          .eq('profiles.user_roles.status', 'active');
 
-      final barberIds = salonBarbers
-          .map((sb) => sb['barber_id'] as String)
-          .toList();
+      // ✅ FIX: Extract barber IDs safely
+      final List<String> barberIds = [];
+      for (var entry in salonBarbers) {
+        final dynamic profileData = entry['profiles'];
+        if (profileData != null) {
+          final Map<String, dynamic> profile = Map<String, dynamic>.from(
+            profileData,
+          );
+          final userRoles = profile['user_roles'] as List? ?? [];
+          bool isActive = false;
+          for (var role in userRoles) {
+            if (role['status'] == 'active') {
+              isActive = true;
+              break;
+            }
+          }
+          if (isActive) {
+            final barberId = entry['barber_id']?.toString();
+            if (barberId != null && barberId.isNotEmpty) {
+              barberIds.add(barberId);
+            }
+          }
+        }
+      }
+
       final availableBarberIds = barberIds
           .where((id) => id != excludeBarberId)
           .toList();
@@ -499,7 +582,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
 
           return {
             'barber_id': barberId,
-            'name': profile?['full_name'] ?? 'Another barber',
+            'name': profile?['full_name']?.toString() ?? 'Another barber',
           };
         }
       }
@@ -518,6 +601,18 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     String endTime,
   ) async {
     try {
+      // ✅ STEP 1: Check if barber has active role
+      final roleCheck = await supabase
+          .from('user_roles')
+          .select('status')
+          .eq('user_id', barberId)
+          .eq('role_id', 2) // barber role ID
+          .maybeSingle();
+
+      if (roleCheck == null || roleCheck['status'] != 'active') {
+        return false; // Barber not active
+      }
+
       final localDate = _utcDateStringToLocalDate(appointmentDate);
       final dayOfWeek = localDate.weekday;
 

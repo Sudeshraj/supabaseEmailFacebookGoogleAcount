@@ -81,13 +81,52 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
     try {
       final salonIdInt = int.parse(widget.salonId);
 
-      // Step 1: Get salon_barber_id if not provided
+      // ✅ STEP 1: Check if barber has active role in user_roles
+      final barberRoleCheck = await supabase
+          .from('user_roles')
+          .select('status')
+          .eq('user_id', widget.barberId)
+          .eq('role_id', 2) // barber role ID
+          .maybeSingle();
+
+      if (barberRoleCheck == null) {
+        throw Exception(
+          'Barber role not found. Please assign barber role first.',
+        );
+      }
+
+      if (barberRoleCheck['status'] != 'active') {
+        throw Exception(
+          'Barber account is ${barberRoleCheck['status']}. Please reactivate the barber first.',
+        );
+      }
+
+      // ✅ STEP 2: Check if barber profile is active and not blocked
+      final barberProfileCheck = await supabase
+          .from('profiles')
+          .select('is_active, is_blocked')
+          .eq('id', widget.barberId)
+          .maybeSingle();
+
+      if (barberProfileCheck != null) {
+        if (barberProfileCheck['is_blocked'] == true) {
+          throw Exception('Barber account is blocked. Please contact support.');
+        }
+        if (barberProfileCheck['is_active'] == false) {
+          throw Exception(
+            'Barber profile is inactive. Please reactivate the barber first.',
+          );
+        }
+      }
+
+      // Step 3: Get salon_barber_id if not provided
       if (widget.salonBarberId == null) {
         final salonBarberResponse = await supabase
             .from('salon_barbers')
             .select('id')
             .eq('barber_id', widget.barberId)
             .eq('salon_id', salonIdInt)
+            .eq('status', 'active') // ✅ Added status check
             .maybeSingle();
 
         if (salonBarberResponse != null) {
@@ -99,7 +138,7 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
         _salonBarberId = widget.salonBarberId;
       }
 
-      // Step 2: Load genders
+      // Step 4: Load genders
       final gendersResponse = await supabase
           .from('salon_genders')
           .select('id, display_name')
@@ -111,7 +150,7 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
         _genderMap[g['id']] = g['display_name'];
       }
 
-      // Step 3: Load age categories
+      // Step 5: Load age categories
       final ageCategoriesResponse = await supabase
           .from('salon_age_categories')
           .select('id, display_name, min_age, max_age')
@@ -127,7 +166,7 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
         };
       }
 
-      // Step 4: Load categories
+      // Step 6: Load categories
       final categoriesResponse = await supabase
           .from('salon_categories')
           .select('id, display_name, icon_name, color')
@@ -143,7 +182,7 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
         };
       }
 
-      // Step 5: Get already assigned services
+      // Step 7: Get already assigned services
       final existingServices = await supabase
           .from('barber_services')
           .select('service_id, variant_id')
@@ -158,7 +197,7 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
         }
       }
 
-      // Step 6: Load services
+      // Step 8: Load services
       final servicesResponse = await supabase
           .from('services')
           .select('id, name, description, category_id, icon_name')
@@ -166,7 +205,7 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
           .eq('is_active', true)
           .order('name');
 
-      // Step 7: Load variants
+      // Step 9: Load variants
       final variantsResponse = await supabase
           .from('service_variants')
           .select(
@@ -207,7 +246,7 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
         });
       }
 
-      // Step 8: Build services list
+      // Step 10: Build services list
       final List<Map<String, dynamic>> processedServices = [];
       for (var service in servicesResponse) {
         final serviceId = service['id'] as int;
@@ -263,16 +302,22 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
       setState(() {
         _services = processedServices;
       });
-    
     } catch (e) {
       debugPrint('❌ Error loading services: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error loading services: $e'),
+            content: Text('Error: ${e.toString()}'),
             backgroundColor: Colors.red,
           ),
         );
+        // Navigate back if barber is inactive
+        if (e.toString().contains('inactive') ||
+            e.toString().contains('blocked')) {
+          Future.delayed(const Duration(seconds: 2), () {
+            if (mounted) Navigator.pop(context);
+          });
+        }
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);

@@ -76,6 +76,81 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
     try {
       final salonIdInt = int.parse(widget.salonId);
 
+      // ============================================================
+      // ✅ STEP 1: CHECK IF BARBER HAS ACTIVE ROLE IN user_roles
+      // ============================================================
+      final barberRoleCheck = await supabase
+          .from('user_roles')
+          .select('''
+            status,
+            role_id,
+            roles!inner (
+                name
+            )
+        ''')
+          .eq('user_id', widget.barberId)
+          .eq('roles.name', 'barber')
+          .maybeSingle();
+
+      if (barberRoleCheck == null) {
+        if (mounted) {
+          _showSnackBar('Barber role not found.', Colors.orange);
+          Navigator.pop(context);
+        }
+        return;
+      }
+
+      if (barberRoleCheck['status'] != 'active') {
+        String statusMessage = 'Barber account is ';
+        switch (barberRoleCheck['status']) {
+          case 'inactive':
+            statusMessage += 'deactivated.';
+            break;
+          case 'scheduled_for_deletion':
+            statusMessage += 'scheduled for deletion.';
+            break;
+          case 'deleted':
+            statusMessage += 'deleted.';
+            break;
+          default:
+            statusMessage += 'not active.';
+        }
+        if (mounted) {
+          _showSnackBar(statusMessage, Colors.orange);
+          Navigator.pop(context);
+        }
+        return;
+      }
+
+      // ============================================================
+      // ✅ STEP 2: CHECK IF PROFILE IS ACTIVE
+      // ============================================================
+      final profileCheck = await supabase
+          .from('profiles')
+          .select('is_active, is_blocked')
+          .eq('id', widget.barberId)
+          .maybeSingle();
+
+      if (profileCheck != null) {
+        if (profileCheck['is_blocked'] == true) {
+          if (mounted) {
+            _showSnackBar('Barber account is blocked.', Colors.red);
+            Navigator.pop(context);
+          }
+          return;
+        }
+        if (profileCheck['is_active'] == false) {
+          if (mounted) {
+            _showSnackBar('Barber profile is inactive.', Colors.orange);
+            Navigator.pop(context);
+          }
+          return;
+        }
+      }
+
+      // ============================================================
+      // ✅ STEP 3: GET SALON BARBER ID
+      // ============================================================
       final salonBarberResponse = await supabase
           .from('salon_barbers')
           .select('id')
@@ -89,6 +164,9 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
 
       _salonBarberId = salonBarberResponse['id'] as int;
 
+      // ============================================================
+      // ✅ STEP 4: GET BARBER PROFILE DETAILS
+      // ============================================================
       final profile = await supabase
           .from('profiles')
           .select('id, full_name, email, avatar_url')
@@ -101,6 +179,9 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
         });
       }
 
+      // ============================================================
+      // ✅ STEP 5: GET SALON CATEGORIES
+      // ============================================================
       final categoriesResponse = await supabase
           .from('salon_categories')
           .select('id, display_name, icon_name, color')
@@ -114,6 +195,9 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
         });
       }
 
+      // ============================================================
+      // ✅ STEP 6: GET GENDERS AND AGE CATEGORIES
+      // ============================================================
       final gendersResponse = await supabase
           .from('salon_genders')
           .select('id, display_name')
@@ -138,6 +222,9 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
         };
       }
 
+      // ============================================================
+      // ✅ STEP 7: GET BARBER'S CURRENT SERVICES
+      // ============================================================
       final currentServices = await supabase
           .from('barber_services')
           .select('id, variant_id, service_id')
@@ -153,11 +240,17 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
         return;
       }
 
+      // ============================================================
+      // ✅ STEP 8: GET ALL SERVICE IDs
+      // ============================================================
       final allServiceIds = currentServices
           .map((s) => s['service_id'] as int)
           .toSet()
           .toList();
 
+      // ============================================================
+      // ✅ STEP 9: GET SERVICE DETAILS
+      // ============================================================
       final servicesResponse = await supabase
           .from('services')
           .select('id, name, description, category_id, icon_name')
@@ -186,6 +279,9 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
         };
       }
 
+      // ============================================================
+      // ✅ STEP 10: GROUP VARIANTS BY SERVICE
+      // ============================================================
       final Map<int, List<Map<String, dynamic>>> variantsByService = {};
       final Map<int, bool> hasFullService = {};
 
@@ -232,6 +328,9 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
         }
       }
 
+      // ============================================================
+      // ✅ STEP 11: PROCESS AND BUILD SERVICES LIST
+      // ============================================================
       final List<Map<String, dynamic>> processedServices = [];
       for (var serviceId in allServiceIds) {
         final serviceInfo = serviceInfoMap[serviceId];
@@ -256,6 +355,9 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
         });
       }
 
+      // ============================================================
+      // ✅ STEP 12: SORT SERVICES
+      // ============================================================
       processedServices.sort((a, b) {
         final categoryCompare = (a['category_name'] as String).compareTo(
           b['category_name'] as String,
@@ -264,6 +366,9 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
         return (a['name'] as String).compareTo(b['name'] as String);
       });
 
+      // ============================================================
+      // ✅ STEP 13: UPDATE UI STATE
+      // ============================================================
       if (mounted) {
         setState(() {
           _services = processedServices;
@@ -273,15 +378,17 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
               _expandedServices.add(service['id'] as int);
             }
           }
+          _isLoading = false;
         });
       }
+
+      debugPrint('✅ Loaded ${processedServices.length} services for barber');
     } catch (e) {
-      debugPrint('Error loading data: $e');
+      debugPrint('❌ Error loading data: $e');
       if (mounted) {
-        _showSnackBar('Error loading data: $e', Colors.red);
+        setState(() => _isLoading = false);
+        _showSnackBar('Error loading data: ${e.toString()}', Colors.red);
       }
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
     }
   }
 
