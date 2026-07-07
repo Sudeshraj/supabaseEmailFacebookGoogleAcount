@@ -396,7 +396,7 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
         'registered_at': DateTime.now().toIso8601String(),
         'role': roles,
         // ✅ Store role with status in extra_data (Role Level Status)
-        'profile_${roles}': {
+        'profile_$roles': {
           'role': roles,
           'status': 'active',
           'created_at': DateTime.now().toIso8601String(),
@@ -439,6 +439,20 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
           'created_at': DateTime.now().toIso8601String(),
           'updated_at': DateTime.now().toIso8601String(),
         });
+
+        // ✅ Verify profile creation
+        final verifyProfile = await supabase
+            .from('profiles')
+            .select('id, is_active')
+            .eq('id', user.id)
+            .maybeSingle();
+
+        if (verifyProfile == null) {
+          throw Exception('Profile creation failed - verification failed');
+        }
+        debugPrint(
+          '✅ Profile verified: id=${verifyProfile['id']}, is_active=${verifyProfile['is_active']}',
+        );
       } else {
         // 🔥 EXISTING USER - Update profile
         debugPrint('🔄 Updating existing profile');
@@ -493,6 +507,20 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
           'created_at': DateTime.now().toIso8601String(),
           'updated_at': DateTime.now().toIso8601String(),
         });
+
+        // ✅ Verify role assignment
+        final verifyRole = await supabase
+            .from('user_roles')
+            .select('id, status')
+            .eq('user_id', user.id)
+            .eq('role_id', roleId)
+            .maybeSingle();
+
+        if (verifyRole == null) {
+          debugPrint('⚠️ Role assignment may have failed');
+        } else {
+          debugPrint('✅ Role verified: status=${verifyRole['status']}');
+        }
       } else {
         // ✅ If role exists but might be inactive, update status to active
         debugPrint('🔄 Updating existing role status to active');
@@ -547,14 +575,26 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
       await SessionManager.saveCurrentRole(roles!);
 
       // ✅ Sync profile status with SessionManager
-      await SessionManager.syncProfileStatusWithDB(email: email, role: roles!);
+      try {
+        await SessionManager.syncProfileStatusWithDB(
+          email: email,
+          role: roles!,
+        );
+      } catch (e) {
+        debugPrint('⚠️ syncProfileStatusWithDB error: $e');
+        // Continue even if sync fails
+      }
 
       // ✅ Check if any roles need auto-restore
       for (String role in userRoles) {
-        await SessionManager.autoRestoreProfileOnLogin(
-          email: email,
-          role: role,
-        );
+        try {
+          await SessionManager.autoRestoreProfileOnLogin(
+            email: email,
+            role: role,
+          );
+        } catch (e) {
+          debugPrint('⚠️ autoRestoreProfileOnLogin error for $role: $e');
+        }
       }
 
       // ✅ Refresh app state
@@ -641,25 +681,29 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
   void _redirectBasedOnRole(String role) {
     if (!mounted) return;
 
-    // ✅ Session check එක අයින් කරන්න
-    // Registration flow complete වෙලා user එක logged in වෙලා ඉන්නවා
-
+    // ✅ Registration flow complete - user is logged in
     final email = widget.user?.email ?? supabase.auth.currentUser?.email;
 
     if (email == null) {
+      debugPrint('⚠️ No email found, redirecting to login');
       context.go('/login');
       return;
     }
 
+    debugPrint('🎯 Redirecting based on role: $role for $email');
+
     // ✅ Role එක අනුව redirect කරන්න
     switch (role) {
       case 'owner':
+        debugPrint('👑 Going to owner dashboard');
         context.go('/owner');
         break;
       case 'barber':
+        debugPrint('💇 Going to barber dashboard');
         context.go('/barber');
         break;
       default:
+        debugPrint('👤 Going to customer dashboard');
         context.go('/customer');
         break;
     }
