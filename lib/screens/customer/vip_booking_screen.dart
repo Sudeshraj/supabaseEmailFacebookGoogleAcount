@@ -847,12 +847,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     bool isDateSelectable(DateTime date) {
       // Disable holidays ONLY
       if (_holidays.contains(date)) return false;
-
-      // ✅ Don't disable current date
-      // ✅ Don't disable past dates (if you want to allow booking past dates)
-      // If you want to allow past dates, remove the next line
-      // if (date.isBefore(today)) return false;
-
       return true;
     }
 
@@ -902,7 +896,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
 
     return Column(
       children: [
-        // ... Salon header code remains the same ...
         Expanded(
           child: SingleChildScrollView(
             physics: const BouncingScrollPhysics(),
@@ -914,7 +907,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
             ),
             child: Column(
               children: [
-                // ✅ Show today is holiday banner (only if today is a holiday)
                 if (_holidays.contains(today))
                   Container(
                     padding: const EdgeInsets.all(12),
@@ -974,9 +966,8 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                   child: Container(
                     padding: const EdgeInsets.all(16),
                     child: CalendarDatePicker(
-                      // ✅ Set initial date to first available (today if not holiday)
                       initialDate: getFirstAvailableDate(),
-                      firstDate: today, // Allow today
+                      firstDate: today,
                       lastDate: maxDate,
                       selectableDayPredicate: (date) => isDateSelectable(date),
                       onDateChanged: (date) async {
@@ -990,7 +981,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                   ),
                 ),
 
-                // ✅ Show holiday warning if selected date is a holiday
                 if (isSelectedDateHoliday)
                   Container(
                     margin: const EdgeInsets.only(top: 16),
@@ -1056,7 +1046,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                     ),
                   ),
 
-                // Show no barbers available warning
                 if (_isDateUnavailable &&
                     !_holidays.contains(_selectedDate) &&
                     _selectedDate != null)
@@ -1088,7 +1077,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                     ),
                   ),
 
-                // ✅ Show selected date info (green check)
                 if (_selectedDate != null && !_holidays.contains(_selectedDate))
                   Container(
                     margin: const EdgeInsets.only(top: 16),
@@ -1196,7 +1184,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   // STEP 3: SERVICE SELECTION
   // ============================================
 
-  //--------------------without view----------------------
   Future<void> _loadSalonServices() async {
     if (_servicesLoaded) return;
     setState(() => _isLoadingServices = true);
@@ -1204,7 +1191,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     try {
       final salonId = _selectedSalon!['id'];
 
-      // Single query with all joins
       final response = await supabase
           .from('services')
           .select('''
@@ -1239,7 +1225,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       for (var service in response) {
         final serviceId = service['id'] as int;
 
-        // Initialize service if not exists
         if (!groupedServices.containsKey(serviceId)) {
           groupedServices[serviceId] = {
             'id': serviceId,
@@ -1251,7 +1236,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           };
         }
 
-        // Add variants
         final variants = service['service_variants'] as List? ?? [];
         for (var variant in variants) {
           groupedServices[serviceId]!['variants'].add({
@@ -1264,7 +1248,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         }
       }
 
-      // Convert to list
       final servicesList = groupedServices.values.toList();
 
       setState(() {
@@ -2329,7 +2312,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   }
 
   // ============================================
-  // STEP 4: BARBER SELECTION
+  // STEP 4: BARBER SELECTION (UPDATED)
   // ============================================
 
   Future<Map<String, dynamic>> _checkBarberFullAvailability(
@@ -2343,7 +2326,98 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       'has_special_schedule': false,
       'has_special_break': false,
     };
+
     try {
+      // ============================================================
+      // ✅ STEP 1: CHECK BARBER ACTIVE STATUS IN user_roles
+      // ============================================================
+      final roleCheck = await supabase
+          .from('user_roles')
+          .select('''
+            status,
+            roles!inner (
+              name
+            )
+          ''')
+          .eq('user_id', barberId)
+          .eq('roles.name', 'barber')
+          .maybeSingle();
+
+      if (roleCheck == null) {
+        result['is_available'] = false;
+        result['reason'] = 'Barber profile not found';
+        return result;
+      }
+
+      final status = roleCheck['status'] as String? ?? 'active';
+      if (status != 'active') {
+        String reason = 'Barber account is ';
+        switch (status) {
+          case 'inactive':
+            reason += 'deactivated';
+            break;
+          case 'scheduled_for_deletion':
+            reason += 'scheduled for deletion';
+            break;
+          case 'deleted':
+            reason += 'deleted';
+            break;
+          default:
+            reason += 'not active';
+        }
+        result['is_available'] = false;
+        result['reason'] = reason;
+        return result;
+      }
+
+      // ============================================================
+      // ✅ STEP 2: CHECK PROFILE IS_ACTIVE
+      // ============================================================
+      final profileCheck = await supabase
+          .from('profiles')
+          .select('is_active, is_blocked')
+          .eq('id', barberId)
+          .maybeSingle();
+
+      if (profileCheck != null) {
+        if (profileCheck['is_blocked'] == true) {
+          result['is_available'] = false;
+          result['reason'] = 'Barber account is blocked';
+          return result;
+        }
+        if (profileCheck['is_active'] == false) {
+          result['is_available'] = false;
+          result['reason'] = 'Barber profile is inactive';
+          return result;
+        }
+      }
+
+      // ============================================================
+      // ✅ STEP 3: CHECK SALON BARBER STATUS
+      // ============================================================
+      final salonBarberCheck = await supabase
+          .from('salon_barbers')
+          .select('status')
+          .eq('barber_id', barberId)
+          .eq('salon_id', _selectedSalon!['id'])
+          .maybeSingle();
+
+      if (salonBarberCheck != null) {
+        final salonStatus = salonBarberCheck['status'] as String? ?? 'active';
+        if (salonStatus != 'active') {
+          result['is_available'] = false;
+          result['reason'] = 'Barber is not assigned to this salon';
+          return result;
+        }
+      } else {
+        result['is_available'] = false;
+        result['reason'] = 'Barber not found in this salon';
+        return result;
+      }
+
+      // ============================================================
+      // ✅ STEP 4: GET BARBER EFFECTIVE SCHEDULE
+      // ============================================================
       final scheduleResult = await supabase.rpc(
         'get_barber_effective_schedule',
         params: {
@@ -2352,24 +2426,41 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           'p_date': dateStr,
         },
       );
+
       final schedule = scheduleResult is List && scheduleResult.isNotEmpty
           ? scheduleResult[0]
           : scheduleResult;
+
       if (schedule != null) {
         result['has_special_schedule'] =
             schedule['has_special_schedule'] == true;
         result['has_special_break'] = schedule['has_special_break'] == true;
+
         final leaveType = schedule['leave_type'] as String?;
         if (leaveType == 'full_day') {
           result['is_available'] = false;
           result['reason'] = 'On full day leave';
           return result;
         }
+
+        final workStart = schedule['work_start'] as String?;
+        if (workStart == null) {
+          result['is_available'] = false;
+          result['reason'] = 'Not working on this day';
+          return result;
+        }
       }
+
+      result['is_available'] = true;
+      result['reason'] = null;
+
+      return result;
     } catch (e) {
       debugPrint('Error checking barber availability: $e');
+      result['is_available'] = false;
+      result['reason'] = 'Error checking availability';
+      return result;
     }
-    return result;
   }
 
   Widget _buildBarberSelectionStep() {
@@ -2765,6 +2856,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     );
   }
 
+  // ✅ UPDATED: Load available barbers with user_roles.status check
   Future<void> _loadAvailableBarbers() async {
     if (_isLoadingBarbers) return;
     if (_barbersLoaded && _availableBarbers.isNotEmpty) return;
@@ -2779,11 +2871,26 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         });
         return;
       }
+
+      // ✅ Updated: Get barbers with user_roles.status check
       final salonBarbers = await supabase
           .from('salon_barbers')
-          .select('barber_id')
+          .select('''
+            barber_id,
+            profiles!inner (
+                id,
+                full_name,
+                avatar_url,
+                user_roles!inner (
+                    status
+                )
+            )
+        ''')
           .eq('salon_id', _selectedSalon!['id'])
-          .eq('status', 'active');
+          .eq('salon_barbers.status', 'active')
+          .eq('profiles.user_roles.status', 'active')  // ✅ Added
+          .eq('profiles.user_roles.role_id', 2);  // barber role
+
       if (salonBarbers.isEmpty) {
         setState(() {
           _availableBarbers = [];
@@ -2792,6 +2899,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         });
         return;
       }
+
       final List<String> barberIds = salonBarbers
           .map<String>((b) => b['barber_id'].toString())
           .toList();
@@ -3305,7 +3413,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   }
 
   // ============================================
-  // STEP 6: VIP TIME SLOT SELECTION (FULLY FIXED)
+  // STEP 6: VIP TIME SLOT SELECTION
   // ============================================
 
   Widget _buildTimezoneIndicator() => Container(
@@ -3359,7 +3467,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     ),
   );
 
-  // ✅ FIXED: Load available slots with all priority checks
   Future<void> _loadAvailableSlots() async {
     if (!mounted) return;
 
@@ -3383,12 +3490,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate!);
       final totalDuration = _calculateTotalDuration();
 
-      // ============================================
-      // STEP 1: GET EFFECTIVE SCHEDULE (DB Function)
-      // Handles: Special Leave → Regular Leave →
-      // Special Schedule → Regular Schedule →
-      // Special Break → Regular Break
-      // ============================================
       final scheduleResult = await supabase.rpc(
         'get_barber_effective_schedule',
         params: {
@@ -3410,9 +3511,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         }
       }
 
-      // ============================================
-      // STEP 2: CHECK LEAVES
-      // ============================================
       final leaveType = effectiveSchedule['leave_type'] as String?;
       if (leaveType == 'full_day') {
         if (mounted) {
@@ -3425,9 +3523,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         return;
       }
 
-      // ============================================
-      // STEP 3: GET WORK HOURS (UTC)
-      // ============================================
       String workStartUTC =
           effectiveSchedule['work_start']?.toString() ?? '09:00';
       String workEndUTC = effectiveSchedule['work_end']?.toString() ?? '18:00';
@@ -3446,9 +3541,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           ? int.parse(workEndParts[1])
           : 0;
 
-      // ============================================
-      // STEP 4: GET BREAKS
-      // ============================================
       List<Map<String, dynamic>> breakRanges = [];
 
       String? breakStartUTC = effectiveSchedule['lunch_break_start']
@@ -3479,9 +3571,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         });
       }
 
-      // ============================================
-      // STEP 5: GET EXISTING VIP BOOKINGS
-      // ============================================
       final existingAppointments = await supabase
           .from('appointments')
           .select('id, start_time, end_time, vip_queue_number, is_vip, status')
@@ -3515,9 +3604,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         });
       }
 
-      // ============================================
-      // STEP 6: CALCULATE ALL SLOTS
-      // ============================================
       final List<Map<String, dynamic>> slots = [];
       int slotNumber = 1;
 
@@ -3542,7 +3628,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         workEndDateTimeUTC = workEndDateTimeUTC.add(const Duration(days: 1));
       }
 
-      // Helper function to check overlap with ranges
       bool isOverlapWithRanges(
         int startMin,
         int endMin,
@@ -3583,41 +3668,27 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         int slotStartMin = slotStartUTC.hour * 60 + slotStartUTC.minute;
         int slotEndMin = slotEndUTC.hour * 60 + slotEndUTC.minute;
 
-        // ============================================
-        // CHECK 1: VIP Bookings Overlap
-        // ============================================
         bool isOverlappingWithBookings = isOverlapWithRanges(
           slotStartMin,
           slotEndMin,
           bookedRanges,
         );
 
-        // ============================================
-        // CHECK 2: Break Overlap
-        // ============================================
         bool isOverlappingWithBreak = isOverlapWithRanges(
           slotStartMin,
           slotEndMin,
           breakRanges,
         );
 
-        // ============================================
-        // CHECK 3: Current Time (Past/Ongoing) - USING FIXED FUNCTION
-        // ============================================
         final localSlotStart = TimezoneService.utcToLocalDateTimeForDate(
           '${slotStartUTC.hour.toString().padLeft(2, '0')}:${slotStartUTC.minute.toString().padLeft(2, '0')}:00',
           _selectedDate!,
         );
         bool isPast = _isSlotInPast(localSlotStart, totalDuration);
 
-        // ============================================
-        // FINAL: Slot Available?
-        // Disable if: Booked OR Break OR Past (including ongoing)
-        // ============================================
         bool isAvailable =
             !isOverlappingWithBookings && !isOverlappingWithBreak && !isPast;
 
-        // Status Text
         String statusText = '';
         int displayVipNumber = 0;
 
@@ -3642,7 +3713,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         } else if (isPast) {
           statusText = 'Time Passed';
         } else {
-          // Calculate VIP number
           int vipCountBefore = 0;
           for (final booked in bookedRanges) {
             if (booked['is_vip'] == true) {
@@ -3657,7 +3727,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           displayVipNumber = vipCountBefore + 1;
         }
 
-        // Convert to Local for display
         final localStartDateTime = TimezoneService.utcToLocalDateTimeForDate(
           '${slotStartUTC.hour.toString().padLeft(2, '0')}:${slotStartUTC.minute.toString().padLeft(2, '0')}:00',
           _selectedDate!,
@@ -3667,7 +3736,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           _selectedDate!,
         );
 
-        // ✅ Use simple formatter - no timezone conversion needed
         final displayStartTime = _formatTimeWithAmPm(localStartDateTime);
         final displayEndTime = _formatTimeWithAmPm(localEndDateTime);
 
@@ -4314,7 +4382,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   }
 
   // ============================================
-  // STEP 7: CONFIRMATION
+  // STEP 7: CONFIRMATION (UPDATED)
   // ============================================
 
   Widget _buildConfirmationStep() {
@@ -4592,6 +4660,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     ),
   );
 
+  // ✅ UPDATED: Confirm booking with status checks
   Future<void> _confirmBooking() async {
     if (!mounted) return;
     setState(() => _isBooking = true);
@@ -4599,6 +4668,34 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     try {
       final user = supabase.auth.currentUser;
       if (user == null) throw Exception('Please login');
+
+      // ============================================================
+      // ✅ CHECK IF CUSTOMER HAS ACTIVE ROLE
+      // ============================================================
+      final customerCheck = await supabase
+          .from('user_roles')
+          .select('status')
+          .eq('user_id', user.id)
+          .eq('role_id', 3)  // customer role ID
+          .maybeSingle();
+
+      if (customerCheck == null || customerCheck['status'] != 'active') {
+        throw Exception('Your account is not active. Please contact support.');
+      }
+
+      // ============================================================
+      // ✅ CHECK IF BARBER HAS ACTIVE ROLE
+      // ============================================================
+      final barberCheck = await supabase
+          .from('user_roles')
+          .select('status')
+          .eq('user_id', _selectedBarber!['id'])
+          .eq('role_id', 2)  // barber role ID
+          .maybeSingle();
+
+      if (barberCheck == null || barberCheck['status'] != 'active') {
+        throw Exception('Barber is not available. Please select another barber.');
+      }
 
       final utcStartTime = _selectedSlot!['utc_start_time'];
       final utcEndTime = _selectedSlot!['utc_end_time'];

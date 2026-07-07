@@ -74,7 +74,32 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
         return;
       }
 
-      // ✅ STEP 1: Get followed salons
+      // ✅ STEP 0: Get customer role ID dynamically
+      final roleResponse = await supabase
+          .from('roles')
+          .select('id')
+          .eq('name', 'customer')
+          .single();
+      
+      final customerRoleId = roleResponse['id'];
+
+      // ✅ STEP 1: Check if user has active customer role
+      final roleCheck = await supabase
+          .from('user_roles')
+          .select('status')
+          .eq('user_id', user.id)
+          .eq('role_id', customerRoleId)
+          .maybeSingle();
+
+      if (roleCheck == null || roleCheck['status'] != 'active') {
+        setState(() {
+          _error = 'Your account is not active. Please contact support.';
+          _isLoading = false;
+        });
+        return;
+      }
+
+      // ✅ STEP 2: Get followed salons
       final followedSalons = await supabase
           .from('salon_followers')
           .select('salon_id')
@@ -84,7 +109,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
           .map((f) => f['salon_id'] as int)
           .toList();
 
-      // ✅ STEP 2: If no followed salons, show empty state
+      // ✅ STEP 3: If no followed salons, show empty state
       if (followedSalonIds.isEmpty) {
         setState(() {
           _bookings = [];
@@ -93,7 +118,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
         return;
       }
 
-      // ✅ STEP 3: Get appointments only from followed salons
+      // ✅ STEP 4: Get appointments only from followed salons
       final appointments = await supabase
           .from('appointments')
           .select('*')
@@ -144,13 +169,12 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
         }
 
         // =====================================================
-        // TIME CONVERSION (UTC to LOCAL) - FIXED
+        // TIME CONVERSION (UTC to LOCAL)
         // =====================================================
         final utcDate = DateTime.parse(booking['appointment_date']);
         final utcStartTime = booking['start_time'] as String;
         final utcEndTime = booking['end_time'] as String;
 
-        // ✅ FIXED: Use utcToLocalTimeForDate instead of deprecated method
         final localStartTime = TimezoneService.utcToLocalTimeForDate(
           utcStartTime,
           utcDate,
@@ -238,6 +262,28 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
       final user = supabase.auth.currentUser;
       if (user == null) return;
 
+      // ✅ Get customer role ID dynamically
+      final roleResponse = await supabase
+          .from('roles')
+          .select('id')
+          .eq('name', 'customer')
+          .single();
+      
+      final customerRoleId = roleResponse['id'];
+
+      // ✅ Check if user has active customer role
+      final roleCheck = await supabase
+          .from('user_roles')
+          .select('status')
+          .eq('user_id', user.id)
+          .eq('role_id', customerRoleId)
+          .maybeSingle();
+
+      if (roleCheck == null || roleCheck['status'] != 'active') {
+        setState(() => _overflowNotifications = []);
+        return;
+      }
+
       // ✅ Get followed salons
       final followedSalons = await supabase
           .from('salon_followers')
@@ -286,7 +332,6 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
         final utcStartTime = apt['start_time'] as String;
         final utcEndTime = apt['end_time'] as String;
 
-        // ✅ FIXED: Use utcToLocalTimeForDate instead of deprecated method
         final localStartTime = TimezoneService.utcToLocalTimeForDate(
           utcStartTime,
           appointmentDate,
@@ -350,6 +395,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
       final user = supabase.auth.currentUser;
       if (user == null) return;
 
+      // ✅ Call handle_overflow_response RPC
       final result = await supabase.rpc(
         'handle_overflow_response',
         params: {
@@ -1939,6 +1985,35 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
     try {
       final user = supabase.auth.currentUser;
       if (user == null) return;
+
+      // ✅ Get customer role ID dynamically
+      final roleResponse = await supabase
+          .from('roles')
+          .select('id')
+          .eq('name', 'customer')
+          .single();
+      
+      final customerRoleId = roleResponse['id'];
+
+      // ✅ Check if user has active customer role
+      final roleCheck = await supabase
+          .from('user_roles')
+          .select('status')
+          .eq('user_id', user.id)
+          .eq('role_id', customerRoleId)
+          .maybeSingle();
+
+      if (roleCheck == null || roleCheck['status'] != 'active') {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Your account is not active'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
+      }
 
       final appointment = await supabase
           .from('appointments')

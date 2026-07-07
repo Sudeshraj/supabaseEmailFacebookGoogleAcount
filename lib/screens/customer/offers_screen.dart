@@ -81,7 +81,7 @@ class _OffersScreenState extends State<OffersScreen> {
   }
 
   // ============================================
-  // ✅ FIXED: TIMEZONE HELPER METHODS (Using TimezoneService)
+  // ✅ TIMEZONE HELPER METHODS (Using TimezoneService)
   // ============================================
 
   /// Get days left using TimezoneService
@@ -145,7 +145,7 @@ class _OffersScreenState extends State<OffersScreen> {
   }
 
   // ============================================
-  // LOAD OFFERS
+  // LOAD OFFERS - UPDATED WITH STATUS CHECK
   // ============================================
 
   Future<void> _loadOffers() async {
@@ -169,6 +169,55 @@ class _OffersScreenState extends State<OffersScreen> {
           });
         }
         return;
+      }
+
+      // ✅ STEP 1: Check if customer has active role
+      final customerCheck = await supabase
+          .from('user_roles')
+          .select('status')
+          .eq('user_id', user.id)
+          .eq('role_id', 3)  // customer role ID
+          .maybeSingle();
+
+      if (customerCheck == null || customerCheck['status'] != 'active') {
+        if (mounted) {
+          setState(() {
+            _hasError = true;
+            _errorMessage = 'Your account is not active. Please contact support.';
+            _isLoading = false;
+          });
+        }
+        return;
+      }
+
+      // ✅ STEP 2: Check if profile is active and not blocked
+      final profileCheck = await supabase
+          .from('profiles')
+          .select('is_active, is_blocked')
+          .eq('id', user.id)
+          .maybeSingle();
+
+      if (profileCheck != null) {
+        if (profileCheck['is_blocked'] == true) {
+          if (mounted) {
+            setState(() {
+              _hasError = true;
+              _errorMessage = 'Your account has been blocked. Please contact support.';
+              _isLoading = false;
+            });
+          }
+          return;
+        }
+        if (profileCheck['is_active'] == false) {
+          if (mounted) {
+            setState(() {
+              _hasError = true;
+              _errorMessage = 'Your profile is inactive. Please contact support.';
+              _isLoading = false;
+            });
+          }
+          return;
+        }
       }
 
       // Get followed salons
@@ -355,7 +404,7 @@ class _OffersScreenState extends State<OffersScreen> {
   }
 
   // ============================================
-  // APPLY OFFER METHOD
+  // APPLY OFFER - UPDATED WITH STATUS CHECK
   // ============================================
 
   Future<void> _applyOffer(Map<String, dynamic> offer) async {
@@ -367,6 +416,52 @@ class _OffersScreenState extends State<OffersScreen> {
           context.push('/login');
         }
         return;
+      }
+
+      // ✅ STEP 1: Check if customer has active role
+      final customerCheck = await supabase
+          .from('user_roles')
+          .select('status')
+          .eq('user_id', user.id)
+          .eq('role_id', 3)  // customer role ID
+          .maybeSingle();
+
+      if (customerCheck == null || customerCheck['status'] != 'active') {
+        if (mounted) {
+          _showSnackBar(
+            'Your account is not active. Please contact support.',
+            Colors.red,
+          );
+        }
+        return;
+      }
+
+      // ✅ STEP 2: Check if profile is active and not blocked
+      final profileCheck = await supabase
+          .from('profiles')
+          .select('is_active, is_blocked')
+          .eq('id', user.id)
+          .maybeSingle();
+
+      if (profileCheck != null) {
+        if (profileCheck['is_blocked'] == true) {
+          if (mounted) {
+            _showSnackBar(
+              'Your account has been blocked. Please contact support.',
+              Colors.red,
+            );
+          }
+          return;
+        }
+        if (profileCheck['is_active'] == false) {
+          if (mounted) {
+            _showSnackBar(
+              'Your profile is inactive. Please contact support.',
+              Colors.red,
+            );
+          }
+          return;
+        }
       }
 
       // Check offer validity using TimezoneService

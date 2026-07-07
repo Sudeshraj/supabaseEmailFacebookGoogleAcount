@@ -2351,7 +2351,99 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       'has_special_schedule': false,
       'has_special_break': false,
     };
+
     try {
+      // ============================================================
+      // ✅ STEP 1: CHECK BARBER ACTIVE STATUS IN user_roles
+      // ============================================================
+      final roleCheck = await supabase
+          .from('user_roles')
+          .select('''
+            status,
+            roles!inner (
+              name
+            )
+          ''')
+          .eq('user_id', barberId)
+          .eq('roles.name', 'barber')
+          .maybeSingle();
+
+      // ✅ Check if barber has active role
+      if (roleCheck == null) {
+        result['is_available'] = false;
+        result['reason'] = 'Barber profile not found';
+        return result;
+      }
+
+      final status = roleCheck['status'] as String? ?? 'active';
+      if (status != 'active') {
+        String reason = 'Barber account is ';
+        switch (status) {
+          case 'inactive':
+            reason += 'deactivated';
+            break;
+          case 'scheduled_for_deletion':
+            reason += 'scheduled for deletion';
+            break;
+          case 'deleted':
+            reason += 'deleted';
+            break;
+          default:
+            reason += 'not active';
+        }
+        result['is_available'] = false;
+        result['reason'] = reason;
+        return result;
+      }
+
+      // ============================================================
+      // ✅ STEP 2: CHECK PROFILE IS_ACTIVE
+      // ============================================================
+      final profileCheck = await supabase
+          .from('profiles')
+          .select('is_active, is_blocked')
+          .eq('id', barberId)
+          .maybeSingle();
+
+      if (profileCheck != null) {
+        if (profileCheck['is_blocked'] == true) {
+          result['is_available'] = false;
+          result['reason'] = 'Barber account is blocked';
+          return result;
+        }
+        if (profileCheck['is_active'] == false) {
+          result['is_available'] = false;
+          result['reason'] = 'Barber profile is inactive';
+          return result;
+        }
+      }
+
+      // ============================================================
+      // ✅ STEP 3: CHECK SALON BARBER STATUS
+      // ============================================================
+      final salonBarberCheck = await supabase
+          .from('salon_barbers')
+          .select('status')
+          .eq('barber_id', barberId)
+          .eq('salon_id', _selectedSalon!['id'])
+          .maybeSingle();
+
+      if (salonBarberCheck != null) {
+        final salonStatus = salonBarberCheck['status'] as String? ?? 'active';
+        if (salonStatus != 'active') {
+          result['is_available'] = false;
+          result['reason'] = 'Barber is not assigned to this salon';
+          return result;
+        }
+      } else {
+        result['is_available'] = false;
+        result['reason'] = 'Barber not found in this salon';
+        return result;
+      }
+
+      // ============================================================
+      // ✅ STEP 4: GET BARBER EFFECTIVE SCHEDULE
+      // ============================================================
       final scheduleResult = await supabase.rpc(
         'get_barber_effective_schedule',
         params: {
@@ -2360,24 +2452,44 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           'p_date': dateStr,
         },
       );
+
       final schedule = scheduleResult is List && scheduleResult.isNotEmpty
           ? scheduleResult[0]
           : scheduleResult;
+
       if (schedule != null) {
         result['has_special_schedule'] =
             schedule['has_special_schedule'] == true;
         result['has_special_break'] = schedule['has_special_break'] == true;
+
         final leaveType = schedule['leave_type'] as String?;
         if (leaveType == 'full_day') {
           result['is_available'] = false;
           result['reason'] = 'On full day leave';
           return result;
         }
+
+        // ✅ Check if work_start is null (barber not working)
+        final workStart = schedule['work_start'] as String?;
+        if (workStart == null) {
+          result['is_available'] = false;
+          result['reason'] = 'Not working on this day';
+          return result;
+        }
       }
+      // ============================================================
+      // ✅ STEP 6: ALL CHECKS PASSED - BARBER IS AVAILABLE
+      // ============================================================
+      result['is_available'] = true;
+      result['reason'] = null;
+
+      return result;
     } catch (e) {
       debugPrint('Error checking barber availability: $e');
+      result['is_available'] = false;
+      result['reason'] = 'Error checking availability';
+      return result;
     }
-    return result;
   }
 
   Widget _buildBarberSelectionStep() {
@@ -2789,9 +2901,21 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       }
       final salonBarbers = await supabase
           .from('salon_barbers')
-          .select('barber_id')
+          .select('''
+        barber_id,
+        profiles!inner (
+            id,
+            full_name,
+            avatar_url,
+            user_roles!inner (
+                status
+            )
+        )
+    ''')
           .eq('salon_id', _selectedSalon!['id'])
-          .eq('status', 'active');
+          .eq('salon_barbers.status', 'active')
+          .eq('profiles.user_roles.status', 'active') // ✅ Added
+          .eq('profiles.user_roles.role_id', 2);
       if (salonBarbers.isEmpty) {
         setState(() {
           _availableBarbers = [];
