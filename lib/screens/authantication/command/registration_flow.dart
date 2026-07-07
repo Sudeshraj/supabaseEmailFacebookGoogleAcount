@@ -4,7 +4,7 @@ import 'package:flutter_application_1/screens/authantication/command/welcome.dar
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:universal_platform/universal_platform.dart';
 import 'package:go_router/go_router.dart';
-import 'package:flutter_application_1/screens/authantication/customer_reg/name_screen.dart';
+import 'package:flutter_application_1/screens/authantication/command/name_screen.dart';
 import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
 import 'package:flutter_application_1/screens/authantication/functions/loading_overlay.dart';
 import 'package:flutter_application_1/main.dart';
