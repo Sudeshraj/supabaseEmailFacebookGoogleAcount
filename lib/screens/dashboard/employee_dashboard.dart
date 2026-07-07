@@ -109,16 +109,16 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
     await TimezoneService.initialize();
 
     final prefs = await SharedPreferences.getInstance();
-    
+
     String cachedTimezone = prefs.getString('cached_timezone') ?? '';
-    
+
     if (cachedTimezone.isNotEmpty) {
       _userTimezone = cachedTimezone;
     } else {
       _userTimezone = TimezoneService.getCurrentTimezone();
       await prefs.setString('cached_timezone', _userTimezone);
     }
-    
+
     await TimezoneService.setTimezone(_userTimezone);
     _lastTimezone = _userTimezone;
 
@@ -170,22 +170,26 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
     try {
       final date = DateTime.parse(dateStr);
       final now = DateTime.now();
-      
-      if (date.year == now.year && date.month == now.month && date.day == now.day) {
+
+      if (date.year == now.year &&
+          date.month == now.month &&
+          date.day == now.day) {
         return 'Today';
       }
-      
+
       final tomorrow = now.add(const Duration(days: 1));
-      if (date.year == tomorrow.year && date.month == tomorrow.month && date.day == tomorrow.day) {
+      if (date.year == tomorrow.year &&
+          date.month == tomorrow.month &&
+          date.day == tomorrow.day) {
         return 'Tomorrow';
       }
-      
+
       final dayDiff = date.difference(now).inDays;
       if (dayDiff <= 7) {
         final weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
         return weekdays[date.weekday - 1];
       }
-      
+
       return '${date.day}/${date.month}';
     } catch (e) {
       return dateStr;
@@ -194,8 +198,18 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
   String _getMonthName() {
     const months = [
-      'January', 'February', 'March', 'April', 'May', 'June',
-      'July', 'August', 'September', 'October', 'November', 'December'
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
     ];
     return months[DateTime.now().month - 1];
   }
@@ -207,7 +221,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
     try {
       final today = DateTime.now().toIso8601String().split('T').first;
-      
+
       final specialBreak = await supabase
           .from('barber_special_breaks')
           .select('''
@@ -227,20 +241,22 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         final startTime = specialBreak['start_time'] as String;
         final endTime = specialBreak['end_time'] as String;
         final now = DateTime.now();
-        final nowStr = '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:00';
-        
-        final isOnBreakNow = nowStr.compareTo(startTime) >= 0 && nowStr.compareTo(endTime) < 0;
-        
+        final nowStr =
+            '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:00';
+
+        final isOnBreakNow =
+            nowStr.compareTo(startTime) >= 0 && nowStr.compareTo(endTime) < 0;
+
         setState(() {
           _isOnBreak = isOnBreakNow;
         });
-        
+
         debugPrint('✅ Loaded SPECIAL break');
         return;
       }
 
       final dayOfWeek = DateTime.now().weekday;
-      
+
       final regularBreak = await supabase
           .from('barber_breaks')
           .select('''
@@ -259,14 +275,16 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         final startTime = regularBreak['start_time'] as String;
         final endTime = regularBreak['end_time'] as String;
         final now = DateTime.now();
-        final nowStr = '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:00';
-        
-        final isOnBreakNow = nowStr.compareTo(startTime) >= 0 && nowStr.compareTo(endTime) < 0;
-        
+        final nowStr =
+            '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:00';
+
+        final isOnBreakNow =
+            nowStr.compareTo(startTime) >= 0 && nowStr.compareTo(endTime) < 0;
+
         setState(() {
           _isOnBreak = isOnBreakNow;
         });
-        
+
         debugPrint('✅ Loaded REGULAR break');
         return;
       }
@@ -274,9 +292,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
       setState(() {
         _isOnBreak = false;
       });
-      
-      debugPrint('ℹ️ No break found - Working');
 
+      debugPrint('ℹ️ No break found - Working');
     } catch (e) {
       debugPrint('❌ Error loading break status: $e');
       setState(() {
@@ -385,12 +402,19 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                           });
                         },
                         decoration: InputDecoration(
-                          hintText: '🔍 Search by country, city, or timezone...',
+                          hintText:
+                              '🔍 Search by country, city, or timezone...',
                           hintStyle: TextStyle(color: Colors.grey[400]),
-                          prefixIcon: const Icon(Icons.search, color: Colors.grey),
+                          prefixIcon: const Icon(
+                            Icons.search,
+                            color: Colors.grey,
+                          ),
                           suffixIcon: searchQuery.isNotEmpty
                               ? IconButton(
-                                  icon: const Icon(Icons.clear, color: Colors.grey),
+                                  icon: const Icon(
+                                    Icons.clear,
+                                    color: Colors.grey,
+                                  ),
                                   onPressed: () {
                                     searchController.clear();
                                     setDialogState(() {
@@ -441,14 +465,18 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                                         fontSize: 13,
                                       ),
                                       tabs: continentGroups.keys
-                                          .map((continent) => Tab(text: continent))
+                                          .map(
+                                            (continent) => Tab(text: continent),
+                                          )
                                           .toList(),
                                     ),
                                   ),
                                   const SizedBox(height: 8),
                                   Expanded(
                                     child: TabBarView(
-                                      children: continentGroups.values.map((timezones) {
+                                      children: continentGroups.values.map((
+                                        timezones,
+                                      ) {
                                         return ListView.builder(
                                           itemCount: timezones.length,
                                           itemBuilder: (context, index) {
@@ -457,9 +485,16 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                                                 .split('/')
                                                 .last
                                                 .replaceAll('_', ' ');
-                                            final countryCode = _extractCountryCode(tz);
-                                            final flag = _getFlagByCountryCode(countryCode);
-                                            return _buildTimezoneTile(tz, displayName, flag);
+                                            final countryCode =
+                                                _extractCountryCode(tz);
+                                            final flag = _getFlagByCountryCode(
+                                              countryCode,
+                                            );
+                                            return _buildTimezoneTile(
+                                              tz,
+                                              displayName,
+                                              flag,
+                                            );
                                           },
                                         );
                                       }).toList(),
@@ -472,7 +507,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                           ? ListView.builder(
                               itemCount: filteredGroups.keys.length,
                               itemBuilder: (context, index) {
-                                final continent = filteredGroups.keys.elementAt(index);
+                                final continent = filteredGroups.keys.elementAt(
+                                  index,
+                                );
                                 final items = filteredGroups[continent]!;
                                 return Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -486,7 +523,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                                         children: [
                                           Text(
                                             _getContinentEmoji(continent),
-                                            style: const TextStyle(fontSize: 18),
+                                            style: const TextStyle(
+                                              fontSize: 18,
+                                            ),
                                           ),
                                           const SizedBox(width: 8),
                                           Text(
@@ -497,14 +536,17 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                                             ),
                                           ),
                                           Container(
-                                            margin: const EdgeInsets.only(left: 8),
+                                            margin: const EdgeInsets.only(
+                                              left: 8,
+                                            ),
                                             padding: const EdgeInsets.symmetric(
                                               horizontal: 6,
                                               vertical: 2,
                                             ),
                                             decoration: BoxDecoration(
                                               color: Colors.grey[200],
-                                              borderRadius: BorderRadius.circular(10),
+                                              borderRadius:
+                                                  BorderRadius.circular(10),
                                             ),
                                             child: Text(
                                               '${items.length}',
@@ -956,7 +998,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
               : null,
           child: _employeeAvatar.isEmpty
               ? Text(
-                  _employeeName.isNotEmpty ? _employeeName[0].toUpperCase() : '?',
+                  _employeeName.isNotEmpty
+                      ? _employeeName[0].toUpperCase()
+                      : '?',
                   style: const TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.bold,
@@ -981,45 +1025,142 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
       _employeeId = currentUser.id;
       _employeeEmail = currentUser.email ?? '';
-      debugPrint('📋 Loading employee data for user: $_employeeId, email: $_employeeEmail');
+      debugPrint(
+        '📋 Loading employee data for user: $_employeeId, email: $_employeeEmail',
+      );
 
-      // Check if user has barber role
+      // ✅ STEP 1: Check if user has ACTIVE barber role
       final userRolesResponse = await supabase
           .from('user_roles')
-          .select('role_id, roles!inner(name)')
+          .select('''
+          role_id,
+          status,
+          roles!inner (
+            id,
+            name
+          )
+        ''')
           .eq('user_id', _employeeId);
 
-      bool isBarber = false;
+      bool isActiveBarber = false;
+      String? roleStatus;
       for (var role in userRolesResponse) {
         final roleData = role['roles'] as Map?;
+        final status = role['status'] as String? ?? 'active';
         if (roleData != null && roleData['name'] == 'barber') {
-          isBarber = true;
+          roleStatus = status;
+          if (status == 'active') {
+            isActiveBarber = true;
+          }
           break;
         }
       }
 
-      if (!isBarber) {
-        final profile = await SessionManager.getProfileByEmail(_employeeEmail);
-        if (profile != null) {
-          final roles = profile['roles'] as List? ?? [];
-          if (roles.contains('barber')) {
-            isBarber = true;
-            debugPrint('✅ Found barber role in SessionManager');
+      // ✅ Check if role exists but inactive
+      if (!isActiveBarber && roleStatus != null) {
+        if (mounted) {
+          String message = 'Your barber account is ';
+          switch (roleStatus) {
+            case 'inactive':
+              message += 'deactivated';
+              break;
+            case 'scheduled_for_deletion':
+              message += 'scheduled for deletion';
+              break;
+            case 'deleted':
+              message += 'deleted';
+              break;
+            default:
+              message += 'not active';
           }
-        }
 
-        if (!isBarber) {
-          debugPrint('❌ User does not have barber role');
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('⚠️ $message. Please contact support.'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+
+          // Redirect to login after showing message
+          Future.delayed(const Duration(seconds: 2), () {
+            if (mounted) {
+              context.go('/');
+            }
+          });
           return;
         }
       }
 
-      // Load profile
+      // ✅ Check if user has barber role at all (from SessionManager fallback)
+      if (!isActiveBarber) {
+        final profile = await SessionManager.getProfileByEmail(_employeeEmail);
+        if (profile != null) {
+          final roles = profile['roles'] as List? ?? [];
+          if (roles.contains('barber')) {
+            // Role exists in session but maybe not in DB - try to reactivate
+            isActiveBarber = true;
+            debugPrint(
+              '✅ Found barber role in SessionManager, but DB check failed',
+            );
+          }
+        }
+
+        if (!isActiveBarber) {
+          debugPrint('❌ User does not have barber role');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'You do not have a barber role. Please contact support.',
+                ),
+                backgroundColor: Colors.red,
+              ),
+            );
+            context.go('/');
+          }
+          return;
+        }
+      }
+
+      // ✅ Load profile
       final profileResponse = await supabase
           .from('profiles')
-          .select('full_name, email, avatar_url')
+          .select('full_name, email, avatar_url, is_active, is_blocked')
           .eq('id', _employeeId)
           .maybeSingle();
+
+      // ✅ Check if profile is blocked or inactive
+      if (profileResponse != null) {
+        if (profileResponse['is_blocked'] == true) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Your account has been blocked. Please contact support.',
+                ),
+                backgroundColor: Colors.red,
+              ),
+            );
+            context.go('/');
+          }
+          return;
+        }
+
+        if (profileResponse['is_active'] == false) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Your profile is inactive. Please contact support.',
+                ),
+                backgroundColor: Colors.orange,
+              ),
+            );
+            context.go('/');
+          }
+          return;
+        }
+      }
 
       if (profileResponse != null) {
         setState(() {
@@ -1033,7 +1174,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
           }
           _employeeAvatar = profileResponse['avatar_url'] ?? '';
         });
-        debugPrint('✅ Profile loaded: name=$_employeeName, email=$_employeeEmail');
+        debugPrint(
+          '✅ Profile loaded: name=$_employeeName, email=$_employeeEmail',
+        );
       } else {
         final profile = await SessionManager.getProfileByEmail(_employeeEmail);
         if (profile != null) {
@@ -1041,11 +1184,13 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
             _employeeName = profile['name'] ?? _employeeEmail.split('@').first;
             _employeeAvatar = profile['avatar'] ?? '';
           });
-          debugPrint('✅ Profile loaded from SessionManager: name=$_employeeName');
+          debugPrint(
+            '✅ Profile loaded from SessionManager: name=$_employeeName',
+          );
         }
       }
 
-      // Load ALL assigned salons for this barber
+      // ✅ Load assigned salons
       await _loadAssignedSalons();
     } catch (e) {
       debugPrint('❌ Error loading employee data: $e');
@@ -1060,7 +1205,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
               _employeeName = profile['name'] ?? email.split('@').first;
               _employeeAvatar = profile['avatar'] ?? '';
             });
-            debugPrint('✅ Fallback profile loaded: name=$_employeeName, email=$_employeeEmail');
+            debugPrint(
+              '✅ Fallback profile loaded: name=$_employeeName, email=$_employeeEmail',
+            );
           }
         }
       } catch (fallbackError) {
@@ -1136,7 +1283,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         }
       });
 
-      debugPrint('✅ Selected salon: $_selectedSalonName (ID: $_selectedSalonId)');
+      debugPrint(
+        '✅ Selected salon: $_selectedSalonName (ID: $_selectedSalonId)',
+      );
       debugPrint('✅ Total assigned salons: ${_assignedSalons.length}');
     } catch (e) {
       debugPrint('❌ Error loading assigned salons: $e');
@@ -1159,15 +1308,15 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
   Future<void> _loadDataForSelectedSalon() async {
     if (_selectedSalonId == null) return;
-    
+
     setState(() => _isLoading = true);
-    
+
     try {
       await _loadAppointments();
       await _loadStatistics();
       await _loadBreakStatus();
       await _loadNotificationCount();
-      
+
       if (mounted) {
         setState(() => _isLoading = false);
         debugPrint('✅ Data loaded for salon: $_selectedSalonName');
@@ -1208,7 +1357,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
       if (mounted) {
         setState(() => _isLoading = false);
         debugPrint('✅ Employee data loaded successfully');
-        debugPrint('📊 Today: $_todaysAppointments, Pending: $_pendingAppointments, Monthly: $_monthlyEarnings, Customers: $_totalCustomers');
+        debugPrint(
+          '📊 Today: $_todaysAppointments, Pending: $_pendingAppointments, Monthly: $_monthlyEarnings, Customers: $_totalCustomers',
+        );
       }
     } catch (e) {
       debugPrint('❌ Error loading employee data: $e');
@@ -1299,7 +1450,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
       debugPrint('📊 Found ${response.length} appointments');
 
       final List<Map<String, dynamic>> allAppointments = [];
-      
+
       // Counters
       int todayTotal = 0;
       int todayCompleted = 0;
@@ -1315,7 +1466,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         final status = apt['status'] as String? ?? 'pending';
         final aptDate = apt['appointment_date'] as String;
         final isToday = aptDate == todayStr;
-        
+
         final price =
             (apt['price'] as num?)?.toDouble() ??
             (variant?['price'] as num?)?.toDouble() ??
@@ -1334,7 +1485,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         }
 
         // Count ALL PENDING (today + future)
-        if (status == 'pending' || status == 'confirmed' || status == 'in_progress') {
+        if (status == 'pending' ||
+            status == 'confirmed' ||
+            status == 'in_progress') {
           totalPendingAll++;
         }
 
@@ -1371,7 +1524,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
       debugPrint('✅ Today Completed: $_completedToday');
       debugPrint('✅ TOTAL Pending (All dates): $_pendingAppointments');
       debugPrint('✅ Total appointments in list: ${allAppointments.length}');
-
     } catch (e) {
       debugPrint('❌ Error loading appointments: $e');
       setState(() {
@@ -1415,7 +1567,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
           .map((a) => a['customer_id'])
           .toSet()
           .length;
-      
+
       // 2. MONTHLY EARNINGS
       final firstDayOfMonth = DateTime(
         DateTime.now().year,
@@ -1423,7 +1575,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         1,
       );
       final firstDayStr = firstDayOfMonth.toIso8601String().split('T').first;
-      
+
       final lastDayOfMonth = DateTime(
         DateTime.now().year,
         DateTime.now().month + 1,
@@ -1467,8 +1619,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         _rating = avgRating;
       });
 
-      debugPrint('✅ Stats - Customers: $uniqueCustomers, Monthly: $monthlyTotal, Rating: $avgRating');
-      
+      debugPrint(
+        '✅ Stats - Customers: $uniqueCustomers, Monthly: $monthlyTotal, Rating: $avgRating',
+      );
     } catch (e) {
       debugPrint('❌ Error loading statistics: $e');
       setState(() {
@@ -1914,10 +2067,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
           children: [
             const Text(
               'Select Salon',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
             const Text(
@@ -1947,7 +2097,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                 title: Text(
                   salon['name'] ?? 'Unknown Salon',
                   style: TextStyle(
-                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                    fontWeight: isSelected
+                        ? FontWeight.bold
+                        : FontWeight.normal,
                   ),
                 ),
                 subtitle: Text(
@@ -2039,7 +2191,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                       minHeight: 16,
                     ),
                     child: Text(
-                      _unreadNotificationCount > 99 ? '99+' : '$_unreadNotificationCount',
+                      _unreadNotificationCount > 99
+                          ? '99+'
+                          : '$_unreadNotificationCount',
                       style: const TextStyle(
                         color: Colors.white,
                         fontSize: 8,
@@ -2082,7 +2236,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                             'Get instant notifications for new bookings and schedule changes',
                         compact: false,
                       ),
-                    
+
                     // Welcome Section
                     Padding(
                       padding: const EdgeInsets.all(16),
@@ -2118,7 +2272,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                                       vertical: 2,
                                     ),
                                     decoration: BoxDecoration(
-                                      color: Colors.purple.withValues(alpha: 0.1),
+                                      color: Colors.purple.withValues(
+                                        alpha: 0.1,
+                                      ),
                                       borderRadius: BorderRadius.circular(10),
                                     ),
                                     child: Text(
@@ -2141,7 +2297,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                                         vertical: 2,
                                       ),
                                       decoration: BoxDecoration(
-                                        color: Colors.blue.withValues(alpha: 0.1),
+                                        color: Colors.blue.withValues(
+                                          alpha: 0.1,
+                                        ),
                                         borderRadius: BorderRadius.circular(10),
                                       ),
                                       child: Row(
@@ -2268,7 +2426,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                               Row(
                                 children: [
                                   Text(
-                                    _rating > 0 ? _rating.toStringAsFixed(1) : '0.0',
+                                    _rating > 0
+                                        ? _rating.toStringAsFixed(1)
+                                        : '0.0',
                                     style: const TextStyle(
                                       fontSize: 28,
                                       fontWeight: FontWeight.bold,
@@ -2319,7 +2479,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                       ),
                     ),
                     const SizedBox(height: 16),
-                    
+
                     // Stats Cards - Row 1
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -2350,7 +2510,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                       ),
                     ),
                     const SizedBox(height: 12),
-                    
+
                     // Stats Cards - Row 2
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -2372,7 +2532,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                               value: 'Rs. $_monthlyEarnings',
                               icon: Icons.trending_up,
                               color: Colors.purple,
-                              subtitle: '${_getMonthName()} ${DateTime.now().year}',
+                              subtitle:
+                                  '${_getMonthName()} ${DateTime.now().year}',
                               onTap: _viewTodayEarnings,
                             ),
                           ),
@@ -2380,7 +2541,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                       ),
                     ),
                     const SizedBox(height: 12),
-                    
+
                     // Stats Cards - Row 3
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -2395,7 +2556,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                       ),
                     ),
                     const SizedBox(height: 16),
-                    
+
                     // Quick Actions
                     const SectionHeader(title: 'Quick Actions', actionText: ''),
                     const SizedBox(height: 8),
@@ -2441,7 +2602,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                       ),
                     ),
                     const SizedBox(height: 16),
-                    
+
                     // Today's Schedule
                     const SectionHeader(
                       title: 'Today\'s Schedule',
@@ -2450,7 +2611,10 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                     const SizedBox(height: 8),
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: _todaysAppointmentsList.where((a) => a['is_today'] == true).isEmpty
+                      child:
+                          _todaysAppointmentsList
+                              .where((a) => a['is_today'] == true)
+                              .isEmpty
                           ? Container(
                               padding: const EdgeInsets.all(32),
                               decoration: BoxDecoration(
@@ -2495,15 +2659,17 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                                       queueNumber: apt['queue_number'],
                                       queueToken: apt['queue_token'],
                                       showActions: apt['status'] != 'completed',
-                                      onTap: () =>
-                                          _viewBookingDetails(apt['customer_name']),
+                                      onTap: () => _viewBookingDetails(
+                                        apt['customer_name'],
+                                      ),
                                       onComplete: _markAppointmentComplete,
                                     );
-                                  }).toList(),
+                                  })
+                                  .toList(),
                             ),
                     ),
                     const SizedBox(height: 16),
-                    
+
                     // Performance Card
                     Container(
                       margin: const EdgeInsets.all(16),
@@ -2564,4 +2730,5 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
   }
 }
 
-final RouteObserver<ModalRoute<void>> routeObserver = RouteObserver<ModalRoute<void>>();
+final RouteObserver<ModalRoute<void>> routeObserver =
+    RouteObserver<ModalRoute<void>>();

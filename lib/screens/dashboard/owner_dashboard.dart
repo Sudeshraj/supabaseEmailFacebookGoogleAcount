@@ -15,7 +15,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/timezone_service.dart';
 
 // ✅ Add route observer
-final RouteObserver<ModalRoute<void>> routeObserver = RouteObserver<ModalRoute<void>>();
+final RouteObserver<ModalRoute<void>> routeObserver =
+    RouteObserver<ModalRoute<void>>();
 
 class OwnerDashboard extends StatefulWidget {
   const OwnerDashboard({super.key});
@@ -25,7 +26,8 @@ class OwnerDashboard extends StatefulWidget {
 }
 
 class _OwnerDashboardState extends State<OwnerDashboard>
-    with SingleTickerProviderStateMixin, RouteAware {  // ✅ Added RouteAware
+    with SingleTickerProviderStateMixin, RouteAware {
+  // ✅ Added RouteAware
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   final NotificationService _notificationService = NotificationService();
@@ -82,9 +84,10 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       vsync: this,
       duration: const Duration(milliseconds: 900),
     )..repeat(reverse: true);
-    _pulseAnim = Tween<double>(begin: 1.0, end: 1.06).animate(
-      CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut),
-    );
+    _pulseAnim = Tween<double>(
+      begin: 1.0,
+      end: 1.06,
+    ).animate(CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut));
     _loadAllData();
     _setupNotificationListeners();
   }
@@ -121,19 +124,36 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   void _updateCurrentDate() {
     final now = DateTime.now();
     const months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
     final weekdays = [
-      'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'
+      'Sunday',
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
     ];
-    _currentDate = '${weekdays[now.weekday]}, ${months[now.month - 1]} ${now.day}, ${now.year}';
+    _currentDate =
+        '${weekdays[now.weekday]}, ${months[now.month - 1]} ${now.day}, ${now.year}';
   }
 
   Future<void> _loadTimezone() async {
     await TimezoneService.initialize();
     final prefs = await SharedPreferences.getInstance();
-    
+
     final cachedTimezone = prefs.getString('cached_timezone');
     if (cachedTimezone != null && cachedTimezone.isNotEmpty) {
       _currentTimezone = cachedTimezone;
@@ -141,7 +161,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       _currentTimezone = TimezoneService.getCurrentTimezone();
       await prefs.setString('cached_timezone', _currentTimezone);
     }
-    
+
     _currentTimezoneFlag = TimezoneService.getCurrentFlag();
     _currentTimezoneOffset = TimezoneService.getUtcOffsetString();
     _updateCurrentDate();
@@ -153,36 +173,109 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
   String _extractCountryCode(String timezone) {
     final countryMap = {
-      'Asia/Colombo': 'LK', 'Asia/Tokyo': 'JP', 'Asia/Seoul': 'KR', 'Asia/Shanghai': 'CN',
-      'Asia/Hong_Kong': 'HK', 'Asia/Taipei': 'TW', 'Asia/Kolkata': 'IN', 'Asia/Dubai': 'AE',
-      'Asia/Singapore': 'SG', 'Asia/Kuala_Lumpur': 'MY', 'Asia/Bangkok': 'TH', 'Asia/Jakarta': 'ID',
-      'Asia/Manila': 'PH', 'Asia/Ho_Chi_Minh': 'VN', 'Asia/Dhaka': 'BD', 'Asia/Karachi': 'PK',
-      'Asia/Kathmandu': 'NP', 'Asia/Riyadh': 'SA', 'Asia/Kuwait': 'KW', 'Asia/Doha': 'QA',
-      'Europe/London': 'GB', 'Europe/Paris': 'FR', 'Europe/Berlin': 'DE', 'Europe/Rome': 'IT',
-      'Europe/Madrid': 'ES', 'Europe/Amsterdam': 'NL', 'Europe/Zurich': 'CH', 'Europe/Moscow': 'RU',
-      'America/New_York': 'US', 'America/Chicago': 'US', 'America/Denver': 'US', 'America/Los_Angeles': 'US',
-      'America/Toronto': 'CA', 'America/Vancouver': 'CA', 'America/Mexico_City': 'MX', 'America/Sao_Paulo': 'BR',
-      'Australia/Sydney': 'AU', 'Australia/Melbourne': 'AU', 'Australia/Perth': 'AU', 'Australia/Adelaide': 'AU',
-      'Pacific/Auckland': 'NZ', 'Africa/Johannesburg': 'ZA', 'Africa/Cairo': 'EG', 'Africa/Lagos': 'NG',
-      'Africa/Nairobi': 'KE', 'America/Argentina/Buenos_Aires': 'AR', 'America/Santiago': 'CL',
-      'America/Bogota': 'CO', 'America/Lima': 'PE',
+      'Asia/Colombo': 'LK',
+      'Asia/Tokyo': 'JP',
+      'Asia/Seoul': 'KR',
+      'Asia/Shanghai': 'CN',
+      'Asia/Hong_Kong': 'HK',
+      'Asia/Taipei': 'TW',
+      'Asia/Kolkata': 'IN',
+      'Asia/Dubai': 'AE',
+      'Asia/Singapore': 'SG',
+      'Asia/Kuala_Lumpur': 'MY',
+      'Asia/Bangkok': 'TH',
+      'Asia/Jakarta': 'ID',
+      'Asia/Manila': 'PH',
+      'Asia/Ho_Chi_Minh': 'VN',
+      'Asia/Dhaka': 'BD',
+      'Asia/Karachi': 'PK',
+      'Asia/Kathmandu': 'NP',
+      'Asia/Riyadh': 'SA',
+      'Asia/Kuwait': 'KW',
+      'Asia/Doha': 'QA',
+      'Europe/London': 'GB',
+      'Europe/Paris': 'FR',
+      'Europe/Berlin': 'DE',
+      'Europe/Rome': 'IT',
+      'Europe/Madrid': 'ES',
+      'Europe/Amsterdam': 'NL',
+      'Europe/Zurich': 'CH',
+      'Europe/Moscow': 'RU',
+      'America/New_York': 'US',
+      'America/Chicago': 'US',
+      'America/Denver': 'US',
+      'America/Los_Angeles': 'US',
+      'America/Toronto': 'CA',
+      'America/Vancouver': 'CA',
+      'America/Mexico_City': 'MX',
+      'America/Sao_Paulo': 'BR',
+      'Australia/Sydney': 'AU',
+      'Australia/Melbourne': 'AU',
+      'Australia/Perth': 'AU',
+      'Australia/Adelaide': 'AU',
+      'Pacific/Auckland': 'NZ',
+      'Africa/Johannesburg': 'ZA',
+      'Africa/Cairo': 'EG',
+      'Africa/Lagos': 'NG',
+      'Africa/Nairobi': 'KE',
+      'America/Argentina/Buenos_Aires': 'AR',
+      'America/Santiago': 'CL',
+      'America/Bogota': 'CO',
+      'America/Lima': 'PE',
     };
     if (countryMap.containsKey(timezone)) return countryMap[timezone]!;
     for (var entry in countryMap.entries) {
-      if (timezone.contains(entry.key) || entry.key.contains(timezone)) return entry.value;
+      if (timezone.contains(entry.key) || entry.key.contains(timezone)) {
+        return entry.value;
+      }
     }
     return '';
   }
 
   String _getFlagByCountryCode(String countryCode) {
     final flags = {
-      'LK': '🇱🇰', 'JP': '🇯🇵', 'KR': '🇰🇷', 'CN': '🇨🇳', 'HK': '🇭🇰', 'TW': '🇹🇼',
-      'IN': '🇮🇳', 'AE': '🇦🇪', 'SG': '🇸🇬', 'MY': '🇲🇾', 'TH': '🇹🇭', 'ID': '🇮🇩',
-      'PH': '🇵🇭', 'VN': '🇻🇳', 'BD': '🇧🇩', 'PK': '🇵🇰', 'NP': '🇳🇵', 'SA': '🇸🇦',
-      'KW': '🇰🇼', 'QA': '🇶🇦', 'GB': '🇬🇧', 'FR': '🇫🇷', 'DE': '🇩🇪', 'IT': '🇮🇹',
-      'ES': '🇪🇸', 'NL': '🇳🇱', 'CH': '🇨🇭', 'RU': '🇷🇺', 'US': '🇺🇸', 'CA': '🇨🇦',
-      'MX': '🇲🇽', 'BR': '🇧🇷', 'AU': '🇦🇺', 'NZ': '🇳🇿', 'ZA': '🇿🇦', 'EG': '🇪🇬',
-      'NG': '🇳🇬', 'KE': '🇰🇪', 'AR': '🇦🇷', 'CL': '🇨🇱', 'CO': '🇨🇴', 'PE': '🇵🇪',
+      'LK': '🇱🇰',
+      'JP': '🇯🇵',
+      'KR': '🇰🇷',
+      'CN': '🇨🇳',
+      'HK': '🇭🇰',
+      'TW': '🇹🇼',
+      'IN': '🇮🇳',
+      'AE': '🇦🇪',
+      'SG': '🇸🇬',
+      'MY': '🇲🇾',
+      'TH': '🇹🇭',
+      'ID': '🇮🇩',
+      'PH': '🇵🇭',
+      'VN': '🇻🇳',
+      'BD': '🇧🇩',
+      'PK': '🇵🇰',
+      'NP': '🇳🇵',
+      'SA': '🇸🇦',
+      'KW': '🇰🇼',
+      'QA': '🇶🇦',
+      'GB': '🇬🇧',
+      'FR': '🇫🇷',
+      'DE': '🇩🇪',
+      'IT': '🇮🇹',
+      'ES': '🇪🇸',
+      'NL': '🇳🇱',
+      'CH': '🇨🇭',
+      'RU': '🇷🇺',
+      'US': '🇺🇸',
+      'CA': '🇨🇦',
+      'MX': '🇲🇽',
+      'BR': '🇧🇷',
+      'AU': '🇦🇺',
+      'NZ': '🇳🇿',
+      'ZA': '🇿🇦',
+      'EG': '🇪🇬',
+      'NG': '🇳🇬',
+      'KE': '🇰🇪',
+      'AR': '🇦🇷',
+      'CL': '🇨🇱',
+      'CO': '🇨🇴',
+      'PE': '🇵🇪',
     };
     return flags[countryCode] ?? '🌐';
   }
@@ -208,17 +301,21 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
   Widget _buildTimezoneTile(String tz, String displayName, String flag) {
     final isSelected = tz == _currentTimezone;
-    
+
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 2),
       decoration: BoxDecoration(
-        color: isSelected ? const Color(0xFFFF6B8B).withValues(alpha: 0.1) : null,
+        color: isSelected
+            ? const Color(0xFFFF6B8B).withValues(alpha: 0.1)
+            : null,
         borderRadius: BorderRadius.circular(12),
       ),
       child: ListTile(
         leading: CircleAvatar(
           radius: 20,
-          backgroundColor: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[200],
+          backgroundColor: isSelected
+              ? const Color(0xFFFF6B8B)
+              : Colors.grey[200],
           child: Text(flag, style: const TextStyle(fontSize: 16)),
         ),
         title: Text(
@@ -228,8 +325,15 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             color: isSelected ? const Color(0xFFFF6B8B) : null,
           ),
         ),
-        subtitle: Text(tz, style: const TextStyle(fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
-        trailing: isSelected ? const Icon(Icons.check_circle, color: Color(0xFFFF6B8B)) : null,
+        subtitle: Text(
+          tz,
+          style: const TextStyle(fontSize: 11),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        trailing: isSelected
+            ? const Icon(Icons.check_circle, color: Color(0xFFFF6B8B))
+            : null,
         onTap: () => Navigator.of(context).pop(tz),
       ),
     );
@@ -239,7 +343,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     final displayName = _currentTimezone.split('/').last.replaceAll('_', ' ');
     final offset = TimezoneService.getUtcOffsetString();
     final flag = TimezoneService.getCurrentFlag();
-    
+
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -255,8 +359,19 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Current: $displayName', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                Text(_currentTimezone, style: const TextStyle(fontSize: 10, color: Colors.grey), maxLines: 1, overflow: TextOverflow.ellipsis),
+                Text(
+                  'Current: $displayName',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                  ),
+                ),
+                Text(
+                  _currentTimezone,
+                  style: const TextStyle(fontSize: 10, color: Colors.grey),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ],
             ),
           ),
@@ -266,7 +381,14 @@ class _OwnerDashboardState extends State<OwnerDashboard>
               color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(20),
             ),
-            child: Text(offset, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Color(0xFFFF6B8B))),
+            child: Text(
+              offset,
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 11,
+                color: Color(0xFFFF6B8B),
+              ),
+            ),
           ),
         ],
       ),
@@ -284,13 +406,21 @@ class _OwnerDashboardState extends State<OwnerDashboard>
               color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: const Icon(Icons.access_time, color: Color(0xFFFF6B8B), size: 28),
+            child: const Icon(
+              Icons.access_time,
+              color: Color(0xFFFF6B8B),
+              size: 28,
+            ),
           ),
           const SizedBox(width: 12),
           const Expanded(
             child: Text(
               'Select Your Timezone',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFFFF6B8B)),
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFFFF6B8B),
+              ),
             ),
           ),
           IconButton(
@@ -305,7 +435,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   Future<void> _changeTimezone() async {
     final allTimezones = TimezoneService.getAllAvailableTimezones();
     final continentGroups = _groupTimezonesByContinent(allTimezones);
-    
+
     final List<Map<String, dynamic>> searchableList = [];
     for (var entry in continentGroups.entries) {
       final continent = entry.key;
@@ -313,7 +443,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         final displayName = tz.split('/').last.replaceAll('_', ' ');
         final countryCode = _extractCountryCode(tz);
         final flag = _getFlagByCountryCode(countryCode);
-        
+
         final searchText = [
           continent.toLowerCase(),
           displayName.toLowerCase(),
@@ -321,7 +451,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           countryCode.toLowerCase(),
           displayName.toLowerCase(),
         ].join(' ');
-        
+
         searchableList.add({
           'timezone': tz,
           'displayName': displayName,
@@ -331,14 +461,14 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         });
       }
     }
-    
+
     TextEditingController searchController = TextEditingController();
-    
+
     final result = await showDialog<String>(
       context: context,
       builder: (context) {
         String searchQuery = '';
-        
+
         return StatefulBuilder(
           builder: (context, setDialogState) {
             List<Map<String, dynamic>> filteredList = searchableList;
@@ -348,7 +478,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                   .where((item) => item['searchText'].contains(query))
                   .toList();
             }
-            
+
             Map<String, List<Map<String, dynamic>>> filteredGroups = {};
             for (var item in filteredList) {
               final continent = item['continent'];
@@ -357,9 +487,11 @@ class _OwnerDashboardState extends State<OwnerDashboard>
               }
               filteredGroups[continent]!.add(item);
             }
-            
+
             return Dialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(24),
+              ),
               child: Container(
                 width: MediaQuery.of(context).size.width * 0.9,
                 height: MediaQuery.of(context).size.height * 0.85,
@@ -379,12 +511,19 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                           });
                         },
                         decoration: InputDecoration(
-                          hintText: '🔍 Search by country, city, or timezone...',
+                          hintText:
+                              '🔍 Search by country, city, or timezone...',
                           hintStyle: TextStyle(color: Colors.grey[400]),
-                          prefixIcon: const Icon(Icons.search, color: Colors.grey),
+                          prefixIcon: const Icon(
+                            Icons.search,
+                            color: Colors.grey,
+                          ),
                           suffixIcon: searchQuery.isNotEmpty
                               ? IconButton(
-                                  icon: const Icon(Icons.clear, color: Colors.grey),
+                                  icon: const Icon(
+                                    Icons.clear,
+                                    color: Colors.grey,
+                                  ),
                                   onPressed: () {
                                     searchController.clear();
                                     setDialogState(() {
@@ -399,7 +538,10 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                           ),
                           filled: true,
                           fillColor: Colors.grey[100],
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 14,
+                          ),
                         ),
                       ),
                     ),
@@ -408,7 +550,10 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                         padding: const EdgeInsets.only(bottom: 8),
                         child: Text(
                           'Found ${filteredList.length} timezone${filteredList.length != 1 ? 's' : ''}',
-                          style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                          ),
                         ),
                       ),
                     Expanded(
@@ -424,22 +569,41 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                                       labelColor: const Color(0xFFFF6B8B),
                                       unselectedLabelColor: Colors.grey,
                                       indicatorColor: const Color(0xFFFF6B8B),
-                                      labelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
-                                      tabs: continentGroups.keys.map((continent) => Tab(text: continent)).toList(),
+                                      labelStyle: const TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 13,
+                                      ),
+                                      tabs: continentGroups.keys
+                                          .map(
+                                            (continent) => Tab(text: continent),
+                                          )
+                                          .toList(),
                                     ),
                                   ),
                                   const SizedBox(height: 8),
                                   Expanded(
                                     child: TabBarView(
-                                      children: continentGroups.values.map((timezones) {
+                                      children: continentGroups.values.map((
+                                        timezones,
+                                      ) {
                                         return ListView.builder(
                                           itemCount: timezones.length,
                                           itemBuilder: (context, index) {
                                             final tz = timezones[index];
-                                            final displayName = tz.split('/').last.replaceAll('_', ' ');
-                                            final countryCode = _extractCountryCode(tz);
-                                            final flag = _getFlagByCountryCode(countryCode);
-                                            return _buildTimezoneTile(tz, displayName, flag);
+                                            final displayName = tz
+                                                .split('/')
+                                                .last
+                                                .replaceAll('_', ' ');
+                                            final countryCode =
+                                                _extractCountryCode(tz);
+                                            final flag = _getFlagByCountryCode(
+                                              countryCode,
+                                            );
+                                            return _buildTimezoneTile(
+                                              tz,
+                                              displayName,
+                                              flag,
+                                            );
                                           },
                                         );
                                       }).toList(),
@@ -449,53 +613,102 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                               ),
                             )
                           : filteredList.isNotEmpty
-                              ? ListView.builder(
-                                  itemCount: filteredGroups.keys.length,
-                                  itemBuilder: (context, index) {
-                                    final continent = filteredGroups.keys.elementAt(index);
-                                    final items = filteredGroups[continent]!;
-                                    return Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Padding(
-                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-                                          child: Row(
-                                            children: [
-                                              Text(_getContinentEmoji(continent), style: const TextStyle(fontSize: 18)),
-                                              const SizedBox(width: 8),
-                                              Text(continent, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                                              Container(
-                                                margin: const EdgeInsets.only(left: 8),
-                                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                                decoration: BoxDecoration(color: Colors.grey[200], borderRadius: BorderRadius.circular(10)),
-                                                child: Text('${items.length}', style: TextStyle(fontSize: 10, color: Colors.grey[600])),
-                                              ),
-                                            ],
+                          ? ListView.builder(
+                              itemCount: filteredGroups.keys.length,
+                              itemBuilder: (context, index) {
+                                final continent = filteredGroups.keys.elementAt(
+                                  index,
+                                );
+                                final items = filteredGroups[continent]!;
+                                return Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 12,
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          Text(
+                                            _getContinentEmoji(continent),
+                                            style: const TextStyle(
+                                              fontSize: 18,
+                                            ),
                                           ),
-                                        ),
-                                        ...items.map((item) => _buildTimezoneTile(
-                                          item['timezone'], 
-                                          item['displayName'], 
-                                          item['flag']
-                                        )),
-                                        if (index != filteredGroups.keys.length - 1) const Divider(),
-                                      ],
-                                    );
-                                  },
-                                )
-                              : Center(
-                                  child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Icon(Icons.search_off, size: 64, color: Colors.grey[400]),
-                                      const SizedBox(height: 16),
-                                      Text('No timezones found', style: TextStyle(fontSize: 16, color: Colors.grey[600])),
-                                      const SizedBox(height: 8),
-                                      Text('Try "Sri Lanka", "Tokyo", "London", or "New York"',
-                                          style: TextStyle(fontSize: 12, color: Colors.grey[500])),
-                                    ],
+                                          const SizedBox(width: 8),
+                                          Text(
+                                            continent,
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 14,
+                                            ),
+                                          ),
+                                          Container(
+                                            margin: const EdgeInsets.only(
+                                              left: 8,
+                                            ),
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 6,
+                                              vertical: 2,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: Colors.grey[200],
+                                              borderRadius:
+                                                  BorderRadius.circular(10),
+                                            ),
+                                            child: Text(
+                                              '${items.length}',
+                                              style: TextStyle(
+                                                fontSize: 10,
+                                                color: Colors.grey[600],
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    ...items.map(
+                                      (item) => _buildTimezoneTile(
+                                        item['timezone'],
+                                        item['displayName'],
+                                        item['flag'],
+                                      ),
+                                    ),
+                                    if (index != filteredGroups.keys.length - 1)
+                                      const Divider(),
+                                  ],
+                                );
+                              },
+                            )
+                          : Center(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.search_off,
+                                    size: 64,
+                                    color: Colors.grey[400],
                                   ),
-                                ),
+                                  const SizedBox(height: 16),
+                                  Text(
+                                    'No timezones found',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      color: Colors.grey[600],
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'Try "Sri Lanka", "Tokyo", "London", or "New York"',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.grey[500],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                     ),
                     const SizedBox(height: 8),
                     _buildCurrentTimezoneInfo(),
@@ -507,7 +720,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         );
       },
     );
-    
+
     if (result != null && result != _currentTimezone) {
       await _applyTimezoneChange(result);
     }
@@ -515,22 +728,24 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
   Future<void> _applyTimezoneChange(String newTimezone) async {
     setState(() => _isLoading = true);
-    
+
     try {
       await TimezoneService.setTimezone(newTimezone);
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('cached_timezone', newTimezone);
-      
+
       _currentTimezone = newTimezone;
       _currentTimezoneFlag = TimezoneService.getCurrentFlag();
       _currentTimezoneOffset = TimezoneService.getUtcOffsetString();
-      
+
       await _loadAllData();
-      
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Timezone changed to ${newTimezone.split('/').last.replaceAll('_', ' ')}'),
+            content: Text(
+              'Timezone changed to ${newTimezone.split('/').last.replaceAll('_', ' ')}',
+            ),
             backgroundColor: Colors.green,
             behavior: SnackBarBehavior.floating,
           ),
@@ -540,7 +755,10 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       debugPrint('Error changing timezone: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error changing timezone: $e'), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text('Error changing timezone: $e'),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     } finally {
@@ -550,8 +768,13 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
   String _getContinentEmoji(String continent) {
     final emojis = {
-      'Asia': '🌏', 'Europe': '🌍', 'Africa': '🌍', 'America': '🌎',
-      'Australia': '🇦🇺', 'Pacific': '🌏', 'UTC': '🌐',
+      'Asia': '🌏',
+      'Europe': '🌍',
+      'Africa': '🌍',
+      'America': '🌎',
+      'Australia': '🇦🇺',
+      'Pacific': '🌏',
+      'UTC': '🌐',
     };
     return emojis[continent] ?? '🌐';
   }
@@ -570,7 +793,9 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
       _hasPermission = await _notificationService.hasPermission();
       if (!_hasPermission) {
-        _showPermissionCard = await _permissionManager.shouldShowPermissionCard('owner_dashboard');
+        _showPermissionCard = await _permissionManager.shouldShowPermissionCard(
+          'owner_dashboard',
+        );
       } else {
         _showPermissionCard = false;
       }
@@ -581,7 +806,10 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       if (mounted) {
         setState(() => _isLoading = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error loading data: $e'), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text('Error loading data: $e'),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     }
@@ -591,6 +819,25 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     try {
       final userId = supabase.auth.currentUser?.id;
       if (userId == null) return;
+
+      // ✅ Check if user has active owner role
+      final ownerCheck = await supabase
+          .from('user_roles')
+          .select('status')
+          .eq('user_id', userId)
+          .eq('role_id', 1) // owner role ID
+          .maybeSingle();
+
+      if (ownerCheck == null || ownerCheck['status'] != 'active') {
+        debugPrint('⚠️ User does not have active owner role');
+        if (mounted) {
+          setState(() {
+            _ownerSalons = [];
+            _hasSalon = false;
+          });
+        }
+        return;
+      }
 
       final response = await supabase
           .from('salons')
@@ -622,6 +869,44 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       final currentUser = supabase.auth.currentUser;
       if (currentUser == null) return;
 
+      // ✅ Check if profile is active and not blocked
+      final profileCheck = await supabase
+          .from('profiles')
+          .select('is_active, is_blocked')
+          .eq('id', currentUser.id)
+          .maybeSingle();
+
+      if (profileCheck != null) {
+        if (profileCheck['is_blocked'] == true) {
+          debugPrint('⚠️ User account is blocked');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Your account has been blocked. Please contact support.',
+                ),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+          return;
+        }
+        if (profileCheck['is_active'] == false) {
+          debugPrint('⚠️ User profile is inactive');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Your profile is inactive. Please contact support.',
+                ),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          }
+          return;
+        }
+      }
+
       final profileResponse = await supabase
           .from('profiles')
           .select('full_name, email, avatar_url, extra_data')
@@ -630,7 +915,10 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
       if (profileResponse != null && mounted) {
         setState(() {
-          _userName = profileResponse['full_name'] ?? profileResponse['extra_data']?['full_name'] ?? 'Salon Owner';
+          _userName =
+              profileResponse['full_name'] ??
+              profileResponse['extra_data']?['full_name'] ??
+              'Salon Owner';
           _userEmail = profileResponse['email'] ?? currentUser.email;
           _profileImageUrl = profileResponse['avatar_url'];
         });
@@ -659,19 +947,35 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           .eq('appointment_date', today)
           .eq('status', 'pending');
 
+      // ✅ Updated: Get active barbers with user_roles.status check
       final activeBarbers = await supabase
           .from('salon_barbers')
-          .select('id')
+          .select('''
+          id,
+          profiles!inner (
+            user_roles!inner (
+              status
+            )
+          )
+        ''')
           .eq('salon_id', salonIdInt)
-          .eq('status', 'active');
+          .eq('salon_barbers.status', 'active')
+          .eq('profiles.user_roles.role_id', 2)
+          .eq('profiles.user_roles.status', 'active');
 
       final totalCustomers = await supabase
           .from('appointments')
           .select('customer_id')
           .eq('salon_id', salonIdInt);
 
-      final uniqueCustomers = totalCustomers.map((a) => a['customer_id'] as String).toSet().length;
-      final revenue = todayAppointments.fold<int>(0, (sum, item) => sum + ((item['price'] as num?)?.toInt() ?? 0));
+      final uniqueCustomers = totalCustomers
+          .map((a) => a['customer_id'] as String)
+          .toSet()
+          .length;
+      final revenue = todayAppointments.fold<int>(
+        0,
+        (sum, item) => sum + ((item['price'] as num?)?.toInt() ?? 0),
+      );
 
       if (mounted) {
         setState(() {
@@ -681,7 +985,9 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           _totalCustomers = uniqueCustomers;
           _totalRevenue = revenue;
           pendingAppointments = _pendingBookings;
-          completedToday = todayAppointments.where((a) => a['status'] == 'completed').length;
+          completedToday = todayAppointments
+              .where((a) => a['status'] == 'completed')
+              .length;
         });
       }
     } catch (e) {
@@ -705,26 +1011,59 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     try {
       final salonId = int.parse(_selectedSalonId!);
 
-      final servicesResponse = await supabase.from('services').select('id').eq('salon_id', salonId).eq('is_active', true).limit(1);
+      final servicesResponse = await supabase
+          .from('services')
+          .select('id')
+          .eq('salon_id', salonId)
+          .eq('is_active', true)
+          .limit(1);
       _hasServices = servicesResponse.isNotEmpty;
 
-      final barbersResponse = await supabase.from('salon_barbers').select('id').eq('salon_id', salonId).eq('status', 'active').limit(1);
+      // ✅ Updated: Check barbers with user_roles.status
+      final barbersResponse = await supabase
+          .from('salon_barbers')
+          .select('''
+          id,
+          profiles!inner (
+            user_roles!inner (
+              status
+            )
+          )
+        ''')
+          .eq('salon_id', salonId)
+          .eq('salon_barbers.status', 'active')
+          .eq('profiles.user_roles.role_id', 2)
+          .eq('profiles.user_roles.status', 'active')
+          .limit(1);
       _hasBarbers = barbersResponse.isNotEmpty;
 
       if (_hasBarbers) {
-        final schedulesResponse = await supabase.from('barber_schedules').select('id').eq('salon_id', salonId).limit(1);
+        final schedulesResponse = await supabase
+            .from('barber_schedules')
+            .select('id')
+            .eq('salon_id', salonId)
+            .limit(1);
         _hasBarberSchedule = schedulesResponse.isNotEmpty;
       } else {
         _hasBarberSchedule = false;
       }
 
-      final holidaysResponse = await supabase.from('salon_holidays').select('id').eq('salon_id', salonId).limit(1);
+      final holidaysResponse = await supabase
+          .from('salon_holidays')
+          .select('id')
+          .eq('salon_id', salonId)
+          .limit(1);
       _hasHolidays = holidaysResponse.isNotEmpty;
 
       if (mounted) {
         setState(() {
           _hasSalon = true;
-          _completedSteps = (_hasSalon ? 1 : 0) + (_hasServices ? 1 : 0) + (_hasBarbers ? 1 : 0) + (_hasBarberSchedule ? 1 : 0) + (_hasHolidays ? 1 : 0);
+          _completedSteps =
+              (_hasSalon ? 1 : 0) +
+              (_hasServices ? 1 : 0) +
+              (_hasBarbers ? 1 : 0) +
+              (_hasBarberSchedule ? 1 : 0) +
+              (_hasHolidays ? 1 : 0);
         });
       }
     } catch (e) {
@@ -736,12 +1075,12 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
   Future<void> _switchSalon(String salonId) async {
     if (_isSwitchingSalon || salonId == _selectedSalonId) return;
-    
+
     setState(() {
       _isSwitchingSalon = true;
       _selectedSalonId = salonId;
     });
-    
+
     try {
       await Future.wait([_loadDashboardStats(), _checkOnboardingStatus()]);
     } catch (e) {
@@ -757,14 +1096,51 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
   Widget _buildStepFlow() {
     final steps = [
-      {'label': 'Create Salon', 'subtitle': 'Set up your profile', 'isCompleted': _hasSalon, 'onTap': _navigateToCreateSalon, 'icon': Icons.storefront_outlined, 'locked': false},
-      {'label': 'Add Services', 'subtitle': 'Services & pricing', 'isCompleted': _hasServices, 'onTap': _navigateToAddService, 'icon': Icons.content_cut_outlined, 'locked': !_hasSalon},
-      {'label': 'Add Barbers', 'subtitle': 'Your team', 'isCompleted': _hasBarbers, 'onTap': _navigateToAddBarber, 'icon': Icons.people_outline, 'locked': !_hasSalon},
-      {'label': 'Set Schedules', 'subtitle': 'Working hours', 'isCompleted': _hasBarberSchedule, 'onTap': _navigateToBarberSchedule, 'icon': Icons.calendar_month_outlined, 'locked': !_hasBarbers},
-      {'label': 'Set Holidays', 'subtitle': 'Days off', 'isCompleted': _hasHolidays, 'onTap': _viewSalonHolidays, 'icon': Icons.wb_sunny_outlined, 'locked': !_hasSalon},
+      {
+        'label': 'Create Salon',
+        'subtitle': 'Set up your profile',
+        'isCompleted': _hasSalon,
+        'onTap': _navigateToCreateSalon,
+        'icon': Icons.storefront_outlined,
+        'locked': false,
+      },
+      {
+        'label': 'Add Services',
+        'subtitle': 'Services & pricing',
+        'isCompleted': _hasServices,
+        'onTap': _navigateToAddService,
+        'icon': Icons.content_cut_outlined,
+        'locked': !_hasSalon,
+      },
+      {
+        'label': 'Add Barbers',
+        'subtitle': 'Your team',
+        'isCompleted': _hasBarbers,
+        'onTap': _navigateToAddBarber,
+        'icon': Icons.people_outline,
+        'locked': !_hasSalon,
+      },
+      {
+        'label': 'Set Schedules',
+        'subtitle': 'Working hours',
+        'isCompleted': _hasBarberSchedule,
+        'onTap': _navigateToBarberSchedule,
+        'icon': Icons.calendar_month_outlined,
+        'locked': !_hasBarbers,
+      },
+      {
+        'label': 'Set Holidays',
+        'subtitle': 'Days off',
+        'isCompleted': _hasHolidays,
+        'onTap': _viewSalonHolidays,
+        'icon': Icons.wb_sunny_outlined,
+        'locked': !_hasSalon,
+      },
     ];
 
-    final nextIdx = steps.indexWhere((s) => !(s['isCompleted'] as bool) && !(s['locked'] as bool? ?? false));
+    final nextIdx = steps.indexWhere(
+      (s) => !(s['isCompleted'] as bool) && !(s['locked'] as bool? ?? false),
+    );
     const pink = Color(0xFFFF6B8B);
     const green = Color(0xFF22C55E);
     final pct = _totalSteps == 0 ? 0.0 : _completedSteps / _totalSteps;
@@ -772,16 +1148,78 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 20.0, offset: const Offset(0, 4))]),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.06),
+            blurRadius: 20.0,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Container(width: 42, height: 42, decoration: BoxDecoration(color: pink, borderRadius: BorderRadius.circular(12)), child: const Icon(Icons.rocket_launch_outlined, color: Colors.white, size: 20)),
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: pink,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.rocket_launch_outlined,
+                  color: Colors.white,
+                  size: 20,
+                ),
+              ),
               const SizedBox(width: 12),
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('Salon Setup', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: Color(0xFF1A1A1A))), Text('$_completedSteps of $_totalSteps steps complete', style: const TextStyle(fontSize: 12, color: Color(0xFF9CA3AF)))])),
-              Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5), decoration: BoxDecoration(color: pct == 1.0 ? green.withValues(alpha: 0.12) : pink.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(20)), child: Text('${(pct * 100).round()}%', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: pct == 1.0 ? green : pink))),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Salon Setup',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF1A1A1A),
+                      ),
+                    ),
+                    Text(
+                      '$_completedSteps of $_totalSteps steps complete',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF9CA3AF),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 5,
+                ),
+                decoration: BoxDecoration(
+                  color: pct == 1.0
+                      ? green.withValues(alpha: 0.12)
+                      : pink.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  '${(pct * 100).round()}%',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: pct == 1.0 ? green : pink,
+                  ),
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 14),
@@ -791,8 +1229,23 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             curve: Curves.easeOut,
             builder: (context, value, _) => Stack(
               children: [
-                Container(height: 7, decoration: BoxDecoration(color: const Color(0xFFF3F4F6), borderRadius: BorderRadius.circular(99))),
-                FractionallySizedBox(widthFactor: value, child: Container(height: 7, decoration: BoxDecoration(color: value >= 1.0 ? green : pink, borderRadius: BorderRadius.circular(99)))),
+                Container(
+                  height: 7,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF3F4F6),
+                    borderRadius: BorderRadius.circular(99),
+                  ),
+                ),
+                FractionallySizedBox(
+                  widthFactor: value,
+                  child: Container(
+                    height: 7,
+                    decoration: BoxDecoration(
+                      color: value >= 1.0 ? green : pink,
+                      borderRadius: BorderRadius.circular(99),
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
@@ -812,15 +1265,63 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                   final isNext = i == nextIdx;
                   return Row(
                     children: [
-                      _buildStepCard(label: step['label'] as String, subtitle: step['subtitle'] as String, icon: step['icon'] as IconData, isCompleted: isCompleted, isLocked: isLocked, isActive: isActive, isNext: isNext, cardWidth: cardWidth, onTap: isActive ? step['onTap'] as VoidCallback? : null),
-                      if (i < steps.length - 1) SizedBox(width: arrowSlot, child: Center(child: Icon(Icons.arrow_forward_ios_rounded, size: 10, color: isCompleted ? green.withValues(alpha: 0.7) : const Color(0xFFE0E0E0)))),
+                      _buildStepCard(
+                        label: step['label'] as String,
+                        subtitle: step['subtitle'] as String,
+                        icon: step['icon'] as IconData,
+                        isCompleted: isCompleted,
+                        isLocked: isLocked,
+                        isActive: isActive,
+                        isNext: isNext,
+                        cardWidth: cardWidth,
+                        onTap: isActive ? step['onTap'] as VoidCallback? : null,
+                      ),
+                      if (i < steps.length - 1)
+                        SizedBox(
+                          width: arrowSlot,
+                          child: Center(
+                            child: Icon(
+                              Icons.arrow_forward_ios_rounded,
+                              size: 10,
+                              color: isCompleted
+                                  ? green.withValues(alpha: 0.7)
+                                  : const Color(0xFFE0E0E0),
+                            ),
+                          ),
+                        ),
                     ],
                   );
                 }),
               );
             },
           ),
-          if (_completedSteps > 0 && _completedSteps < _totalSteps && nextIdx >= 0) Padding(padding: const EdgeInsets.only(top: 16), child: Row(children: [Container(width: 6, height: 6, decoration: const BoxDecoration(color: pink, shape: BoxShape.circle)), const SizedBox(width: 8), Text('Up next:  ${steps[nextIdx]['label'] as String}', style: const TextStyle(fontSize: 12, color: pink, fontWeight: FontWeight.w500))])),
+          if (_completedSteps > 0 &&
+              _completedSteps < _totalSteps &&
+              nextIdx >= 0)
+            Padding(
+              padding: const EdgeInsets.only(top: 16),
+              child: Row(
+                children: [
+                  Container(
+                    width: 6,
+                    height: 6,
+                    decoration: const BoxDecoration(
+                      color: pink,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Up next:  ${steps[nextIdx]['label'] as String}',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: pink,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           if (_completedSteps == _totalSteps)
             TweenAnimationBuilder<double>(
               tween: Tween<double>(begin: 0, end: 1),
@@ -830,7 +1331,36 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                 scale: v,
                 child: Padding(
                   padding: const EdgeInsets.only(top: 18),
-                  child: Container(width: double.infinity, padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 16), decoration: BoxDecoration(color: green, borderRadius: BorderRadius.circular(14)), child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.celebration_outlined, color: Colors.white, size: 18), SizedBox(width: 8), Text('Your salon is ready to launch! 🎉', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600))])),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 13,
+                      horizontal: 16,
+                    ),
+                    decoration: BoxDecoration(
+                      color: green,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.celebration_outlined,
+                          color: Colors.white,
+                          size: 18,
+                        ),
+                        SizedBox(width: 8),
+                        Text(
+                          'Your salon is ready to launch! 🎉',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -839,47 +1369,156 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     );
   }
 
-  Widget _buildStepCard({required String label, required String subtitle, required IconData icon, required bool isCompleted, required bool isLocked, required bool isActive, required bool isNext, required double cardWidth, VoidCallback? onTap}) {
+  Widget _buildStepCard({
+    required String label,
+    required String subtitle,
+    required IconData icon,
+    required bool isCompleted,
+    required bool isLocked,
+    required bool isActive,
+    required bool isNext,
+    required double cardWidth,
+    VoidCallback? onTap,
+  }) {
     const pink = Color(0xFFFF6B8B);
     const green = Color(0xFF22C55E);
-    final Color circleBg = isCompleted ? green : isActive ? pink : const Color(0xFFE5E7EB);
-    final Color labelColor = isCompleted ? const Color(0xFF15803D) : isActive ? const Color(0xFF1A1A1A) : const Color(0xFFB0B5BF);
-    final Color subtitleColor = isCompleted ? green.withValues(alpha: 0.8) : isActive ? const Color(0xFF6B7280) : const Color(0xFFD1D5DB);
+    final Color circleBg = isCompleted
+        ? green
+        : isActive
+        ? pink
+        : const Color(0xFFE5E7EB);
+    final Color labelColor = isCompleted
+        ? const Color(0xFF15803D)
+        : isActive
+        ? const Color(0xFF1A1A1A)
+        : const Color(0xFFB0B5BF);
+    final Color subtitleColor = isCompleted
+        ? green.withValues(alpha: 0.8)
+        : isActive
+        ? const Color(0xFF6B7280)
+        : const Color(0xFFD1D5DB);
 
     Widget card = AnimatedContainer(
       duration: const Duration(milliseconds: 250),
       width: cardWidth,
       padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 4),
       decoration: BoxDecoration(
-        color: isCompleted ? green.withValues(alpha: 0.06) : isNext ? pink.withValues(alpha: 0.07) : isActive ? pink.withValues(alpha: 0.04) : const Color(0xFFFAFAFA),
+        color: isCompleted
+            ? green.withValues(alpha: 0.06)
+            : isNext
+            ? pink.withValues(alpha: 0.07)
+            : isActive
+            ? pink.withValues(alpha: 0.04)
+            : const Color(0xFFFAFAFA),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: isCompleted ? green.withValues(alpha: 0.4) : isNext ? pink.withValues(alpha: 0.65) : isActive ? pink.withValues(alpha: 0.3) : const Color(0xFFEEEEEE), width: isNext ? 1.8 : isActive ? 1.5 : 1.0),
+        border: Border.all(
+          color: isCompleted
+              ? green.withValues(alpha: 0.4)
+              : isNext
+              ? pink.withValues(alpha: 0.65)
+              : isActive
+              ? pink.withValues(alpha: 0.3)
+              : const Color(0xFFEEEEEE),
+          width: isNext
+              ? 1.8
+              : isActive
+              ? 1.5
+              : 1.0,
+        ),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(width: 44, height: 44, decoration: BoxDecoration(color: circleBg, shape: BoxShape.circle), child: Center(child: isCompleted ? const Icon(Icons.check_rounded, color: Colors.white, size: 22) : isLocked ? const Icon(Icons.lock_outline_rounded, color: Color(0xFFADB5BD), size: 18) : Icon(icon, color: Colors.white, size: 20))),
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(color: circleBg, shape: BoxShape.circle),
+            child: Center(
+              child: isCompleted
+                  ? const Icon(
+                      Icons.check_rounded,
+                      color: Colors.white,
+                      size: 22,
+                    )
+                  : isLocked
+                  ? const Icon(
+                      Icons.lock_outline_rounded,
+                      color: Color(0xFFADB5BD),
+                      size: 18,
+                    )
+                  : Icon(icon, color: Colors.white, size: 20),
+            ),
+          ),
           const SizedBox(height: 9),
-          Text(label, textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: labelColor, height: 1.2)),
+          Text(
+            label,
+            textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: labelColor,
+              height: 1.2,
+            ),
+          ),
           const SizedBox(height: 3),
-          Text(subtitle, textAlign: TextAlign.center, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 9, color: subtitleColor, height: 1.2)),
+          Text(
+            subtitle,
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 9, color: subtitleColor, height: 1.2),
+          ),
           const SizedBox(height: 8),
-          _buildStatusChip(isCompleted: isCompleted, isLocked: isLocked, isNext: isNext),
+          _buildStatusChip(
+            isCompleted: isCompleted,
+            isLocked: isLocked,
+            isNext: isNext,
+          ),
         ],
       ),
     );
     if (isNext) card = ScaleTransition(scale: _pulseAnim, child: card);
-    return GestureDetector(onTap: onTap, behavior: HitTestBehavior.opaque, child: card);
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: card,
+    );
   }
 
-  Widget _buildStatusChip({required bool isCompleted, required bool isLocked, required bool isNext}) {
-    if (isCompleted) return _chip('Done', const Color(0xFF16A34A), const Color(0xFFDCFCE7));
-    if (isLocked) return _chip('Locked', const Color(0xFFADB5BD), const Color(0xFFF3F4F6));
-    if (isNext) return _chip('Do This', const Color(0xFFFF6B8B), const Color(0xFFFFEDF1));
+  Widget _buildStatusChip({
+    required bool isCompleted,
+    required bool isLocked,
+    required bool isNext,
+  }) {
+    if (isCompleted) {
+      return _chip('Done', const Color(0xFF16A34A), const Color(0xFFDCFCE7));
+    }
+    if (isLocked) {
+      return _chip('Locked', const Color(0xFFADB5BD), const Color(0xFFF3F4F6));
+    }
+    if (isNext) {
+      return _chip('Do This', const Color(0xFFFF6B8B), const Color(0xFFFFEDF1));
+    }
     return _chip('Pending', const Color(0xFFFF6B8B), const Color(0xFFFFEDF1));
   }
 
-  Widget _chip(String text, Color textColor, Color bgColor) => Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3), decoration: BoxDecoration(color: bgColor, borderRadius: BorderRadius.circular(99)), child: Text(text, style: TextStyle(fontSize: 9, fontWeight: FontWeight.w600, color: textColor)));
+  Widget _chip(String text, Color textColor, Color bgColor) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+    decoration: BoxDecoration(
+      color: bgColor,
+      borderRadius: BorderRadius.circular(99),
+    ),
+    child: Text(
+      text,
+      style: TextStyle(
+        fontSize: 9,
+        fontWeight: FontWeight.w600,
+        color: textColor,
+      ),
+    ),
+  );
 
   // ============================================================
   // MANAGEMENT SECTION
@@ -889,47 +1528,239 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), boxShadow: [BoxShadow(color: Colors.grey.withValues(alpha: 0.1), blurRadius: 8.0, offset: const Offset(0, 2))]),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withValues(alpha: 0.1),
+            blurRadius: 8.0,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(children: [Icon(Icons.settings, size: 20, color: Color(0xFFFF6B8B)), SizedBox(width: 8), Text('Management', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold))]),
+          const Row(
+            children: [
+              Icon(Icons.settings, size: 20, color: Color(0xFFFF6B8B)),
+              SizedBox(width: 8),
+              Text(
+                'Management',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
           const SizedBox(height: 16),
-          const Text('Salon Management', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.grey)),
+          const Text(
+            'Salon Management',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: Colors.grey,
+            ),
+          ),
           const SizedBox(height: 8),
-          Row(children: [_buildQuickAction(icon: Icons.add_business, label: 'Create Salon', color: const Color(0xFFFF6B8B), onTap: _navigateToCreateSalon), const SizedBox(width: 8), _buildQuickAction(icon: Icons.edit, label: 'Edit Salon', color: Colors.blue, onTap: _navigateToEditSalon, enabled: _ownerSalons.isNotEmpty), const SizedBox(width: 8), _buildQuickAction(icon: Icons.beach_access, label: 'Holidays', color: Colors.teal, onTap: _viewSalonHolidays, enabled: _ownerSalons.isNotEmpty)]),
+          Row(
+            children: [
+              _buildQuickAction(
+                icon: Icons.add_business,
+                label: 'Create Salon',
+                color: const Color(0xFFFF6B8B),
+                onTap: _navigateToCreateSalon,
+              ),
+              const SizedBox(width: 8),
+              _buildQuickAction(
+                icon: Icons.edit,
+                label: 'Edit Salon',
+                color: Colors.blue,
+                onTap: _navigateToEditSalon,
+                enabled: _ownerSalons.isNotEmpty,
+              ),
+              const SizedBox(width: 8),
+              _buildQuickAction(
+                icon: Icons.beach_access,
+                label: 'Holidays',
+                color: Colors.teal,
+                onTap: _viewSalonHolidays,
+                enabled: _ownerSalons.isNotEmpty,
+              ),
+            ],
+          ),
           const SizedBox(height: 16),
-          const Text('Service Management', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.grey)),
+          const Text(
+            'Service Management',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: Colors.grey,
+            ),
+          ),
           const SizedBox(height: 8),
-          Row(children: [_buildQuickAction(icon: Icons.build, label: 'Add Service', color: Colors.green, onTap: _navigateToAddService, enabled: _ownerSalons.isNotEmpty), const SizedBox(width: 8), _buildQuickAction(icon: Icons.list, label: 'Service List', color: Colors.cyan, onTap: _navigateToServiceList, enabled: _ownerSalons.isNotEmpty)]),
+          Row(
+            children: [
+              _buildQuickAction(
+                icon: Icons.build,
+                label: 'Add Service',
+                color: Colors.green,
+                onTap: _navigateToAddService,
+                enabled: _ownerSalons.isNotEmpty,
+              ),
+              const SizedBox(width: 8),
+              _buildQuickAction(
+                icon: Icons.list,
+                label: 'Service List',
+                color: Colors.cyan,
+                onTap: _navigateToServiceList,
+                enabled: _ownerSalons.isNotEmpty,
+              ),
+            ],
+          ),
           const SizedBox(height: 16),
-          const Text('Barber Management', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.grey)),
+          const Text(
+            'Barber Management',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: Colors.grey,
+            ),
+          ),
           const SizedBox(height: 8),
-          Row(children: [_buildQuickAction(icon: Icons.person_add, label: 'Add Barber', color: Colors.purple, onTap: _navigateToAddBarber, enabled: _ownerSalons.isNotEmpty), const SizedBox(width: 8), _buildQuickAction(icon: Icons.calendar_month, label: 'Schedule', color: Colors.teal, onTap: _navigateToBarberSchedule, enabled: _ownerSalons.isNotEmpty), const SizedBox(width: 8), _buildQuickAction(icon: Icons.beach_access, label: 'Leaves', color: Colors.orange, onTap: _navigateToBarberLeaves, enabled: _ownerSalons.isNotEmpty)]),
+          Row(
+            children: [
+              _buildQuickAction(
+                icon: Icons.person_add,
+                label: 'Add Barber',
+                color: Colors.purple,
+                onTap: _navigateToAddBarber,
+                enabled: _ownerSalons.isNotEmpty,
+              ),
+              const SizedBox(width: 8),
+              _buildQuickAction(
+                icon: Icons.calendar_month,
+                label: 'Schedule',
+                color: Colors.teal,
+                onTap: _navigateToBarberSchedule,
+                enabled: _ownerSalons.isNotEmpty,
+              ),
+              const SizedBox(width: 8),
+              _buildQuickAction(
+                icon: Icons.beach_access,
+                label: 'Leaves',
+                color: Colors.orange,
+                onTap: _navigateToBarberLeaves,
+                enabled: _ownerSalons.isNotEmpty,
+              ),
+            ],
+          ),
           const SizedBox(height: 8),
-          Row(children: [_buildQuickAction(icon: Icons.list, label: 'Barber List', color: Colors.indigo, onTap: _navigateToBarberList, enabled: _ownerSalons.isNotEmpty)]),
+          Row(
+            children: [
+              _buildQuickAction(
+                icon: Icons.list,
+                label: 'Barber List',
+                color: Colors.indigo,
+                onTap: _navigateToBarberList,
+                enabled: _ownerSalons.isNotEmpty,
+              ),
+            ],
+          ),
           const SizedBox(height: 16),
-          const Text('Offers & Promotions', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.grey)),
+          const Text(
+            'Offers & Promotions',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: Colors.grey,
+            ),
+          ),
           const SizedBox(height: 8),
-          Row(children: [_buildQuickAction(icon: Icons.local_offer, label: 'Manage Offers', color: const Color(0xFFFF6B8B), onTap: _navigateToOffers, enabled: _ownerSalons.isNotEmpty)]),
+          Row(
+            children: [
+              _buildQuickAction(
+                icon: Icons.local_offer,
+                label: 'Manage Offers',
+                color: const Color(0xFFFF6B8B),
+                onTap: _navigateToOffers,
+                enabled: _ownerSalons.isNotEmpty,
+              ),
+            ],
+          ),
           const SizedBox(height: 16),
-          const Text('Reports', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.grey)),
+          const Text(
+            'Reports',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: Colors.grey,
+            ),
+          ),
           const SizedBox(height: 8),
-          Row(children: [const SizedBox(width: 8), _buildQuickAction(icon: Icons.bar_chart, label: 'Reports', color: Colors.deepOrange, onTap: _viewReports), const SizedBox(width: 8), _buildQuickAction(icon: Icons.analytics, label: 'Analytics', color: Colors.indigoAccent, onTap: _viewAnalytics), const SizedBox(width: 8), _buildQuickAction(icon: Icons.settings, label: 'Settings', color: Colors.grey, onTap: _viewSettings)]),
+          Row(
+            children: [
+              const SizedBox(width: 8),
+              _buildQuickAction(
+                icon: Icons.bar_chart,
+                label: 'Reports',
+                color: Colors.deepOrange,
+                onTap: _viewReports,
+              ),
+              const SizedBox(width: 8),
+              _buildQuickAction(
+                icon: Icons.analytics,
+                label: 'Analytics',
+                color: Colors.indigoAccent,
+                onTap: _viewAnalytics,
+              ),
+              const SizedBox(width: 8),
+              _buildQuickAction(
+                icon: Icons.settings,
+                label: 'Settings',
+                color: Colors.grey,
+                onTap: _viewSettings,
+              ),
+            ],
+          ),
           const SizedBox(height: 16),
         ],
       ),
     );
   }
 
-  Widget _buildQuickAction({required IconData icon, required String label, required Color color, required VoidCallback onTap, bool enabled = true}) {
+  Widget _buildQuickAction({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+    bool enabled = true,
+  }) {
     return Expanded(
       child: GestureDetector(
         onTap: enabled ? onTap : null,
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 12),
-          decoration: BoxDecoration(color: enabled ? color.withValues(alpha: 0.1) : Colors.grey.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(12)),
-          child: Column(children: [Icon(icon, color: enabled ? color : Colors.grey[400], size: 28), const SizedBox(height: 4), Text(label, style: TextStyle(fontSize: 12, color: enabled ? color : Colors.grey[500], fontWeight: FontWeight.w500), textAlign: TextAlign.center)]),
+          decoration: BoxDecoration(
+            color: enabled
+                ? color.withValues(alpha: 0.1)
+                : Colors.grey.withValues(alpha: 0.05),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Column(
+            children: [
+              Icon(icon, color: enabled ? color : Colors.grey[400], size: 28),
+              const SizedBox(height: 4),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: enabled ? color : Colors.grey[500],
+                  fontWeight: FontWeight.w500,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -940,10 +1771,25 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), boxShadow: [BoxShadow(color: Colors.grey.withValues(alpha: 0.1), blurRadius: 8.0, offset: const Offset(0, 2))]),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withValues(alpha: 0.1),
+            blurRadius: 8.0,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
       child: Row(
         children: [
-          const Icon(Icons.store, size: 18, color: Color(0xFFFF6B8B)), const SizedBox(width: 8), const Text('Salon:', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+          const Icon(Icons.store, size: 18, color: Color(0xFFFF6B8B)),
+          const SizedBox(width: 8),
+          const Text(
+            'Salon:',
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+          ),
           Expanded(
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
@@ -952,13 +1798,38 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                   final isSelected = _selectedSalonId == salon['id'].toString();
                   return Padding(
                     padding: const EdgeInsets.only(right: 8),
-                    child: FilterChip(label: Text(salon['name'] ?? 'Salon', style: const TextStyle(fontSize: 12)), selected: isSelected, onSelected: (_) => _switchSalon(salon['id'].toString()), backgroundColor: Colors.grey[100], selectedColor: const Color(0xFFFF6B8B).withValues(alpha: 0.2), checkmarkColor: const Color(0xFFFF6B8B), labelStyle: TextStyle(fontSize: 12, color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[800])),
+                    child: FilterChip(
+                      label: Text(
+                        salon['name'] ?? 'Salon',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      selected: isSelected,
+                      onSelected: (_) => _switchSalon(salon['id'].toString()),
+                      backgroundColor: Colors.grey[100],
+                      selectedColor: const Color(
+                        0xFFFF6B8B,
+                      ).withValues(alpha: 0.2),
+                      checkmarkColor: const Color(0xFFFF6B8B),
+                      labelStyle: TextStyle(
+                        fontSize: 12,
+                        color: isSelected
+                            ? const Color(0xFFFF6B8B)
+                            : Colors.grey[800],
+                      ),
+                    ),
                   );
                 }).toList(),
               ),
             ),
           ),
-          IconButton(icon: const Icon(Icons.edit, size: 18), onPressed: _navigateToEditSalon, tooltip: 'Edit Salon', color: const Color(0xFFFF6B8B), padding: EdgeInsets.zero, constraints: const BoxConstraints()),
+          IconButton(
+            icon: const Icon(Icons.edit, size: 18),
+            onPressed: _navigateToEditSalon,
+            tooltip: 'Edit Salon',
+            color: const Color(0xFFFF6B8B),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+          ),
         ],
       ),
     );
@@ -970,7 +1841,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
   Widget _buildSimpleHeader() {
     final isWeb = MediaQuery.of(context).size.width > 800;
-    
+
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       child: isWeb
@@ -978,11 +1849,20 @@ class _OwnerDashboardState extends State<OwnerDashboard>
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 10,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(16),
-                    boxShadow: [BoxShadow(color: Colors.grey.withValues(alpha: 0.1), blurRadius: 8, offset: const Offset(0, 2))],
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.grey.withValues(alpha: 0.1),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -990,27 +1870,65 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                       GestureDetector(
                         onTap: _changeTimezone,
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 5,
+                          ),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                            color: const Color(
+                              0xFFFF6B8B,
+                            ).withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(20),
                           ),
                           child: Row(
                             children: [
-                              Text(_currentTimezoneFlag, style: const TextStyle(fontSize: 14)),
+                              Text(
+                                _currentTimezoneFlag,
+                                style: const TextStyle(fontSize: 14),
+                              ),
                               const SizedBox(width: 6),
-                              Text(_currentTimezone.split('/').last.replaceAll('_', ' '), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: Color(0xFFFF6B8B))),
+                              Text(
+                                _currentTimezone
+                                    .split('/')
+                                    .last
+                                    .replaceAll('_', ' '),
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
+                                  color: Color(0xFFFF6B8B),
+                                ),
+                              ),
                               const SizedBox(width: 4),
-                              Text(_currentTimezoneOffset, style: const TextStyle(fontSize: 10, color: Colors.grey)),
-                              const Icon(Icons.arrow_drop_down, size: 16, color: Color(0xFFFF6B8B)),
+                              Text(
+                                _currentTimezoneOffset,
+                                style: const TextStyle(
+                                  fontSize: 10,
+                                  color: Colors.grey,
+                                ),
+                              ),
+                              const Icon(
+                                Icons.arrow_drop_down,
+                                size: 16,
+                                color: Color(0xFFFF6B8B),
+                              ),
                             ],
                           ),
                         ),
                       ),
                       const SizedBox(width: 12),
-                      const Icon(Icons.calendar_today, size: 14, color: Colors.grey),
+                      const Icon(
+                        Icons.calendar_today,
+                        size: 14,
+                        color: Colors.grey,
+                      ),
                       const SizedBox(width: 6),
-                      Text(_currentDate, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                      Text(
+                        _currentDate,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -1022,32 +1940,68 @@ class _OwnerDashboardState extends State<OwnerDashboard>
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(12),
-                boxShadow: [BoxShadow(color: Colors.grey.withValues(alpha: 0.1), blurRadius: 8, offset: const Offset(0, 2))],
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.grey.withValues(alpha: 0.1),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Row(
                     children: [
-                      const Icon(Icons.calendar_today, size: 12, color: Colors.grey),
+                      const Icon(
+                        Icons.calendar_today,
+                        size: 12,
+                        color: Colors.grey,
+                      ),
                       const SizedBox(width: 4),
-                      Text(_currentDate, style: const TextStyle(fontSize: 10, color: Colors.grey)),
+                      Text(
+                        _currentDate,
+                        style: const TextStyle(
+                          fontSize: 10,
+                          color: Colors.grey,
+                        ),
+                      ),
                     ],
                   ),
                   GestureDetector(
                     onTap: _changeTimezone,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 5,
+                      ),
                       decoration: BoxDecoration(
                         color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Row(
                         children: [
-                          Text(_currentTimezoneFlag, style: const TextStyle(fontSize: 12)),
+                          Text(
+                            _currentTimezoneFlag,
+                            style: const TextStyle(fontSize: 12),
+                          ),
                           const SizedBox(width: 4),
-                          Text(_currentTimezone.split('/').last.replaceAll('_', ' '), style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w500, color: Color(0xFFFF6B8B))),
-                          const Icon(Icons.arrow_drop_down, size: 14, color: Color(0xFFFF6B8B)),
+                          Text(
+                            _currentTimezone
+                                .split('/')
+                                .last
+                                .replaceAll('_', ' '),
+                            style: const TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w500,
+                              color: Color(0xFFFF6B8B),
+                            ),
+                          ),
+                          const Icon(
+                            Icons.arrow_drop_down,
+                            size: 14,
+                            color: Color(0xFFFF6B8B),
+                          ),
                         ],
                       ),
                     ),
@@ -1068,13 +2022,21 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   }
 
   void _navigateToEditSalon() async {
-    if (_ownerSalons.isEmpty) { _showCreateSalonFirstDialog(); return; }
-    final result = await context.push('/owner/salon/edit?salonId=$_selectedSalonId');
+    if (_ownerSalons.isEmpty) {
+      _showCreateSalonFirstDialog();
+      return;
+    }
+    final result = await context.push(
+      '/owner/salon/edit?salonId=$_selectedSalonId',
+    );
     if (result == true) await _refreshAllData();
   }
 
   void _navigateToOffers() {
-    if (_ownerSalons.isEmpty) { _showCreateSalonFirstDialog(); return; }
+    if (_ownerSalons.isEmpty) {
+      _showCreateSalonFirstDialog();
+      return;
+    }
     if (_selectedSalonId != null) {
       context.push('/owner/offers/$_selectedSalonId');
     } else {
@@ -1082,22 +2044,59 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     }
   }
 
-  void _navigateToAddBarber() { if (_ownerSalons.isEmpty) { _showCreateSalonFirstDialog(); return; } context.push('/owner/add-barber?salonId=$_selectedSalonId'); }
-  void _navigateToBarberLeaves() { if (_ownerSalons.isEmpty) { _showCreateSalonFirstDialog(); return; } context.push('/owner/barber-leaves?salonId=$_selectedSalonId'); }
-  void _navigateToBarberSchedule() { if (_ownerSalons.isEmpty) { _showCreateSalonFirstDialog(); return; } context.push('/owner/barber-schedule?salonId=$_selectedSalonId'); }
-  void _navigateToBarberList() { if (_ownerSalons.isEmpty) { _showCreateSalonFirstDialog(); return; } context.push('/owner/barbers?salonId=$_selectedSalonId'); }
+  void _navigateToAddBarber() {
+    if (_ownerSalons.isEmpty) {
+      _showCreateSalonFirstDialog();
+      return;
+    }
+    context.push('/owner/add-barber?salonId=$_selectedSalonId');
+  }
+
+  void _navigateToBarberLeaves() {
+    if (_ownerSalons.isEmpty) {
+      _showCreateSalonFirstDialog();
+      return;
+    }
+    context.push('/owner/barber-leaves?salonId=$_selectedSalonId');
+  }
+
+  void _navigateToBarberSchedule() {
+    if (_ownerSalons.isEmpty) {
+      _showCreateSalonFirstDialog();
+      return;
+    }
+    context.push('/owner/barber-schedule?salonId=$_selectedSalonId');
+  }
+
+  void _navigateToBarberList() {
+    if (_ownerSalons.isEmpty) {
+      _showCreateSalonFirstDialog();
+      return;
+    }
+    context.push('/owner/barbers?salonId=$_selectedSalonId');
+  }
 
   void _navigateToAddService() async {
-    if (_ownerSalons.isEmpty) { _showCreateSalonFirstDialog(); return; }
-    final result = await context.push('/owner/services/add?salonId=$_selectedSalonId');
+    if (_ownerSalons.isEmpty) {
+      _showCreateSalonFirstDialog();
+      return;
+    }
+    final result = await context.push(
+      '/owner/services/add?salonId=$_selectedSalonId',
+    );
     if (result == true) await _refreshAllData();
   }
 
   void _navigateToServiceList() {
-    if (_ownerSalons.isEmpty) { _showCreateSalonFirstDialog(); return; }
+    if (_ownerSalons.isEmpty) {
+      _showCreateSalonFirstDialog();
+      return;
+    }
     if (_ownerSalons.length == 1) {
       final salon = _ownerSalons.first;
-      context.push('/owner/services?salonId=${salon['id']}&salonName=${Uri.encodeComponent(salon['name'])}');
+      context.push(
+        '/owner/services?salonId=${salon['id']}&salonName=${Uri.encodeComponent(salon['name'])}',
+      );
     } else {
       _showSalonSelectionDialogForServices();
     }
@@ -1108,31 +2107,96 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Select Salon'),
-        content: SizedBox(width: double.maxFinite, child: ListView.builder(shrinkWrap: true, itemCount: _ownerSalons.length, itemBuilder: (context, index) {
-          final salon = _ownerSalons[index];
-          return ListTile(leading: const Icon(Icons.store, color: Color(0xFFFF6B8B)), title: Text(salon['name']), onTap: () { Navigator.pop(context); context.push('/owner/services?salonId=${salon['id']}&salonName=${Uri.encodeComponent(salon['name'])}'); });
-        })),
-        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel'))],
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: _ownerSalons.length,
+            itemBuilder: (context, index) {
+              final salon = _ownerSalons[index];
+              return ListTile(
+                leading: const Icon(Icons.store, color: Color(0xFFFF6B8B)),
+                title: Text(salon['name']),
+                onTap: () {
+                  Navigator.pop(context);
+                  context.push(
+                    '/owner/services?salonId=${salon['id']}&salonName=${Uri.encodeComponent(salon['name'])}',
+                  );
+                },
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+        ],
       ),
     );
   }
 
-  void _viewBookings() { if (_selectedSalonId != null) { context.push('/owner/appointments?salonId=$_selectedSalonId'); } else { context.push('/owner/appointments'); } }
-  void _viewAllCustomers() { if (_selectedSalonId != null) { context.push('/owner/customers?salonId=$_selectedSalonId'); } else { context.push('/owner/customers'); } }
-  void _viewRevenue() { if (_selectedSalonId != null) { context.push('/owner/revenue?salonId=$_selectedSalonId'); } else { context.push('/owner/revenue'); } }
+  void _viewBookings() {
+    if (_selectedSalonId != null) {
+      context.push('/owner/appointments?salonId=$_selectedSalonId');
+    } else {
+      context.push('/owner/appointments');
+    }
+  }
+
+  void _viewAllCustomers() {
+    if (_selectedSalonId != null) {
+      context.push('/owner/customers?salonId=$_selectedSalonId');
+    } else {
+      context.push('/owner/customers');
+    }
+  }
+
+  void _viewRevenue() {
+    if (_selectedSalonId != null) {
+      context.push('/owner/revenue?salonId=$_selectedSalonId');
+    } else {
+      context.push('/owner/revenue');
+    }
+  }
+
   void _viewReports() => context.push('/owner/reports');
   void _viewAnalytics() => context.push('/owner/analytics');
   void _viewSettings() => context.push('/owner/settings');
 
-  void _viewSalonHolidays() { if (_ownerSalons.isEmpty) { _showCreateSalonFirstDialog(); return; } context.push('/owner/salon/holidays?salonId=$_selectedSalonId'); }
+  void _viewSalonHolidays() {
+    if (_ownerSalons.isEmpty) {
+      _showCreateSalonFirstDialog();
+      return;
+    }
+    context.push('/owner/salon/holidays?salonId=$_selectedSalonId');
+  }
 
   void _showCreateSalonFirstDialog() {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Create Salon First'),
-        content: const Text('You need to create a salon before managing barbers or services.'),
-        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Later')), ElevatedButton(onPressed: () { Navigator.pop(context); _navigateToCreateSalon(); }, style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF6B8B)), child: const Text('Create Salon'))],
+        content: const Text(
+          'You need to create a salon before managing barbers or services.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Later'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _navigateToCreateSalon();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFFF6B8B),
+            ),
+            child: const Text('Create Salon'),
+          ),
+        ],
       ),
     );
   }
@@ -1146,11 +2210,18 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       FirebaseMessaging.onMessage.listen((RemoteMessage message) {
         if (message.data['type'] == 'new_booking') {
           _showNewBookingAlert(message);
-          setState(() { _pendingBookings++; pendingAppointments++; });
+          setState(() {
+            _pendingBookings++;
+            pendingAppointments++;
+          });
         }
       });
-      FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) { if (message.data['type'] == 'new_booking') _viewBookings(); });
-    } catch (e) { debugPrint('Error: $e'); }
+      FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+        if (message.data['type'] == 'new_booking') _viewBookings();
+      });
+    } catch (e) {
+      debugPrint('Error: $e');
+    }
   }
 
   void _showNewBookingAlert(RemoteMessage message) {
@@ -1159,8 +2230,25 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('New Booking!'),
-        content: Text(message.notification?.body ?? 'A customer has booked an appointment'),
-        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Later')), ElevatedButton(onPressed: () { Navigator.pop(context); _viewBookings(); }, style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF6B8B)), child: const Text('View'))],
+        content: Text(
+          message.notification?.body ?? 'A customer has booked an appointment',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Later'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _viewBookings();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFFF6B8B),
+            ),
+            child: const Text('View'),
+          ),
+        ],
       ),
     );
   }
@@ -1172,17 +2260,38 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         context: context,
         action: 'owner_dashboard',
         customTitle: '🔔 Get Booking Alerts',
-        customMessage: 'Get instant notifications when customers book appointments',
-        onGranted: () async { await _permissionManager.markPermissionGranted(); setState(() { _hasPermission = true; _showPermissionCard = false; }); },
-        onDenied: () async => await _permissionManager.markPermissionDenied(permanent: false),
+        customMessage:
+            'Get instant notifications when customers book appointments',
+        onGranted: () async {
+          await _permissionManager.markPermissionGranted();
+          setState(() {
+            _hasPermission = true;
+            _showPermissionCard = false;
+          });
+        },
+        onDenied: () async =>
+            await _permissionManager.markPermissionDenied(permanent: false),
       );
-    } catch (e) { debugPrint('Error: $e'); }
+    } catch (e) {
+      debugPrint('Error: $e');
+    }
   }
 
-  Future<void> _handleNotNow() async { setState(() => _showPermissionCard = false); await _permissionManager.markPermissionShown('owner_dashboard'); }
+  Future<void> _handleNotNow() async {
+    setState(() => _showPermissionCard = false);
+    await _permissionManager.markPermissionShown('owner_dashboard');
+  }
 
   void _openDrawer() {
-    try { if (_scaffoldKey.currentState != null) { _scaffoldKey.currentState!.openDrawer(); } else { Scaffold.of(context).openDrawer(); } } catch (e) { _showMenuDialog(); }
+    try {
+      if (_scaffoldKey.currentState != null) {
+        _scaffoldKey.currentState!.openDrawer();
+      } else {
+        Scaffold.of(context).openDrawer();
+      }
+    } catch (e) {
+      _showMenuDialog();
+    }
   }
 
   void _showMenuDialog() {
@@ -1192,32 +2301,94 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         title: const Text('Menu'),
         content: SizedBox(
           width: double.maxFinite,
-          child: ListView(shrinkWrap: true, children: [
-            ListTile(leading: const Icon(Icons.dashboard), title: const Text('Dashboard'), onTap: () => Navigator.pop(context)),
-            ListTile(leading: const Icon(Icons.calendar_today), title: const Text('Appointments'), onTap: () { Navigator.pop(context); _viewBookings(); }),
-            ListTile(leading: const Icon(Icons.people), title: const Text('Customers'), onTap: () { Navigator.pop(context); _viewAllCustomers(); }),
-            ListTile(leading: const Icon(Icons.content_cut), title: const Text('Barbers'), onTap: () { Navigator.pop(context); _navigateToBarberList(); }),
-            ListTile(leading: const Icon(Icons.local_offer), title: const Text('Offers'), onTap: () { Navigator.pop(context); _navigateToOffers(); }),
-            const Divider(),
-            ListTile(leading: const Icon(Icons.logout, color: Colors.red), title: const Text('Logout'), onTap: () { Navigator.pop(context); _logout(context); }),
-          ]),
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.dashboard),
+                title: const Text('Dashboard'),
+                onTap: () => Navigator.pop(context),
+              ),
+              ListTile(
+                leading: const Icon(Icons.calendar_today),
+                title: const Text('Appointments'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _viewBookings();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.people),
+                title: const Text('Customers'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _viewAllCustomers();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.content_cut),
+                title: const Text('Barbers'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _navigateToBarberList();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.local_offer),
+                title: const Text('Offers'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _navigateToOffers();
+                },
+              ),
+              const Divider(),
+              ListTile(
+                leading: const Icon(Icons.logout, color: Colors.red),
+                title: const Text('Logout'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _logout(context);
+                },
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 
   Future<void> _logout(BuildContext context) async {
-    showLogoutConfirmation(context, onLogoutConfirmed: () async {
-      if (!mounted) return;
-      showDialog(context: context, barrierDismissible: false, builder: (context) => const Center(child: CircularProgressIndicator(color: Color(0xFFFF6B8B))));
-      try {
-        await SessionManager.logoutForContinue();
-        await appState.refreshState();
-        if (context.mounted) { Navigator.pop(context); context.go('/'); }
-      } catch (e) {
-        if (context.mounted) { Navigator.pop(context); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Logout failed: $e'), backgroundColor: Colors.red)); }
-      }
-    });
+    showLogoutConfirmation(
+      context,
+      onLogoutConfirmed: () async {
+        if (!mounted) return;
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => const Center(
+            child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+          ),
+        );
+        try {
+          await SessionManager.logoutForContinue();
+          await appState.refreshState();
+          if (context.mounted) {
+            Navigator.pop(context);
+            context.go('/');
+          }
+        } catch (e) {
+          if (context.mounted) {
+            Navigator.pop(context);
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Logout failed: $e'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+        }
+      },
+    );
   }
 
   // ============================================================
@@ -1231,16 +2402,31 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     return Scaffold(
       key: _scaffoldKey,
       appBar: AppBar(
-        title: Text(isWeb ? 'Owner Dashboard' : 'Dashboard', style: const TextStyle(fontWeight: FontWeight.w600)),
+        title: Text(
+          isWeb ? 'Owner Dashboard' : 'Dashboard',
+          style: const TextStyle(fontWeight: FontWeight.w600),
+        ),
         backgroundColor: const Color(0xFFFF6B8B),
         foregroundColor: Colors.white,
         elevation: 0,
         centerTitle: isWeb,
-        leading: IconButton(icon: const Icon(Icons.menu), onPressed: _openDrawer, tooltip: 'Menu'),
+        leading: IconButton(
+          icon: const Icon(Icons.menu),
+          onPressed: _openDrawer,
+          tooltip: 'Menu',
+        ),
       ),
-      drawer: SideMenu(userRole: 'owner', userName: _userName, userEmail: _userEmail, profileImageUrl: _profileImageUrl, onMenuItemSelected: () => _refreshAllData()),
+      drawer: SideMenu(
+        userRole: 'owner',
+        userName: _userName,
+        userEmail: _userEmail,
+        profileImageUrl: _profileImageUrl,
+        onMenuItemSelected: () => _refreshAllData(),
+      ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: Color(0xFFFF6B8B)))
+          ? const Center(
+              child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+            )
           : RefreshIndicator(
               onRefresh: _refreshAllData,
               color: const Color(0xFFFF6B8B),
@@ -1248,7 +2434,15 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                 physics: const AlwaysScrollableScrollPhysics(),
                 child: Column(
                   children: [
-                    if (_showPermissionCard && !_hasPermission) PermissionCard(onEnable: _enableNotifications, onNotNow: _handleNotNow, title: '🔔 Get Booking Alerts', message: 'Get instant notifications when customers book appointments', compact: true),
+                    if (_showPermissionCard && !_hasPermission)
+                      PermissionCard(
+                        onEnable: _enableNotifications,
+                        onNotNow: _handleNotNow,
+                        title: '🔔 Get Booking Alerts',
+                        message:
+                            'Get instant notifications when customers book appointments',
+                        compact: true,
+                      ),
                     _buildSimpleHeader(),
                     if (_completedSteps < _totalSteps) _buildStepFlow(),
                     if (_ownerSalons.length > 1) _buildSalonSelector(),
@@ -1256,19 +2450,134 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                       Container(
                         margin: const EdgeInsets.all(16),
                         padding: const EdgeInsets.all(20),
-                        decoration: BoxDecoration(color: Colors.orange.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(16)),
-                        child: Column(children: [const Icon(Icons.warning, color: Colors.orange, size: 40), const SizedBox(height: 8), const Text('No Salons Found', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.orange)), const SizedBox(height: 8), const Text('Create your first salon to get started', style: TextStyle(fontSize: 12, color: Colors.grey)), const SizedBox(height: 12), ElevatedButton.icon(onPressed: _navigateToCreateSalon, icon: const Icon(Icons.add_business, size: 18), label: const Text('Create Salon'), style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF6B8B), foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8)))]),
+                        decoration: BoxDecoration(
+                          color: Colors.orange.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Column(
+                          children: [
+                            const Icon(
+                              Icons.warning,
+                              color: Colors.orange,
+                              size: 40,
+                            ),
+                            const SizedBox(height: 8),
+                            const Text(
+                              'No Salons Found',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.orange,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            const Text(
+                              'Create your first salon to get started',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            ElevatedButton.icon(
+                              onPressed: _navigateToCreateSalon,
+                              icon: const Icon(Icons.add_business, size: 18),
+                              label: const Text('Create Salon'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFFFF6B8B),
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 8,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     if (_ownerSalons.isNotEmpty)
                       _isSwitchingSalon
-                          ? const Padding(padding: EdgeInsets.all(32.0), child: Center(child: CircularProgressIndicator(color: Color(0xFFFF6B8B))))
+                          ? const Padding(
+                              padding: EdgeInsets.all(32.0),
+                              child: Center(
+                                child: CircularProgressIndicator(
+                                  color: Color(0xFFFF6B8B),
+                                ),
+                              ),
+                            )
                           : Column(
                               children: [
-                                Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Row(children: [Expanded(child: DashboardStatCard(title: "Today's Appointments", value: '$_todayAppointments', icon: Icons.calendar_today, color: Colors.blue, onTap: _viewBookings)), const SizedBox(width: 12), Expanded(child: DashboardStatCard(title: 'Pending', value: '$_pendingBookings', icon: Icons.pending_actions, color: Colors.orange, onTap: _viewBookings))])),
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: DashboardStatCard(
+                                          title: "Today's Appointments",
+                                          value: '$_todayAppointments',
+                                          icon: Icons.calendar_today,
+                                          color: Colors.blue,
+                                          onTap: _viewBookings,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: DashboardStatCard(
+                                          title: 'Pending',
+                                          value: '$_pendingBookings',
+                                          icon: Icons.pending_actions,
+                                          color: Colors.orange,
+                                          onTap: _viewBookings,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
                                 const SizedBox(height: 12),
-                                Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Row(children: [Expanded(child: DashboardStatCard(title: 'Customers', value: '$_totalCustomers', icon: Icons.people, color: Colors.purple, onTap: _viewAllCustomers)), const SizedBox(width: 12), Expanded(child: DashboardStatCard(title: 'Barbers', value: '$_activeBarbers', icon: Icons.content_cut, color: Colors.green, onTap: _navigateToBarberList))])),
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: DashboardStatCard(
+                                          title: 'Customers',
+                                          value: '$_totalCustomers',
+                                          icon: Icons.people,
+                                          color: Colors.purple,
+                                          onTap: _viewAllCustomers,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: DashboardStatCard(
+                                          title: 'Barbers',
+                                          value: '$_activeBarbers',
+                                          icon: Icons.content_cut,
+                                          color: Colors.green,
+                                          onTap: _navigateToBarberList,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
                                 const SizedBox(height: 12),
-                                Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: DashboardStatCard(title: 'Revenue', value: 'Rs. $_totalRevenue', icon: Icons.currency_rupee, color: Colors.green, fullWidth: true, onTap: _viewRevenue)),
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                  ),
+                                  child: DashboardStatCard(
+                                    title: 'Revenue',
+                                    value: 'Rs. $_totalRevenue',
+                                    icon: Icons.currency_rupee,
+                                    color: Colors.green,
+                                    fullWidth: true,
+                                    onTap: _viewRevenue,
+                                  ),
+                                ),
                               ],
                             ),
                     const SizedBox(height: 16),

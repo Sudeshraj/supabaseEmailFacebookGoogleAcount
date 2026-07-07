@@ -30,6 +30,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   bool _hasPermission = false;
   bool _showPermissionCard = false;
   bool _isLoading = true;
+  bool _isActive = false;
 
   // Customer Data
   String _customerName = 'Guest User';
@@ -81,6 +82,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     WidgetsBinding.instance.addObserver(this);
     _initializeTimezone();
     _loadCustomerData();
+    _checkCustomerStatus(); // ✅ NEW: Check customer status
     _loadDashboardData();
     _setupNotificationListeners();
     _searchController.addListener(_onSearchTextChanged);
@@ -101,6 +103,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       debugPrint('🔄 App resumed - refreshing notification count');
       _loadUnreadCount();
       _loadDashboardData();
+      _checkCustomerStatus(); // ✅ Check status on resume
     }
   }
 
@@ -121,7 +124,92 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     super.dispose();
   }
 
-  // ==================== TIMEZONE INITIALIZATION ====================
+  // ============================================================
+  // ✅ CHECK CUSTOMER STATUS (NEW)
+  // ============================================================
+
+  Future<void> _checkCustomerStatus() async {
+    try {
+      final user = supabase.auth.currentUser;
+      if (user == null) {
+        setState(() => _isActive = false);
+        return;
+      }
+
+      // ✅ Check user_roles status
+      final roleCheck = await supabase
+          .from('user_roles')
+          .select('status')
+          .eq('user_id', user.id)
+          .eq('role_id', 3) // customer role ID
+          .maybeSingle();
+
+      if (roleCheck == null || roleCheck['status'] != 'active') {
+        setState(() => _isActive = false);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Your customer profile is not active. Please contact support.',
+              ),
+              backgroundColor: Colors.orange,
+              duration: Duration(seconds: 4),
+            ),
+          );
+        }
+        return;
+      }
+
+      // ✅ Check profile status
+      final profileCheck = await supabase
+          .from('profiles')
+          .select('is_active, is_blocked')
+          .eq('id', user.id)
+          .maybeSingle();
+
+      if (profileCheck != null) {
+        if (profileCheck['is_blocked'] == true) {
+          setState(() => _isActive = false);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Your account has been blocked. Please contact support.',
+                ),
+                backgroundColor: Colors.red,
+                duration: Duration(seconds: 4),
+              ),
+            );
+          }
+          return;
+        }
+        if (profileCheck['is_active'] == false) {
+          setState(() => _isActive = false);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Your profile is inactive. Please contact support.',
+                ),
+                backgroundColor: Colors.orange,
+                duration: Duration(seconds: 4),
+              ),
+            );
+          }
+          return;
+        }
+      }
+
+      setState(() => _isActive = true);
+    } catch (e) {
+      debugPrint('❌ Error checking customer status: $e');
+      setState(() => _isActive = false);
+    }
+  }
+
+  // ============================================================
+  // TIMEZONE INITIALIZATION
+  // ============================================================
 
   Future<void> _initializeTimezone() async {
     await TimezoneService.initialize();
@@ -160,7 +248,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     _lastTimezone = currentTimezone;
   }
 
-  // ==================== FIXED: PARSE DATE SAFELY ====================
+  // ============================================================
+  // FIXED: PARSE DATE SAFELY
+  // ============================================================
 
   DateTime _parseDateSafely(String dateStr) {
     String processedStr = dateStr;
@@ -170,7 +260,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     return DateTime.parse(processedStr).toUtc();
   }
 
-  // ==================== FIXED: CHECK OFFER ACTIVE ====================
+  // ============================================================
+  // FIXED: CHECK OFFER ACTIVE
+  // ============================================================
 
   bool _isOfferActive(Map<String, dynamic> offer) {
     try {
@@ -202,7 +294,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     }
   }
 
-  // ==================== FIXED: GET DAYS LEFT ====================
+  // ============================================================
+  // FIXED: GET DAYS LEFT
+  // ============================================================
 
   int _getDaysLeft(String validToUtc) {
     try {
@@ -225,15 +319,15 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     }
   }
 
-  // ==================== FIXED: TIMEZONE CONVERSION METHODS ====================
+  // ============================================================
+  // FIXED: TIMEZONE CONVERSION METHODS
+  // ============================================================
 
-  /// Convert UTC time to local time string using TimezoneService (DST-SAFE)
   String _convertUtcToLocalTime(String? utcTime, DateTime referenceDate) {
     if (utcTime == null || utcTime.isEmpty) return '--:--';
     try {
       String timeStr = utcTime;
       if (timeStr.length > 5) timeStr = timeStr.substring(0, 5);
-      // ✅ FIXED: Use utcToLocalTimeForDate instead of deprecated method
       return TimezoneService.utcToLocalTimeForDate(timeStr, referenceDate);
     } catch (e) {
       debugPrint('Error converting time: $e');
@@ -252,7 +346,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     return '$openLocal - $closeLocal';
   }
 
-  // ==================== TIMEZONE SELECTOR WIDGET ====================
+  // ============================================================
+  // TIMEZONE SELECTOR WIDGET
+  // ============================================================
 
   Widget _buildTimezoneSelector() {
     return GestureDetector(
@@ -288,7 +384,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     );
   }
 
-  // ==================== TIMEZONE PICKER METHODS ====================
+  // ============================================================
+  // TIMEZONE PICKER METHODS
+  // ============================================================
 
   String _extractCountryCode(String timezone) {
     final countryMap = {
@@ -897,7 +995,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     }
   }
 
-  // ==================== SEARCH METHODS ====================
+  // ============================================================
+  // SEARCH METHODS
+  // ============================================================
 
   void _onSearchTextChanged() {
     final query = _searchController.text.trim();
@@ -1156,7 +1256,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     context.push('/customer/salon-profile', extra: salon);
   }
 
-  // ==================== LOAD CUSTOMER DATA ====================
+  // ============================================================
+  // LOAD CUSTOMER DATA
+  // ============================================================
 
   Future<void> _loadCustomerData() async {
     try {
@@ -1191,7 +1293,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     }
   }
 
-  // ==================== LOAD FOLLOWED SALONS ====================
+  // ============================================================
+  // LOAD FOLLOWED SALONS
+  // ============================================================
 
   Future<void> _loadFollowedSalons(String userId) async {
     try {
@@ -1245,7 +1349,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     }
   }
 
-  // ==================== LOAD OFFERS FROM FOLLOWED SALONS ====================
+  // ============================================================
+  // LOAD OFFERS FROM FOLLOWED SALONS
+  // ============================================================
 
   Future<List<Map<String, dynamic>>> _loadOffersFromDatabase() async {
     try {
@@ -1311,7 +1417,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     return [];
   }
 
-  // ==================== LOAD UNREAD NOTIFICATION COUNT ====================
+  // ============================================================
+  // LOAD UNREAD NOTIFICATION COUNT
+  // ============================================================
 
   Future<void> _loadUnreadCount() async {
     if (_isRefreshingCount) return;
@@ -1370,7 +1478,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     }
   }
 
-  // ==================== LOAD DASHBOARD DATA ====================
+  // ============================================================
+  // LOAD DASHBOARD DATA
+  // ============================================================
 
   Future<void> _loadDashboardData() async {
     if (!mounted) return;
@@ -1379,6 +1489,13 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     try {
       final user = supabase.auth.currentUser;
       if (user == null) {
+        if (mounted) setState(() => _isLoading = false);
+        return;
+      }
+
+      // ✅ Check customer status first
+      await _checkCustomerStatus();
+      if (!_isActive) {
         if (mounted) setState(() => _isLoading = false);
         return;
       }
@@ -1492,7 +1609,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     }
   }
 
-  // ==================== GET FAVORITE BARBERS ====================
+  // ============================================================
+  // GET FAVORITE BARBERS
+  // ============================================================
 
   Future<List<Map<String, dynamic>>> _getFavoriteBarbers(
     String customerId,
@@ -1553,7 +1672,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     }
   }
 
-  // ==================== NOTIFICATION LISTENERS ====================
+  // ============================================================
+  // NOTIFICATION LISTENERS
+  // ============================================================
 
   void _setupNotificationListeners() {
     try {
@@ -1695,7 +1816,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     await _permissionManager.markPermissionShown('customer_dashboard');
   }
 
-  // ==================== NAVIGATION METHODS ====================
+  // ============================================================
+  // NAVIGATION METHODS
+  // ============================================================
 
   void _viewMyBookings() {
     context.push('/customer/my-bookings');
@@ -1739,7 +1862,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     context.push('/customer/favorites');
   }
 
-  // ==================== APPLY OFFER METHOD ====================
+  // ============================================================
+  // APPLY OFFER METHOD
+  // ============================================================
 
   void _showSnackBar(String message, Color color) {
     if (!mounted) return;
@@ -1753,9 +1878,12 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     );
   }
 
+  // ============================================================
+  // ✅ APPLY OFFER WITH STATUS CHECK (UPDATED)
+  // ============================================================
+
   Future<void> _applyOffer(Map<String, dynamic> offer) async {
     try {
-      // 1. CHECK LOGIN
       final user = supabase.auth.currentUser;
       if (user == null) {
         if (mounted) {
@@ -1765,7 +1893,53 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         return;
       }
 
-      // 2. CHECK OFFER VALIDITY
+      // ✅ STEP 1: Check if customer has active role
+      final customerCheck = await supabase
+          .from('user_roles')
+          .select('status')
+          .eq('user_id', user.id)
+          .eq('role_id', 3) // customer role ID
+          .maybeSingle();
+
+      if (customerCheck == null || customerCheck['status'] != 'active') {
+        if (mounted) {
+          _showSnackBar(
+            'Your account is not active. Please contact support.',
+            Colors.red,
+          );
+        }
+        return;
+      }
+
+      // ✅ STEP 2: Check if profile is active and not blocked
+      final profileCheck = await supabase
+          .from('profiles')
+          .select('is_active, is_blocked')
+          .eq('id', user.id)
+          .maybeSingle();
+
+      if (profileCheck != null) {
+        if (profileCheck['is_blocked'] == true) {
+          if (mounted) {
+            _showSnackBar(
+              'Your account has been blocked. Please contact support.',
+              Colors.red,
+            );
+          }
+          return;
+        }
+        if (profileCheck['is_active'] == false) {
+          if (mounted) {
+            _showSnackBar(
+              'Your profile is inactive. Please contact support.',
+              Colors.red,
+            );
+          }
+          return;
+        }
+      }
+
+      // Check offer validity
       if (!_isOfferActive(offer)) {
         if (mounted) {
           _showSnackBar('This offer has expired', Colors.red);
@@ -1773,7 +1947,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         return;
       }
 
-      // 3. CHECK POINTS REQUIREMENT
+      // Check points requirement
       final pointsRequired = offer['points_required'] ?? 0;
       if (pointsRequired > 0) {
         final loyaltyResult = await supabase
@@ -1794,7 +1968,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         }
       }
 
-      // 4. CHECK USAGE LIMIT
+      // Check usage limit
       final usageLimit = offer['usage_limit'];
       final usedCount = offer['used_count'] ?? 0;
       if (usageLimit != null && usedCount >= usageLimit) {
@@ -1804,7 +1978,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         return;
       }
 
-      // 5. CHECK IF ALREADY APPLIED
+      // Check if already applied
       final existingOffer = await supabase
           .from('customer_offers')
           .select('id, status')
@@ -1828,7 +2002,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
 
       if (!mounted) return;
 
-      // 6. SHOW CONFIRMATION DIALOG
+      // Show confirmation dialog
       final confirmed = await showDialog<bool>(
         context: context,
         barrierDismissible: false,
@@ -1927,7 +2101,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       if (!mounted) return;
       if (confirmed != true) return;
 
-      // 7. SAVE TO customer_offers TABLE
+      // Save to customer_offers table
       await supabase.from('customer_offers').insert({
         'customer_id': user.id,
         'offer_id': offer['id'],
@@ -1936,13 +2110,13 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         'status': 'active',
       });
 
-      // 8. UPDATE OFFER USAGE COUNT
+      // Update offer usage count
       await supabase
           .from('offers')
           .update({'used_count': (usedCount + 1)})
           .eq('id', offer['id']);
 
-      // 9. DEDUCT POINTS IF REQUIRED
+      // Deduct points if required
       if (pointsRequired > 0) {
         final loyaltyResult = await supabase
             .from('customer_loyalty')
@@ -1973,7 +2147,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         });
       }
 
-      // 10. SHOW SUCCESS MESSAGE
+      // Show success message
       if (mounted) {
         _showSnackBar(
           '✅ "${offer['title']}" applied successfully!',
@@ -1981,7 +2155,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         );
       }
 
-      // 11. NAVIGATE TO BOOKING FLOW WITH OFFER
+      // Navigate to booking flow
       if (mounted) {
         context.push('/customer/booking-flow', extra: {'offer': offer});
       }
@@ -2041,7 +2215,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     }
   }
 
-  // ==================== WIDGET BUILDERS ====================
+  // ============================================================
+  // WIDGET BUILDERS
+  // ============================================================
 
   Widget _buildHorizontalSalonCard(Map<String, dynamic> salon) {
     final hasLogo =
@@ -2621,7 +2797,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     );
   }
 
-  // ==================== FACEBOOK STYLE OFFER POST ====================
+  // ============================================================
+  // FACEBOOK STYLE OFFER POST
+  // ============================================================
 
   Widget _buildFacebookStyleOfferPost(Map<String, dynamic> offer, int index) {
     final salonData = offer['salons'];
@@ -2857,7 +3035,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     );
   }
 
-  // ==================== MAIN BUILD METHOD ====================
+  // ============================================================
+  // MAIN BUILD METHOD
+  // ============================================================
 
   @override
   Widget build(BuildContext context) {
@@ -2887,6 +3067,67 @@ class _CustomerDashboardState extends State<CustomerDashboard>
               CircularProgressIndicator(color: Color(0xFFFF6B8B)),
               SizedBox(height: 16),
               Text('Loading timezone...'),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // ✅ Show inactive message if not active
+    if (!_isActive) {
+      return Scaffold(
+        key: _scaffoldKey,
+        appBar: AppBar(
+          backgroundColor: const Color(0xFFFF6B8B),
+          foregroundColor: Colors.white,
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.menu),
+            onPressed: _openDrawer,
+            tooltip: 'Menu',
+            iconSize: 28,
+          ),
+          actions: [_buildProfilePhoto()],
+        ),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.person_off_outlined,
+                size: 64,
+                color: Colors.grey[400],
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Profile Inactive',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey[700],
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Your customer profile is not active.\nPlease contact support for assistance.',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: Colors.grey[500],
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton(
+                onPressed: _loadDashboardData,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFFF6B8B),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: const Text('Check Status'),
+              ),
             ],
           ),
         ),
