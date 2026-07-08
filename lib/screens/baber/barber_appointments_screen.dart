@@ -1,8 +1,7 @@
-// lib/screens/barber/barber_appointments_screen.dart
-
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:go_router/go_router.dart';
 import '../../services/timezone_service.dart';
 
 class BarberAppointmentsScreen extends StatefulWidget {
@@ -31,6 +30,7 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
 
   bool _isLoading = true;
   String? _error;
+  bool _isBarberActive = true;
 
   // Tab controller
   late TabController _tabController;
@@ -46,8 +46,7 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
-    _loadBarberData();
-    _loadAppointments();
+    _checkBarberStatusAndLoad();
   }
 
   @override
@@ -57,52 +56,122 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
     super.dispose();
   }
 
-  Future<void> _loadBarberData() async {
+  // =====================================================
+  // ✅ CHECK BARBER STATUS AND LOAD DATA
+  // =====================================================
+  Future<void> _checkBarberStatusAndLoad() async {
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+
     try {
       final user = supabase.auth.currentUser;
-      if (user == null) return;
+      if (user == null) {
+        setState(() {
+          _error = 'Please login to continue';
+          _isLoading = false;
+        });
+        return;
+      }
 
-      final profile = await supabase
+      // ✅ STEP 1: Check if barber has active role
+      final roleCheck = await supabase
+          .from('user_roles')
+          .select('status, roles!inner (name)')
+          .eq('user_id', user.id)
+          .eq('roles.name', 'barber')
+          .maybeSingle();
+
+      if (roleCheck == null) {
+        setState(() {
+          _error = 'Barber profile not found. Please contact support.';
+          _isLoading = false;
+          _isBarberActive = false;
+        });
+        return;
+      }
+
+      final status = roleCheck['status'] as String? ?? 'active';
+      if (status != 'active') {
+        String message = 'Your barber account is ';
+        switch (status) {
+          case 'inactive':
+            message += 'deactivated. Please contact support.';
+            break;
+          case 'scheduled_for_deletion':
+            message += 'scheduled for deletion. Please contact support.';
+            break;
+          case 'deleted':
+            message += 'deleted. Please contact support.';
+            break;
+          default:
+            message += 'not active. Please contact support.';
+        }
+        setState(() {
+          _error = message;
+          _isLoading = false;
+          _isBarberActive = false;
+        });
+        return;
+      }
+
+      // ✅ STEP 2: Check profile status
+      final profileCheck = await supabase
           .from('profiles')
-          .select('full_name')
+          .select('is_active, is_blocked, full_name, extra_data')
           .eq('id', user.id)
           .maybeSingle();
 
-      if (profile != null && mounted) {
-        setState(() {});
+      if (profileCheck != null) {
+        if (profileCheck['is_blocked'] == true) {
+          setState(() {
+            _error = 'Your account has been blocked. Please contact support.';
+            _isLoading = false;
+            _isBarberActive = false;
+          });
+          return;
+        }
+
+        if (profileCheck['is_active'] == false) {
+          // Check if scheduled for deletion
+          final extraData = profileCheck['extra_data'] as Map<String, dynamic>? ?? {};
+          final profileStatus = extraData['profile_status'] as Map<String, dynamic>?;
+          
+          if (profileStatus != null && profileStatus['status'] == 'scheduled_for_deletion') {
+            setState(() {
+              _error = 'Your profile is scheduled for deletion. Please contact support.';
+              _isLoading = false;
+              _isBarberActive = false;
+            });
+            return;
+          }
+          
+          setState(() {
+            _error = 'Your profile is inactive. Please contact support.';
+            _isLoading = false;
+            _isBarberActive = false;
+          });
+          return;
+        }
       }
+
+      // ✅ All checks passed
+      _isBarberActive = true;
+      await _loadAppointments();
+      
     } catch (e) {
-      debugPrint('Error loading barber data: $e');
+      debugPrint('Error checking barber status: $e');
+      setState(() {
+        _error = 'Failed to load data: $e';
+        _isLoading = false;
+        _isBarberActive = false;
+      });
     }
-  }
-
-  String _getDisplayQueueNumber(Map<String, dynamic> appointment) {
-    final isVip = appointment['is_vip'] ?? false;
-    final regularQueueNumber = appointment['regular_queue_number'];
-    final vipQueueNumber = appointment['vip_queue_number'];
-
-    if (isVip && vipQueueNumber != null) {
-      return 'VIP-$vipQueueNumber';
-    } else if (!isVip && regularQueueNumber != null) {
-      return 'Q$regularQueueNumber';
-    }
-    return '';
-  }
-
-  String _getDisplayTime(Map<String, dynamic> appointment) {
-    // Priority: estimated_start_time > start_time
-    if (appointment['estimated_start_time'] != null) {
-      final estimatedTime = appointment['estimated_start_time'].toString();
-      if (estimatedTime.length > 5) {
-        return estimatedTime.substring(0, 5);
-      }
-      return estimatedTime;
-    }
-    return appointment['local_start_time'] ?? '';
   }
 
   // =====================================================
-  // LOAD APPOINTMENTS
+  // ✅ LOAD APPOINTMENTS (WITH STATUS CHECKS)
   // =====================================================
   Future<void> _loadAppointments() async {
     if (!mounted) return;
@@ -118,6 +187,23 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
         setState(() {
           _error = 'Please login to continue';
           _isLoading = false;
+        });
+        return;
+      }
+
+      // ✅ Re-check barber status before loading
+      final roleCheck = await supabase
+          .from('user_roles')
+          .select('status')
+          .eq('user_id', user.id)
+          .eq('role_id', 2)
+          .maybeSingle();
+
+      if (roleCheck == null || roleCheck['status'] != 'active') {
+        setState(() {
+          _error = 'Your barber account is not active.';
+          _isLoading = false;
+          _isBarberActive = false;
         });
         return;
       }
@@ -146,7 +232,7 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
         return;
       }
 
-      // Get customer details
+      // ✅ Get customer details with status check
       final customerIds = appointments
           .map((a) => a['customer_id'] as String?)
           .where((id) => id != null)
@@ -155,13 +241,31 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
 
       Map<String, Map<String, dynamic>> customersMap = {};
       if (customerIds.isNotEmpty) {
-        final customers = await supabase
-            .from('profiles')
-            .select('id, full_name, avatar_url, phone')
-            .inFilter('id', customerIds);
+        // ✅ Get only active customers
+        final activeCustomers = await supabase
+            .from('user_roles')
+            .select('user_id')
+            .eq('role_id', 3)  // customer role ID
+            .eq('status', 'active')
+            .inFilter('user_id', customerIds);
 
-        for (var customer in customers) {
-          customersMap[customer['id']] = customer;
+        final activeCustomerIds = activeCustomers
+            .map((c) => c['user_id'] as String)
+            .toList();
+
+        if (activeCustomerIds.isNotEmpty) {
+          final customers = await supabase
+              .from('profiles')
+              .select('id, full_name, avatar_url, phone, is_active, is_blocked')
+              .inFilter('id', activeCustomerIds);
+
+          for (var customer in customers) {
+            // ✅ Skip blocked or inactive customers
+            if (customer['is_blocked'] == true || customer['is_active'] == false) {
+              continue;
+            }
+            customersMap[customer['id']] = customer;
+          }
         }
       }
 
@@ -213,38 +317,56 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
 
       for (var apt in appointments) {
         final customer = customersMap[apt['customer_id']];
+        
+        // ✅ Skip if customer not found (inactive/blocked)
+        if (customer == null) {
+          continue;
+        }
+
         final serviceName = servicesMap[apt['service_id']] ?? 'Service';
         final salonName = salonsMap[apt['salon_id']] ?? 'Salon';
 
-        final appointmentDate = DateTime.parse(apt['appointment_date']);
+        final utcDate = DateTime.parse(apt['appointment_date']);
+        final localDate = TimezoneService.utcToLocalDateTimeForDate(
+          '12:00:00',
+          utcDate,
+        );
         final appointmentDateOnly = DateTime(
-          appointmentDate.year,
-          appointmentDate.month,
-          appointmentDate.day,
+          localDate.year,
+          localDate.month,
+          localDate.day,
         );
 
         final utcStart = apt['start_time'] as String;
         final utcEnd = apt['end_time'] as String;
 
-        // Convert UTC to local time for display
-        final localStart = TimezoneService.utcToLocalTime(
+        final localStart = TimezoneService.utcToLocalTimeForDate(
           utcStart,
-          appointmentDate,
+          utcDate,
         );
-        final localEnd = TimezoneService.utcToLocalTime(
+        final localEnd = TimezoneService.utcToLocalTimeForDate(
           utcEnd,
-          appointmentDate,
+          utcDate,
         );
 
-        // Format estimated times if exists
+        // Format estimated times
         String estimatedStartDisplay = '';
         String estimatedEndDisplay = '';
         if (apt['estimated_start_time'] != null) {
           final estStart = DateTime.parse(apt['estimated_start_time']);
-          estimatedStartDisplay = DateFormat('HH:mm').format(estStart);
+          final localEstStart = TimezoneService.utcToLocalDateTimeForDate(
+            '${estStart.hour.toString().padLeft(2, '0')}:${estStart.minute.toString().padLeft(2, '0')}:00',
+            estStart,
+          );
+          estimatedStartDisplay = DateFormat('HH:mm').format(localEstStart);
+          
           if (apt['estimated_end_time'] != null) {
             final estEnd = DateTime.parse(apt['estimated_end_time']);
-            estimatedEndDisplay = DateFormat('HH:mm').format(estEnd);
+            final localEstEnd = TimezoneService.utcToLocalDateTimeForDate(
+              '${estEnd.hour.toString().padLeft(2, '0')}:${estEnd.minute.toString().padLeft(2, '0')}:00',
+              estEnd,
+            );
+            estimatedEndDisplay = DateFormat('HH:mm').format(localEstEnd);
           }
         }
 
@@ -269,10 +391,10 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
           'queue_position': queuePosition,
           'display_queue': displayQueue,
           'child_name': apt['child_name'],
-          'customer_name': customer?['full_name'] ?? 'Customer',
+          'customer_name': customer['full_name'] ?? 'Customer',
           'customer_id': apt['customer_id'],
-          'customer_avatar': customer?['avatar_url'],
-          'customer_phone': customer?['phone'],
+          'customer_avatar': customer['avatar_url'],
+          'customer_phone': customer['phone'],
           'service_name': serviceName,
           'salon_name': salonName,
           'local_start_time': localStart,
@@ -281,8 +403,8 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
           'estimated_end_time': estimatedEndDisplay,
           'is_started': isStarted,
           'is_completed': isCompleted,
-          'date_display': DateFormat('MMM dd, yyyy').format(appointmentDate),
-          'day_display': DateFormat('EEEE').format(appointmentDate),
+          'date_display': DateFormat('MMM dd, yyyy').format(localDate),
+          'day_display': DateFormat('EEEE').format(localDate),
           'time_display': '$localStart - $localEnd',
           'display_time': _getDisplayTime({
             'estimated_start_time': apt['estimated_start_time'],
@@ -301,7 +423,7 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
         }
       }
 
-      // Sort by queue_position (time order)
+      // Sort by queue_position
       todayList.sort((a, b) {
         final aPos = a['queue_position'] ?? 999;
         final bPos = b['queue_position'] ?? 999;
@@ -336,11 +458,52 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
   }
 
   // =====================================================
-  // START APPOINTMENT
+  // ✅ HELPER: GET DISPLAY QUEUE NUMBER
+  // =====================================================
+  String _getDisplayQueueNumber(Map<String, dynamic> appointment) {
+    final isVip = appointment['is_vip'] ?? false;
+    final regularQueueNumber = appointment['regular_queue_number'];
+    final vipQueueNumber = appointment['vip_queue_number'];
+
+    if (isVip && vipQueueNumber != null) {
+      return 'VIP-$vipQueueNumber';
+    } else if (!isVip && regularQueueNumber != null) {
+      return 'Q$regularQueueNumber';
+    }
+    return '';
+  }
+
+  String _getDisplayTime(Map<String, dynamic> appointment) {
+    if (appointment['estimated_start_time'] != null) {
+      final estimatedTime = appointment['estimated_start_time'].toString();
+      if (estimatedTime.length > 5) {
+        return estimatedTime.substring(0, 5);
+      }
+      return estimatedTime;
+    }
+    return appointment['local_start_time'] ?? '';
+  }
+
+  // =====================================================
+  // ✅ START APPOINTMENT (WITH STATUS CHECK)
   // =====================================================
   Future<void> _startAppointment(Map<String, dynamic> appointment) async {
     if (_isProcessing) return;
 
+    // ✅ Check barber status before starting
+    final isActive = await _checkBarberActive();
+    if (!isActive) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Your barber account is not active.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return;
+    }
+if (!mounted) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -511,10 +674,24 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
   }
 
   // =====================================================
-  // END / COMPLETE APPOINTMENT
+  // ✅ END / COMPLETE APPOINTMENT
   // =====================================================
   Future<void> _endAppointment(Map<String, dynamic> appointment) async {
     if (_isProcessing) return;
+
+    // ✅ Check barber status before ending
+    final isActive = await _checkBarberActive();
+    if (!isActive) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Your barber account is not active.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return;
+    }
 
     final hasOverflow = await _checkForOverflowWarning(appointment['id']);
     if (!mounted) return;
@@ -684,67 +861,25 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
     }
   }
 
-  Future<bool> _checkForOverflowWarning(int appointmentId) async {
-    try {
-      final result = await supabase
-          .from('overflow_notifications')
-          .select('id')
-          .eq('appointment_id', appointmentId)
-          .eq('status', 'PENDING')
-          .maybeSingle();
-
-      return result != null;
-    } catch (e) {
-      return false;
-    }
-  }
-
-  void _showOverflowNotificationDialog(Map<String, dynamic> result) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Row(
-          children: [
-            Icon(Icons.warning_amber, color: _warningColor),
-            const SizedBox(width: 8),
-            const Text('Customer Notification Sent'),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(result['message'] ?? 'Appointment exceeds salon hours.'),
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: _warningColor.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Text(
-                'Customer has been notified and can choose to MOVE or CANCEL.\n\nIf no response within 30 minutes, the appointment will be auto-cancelled.',
-                style: TextStyle(fontSize: 12),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
-  }
-
   // =====================================================
-  // CANCEL APPOINTMENT
+  // ✅ CANCEL APPOINTMENT (WITH STATUS CHECK)
   // =====================================================
   Future<void> _cancelAppointment(Map<String, dynamic> appointment) async {
     if (_isProcessing) return;
+
+    // ✅ Check barber status before cancelling
+    final isActive = await _checkBarberActive();
+    if (!isActive) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Your barber account is not active.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return;
+    }
 
     String? selectedReason;
     final TextEditingController otherReasonController = TextEditingController();
@@ -762,7 +897,7 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
       {'value': 'Schedule conflict', 'label': '📅 Schedule Conflict'},
       {'value': 'Other', 'label': '📝 Other'},
     ];
-
+if (!mounted) return;
     final confirmed = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
@@ -1098,6 +1233,94 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
     }
   }
 
+  // =====================================================
+  // ✅ CHECK IF BARBER IS ACTIVE (HELPER)
+  // =====================================================
+  Future<bool> _checkBarberActive() async {
+    try {
+      final user = supabase.auth.currentUser;
+      if (user == null) return false;
+
+      final roleCheck = await supabase
+          .from('user_roles')
+          .select('status')
+          .eq('user_id', user.id)
+          .eq('role_id', 2)
+          .maybeSingle();
+
+      if (roleCheck == null) return false;
+      return roleCheck['status'] == 'active';
+    } catch (e) {
+      debugPrint('Error checking barber active status: $e');
+      return false;
+    }
+  }
+
+  // =====================================================
+  // ✅ CHECK OVERFLOW WARNING
+  // =====================================================
+  Future<bool> _checkForOverflowWarning(int appointmentId) async {
+    try {
+      final result = await supabase
+          .from('overflow_notifications')
+          .select('id')
+          .eq('appointment_id', appointmentId)
+          .eq('status', 'PENDING')
+          .maybeSingle();
+
+      return result != null;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // =====================================================
+  // ✅ SHOW OVERFLOW NOTIFICATION DIALOG
+  // =====================================================
+  void _showOverflowNotificationDialog(Map<String, dynamic> result) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Icon(Icons.warning_amber, color: _warningColor),
+            const SizedBox(width: 8),
+            const Text('Customer Notification Sent'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(result['message'] ?? 'Appointment exceeds salon hours.'),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: _warningColor.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Text(
+                'Customer has been notified and can choose to MOVE or CANCEL.\n\nIf no response within 30 minutes, the appointment will be auto-cancelled.',
+                style: TextStyle(fontSize: 12),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // =====================================================
+  // ✅ SHOW CUSTOMER INFO
+  // =====================================================
   void _showCustomerInfo(Map<String, dynamic> appointment) {
     final isVip = appointment['is_vip'] ?? false;
     final displayQueue = appointment['display_queue'] ?? '';
@@ -1289,6 +1512,9 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
     );
   }
 
+  // =====================================================
+  // ✅ SHOW DATE PICKER
+  // =====================================================
   void _showDatePickerDialog() {
     showDialog(
       context: context,
@@ -1314,6 +1540,10 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
       ),
     );
   }
+
+  // =====================================================
+  // ✅ BUILD METHODS
+  // =====================================================
 
   @override
   Widget build(BuildContext context) {
@@ -1396,12 +1626,20 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
                   Text(_error!, style: TextStyle(color: Colors.grey[600])),
                   const SizedBox(height: 16),
                   ElevatedButton(
-                    onPressed: _loadAppointments,
+                    onPressed: _checkBarberStatusAndLoad,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: _primaryColor,
                     ),
                     child: const Text('Retry'),
                   ),
+                  if (!_isBarberActive)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: TextButton(
+                        onPressed: () => context.go('/login'),
+                        child: const Text('Go to Login'),
+                      ),
+                    ),
                 ],
               ),
             )
