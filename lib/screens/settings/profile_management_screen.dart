@@ -16,7 +16,7 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
   List<ProfileData> _profiles = [];
   bool _isLoading = true;
   String? _currentRole;
-  String? _currentUserId;
+  String? currentUserId;
   bool _isProfileLevelStatus = false;
 
   @override
@@ -40,7 +40,7 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
         return;
       }
 
-      _currentUserId = user.id;
+      currentUserId = user.id;
       _currentRole = await SessionManager.getCurrentRole();
 
       debugPrint('📋 Loading profiles for user: ${user.id}');
@@ -106,15 +106,17 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
       int profileGracePeriodDays = 90;
 
       if (_isProfileLevelStatus) {
-        final profileStatus = extraData['profile_status'] as Map<String, dynamic>? ?? {};
+        final profileStatus =
+            extraData['profile_status'] as Map<String, dynamic>? ?? {};
         profileLevelStatus = profileStatus['status'] as String? ?? 'active';
-        
+
         if (profileLevelStatus == 'scheduled_for_deletion') {
           final dueDateStr = profileStatus['deletion_due_date'] as String?;
           if (dueDateStr != null) {
             profileDeletionDueDate = DateTime.parse(dueDateStr);
           }
-          profileGracePeriodDays = profileStatus['grace_period_days'] as int? ?? 90;
+          profileGracePeriodDays =
+              profileStatus['grace_period_days'] as int? ?? 90;
         }
       }
 
@@ -133,10 +135,11 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
         }
 
         // ✅ Get display name
-        String displayName = profileResponse['full_name'] ?? 
-                             extraData['full_name'] ?? 
-                             user.email?.split('@').first ?? 
-                             'User';
+        String displayName =
+            profileResponse['full_name'] ??
+            extraData['full_name'] ??
+            user.email?.split('@').first ??
+            'User';
 
         // ✅ Get role-specific data from extra_data
         DateTime? deletionDueDate;
@@ -145,7 +148,7 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
 
         if (extraData.containsKey(roleKey)) {
           final roleData = extraData[roleKey] as Map<String, dynamic>? ?? {};
-          
+
           if (roleStatus == 'scheduled_for_deletion') {
             final dueDateStr = roleData['deletion_due_date'] as String?;
             if (dueDateStr != null) {
@@ -160,7 +163,8 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
         }
 
         // ✅ Use profile level deletion date if available
-        if (_isProfileLevelStatus && profileLevelStatus == 'scheduled_for_deletion') {
+        if (_isProfileLevelStatus &&
+            profileLevelStatus == 'scheduled_for_deletion') {
           deletionDueDate = profileDeletionDueDate;
           gracePeriodDays = profileGracePeriodDays;
         }
@@ -169,23 +173,25 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
         final isActive = roleStatus == 'active';
         final isBlocked = profileResponse['is_blocked'] ?? false;
 
-        profileList.add(ProfileData(
-          role: roleName,
-          roleId: roleEntry['role_id'],
-          displayName: displayName,
-          email: profileResponse['email'] ?? user.email ?? '',
-          avatarUrl: profileResponse['avatar_url'],
-          status: roleStatus,
-          isCurrent: isCurrent,
-          isActive: isActive,
-          isBlocked: isBlocked,
-          deletionDueDate: deletionDueDate,
-          scheduledAt: scheduledAt,
-          gracePeriodDays: gracePeriodDays,
-          extraData: extraData,
-          isProfileLevel: _isProfileLevelStatus,
-          profileLevelStatus: profileLevelStatus,
-        ));
+        profileList.add(
+          ProfileData(
+            role: roleName,
+            roleId: roleEntry['role_id'],
+            displayName: displayName,
+            email: profileResponse['email'] ?? user.email ?? '',
+            avatarUrl: profileResponse['avatar_url'],
+            status: roleStatus,
+            isCurrent: isCurrent,
+            isActive: isActive,
+            isBlocked: isBlocked,
+            deletionDueDate: deletionDueDate,
+            scheduledAt: scheduledAt,
+            gracePeriodDays: gracePeriodDays,
+            extraData: extraData,
+            isProfileLevel: _isProfileLevelStatus,
+            profileLevelStatus: profileLevelStatus,
+          ),
+        );
       }
 
       debugPrint('📋 Loaded ${profileList.length} profiles');
@@ -257,10 +263,7 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
       debugPrint('❌ Error updating status: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: $e'),
-            backgroundColor: Colors.red,
-          ),
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
         );
       }
     } finally {
@@ -291,9 +294,9 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.orange.withOpacity(0.1),
+                color: Colors.orange.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
               ),
               child: const Row(
                 children: [
@@ -385,19 +388,16 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.blue.withOpacity(0.05),
+                color: Colors.blue.withValues(alpha: 0.05),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.blue.withOpacity(0.2)),
+                border: Border.all(color: Colors.blue.withValues(alpha: 0.2)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: const [
                   Text(
                     '📌 What happens next? (Facebook style)',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14,
-                    ),
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                   ),
                   SizedBox(height: 8),
                   Text(
@@ -414,9 +414,9 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.green.withOpacity(0.05),
+                color: Colors.green.withValues(alpha: 0.05),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.green.withOpacity(0.2)),
+                border: Border.all(color: Colors.green.withValues(alpha: 0.2)),
               ),
               child: const Row(
                 children: [
@@ -457,7 +457,10 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
   }
 
   /// ✅ Update profile level status
-  Future<void> _updateProfileLevelStatus(ProfileData profile, String status) async {
+  Future<void> _updateProfileLevelStatus(
+    ProfileData profile,
+    String status,
+  ) async {
     setState(() => _isLoading = true);
 
     try {
@@ -493,10 +496,7 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
       debugPrint('❌ Error updating profile level status: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: $e'),
-            backgroundColor: Colors.red,
-          ),
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
         );
       }
     } finally {
@@ -588,12 +588,15 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
       }
 
       // ✅ Check remaining profiles
-      final remainingProfiles = await SessionManager.getRemainingProfiles(profile.email);
+      final remainingProfiles = await SessionManager.getRemainingProfiles(
+        profile.email,
+      );
 
       if (remainingProfiles.isEmpty) {
         if (mounted) {
           await supabase.auth.signOut();
           await appState.refreshState();
+          if (!mounted) return;
           context.go('/login');
         }
       } else {
@@ -604,10 +607,7 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
       debugPrint('❌ Error deleting profile: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: $e'),
-            backgroundColor: Colors.red,
-          ),
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
         );
       }
     } finally {
@@ -656,10 +656,7 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
         if (user != null) {
           await supabase.auth.updateUser(
             UserAttributes(
-              data: {
-                ...?user.userMetadata,
-                'current_role': profile.role,
-              },
+              data: {...?user.userMetadata, 'current_role': profile.role},
             ),
           );
         }
@@ -669,7 +666,9 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Switched to ${_getRoleDisplayName(profile.role)} profile'),
+              content: Text(
+                'Switched to ${_getRoleDisplayName(profile.role)} profile',
+              ),
               backgroundColor: Colors.green,
             ),
           );
@@ -680,10 +679,7 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
         debugPrint('❌ Error switching profile: $e');
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Error: $e'),
-              backgroundColor: Colors.red,
-            ),
+            SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
           );
         }
       } finally {
@@ -709,9 +705,9 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.orange.withOpacity(0.1),
+                color: Colors.orange.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
               ),
               child: const Row(
                 children: [
@@ -768,19 +764,16 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.blue.withOpacity(0.05),
+                color: Colors.blue.withValues(alpha: 0.05),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.blue.withOpacity(0.2)),
+                border: Border.all(color: Colors.blue.withValues(alpha: 0.2)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: const [
                   Text(
                     '📌 What happens next?',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14,
-                    ),
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                   ),
                   SizedBox(height: 8),
                   Text(
@@ -797,9 +790,9 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.green.withOpacity(0.05),
+                color: Colors.green.withValues(alpha: 0.05),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.green.withOpacity(0.2)),
+                border: Border.all(color: Colors.green.withValues(alpha: 0.2)),
               ),
               child: const Row(
                 children: [
@@ -844,9 +837,7 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
       builder: (context) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text('Reactivate ${_getRoleDisplayName(profile.role)}?'),
-        content: const Text(
-          'Your role will be reactivated immediately.',
-        ),
+        content: const Text('Your role will be reactivated immediately.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -1023,21 +1014,15 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
       icon: Icon(icon, size: 18),
       label: Text(label),
       style: ElevatedButton.styleFrom(
-        backgroundColor: color.withOpacity(0.1),
+        backgroundColor: color.withValues(alpha: 0.1),
         foregroundColor: color,
         elevation: 0,
-        padding: const EdgeInsets.symmetric(
-          horizontal: 12,
-          vertical: 8,
-        ),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(10),
-          side: BorderSide(color: color.withOpacity(0.3)),
+          side: BorderSide(color: color.withValues(alpha: 0.3)),
         ),
-        textStyle: const TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-        ),
+        textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
       ),
     );
   }
@@ -1099,8 +1084,9 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
                   height: 56,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: _getRoleColor(profile.role).withOpacity(0.1),
-                    image: profile.avatarUrl != null &&
+                    color: _getRoleColor(profile.role).withValues(alpha: 0.1),
+                    image:
+                        profile.avatarUrl != null &&
                             profile.avatarUrl!.isNotEmpty
                         ? DecorationImage(
                             image: NetworkImage(profile.avatarUrl!),
@@ -1108,8 +1094,7 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
                           )
                         : null,
                   ),
-                  child: profile.avatarUrl == null ||
-                          profile.avatarUrl!.isEmpty
+                  child: profile.avatarUrl == null || profile.avatarUrl!.isEmpty
                       ? Center(
                           child: Text(
                             profile.displayName.isNotEmpty
@@ -1188,20 +1173,16 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
                               vertical: 2,
                             ),
                             decoration: BoxDecoration(
-                              color: statusColor.withOpacity(0.1),
+                              color: statusColor.withValues(alpha: 0.1),
                               borderRadius: BorderRadius.circular(8),
                               border: Border.all(
-                                color: statusColor.withOpacity(0.3),
+                                color: statusColor.withValues(alpha: 0.3),
                               ),
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Icon(
-                                  statusIcon,
-                                  size: 12,
-                                  color: statusColor,
-                                ),
+                                Icon(statusIcon, size: 12, color: statusColor),
                                 const SizedBox(width: 4),
                                 Text(
                                   statusText,
@@ -1221,10 +1202,10 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
                                 vertical: 2,
                               ),
                               decoration: BoxDecoration(
-                                color: Colors.purple.withOpacity(0.1),
+                                color: Colors.purple.withValues(alpha: 0.1),
                                 borderRadius: BorderRadius.circular(4),
                                 border: Border.all(
-                                  color: Colors.purple.withOpacity(0.2),
+                                  color: Colors.purple.withValues(alpha: 0.2),
                                 ),
                               ),
                               child: const Text(
@@ -1241,10 +1222,7 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
                       const SizedBox(height: 4),
                       Text(
                         profile.email,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey[500],
-                        ),
+                        style: TextStyle(fontSize: 12, color: Colors.grey[500]),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -1260,10 +1238,10 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.orange.withOpacity(0.05),
+                  color: Colors.orange.withValues(alpha: 0.05),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: Colors.orange.withOpacity(0.2),
+                    color: Colors.orange.withValues(alpha: 0.2),
                   ),
                 ),
                 child: Row(
@@ -1308,29 +1286,20 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.grey.withOpacity(0.05),
+                  color: Colors.grey.withValues(alpha: 0.05),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: Colors.grey.withOpacity(0.2),
-                  ),
+                  border: Border.all(color: Colors.grey.withValues(alpha: 0.2)),
                 ),
                 child: Row(
                   children: [
-                    Icon(
-                      Icons.info_outline,
-                      size: 18,
-                      color: Colors.grey[600],
-                    ),
+                    Icon(Icons.info_outline, size: 18, color: Colors.grey[600]),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         isProfileLevel
                             ? 'Complete profile is inactive. You can reactivate it anytime.'
                             : 'This role is inactive. You can reactivate it anytime.',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Colors.grey,
-                        ),
+                        style: TextStyle(fontSize: 13, color: Colors.grey),
                       ),
                     ),
                   ],
@@ -1433,7 +1402,8 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
                       label: 'Delete All',
                       color: Colors.red,
                       isDestructive: true,
-                      onPressed: () => _scheduleCompleteProfileDeletion(profile),
+                      onPressed: () =>
+                          _scheduleCompleteProfileDeletion(profile),
                     ),
                 ],
 
@@ -1464,46 +1434,34 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
         foregroundColor: Colors.white,
         elevation: 0,
         actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadProfiles,
-          ),
+          IconButton(icon: const Icon(Icons.refresh), onPressed: _loadProfiles),
         ],
       ),
       body: _isLoading
           ? const Center(
-              child: CircularProgressIndicator(
-                color: Color(0xFFFF6B8B),
-              ),
+              child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
             )
           : _profiles.isEmpty
-              ? const Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.person_off_outlined,
-                        size: 64,
-                        color: Colors.grey,
-                      ),
-                      SizedBox(height: 16),
-                      Text(
-                        'No profiles found',
-                        style: TextStyle(
-                          fontSize: 18,
-                          color: Colors.grey,
-                        ),
-                      ),
-                    ],
+          ? const Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.person_off_outlined, size: 64, color: Colors.grey),
+                  SizedBox(height: 16),
+                  Text(
+                    'No profiles found',
+                    style: TextStyle(fontSize: 18, color: Colors.grey),
                   ),
-                )
-              : ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: _profiles.length,
-                  itemBuilder: (context, index) {
-                    return _buildProfileCard(_profiles[index]);
-                  },
-                ),
+                ],
+              ),
+            )
+          : ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: _profiles.length,
+              itemBuilder: (context, index) {
+                return _buildProfileCard(_profiles[index]);
+              },
+            ),
     );
   }
 }

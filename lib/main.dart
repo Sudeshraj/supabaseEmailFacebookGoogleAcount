@@ -19,6 +19,8 @@ import 'package:flutter_application_1/screens/customer/my_bookings_screen.dart';
 import 'package:flutter_application_1/screens/customer/offers_screen.dart';
 import 'package:flutter_application_1/screens/customer/salon_profile_screen.dart';
 import 'package:flutter_application_1/screens/customer/vip_booking_screen.dart';
+import 'package:flutter_application_1/screens/settings/auth_settings_screen.dart';
+import 'package:flutter_application_1/screens/settings/change_password_screen.dart';
 import 'package:flutter_application_1/screens/settings/notification_screen.dart';
 import 'package:flutter_application_1/screens/owner/add_barber_screen.dart';
 import 'package:flutter_application_1/screens/owner/add_barber_service_screen.dart';
@@ -763,7 +765,7 @@ GoRouter _createRouter() {
           return ResetPasswordConfirmScreen(email: extra?['email'] ?? '');
         },
       ),
-            // Settings Routes
+      // Settings Routes
       GoRoute(
         path: '/settings',
         builder: (context, state) => const SettingsScreen(),
@@ -776,6 +778,14 @@ GoRouter _createRouter() {
         path: '/profile',
         name: 'profile',
         builder: (context, state) => const ProfileScreen(),
+      ),
+      GoRoute(
+        path: '/settings/auth',
+        builder: (context, state) => const AuthSettingsScreen(),
+      ),
+      GoRoute(
+        path: '/settings/change-password',
+        builder: (context, state) => const ChangePasswordScreen(),
       ),
       // ============================================
       // OWNER ROUTES
