@@ -507,113 +507,113 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
   // ============================================================
   // 🔥 COMPLETE PROFILE DELETE (Immediate - Admin only)
   // ============================================================
-  Future<void> _deleteCompleteProfileImmediate(ProfileData profile) async {
-    // ✅ Show warning dialog
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text(
-          '⚠️ Permanently Delete Profile?',
-          style: TextStyle(color: Colors.red),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: const [
-            Text(
-              'This will permanently delete your entire profile immediately.',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
-            SizedBox(height: 12),
-            Text('• All your roles will be removed'),
-            Text('• All your data will be deleted'),
-            Text('• This action cannot be undone'),
-            SizedBox(height: 12),
-            Text(
-              'Are you sure you want to proceed?',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Delete Permanently'),
-          ),
-        ],
-      ),
-    );
+  // Future<void> _deleteCompleteProfileImmediate(ProfileData profile) async {
+  //   // ✅ Show warning dialog
+  //   final confirm = await showDialog<bool>(
+  //     context: context,
+  //     builder: (context) => AlertDialog(
+  //       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+  //       title: const Text(
+  //         '⚠️ Permanently Delete Profile?',
+  //         style: TextStyle(color: Colors.red),
+  //       ),
+  //       content: Column(
+  //         mainAxisSize: MainAxisSize.min,
+  //         crossAxisAlignment: CrossAxisAlignment.start,
+  //         children: const [
+  //           Text(
+  //             'This will permanently delete your entire profile immediately.',
+  //             style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+  //           ),
+  //           SizedBox(height: 12),
+  //           Text('• All your roles will be removed'),
+  //           Text('• All your data will be deleted'),
+  //           Text('• This action cannot be undone'),
+  //           SizedBox(height: 12),
+  //           Text(
+  //             'Are you sure you want to proceed?',
+  //             style: TextStyle(fontWeight: FontWeight.bold),
+  //           ),
+  //         ],
+  //       ),
+  //       actions: [
+  //         TextButton(
+  //           onPressed: () => Navigator.pop(context, false),
+  //           child: const Text('Cancel'),
+  //         ),
+  //         ElevatedButton(
+  //           onPressed: () => Navigator.pop(context, true),
+  //           style: ElevatedButton.styleFrom(
+  //             backgroundColor: Colors.red,
+  //             foregroundColor: Colors.white,
+  //           ),
+  //           child: const Text('Delete Permanently'),
+  //         ),
+  //       ],
+  //     ),
+  //   );
 
-    if (confirm != true) return;
+  //   if (confirm != true) return;
 
-    setState(() => _isLoading = true);
+  //   setState(() => _isLoading = true);
 
-    try {
-      final supabase = Supabase.instance.client;
-      final user = supabase.auth.currentUser;
+  //   try {
+  //     final supabase = Supabase.instance.client;
+  //     final user = supabase.auth.currentUser;
 
-      if (user == null) throw Exception('User not found');
+  //     if (user == null) throw Exception('User not found');
 
-      debugPrint('🗑️ Deleting complete profile immediately: ${profile.email}');
+  //     debugPrint('🗑️ Deleting complete profile immediately: ${profile.email}');
 
-      // ✅ Use SessionManager to delete complete profile
-      final success = await SessionManager.deleteCompleteProfile(
-        email: profile.email,
-        userId: user.id,
-      );
+  //     // ✅ Use SessionManager to delete complete profile
+  //     final success = await SessionManager.deleteCompleteProfile(
+  //       email: profile.email,
+  //       userId: user.id,
+  //     );
 
-      if (!success) {
-        throw Exception('Failed to delete profile');
-      }
+  //     if (!success) {
+  //       throw Exception('Failed to delete profile');
+  //     }
 
-      debugPrint('✅ Complete profile deleted successfully');
+  //     debugPrint('✅ Complete profile deleted successfully');
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('✅ Profile deleted permanently'),
-            backgroundColor: Colors.green,
-            duration: Duration(seconds: 3),
-          ),
-        );
-      }
+  //     if (mounted) {
+  //       ScaffoldMessenger.of(context).showSnackBar(
+  //         const SnackBar(
+  //           content: Text('✅ Profile deleted permanently'),
+  //           backgroundColor: Colors.green,
+  //           duration: Duration(seconds: 3),
+  //         ),
+  //       );
+  //     }
 
-      // ✅ Check remaining profiles
-      final remainingProfiles = await SessionManager.getRemainingProfiles(
-        profile.email,
-      );
+  //     // ✅ Check remaining profiles
+  //     final remainingProfiles = await SessionManager.getRemainingProfiles(
+  //       profile.email,
+  //     );
 
-      if (remainingProfiles.isEmpty) {
-        if (mounted) {
-          await supabase.auth.signOut();
-          await appState.refreshState();
-          if (!mounted) return;
-          context.go('/login');
-        }
-      } else {
-        await _loadProfiles();
-        await appState.refreshState();
-      }
-    } catch (e) {
-      debugPrint('❌ Error deleting profile: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
-  }
+  //     if (remainingProfiles.isEmpty) {
+  //       if (mounted) {
+  //         await supabase.auth.signOut();
+  //         await appState.refreshState();
+  //         if (!mounted) return;
+  //         context.go('/login');
+  //       }
+  //     } else {
+  //       await _loadProfiles();
+  //       await appState.refreshState();
+  //     }
+  //   } catch (e) {
+  //     debugPrint('❌ Error deleting profile: $e');
+  //     if (mounted) {
+  //       ScaffoldMessenger.of(context).showSnackBar(
+  //         SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+  //       );
+  //     }
+  //   } finally {
+  //     if (mounted) setState(() => _isLoading = false);
+  //   }
+  // }
 
   // ============================================================
   // 🔥 PROFILE ACTIONS
