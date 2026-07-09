@@ -1,14 +1,15 @@
 import 'dart:async';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_application_1/screens/settings/permission_manager.dart';
 import 'package:flutter_application_1/services/notification_service.dart';
 import 'package:flutter_application_1/services/permission_service.dart';
-import 'package:flutter_application_1/services/permission_manager.dart';
 import 'package:flutter_application_1/widgets/permission_card.dart';
 import 'package:flutter_application_1/widgets/side_menu.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:universal_platform/universal_platform.dart';
 import '../../services/timezone_service.dart';
 
 class CustomerDashboard extends StatefulWidget {
@@ -52,7 +53,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   // Favorite Barbers
   List<Map<String, dynamic>> _favoriteBarbers = [];
 
-  // Special Offers (from database - only followed salons)
+  // Special Offers
   List<Map<String, dynamic>> _offers = [];
 
   // Followed Salons
@@ -82,7 +83,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     WidgetsBinding.instance.addObserver(this);
     _initializeTimezone();
     _loadCustomerData();
-    _checkCustomerStatus(); // ✅ NEW: Check customer status
+    _checkCustomerStatus();
     _loadDashboardData();
     _setupNotificationListeners();
     _searchController.addListener(_onSearchTextChanged);
@@ -103,7 +104,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       debugPrint('🔄 App resumed - refreshing notification count');
       _loadUnreadCount();
       _loadDashboardData();
-      _checkCustomerStatus(); // ✅ Check status on resume
+      _checkCustomerStatus();
     }
   }
 
@@ -125,7 +126,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // ✅ CHECK CUSTOMER STATUS (NEW)
+  // ✅ CHECK CUSTOMER STATUS
   // ============================================================
 
   Future<void> _checkCustomerStatus() async {
@@ -136,12 +137,11 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         return;
       }
 
-      // ✅ Check user_roles status
       final roleCheck = await supabase
           .from('user_roles')
           .select('status')
           .eq('user_id', user.id)
-          .eq('role_id', 3) // customer role ID
+          .eq('role_id', 3)
           .maybeSingle();
 
       if (roleCheck == null || roleCheck['status'] != 'active') {
@@ -160,7 +160,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         return;
       }
 
-      // ✅ Check profile status
       final profileCheck = await supabase
           .from('profiles')
           .select('is_active, is_blocked')
@@ -208,6 +207,318 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
+  // 🔥 SHOW PERMISSION CARD - WITH CONTEXT
+  // ============================================================
+
+  Future<void> _showPermissionCardContext({String? action}) async {
+    final shouldShow = await _permissionManager.shouldShowPermissionCard(
+      screen: 'customer_dashboard',
+      action: action,
+    );
+    
+    if (mounted) {
+      setState(() {
+        _showPermissionCard = shouldShow;
+      });
+    }
+  }
+
+  // ============================================================
+  // 🔥 ENABLE NOTIFICATIONS - UPDATED FOR WEB + CONTEXT
+  // ============================================================
+
+  Future<void> _enableNotifications({String? action}) async {
+    setState(() => _showPermissionCard = false);
+
+    try {
+      final bool isWeb = UniversalPlatform.isWeb;
+
+      // Web - Check if already denied in browser
+      if (isWeb) {
+        final status = await _notificationService.getWebPermissionStatus();
+        if (status == 'denied') {
+          if (mounted) {
+            _showWebPermissionHelp();
+          }
+          return;
+        }
+      }
+
+      final canAsk = await _permissionManager.canAskSystemPermission();
+      if (!canAsk) {
+        if (mounted) {
+          _showSettingsDialog();
+        }
+        return;
+      }
+
+      if (!mounted) return;
+
+      // ✅ Use PermissionManager with context
+      await _permissionService.requestPermissionAtAction(
+        context: context,
+        action: action ?? 'customer_dashboard',
+        customTitle: _permissionManager.getPermissionCardTitle(action: action),
+        customMessage: _permissionManager.getPermissionCardMessage(action: action),
+        onGranted: () async {
+          debugPrint('✅ Permission granted callback');
+          await _permissionManager.markPermissionGranted();
+
+          if (mounted) {
+            setState(() {
+              _hasPermission = true;
+              _showPermissionCard = false;
+            });
+
+            final message = isWeb
+                ? '✅ Notifications enabled in browser!'
+                : '✅ Notifications enabled!';
+
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(message),
+                backgroundColor: Colors.green,
+                duration: const Duration(seconds: 3),
+              ),
+            );
+
+            _loadDashboardData();
+          }
+        },
+        onDenied: () async {
+          debugPrint('❌ Permission denied callback');
+          await _permissionManager.markPermissionDenied(permanent: false);
+
+          if (mounted) {
+            final message = isWeb
+                ? 'You can enable notifications later from browser settings'
+                : 'You can enable later from settings';
+
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(message),
+                backgroundColor: Colors.orange,
+                duration: const Duration(seconds: 3),
+              ),
+            );
+          }
+        },
+      );
+    } catch (e) {
+      debugPrint('❌ Error enabling notifications: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  // ============================================================
+  // 🔥 CONTEXTUAL ACTIONS - UPDATED
+  // ============================================================
+
+  void _bookAppointment() {
+    // ✅ Show permission card before booking
+    if (!_hasPermission) {
+      _showPermissionCardContext(action: 'booking');
+      if (_showPermissionCard) {
+        return; // Show card first, don't navigate
+      }
+    }
+    context.push('/customer/booking-flow');
+  }
+
+  void _createVipBooking() {
+    // ✅ Show permission card before VIP booking
+    if (!_hasPermission) {
+      _showPermissionCardContext(action: 'vip');
+      if (_showPermissionCard) {
+        return;
+      }
+    }
+    context.push('/customer/vip-booking');
+  }
+
+  void _viewAllOffers() {
+    // ✅ Show permission card before offers
+    if (!_hasPermission) {
+      _showPermissionCardContext(action: 'offer');
+      if (_showPermissionCard) {
+        return;
+      }
+    }
+    context.push('/customer/offers');
+  }
+
+  Future<void> _viewNotifications() async {
+    // ✅ Show permission card before notifications
+    if (!_hasPermission) {
+      _showPermissionCardContext(action: 'notification');
+      if (_showPermissionCard) {
+        return;
+      }
+    }
+    
+    final result = await context.push('/notifications?role=customer');
+    await _refreshUnreadCount();
+    if (result == true) {
+      _loadDashboardData();
+    }
+  }
+
+  void _viewLoyaltyProgram() {
+    context.push('/customer/loyalty');
+  }
+
+  void _viewFavoriteBarbers() {
+    context.push('/customer/favorites');
+  }
+
+  // ============================================================
+  // 🔥 SHOW WEB PERMISSION HELP
+  // ============================================================
+
+  void _showWebPermissionHelp() {
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        title: const Row(
+          children: [
+            Text('🌐'),
+            SizedBox(width: 8),
+            Text('Browser Notification Settings'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'To enable notifications, please follow these steps:',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            _buildWebStep('1', 'Click the 🔒 lock icon in the address bar'),
+            const SizedBox(height: 8),
+            _buildWebStep('2', 'Click "Site settings" or "Permissions"'),
+            const SizedBox(height: 8),
+            _buildWebStep('3', 'Find "Notifications" and select "Allow"'),
+            const SizedBox(height: 8),
+            _buildWebStep('4', 'Refresh the page'),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.amber.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.amber.shade200),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline, color: Colors.amber.shade700),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Once enabled, you\'ll receive notifications even when the tab is not active',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.amber.shade800,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Later'),
+          ),
+          ElevatedButton.icon(
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              _permissionService.refreshWebPage();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFFF6B8B),
+              foregroundColor: Colors.white,
+            ),
+            icon: const Icon(Icons.refresh),
+            label: const Text('Refresh Page'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWebStep(String number, String text) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 24,
+          height: 24,
+          decoration: BoxDecoration(
+            color: const Color(0xFFFF6B8B).withAlpha(20),
+            shape: BoxShape.circle,
+          ),
+          child: Center(
+            child: Text(
+              number,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFFFF6B8B),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(child: Text(text, style: const TextStyle(fontSize: 14))),
+      ],
+    );
+  }
+
+  void _showSettingsDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('🔔 Notifications Disabled'),
+        content: const Text(
+          'To enable notifications, please go to your device settings.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _permissionService.openAppSettings();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFFF6B8B),
+            ),
+            child: const Text('Open Settings'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _handleNotNow() async {
+    setState(() => _showPermissionCard = false);
+    await _permissionManager.markPermissionShown('customer_dashboard');
+  }
+
+  // ============================================================
   // TIMEZONE INITIALIZATION
   // ============================================================
 
@@ -249,7 +560,812 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // FIXED: PARSE DATE SAFELY
+  // LOAD DASHBOARD DATA - UPDATED
+  // ============================================================
+
+  Future<void> _loadDashboardData() async {
+    if (!mounted) return;
+    setState(() => _isLoading = true);
+
+    try {
+      final user = supabase.auth.currentUser;
+      if (user == null) {
+        if (mounted) setState(() => _isLoading = false);
+        return;
+      }
+
+      await _checkCustomerStatus();
+      if (!_isActive) {
+        if (mounted) setState(() => _isLoading = false);
+        return;
+      }
+
+      await _loadFollowedSalons(user.id);
+
+      final appointments = await supabase
+          .from('appointments')
+          .select('''
+            id,
+            booking_number,
+            appointment_date,
+            start_time,
+            end_time,
+            status,
+            is_vip,
+            vip_booking_id,
+            price,
+            queue_number,
+            queue_token,
+            barber_id,
+            service_id,
+            variant_id,
+            services!inner (
+              name
+            ),
+            service_variants!left (
+              price,
+              duration,
+              salon_genders!left (display_name),
+              salon_age_categories!left (display_name)
+            )
+          ''')
+          .eq('customer_id', user.id)
+          .order('appointment_date', ascending: false);
+
+      int upcoming = 0;
+      int pending = 0;
+      int completed = 0;
+      int cancelled = 0;
+      int vip = 0;
+      int pendingVip = 0;
+      double totalSpent = 0.0;
+
+      for (var apt in appointments) {
+        final status = apt['status'] as String;
+        final isVip = apt['is_vip'] == true;
+
+        final double price =
+            (apt['price'] as num?)?.toDouble() ??
+            (apt['service_variants']?['price'] as num?)?.toDouble() ??
+            0.0;
+
+        if (status == 'confirmed' || status == 'pending') {
+          final dateStr = apt['appointment_date'] as String;
+          final date = DateTime.parse(dateStr);
+          if (date.isAfter(DateTime.now().subtract(const Duration(days: 1)))) {
+            upcoming++;
+          }
+        }
+
+        if (status == 'pending') pending++;
+        if (status == 'completed') {
+          completed++;
+          totalSpent += price;
+        }
+        if (status == 'cancelled') cancelled++;
+
+        if (isVip) {
+          vip++;
+          if (status == 'pending') pendingVip++;
+        }
+      }
+
+      final favoriteBarbers = await _getFavoriteBarbers(user.id);
+      final offers = await _loadOffersFromDatabase();
+
+      await _loadUnreadCount();
+
+      if (mounted) {
+        setState(() {
+          _upcomingBookings = upcoming;
+          pendingBookings = pending;
+          _completedBookings = completed;
+          _cancelledBookings = cancelled;
+          _vipBookings = vip;
+          _pendingVipBookings = pendingVip;
+          _totalSpent = totalSpent.toInt();
+          _loyaltyPoints = (totalSpent / 10).round();
+          _favoriteBarbers = favoriteBarbers;
+          _offers = offers;
+        });
+      }
+
+      // ✅ Check permission with PermissionManager - No action (initial load)
+      _hasPermission = await _notificationService.hasPermission();
+
+      if (!_hasPermission) {
+        _showPermissionCard = await _permissionManager.shouldShowPermissionCard(
+          screen: 'customer_dashboard',
+          action: null, // No action - normal check
+        );
+
+        // ✅ Web: Check if permission is denied in browser
+        if (UniversalPlatform.isWeb && _showPermissionCard) {
+          final status = await _notificationService.getWebPermissionStatus();
+          if (status == 'denied') {
+            _showPermissionCard = false;
+            if (mounted) {
+              _showWebPermissionHelp();
+            }
+          }
+        }
+      } else {
+        _showPermissionCard = false;
+      }
+
+      debugPrint(
+        '✅ Dashboard loaded: $upcoming upcoming, ${offers.length} offers, $_unreadNotificationCount unread notifications',
+      );
+    } catch (e) {
+      debugPrint('❌ Error loading dashboard data: $e');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  // ============================================================
+  // GET FAVORITE BARBERS
+  // ============================================================
+
+  Future<List<Map<String, dynamic>>> _getFavoriteBarbers(
+    String customerId,
+  ) async {
+    try {
+      final response = await supabase
+          .from('appointments')
+          .select('''
+            barber_id,
+            profiles!barber_id (
+              full_name,
+              avatar_url
+            )
+          ''')
+          .eq('customer_id', customerId)
+          .eq('status', 'completed');
+
+      final Map<String, Map<String, dynamic>> barberCount = {};
+      for (var apt in response) {
+        final barberId = apt['barber_id'] as String;
+        final barberData = apt['profiles'] as Map?;
+
+        if (!barberCount.containsKey(barberId)) {
+          barberCount[barberId] = {
+            'id': barberId,
+            'name': barberData?['full_name'] ?? 'Unknown',
+            'avatar': barberData?['avatar_url'],
+            'count': 0,
+          };
+        }
+        barberCount[barberId]!['count'] = barberCount[barberId]!['count'] + 1;
+      }
+
+      List<Map<String, dynamic>> barbers = barberCount.values.toList();
+      barbers.sort((a, b) => (b['count'] as int).compareTo(a['count'] as int));
+
+      for (var barber in barbers.take(5)) {
+        final reviewsResult = await supabase
+            .from('reviews')
+            .select('overall_rating')
+            .eq('barber_id', barber['id']);
+
+        double avgRating = 0;
+        if (reviewsResult.isNotEmpty) {
+          double total = 0;
+          for (var review in reviewsResult) {
+            total += (review['overall_rating'] as num?)?.toDouble() ?? 0;
+          }
+          avgRating = total / reviewsResult.length;
+        }
+        barber['rating'] = avgRating > 0 ? avgRating : 4.5;
+      }
+
+      return barbers.take(5).toList();
+    } catch (e) {
+      debugPrint('❌ Error getting favorite barbers: $e');
+      return [];
+    }
+  }
+
+  // ============================================================
+  // NOTIFICATION LISTENERS
+  // ============================================================
+
+  void _setupNotificationListeners() {
+    try {
+      FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+        debugPrint('📨 New foreground message received: ${message.data}');
+        _loadUnreadCount();
+
+        final type = message.data['type'];
+        if (type == 'booking_confirmed' || type == 'vip_approved') {
+          _loadDashboardData();
+        }
+      });
+
+      FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+        debugPrint('📱 App opened from notification tap');
+        _loadUnreadCount();
+        _handleNotificationTap(message);
+      });
+
+      FirebaseMessaging.instance.getInitialMessage().then((message) {
+        if (message != null) {
+          debugPrint('📱 App launched from terminated state with notification');
+          _loadUnreadCount();
+          _handleNotificationTap(message);
+        }
+      });
+
+      FirebaseMessaging.instance.onTokenRefresh.listen((newToken) {
+        debugPrint('🔄 FCM Token refreshed: $newToken');
+      });
+    } catch (e) {
+      debugPrint('❌ Error setting up notification listeners: $e');
+    }
+  }
+
+  void _handleNotificationTap(RemoteMessage message) {
+    try {
+      final type = message.data['type'];
+      final bookingId = message.data['booking_id'];
+
+      debugPrint('🔔 Notification tapped - Type: $type, BookingId: $bookingId');
+
+      if (type == 'booking_confirmed' || type == 'booking_update') {
+        if (bookingId != null && mounted) {
+          context.push('/customer/booking-details', extra: bookingId);
+        } else {
+          _viewMyBookings();
+        }
+      } else if (type == 'vip_approved' || type == 'vip_update') {
+        _viewVipBookings();
+      } else if (type == 'offer') {
+        _viewAllOffers();
+      } else {
+        _viewNotifications();
+      }
+    } catch (e) {
+      debugPrint('❌ Error handling notification tap: $e');
+      _viewNotifications();
+    }
+  }
+
+  // ============================================================
+  // NAVIGATION METHODS
+  // ============================================================
+
+  void _viewMyBookings() {
+    context.push('/customer/my-bookings');
+  }
+
+  void _viewVipBookings() {
+    context.push('/customer/vip-bookings');
+  }
+
+  void _openDrawer() {
+    try {
+      if (_scaffoldKey.currentState != null) {
+        _scaffoldKey.currentState!.openDrawer();
+      } else {
+        Scaffold.of(context).openDrawer();
+      }
+    } catch (e) {
+      debugPrint('❌ Error opening drawer: $e');
+    }
+  }
+
+  // ============================================================
+  // LOAD OFFERS FROM FOLLOWED SALONS
+  // ============================================================
+
+  Future<List<Map<String, dynamic>>> _loadOffersFromDatabase() async {
+    try {
+      final user = supabase.auth.currentUser;
+      if (user == null) return [];
+
+      final followedSalonsResult = await supabase
+          .from('salon_followers')
+          .select('salon_id')
+          .eq('customer_id', user.id);
+
+      if (followedSalonsResult.isEmpty) {
+        debugPrint('📭 No followed salons found, no offers to show');
+        return [];
+      }
+
+      final List<int> followedSalonIds = [];
+      for (var item in followedSalonsResult) {
+        followedSalonIds.add(item['salon_id'] as int);
+      }
+
+      debugPrint('📋 Followed salon IDs: $followedSalonIds');
+
+      final today = DateTime.now().toIso8601String().split('T')[0];
+
+      final result = await supabase
+          .from('offers')
+          .select('''
+            id,
+            title,
+            description,
+            discount_type,
+            discount_value,
+            points_required,
+            valid_from,
+            valid_to,
+            image_url,
+            salon_id,
+            salons:salon_id (
+              id,
+              name,
+              logo_url,
+              address
+            )
+          ''')
+          .inFilter('salon_id', followedSalonIds)
+          .eq('is_active', true)
+          .lte('valid_from', today)
+          .gte('valid_to', today)
+          .order('created_at', ascending: false)
+          .limit(20);
+
+      if (result.isNotEmpty) {
+        debugPrint('✅ Loaded ${result.length} offers from followed salons');
+        return List<Map<String, dynamic>>.from(result);
+      } else {
+        debugPrint('📭 No active offers found in followed salons');
+      }
+    } catch (e) {
+      debugPrint('❌ Error loading offers from followed salons: $e');
+    }
+
+    return [];
+  }
+
+  // ============================================================
+  // LOAD FOLLOWED SALONS
+  // ============================================================
+
+  Future<void> _loadFollowedSalons(String userId) async {
+    try {
+      setState(() => _isLoadingSalons = true);
+
+      final result = await supabase.rpc(
+        'get_followed_salons_with_counts',
+        params: {'p_customer_id': userId},
+      );
+
+      if (result != null && result.isNotEmpty) {
+        final List<Map<String, dynamic>> salons = [];
+
+        for (final salon in result) {
+          salons.add({
+            'id': salon['id'],
+            'name': salon['name'] ?? 'Salon',
+            'logo_url': salon['logo_url'],
+            'address': salon['address'] ?? 'Address not available',
+            'phone': salon['phone'] ?? '',
+            'open_time': salon['open_time'] ?? '09:00:00',
+            'close_time': salon['close_time'] ?? '18:00:00',
+            'follower_count': salon['follower_count'] ?? 0,
+            'booking_count': salon['booking_count'] ?? 0,
+          });
+        }
+
+        if (mounted) {
+          setState(() {
+            _followedSalons = salons;
+          });
+        }
+        debugPrint('✅ Loaded ${_followedSalons.length} followed salons');
+      } else {
+        if (mounted) {
+          setState(() {
+            _followedSalons = [];
+          });
+        }
+        debugPrint('📭 No followed salons found');
+      }
+    } catch (e) {
+      debugPrint('❌ Error loading followed salons: $e');
+      if (mounted) {
+        setState(() {
+          _followedSalons = [];
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _isLoadingSalons = false);
+    }
+  }
+
+  // ============================================================
+  // LOAD UNREAD NOTIFICATION COUNT
+  // ============================================================
+
+  Future<void> _loadUnreadCount() async {
+    if (_isRefreshingCount) return;
+
+    try {
+      _isRefreshingCount = true;
+      final user = supabase.auth.currentUser;
+      if (user == null) return;
+
+      final prefs = await SharedPreferences.getInstance();
+      final cachedCount = prefs.getInt('cached_unread_count_${user.id}') ?? 0;
+
+      if (mounted && _unreadNotificationCount != cachedCount) {
+        setState(() {
+          _unreadNotificationCount = cachedCount;
+        });
+      }
+
+      final count = await _notificationService.getUnreadCount(user.id);
+
+      await prefs.setInt('cached_unread_count_${user.id}', count);
+
+      if (mounted) {
+        setState(() {
+          _unreadNotificationCount = count;
+        });
+      }
+
+      debugPrint('📬 Unread notifications: $_unreadNotificationCount');
+    } catch (e) {
+      debugPrint('❌ Error loading unread count: $e');
+    } finally {
+      _isRefreshingCount = false;
+    }
+  }
+
+  Future<void> _refreshUnreadCount() async {
+    try {
+      final user = supabase.auth.currentUser;
+      if (user == null) return;
+
+      final count = await _notificationService.getUnreadCount(user.id);
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt('cached_unread_count_${user.id}', count);
+
+      if (mounted) {
+        setState(() {
+          _unreadNotificationCount = count;
+        });
+      }
+
+      debugPrint('🔄 Refreshed unread count: $_unreadNotificationCount');
+    } catch (e) {
+      debugPrint('❌ Error refreshing unread count: $e');
+    }
+  }
+
+  // ============================================================
+  // APPLY OFFER METHOD
+  // ============================================================
+
+  void _showSnackBar(String message, Color color) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: color,
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
+  Future<void> _applyOffer(Map<String, dynamic> offer) async {
+    try {
+      final user = supabase.auth.currentUser;
+      if (user == null) {
+        if (mounted) {
+          _showSnackBar('Please login to apply offers', Colors.orange);
+          context.push('/login');
+        }
+        return;
+      }
+
+      final customerCheck = await supabase
+          .from('user_roles')
+          .select('status')
+          .eq('user_id', user.id)
+          .eq('role_id', 3)
+          .maybeSingle();
+
+      if (customerCheck == null || customerCheck['status'] != 'active') {
+        if (mounted) {
+          _showSnackBar(
+            'Your account is not active. Please contact support.',
+            Colors.red,
+          );
+        }
+        return;
+      }
+
+      final profileCheck = await supabase
+          .from('profiles')
+          .select('is_active, is_blocked')
+          .eq('id', user.id)
+          .maybeSingle();
+
+      if (profileCheck != null) {
+        if (profileCheck['is_blocked'] == true) {
+          if (mounted) {
+            _showSnackBar(
+              'Your account has been blocked. Please contact support.',
+              Colors.red,
+            );
+          }
+          return;
+        }
+        if (profileCheck['is_active'] == false) {
+          if (mounted) {
+            _showSnackBar(
+              'Your profile is inactive. Please contact support.',
+              Colors.red,
+            );
+          }
+          return;
+        }
+      }
+
+      if (!_isOfferActive(offer)) {
+        if (mounted) {
+          _showSnackBar('This offer has expired', Colors.red);
+        }
+        return;
+      }
+
+      final pointsRequired = offer['points_required'] ?? 0;
+      if (pointsRequired > 0) {
+        final loyaltyResult = await supabase
+            .from('customer_loyalty')
+            .select('current_points')
+            .eq('customer_id', user.id)
+            .maybeSingle();
+
+        final userPoints = loyaltyResult?['current_points'] ?? 0;
+        if (userPoints < pointsRequired) {
+          if (mounted) {
+            _showSnackBar(
+              'You need $pointsRequired points to apply this offer',
+              Colors.orange,
+            );
+          }
+          return;
+        }
+      }
+
+      final usageLimit = offer['usage_limit'];
+      final usedCount = offer['used_count'] ?? 0;
+      if (usageLimit != null && usedCount >= usageLimit) {
+        if (mounted) {
+          _showSnackBar('This offer has reached its usage limit', Colors.red);
+        }
+        return;
+      }
+
+      final existingOffer = await supabase
+          .from('customer_offers')
+          .select('id, status')
+          .eq('customer_id', user.id)
+          .eq('offer_id', offer['id'])
+          .maybeSingle();
+
+      if (existingOffer != null) {
+        if (existingOffer['status'] == 'active') {
+          if (mounted) {
+            _showSnackBar('You have already applied this offer', Colors.orange);
+          }
+          return;
+        } else if (existingOffer['status'] == 'used') {
+          if (mounted) {
+            _showSnackBar('You have already used this offer', Colors.red);
+          }
+          return;
+        }
+      }
+
+      if (!mounted) return;
+
+      final confirmed = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext dialogContext) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          title: Row(
+            children: [
+              Text(
+                _getDiscountIcon(offer['discount_type']),
+                style: const TextStyle(fontSize: 28),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  offer['title'],
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(offer['description'] ?? ''),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: _getDiscountColor(
+                    offer['discount_type'],
+                  ).withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Center(
+                  child: Text(
+                    _getDiscountText(offer),
+                    style: TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                      color: _getDiscountColor(offer['discount_type']),
+                    ),
+                  ),
+                ),
+              ),
+              if (pointsRequired > 0) ...[
+                const SizedBox(height: 12),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.star, color: Colors.amber, size: 20),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Requires $pointsRequired loyalty points',
+                      style: const TextStyle(fontSize: 14),
+                    ),
+                  ],
+                ),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                if (mounted) {
+                  Navigator.pop(dialogContext, false);
+                }
+              },
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                if (mounted) {
+                  Navigator.pop(dialogContext, true);
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFFF6B8B),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: const Text('Apply Offer'),
+            ),
+          ],
+        ),
+      );
+
+      if (!mounted) return;
+      if (confirmed != true) return;
+
+      await supabase.from('customer_offers').insert({
+        'customer_id': user.id,
+        'offer_id': offer['id'],
+        'claimed_at': DateTime.now().toIso8601String(),
+        'expires_at': offer['valid_to'],
+        'status': 'active',
+      });
+
+      await supabase
+          .from('offers')
+          .update({'used_count': (usedCount + 1)})
+          .eq('id', offer['id']);
+
+      if (pointsRequired > 0) {
+        final loyaltyResult = await supabase
+            .from('customer_loyalty')
+            .select('current_points')
+            .eq('customer_id', user.id)
+            .maybeSingle();
+
+        final currentPoints = loyaltyResult?['current_points'] ?? 0;
+        final newPoints = currentPoints - pointsRequired;
+
+        await supabase
+            .from('customer_loyalty')
+            .update({
+              'current_points': newPoints,
+              'updated_at': DateTime.now().toIso8601String(),
+            })
+            .eq('customer_id', user.id);
+
+        await supabase.from('loyalty_transactions').insert({
+          'customer_id': user.id,
+          'points': -pointsRequired,
+          'type': 'redeem',
+          'source': 'offer',
+          'reference_id': offer['id'].toString(),
+          'description':
+              'Redeemed $pointsRequired points for ${offer['title']}',
+          'created_at': DateTime.now().toIso8601String(),
+        });
+      }
+
+      if (mounted) {
+        _showSnackBar(
+          '✅ "${offer['title']}" applied successfully!',
+          Colors.green,
+        );
+      }
+
+      if (mounted) {
+        context.push('/customer/booking-flow', extra: {'offer': offer});
+      }
+    } catch (e) {
+      debugPrint('Error applying offer: $e');
+      if (mounted) {
+        _showSnackBar('Error applying offer. Please try again.', Colors.red);
+      }
+    }
+  }
+
+  String _getDiscountText(Map<String, dynamic> offer) {
+    if (offer['discount_type'] == 'percentage') {
+      return '${offer['discount_value']}% OFF';
+    } else if (offer['discount_type'] == 'fixed') {
+      return 'Rs. ${offer['discount_value']} OFF';
+    } else {
+      return 'FREE SERVICE';
+    }
+  }
+
+  String _getDiscountIcon(String? discountType) {
+    switch (discountType) {
+      case 'percentage':
+        return '💰';
+      case 'fixed':
+        return '💵';
+      case 'free_service':
+        return '🎁';
+      default:
+        return '🏷️';
+    }
+  }
+
+  Color _getDiscountColor(String? discountType) {
+    switch (discountType) {
+      case 'percentage':
+        return const Color(0xFFFF6B8B);
+      case 'fixed':
+        return Colors.green.shade600;
+      case 'free_service':
+        return Colors.purple.shade600;
+      default:
+        return Colors.orange.shade600;
+    }
+  }
+
+  // ============================================================
+  // DATE HELPERS
   // ============================================================
 
   DateTime _parseDateSafely(String dateStr) {
@@ -259,10 +1375,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     }
     return DateTime.parse(processedStr).toUtc();
   }
-
-  // ============================================================
-  // FIXED: CHECK OFFER ACTIVE
-  // ============================================================
 
   bool _isOfferActive(Map<String, dynamic> offer) {
     try {
@@ -294,10 +1406,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     }
   }
 
-  // ============================================================
-  // FIXED: GET DAYS LEFT
-  // ============================================================
-
   int _getDaysLeft(String validToUtc) {
     try {
       final utcDate = _parseDateSafely(validToUtc);
@@ -318,10 +1426,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       return -1;
     }
   }
-
-  // ============================================================
-  // FIXED: TIMEZONE CONVERSION METHODS
-  // ============================================================
 
   String _convertUtcToLocalTime(String? utcTime, DateTime referenceDate) {
     if (utcTime == null || utcTime.isEmpty) return '--:--';
@@ -347,7 +1451,44 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // TIMEZONE SELECTOR WIDGET
+  // LOAD CUSTOMER DATA
+  // ============================================================
+
+  Future<void> _loadCustomerData() async {
+    try {
+      final user = supabase.auth.currentUser;
+      if (user == null) return;
+
+      _customerEmail = user.email ?? '';
+
+      final profile = await supabase
+          .from('profiles')
+          .select('full_name, avatar_url')
+          .eq('id', user.id)
+          .maybeSingle();
+
+      if (profile != null) {
+        setState(() {
+          _customerName =
+              profile['full_name'] ??
+              user.email?.split('@').first ??
+              'Guest User';
+          _customerImage = profile['avatar_url'];
+        });
+      } else {
+        setState(() {
+          _customerName = user.email?.split('@').first ?? 'Guest User';
+        });
+      }
+
+      debugPrint('✅ Loaded customer: $_customerName ($_customerEmail)');
+    } catch (e) {
+      debugPrint('❌ Error loading customer data: $e');
+    }
+  }
+
+  // ============================================================
+  // WIDGET BUILDERS
   // ============================================================
 
   Widget _buildTimezoneSelector() {
@@ -1257,966 +2398,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // LOAD CUSTOMER DATA
-  // ============================================================
-
-  Future<void> _loadCustomerData() async {
-    try {
-      final user = supabase.auth.currentUser;
-      if (user == null) return;
-
-      _customerEmail = user.email ?? '';
-
-      final profile = await supabase
-          .from('profiles')
-          .select('full_name, avatar_url')
-          .eq('id', user.id)
-          .maybeSingle();
-
-      if (profile != null) {
-        setState(() {
-          _customerName =
-              profile['full_name'] ??
-              user.email?.split('@').first ??
-              'Guest User';
-          _customerImage = profile['avatar_url'];
-        });
-      } else {
-        setState(() {
-          _customerName = user.email?.split('@').first ?? 'Guest User';
-        });
-      }
-
-      debugPrint('✅ Loaded customer: $_customerName ($_customerEmail)');
-    } catch (e) {
-      debugPrint('❌ Error loading customer data: $e');
-    }
-  }
-
-  // ============================================================
-  // LOAD FOLLOWED SALONS
-  // ============================================================
-
-  Future<void> _loadFollowedSalons(String userId) async {
-    try {
-      setState(() => _isLoadingSalons = true);
-
-      final result = await supabase.rpc(
-        'get_followed_salons_with_counts',
-        params: {'p_customer_id': userId},
-      );
-
-      if (result != null && result.isNotEmpty) {
-        final List<Map<String, dynamic>> salons = [];
-
-        for (final salon in result) {
-          salons.add({
-            'id': salon['id'],
-            'name': salon['name'] ?? 'Salon',
-            'logo_url': salon['logo_url'],
-            'address': salon['address'] ?? 'Address not available',
-            'phone': salon['phone'] ?? '',
-            'open_time': salon['open_time'] ?? '09:00:00',
-            'close_time': salon['close_time'] ?? '18:00:00',
-            'follower_count': salon['follower_count'] ?? 0,
-            'booking_count': salon['booking_count'] ?? 0,
-          });
-        }
-
-        if (mounted) {
-          setState(() {
-            _followedSalons = salons;
-          });
-        }
-        debugPrint('✅ Loaded ${_followedSalons.length} followed salons');
-      } else {
-        if (mounted) {
-          setState(() {
-            _followedSalons = [];
-          });
-        }
-        debugPrint('📭 No followed salons found');
-      }
-    } catch (e) {
-      debugPrint('❌ Error loading followed salons: $e');
-      if (mounted) {
-        setState(() {
-          _followedSalons = [];
-        });
-      }
-    } finally {
-      if (mounted) setState(() => _isLoadingSalons = false);
-    }
-  }
-
-  // ============================================================
-  // LOAD OFFERS FROM FOLLOWED SALONS
-  // ============================================================
-
-  Future<List<Map<String, dynamic>>> _loadOffersFromDatabase() async {
-    try {
-      final user = supabase.auth.currentUser;
-      if (user == null) return [];
-
-      final followedSalonsResult = await supabase
-          .from('salon_followers')
-          .select('salon_id')
-          .eq('customer_id', user.id);
-
-      if (followedSalonsResult.isEmpty) {
-        debugPrint('📭 No followed salons found, no offers to show');
-        return [];
-      }
-
-      final List<int> followedSalonIds = [];
-      for (var item in followedSalonsResult) {
-        followedSalonIds.add(item['salon_id'] as int);
-      }
-
-      debugPrint('📋 Followed salon IDs: $followedSalonIds');
-
-      final today = DateTime.now().toIso8601String().split('T')[0];
-
-      final result = await supabase
-          .from('offers')
-          .select('''
-            id,
-            title,
-            description,
-            discount_type,
-            discount_value,
-            points_required,
-            valid_from,
-            valid_to,
-            image_url,
-            salon_id,
-            salons:salon_id (
-              id,
-              name,
-              logo_url,
-              address
-            )
-          ''')
-          .inFilter('salon_id', followedSalonIds)
-          .eq('is_active', true)
-          .lte('valid_from', today)
-          .gte('valid_to', today)
-          .order('created_at', ascending: false)
-          .limit(20);
-
-      if (result.isNotEmpty) {
-        debugPrint('✅ Loaded ${result.length} offers from followed salons');
-        return List<Map<String, dynamic>>.from(result);
-      } else {
-        debugPrint('📭 No active offers found in followed salons');
-      }
-    } catch (e) {
-      debugPrint('❌ Error loading offers from followed salons: $e');
-    }
-
-    return [];
-  }
-
-  // ============================================================
-  // LOAD UNREAD NOTIFICATION COUNT
-  // ============================================================
-
-  Future<void> _loadUnreadCount() async {
-    if (_isRefreshingCount) return;
-
-    try {
-      _isRefreshingCount = true;
-      final user = supabase.auth.currentUser;
-      if (user == null) return;
-
-      final prefs = await SharedPreferences.getInstance();
-      final cachedCount = prefs.getInt('cached_unread_count_${user.id}') ?? 0;
-
-      if (mounted && _unreadNotificationCount != cachedCount) {
-        setState(() {
-          _unreadNotificationCount = cachedCount;
-        });
-      }
-
-      final count = await _notificationService.getUnreadCount(user.id);
-
-      await prefs.setInt('cached_unread_count_${user.id}', count);
-
-      if (mounted) {
-        setState(() {
-          _unreadNotificationCount = count;
-        });
-      }
-
-      debugPrint('📬 Unread notifications: $_unreadNotificationCount');
-    } catch (e) {
-      debugPrint('❌ Error loading unread count: $e');
-    } finally {
-      _isRefreshingCount = false;
-    }
-  }
-
-  Future<void> _refreshUnreadCount() async {
-    try {
-      final user = supabase.auth.currentUser;
-      if (user == null) return;
-
-      final count = await _notificationService.getUnreadCount(user.id);
-
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setInt('cached_unread_count_${user.id}', count);
-
-      if (mounted) {
-        setState(() {
-          _unreadNotificationCount = count;
-        });
-      }
-
-      debugPrint('🔄 Refreshed unread count: $_unreadNotificationCount');
-    } catch (e) {
-      debugPrint('❌ Error refreshing unread count: $e');
-    }
-  }
-
-  // ============================================================
-  // LOAD DASHBOARD DATA
-  // ============================================================
-
-  Future<void> _loadDashboardData() async {
-    if (!mounted) return;
-    setState(() => _isLoading = true);
-
-    try {
-      final user = supabase.auth.currentUser;
-      if (user == null) {
-        if (mounted) setState(() => _isLoading = false);
-        return;
-      }
-
-      // ✅ Check customer status first
-      await _checkCustomerStatus();
-      if (!_isActive) {
-        if (mounted) setState(() => _isLoading = false);
-        return;
-      }
-
-      await _loadFollowedSalons(user.id);
-
-      final appointments = await supabase
-          .from('appointments')
-          .select('''
-            id,
-            booking_number,
-            appointment_date,
-            start_time,
-            end_time,
-            status,
-            is_vip,
-            vip_booking_id,
-            price,
-            queue_number,
-            queue_token,
-            barber_id,
-            service_id,
-            variant_id,
-            services!inner (
-              name
-            ),
-            service_variants!left (
-              price,
-              duration,
-              salon_genders!left (display_name),
-              salon_age_categories!left (display_name)
-            )
-          ''')
-          .eq('customer_id', user.id)
-          .order('appointment_date', ascending: false);
-
-      int upcoming = 0;
-      int pending = 0;
-      int completed = 0;
-      int cancelled = 0;
-      int vip = 0;
-      int pendingVip = 0;
-      double totalSpent = 0.0;
-
-      for (var apt in appointments) {
-        final status = apt['status'] as String;
-        final isVip = apt['is_vip'] == true;
-
-        final double price =
-            (apt['price'] as num?)?.toDouble() ??
-            (apt['service_variants']?['price'] as num?)?.toDouble() ??
-            0.0;
-
-        if (status == 'confirmed' || status == 'pending') {
-          final dateStr = apt['appointment_date'] as String;
-          final date = DateTime.parse(dateStr);
-          if (date.isAfter(DateTime.now().subtract(const Duration(days: 1)))) {
-            upcoming++;
-          }
-        }
-
-        if (status == 'pending') pending++;
-        if (status == 'completed') {
-          completed++;
-          totalSpent += price;
-        }
-        if (status == 'cancelled') cancelled++;
-
-        if (isVip) {
-          vip++;
-          if (status == 'pending') pendingVip++;
-        }
-      }
-
-      final favoriteBarbers = await _getFavoriteBarbers(user.id);
-      final offers = await _loadOffersFromDatabase();
-
-      await _loadUnreadCount();
-
-      if (mounted) {
-        setState(() {
-          _upcomingBookings = upcoming;
-          pendingBookings = pending;
-          _completedBookings = completed;
-          _cancelledBookings = cancelled;
-          _vipBookings = vip;
-          _pendingVipBookings = pendingVip;
-          _totalSpent = totalSpent.toInt();
-          _loyaltyPoints = (totalSpent / 10).round();
-          _favoriteBarbers = favoriteBarbers;
-          _offers = offers;
-        });
-      }
-
-      _hasPermission = await _notificationService.hasPermission();
-      if (!_hasPermission) {
-        _showPermissionCard = await _permissionManager.shouldShowPermissionCard(
-          'customer_dashboard',
-        );
-      } else {
-        _showPermissionCard = false;
-      }
-
-      debugPrint(
-        '✅ Dashboard loaded: $upcoming upcoming, ${offers.length} offers, $_unreadNotificationCount unread notifications',
-      );
-    } catch (e) {
-      debugPrint('❌ Error loading dashboard data: $e');
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
-  }
-
-  // ============================================================
-  // GET FAVORITE BARBERS
-  // ============================================================
-
-  Future<List<Map<String, dynamic>>> _getFavoriteBarbers(
-    String customerId,
-  ) async {
-    try {
-      final response = await supabase
-          .from('appointments')
-          .select('''
-            barber_id,
-            profiles!barber_id (
-              full_name,
-              avatar_url
-            )
-          ''')
-          .eq('customer_id', customerId)
-          .eq('status', 'completed');
-
-      final Map<String, Map<String, dynamic>> barberCount = {};
-      for (var apt in response) {
-        final barberId = apt['barber_id'] as String;
-        final barberData = apt['profiles'] as Map?;
-
-        if (!barberCount.containsKey(barberId)) {
-          barberCount[barberId] = {
-            'id': barberId,
-            'name': barberData?['full_name'] ?? 'Unknown',
-            'avatar': barberData?['avatar_url'],
-            'count': 0,
-          };
-        }
-        barberCount[barberId]!['count'] = barberCount[barberId]!['count'] + 1;
-      }
-
-      List<Map<String, dynamic>> barbers = barberCount.values.toList();
-      barbers.sort((a, b) => (b['count'] as int).compareTo(a['count'] as int));
-
-      for (var barber in barbers.take(5)) {
-        final reviewsResult = await supabase
-            .from('reviews')
-            .select('overall_rating')
-            .eq('barber_id', barber['id']);
-
-        double avgRating = 0;
-        if (reviewsResult.isNotEmpty) {
-          double total = 0;
-          for (var review in reviewsResult) {
-            total += (review['overall_rating'] as num?)?.toDouble() ?? 0;
-          }
-          avgRating = total / reviewsResult.length;
-        }
-        barber['rating'] = avgRating > 0 ? avgRating : 4.5;
-      }
-
-      return barbers.take(5).toList();
-    } catch (e) {
-      debugPrint('❌ Error getting favorite barbers: $e');
-      return [];
-    }
-  }
-
-  // ============================================================
-  // NOTIFICATION LISTENERS
-  // ============================================================
-
-  void _setupNotificationListeners() {
-    try {
-      FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-        debugPrint('📨 New foreground message received: ${message.data}');
-        _loadUnreadCount();
-
-        final type = message.data['type'];
-        if (type == 'booking_confirmed' || type == 'vip_approved') {
-          _loadDashboardData();
-        }
-      });
-
-      FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
-        debugPrint('📱 App opened from notification tap');
-        _loadUnreadCount();
-        _handleNotificationTap(message);
-      });
-
-      FirebaseMessaging.instance.getInitialMessage().then((message) {
-        if (message != null) {
-          debugPrint('📱 App launched from terminated state with notification');
-          _loadUnreadCount();
-          _handleNotificationTap(message);
-        }
-      });
-
-      FirebaseMessaging.instance.onTokenRefresh.listen((newToken) {
-        debugPrint('🔄 FCM Token refreshed: $newToken');
-      });
-    } catch (e) {
-      debugPrint('❌ Error setting up notification listeners: $e');
-    }
-  }
-
-  void _handleNotificationTap(RemoteMessage message) {
-    try {
-      final type = message.data['type'];
-      final bookingId = message.data['booking_id'];
-
-      debugPrint('🔔 Notification tapped - Type: $type, BookingId: $bookingId');
-
-      if (type == 'booking_confirmed' || type == 'booking_update') {
-        if (bookingId != null && mounted) {
-          context.push('/customer/booking-details', extra: bookingId);
-        } else {
-          _viewMyBookings();
-        }
-      } else if (type == 'vip_approved' || type == 'vip_update') {
-        _viewVipBookings();
-      } else if (type == 'offer') {
-        _viewAllOffers();
-      } else {
-        _viewNotifications();
-      }
-    } catch (e) {
-      debugPrint('❌ Error handling notification tap: $e');
-      _viewNotifications();
-    }
-  }
-
-  Future<void> _enableNotifications() async {
-    setState(() => _showPermissionCard = false);
-    try {
-      final canAsk = await _permissionManager.canAskSystemPermission();
-      if (!canAsk) {
-        _showSettingsDialog();
-        return;
-      }
-      if (!mounted) return;
-      await _permissionService.requestPermissionAtAction(
-        context: context,
-        action: 'customer_dashboard',
-        customTitle: '🔔 Get Booking Updates',
-        customMessage:
-            'Get instant notifications for booking confirmations, VIP approvals, and special offers',
-        onGranted: () async {
-          await _permissionManager.markPermissionGranted();
-          setState(() {
-            _hasPermission = true;
-            _showPermissionCard = false;
-          });
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('✅ Notifications enabled!'),
-                backgroundColor: Colors.green,
-              ),
-            );
-          }
-        },
-        onDenied: () async {
-          await _permissionManager.markPermissionDenied(permanent: false);
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('You can enable later from settings'),
-                backgroundColor: Colors.orange,
-              ),
-            );
-          }
-        },
-      );
-    } catch (e) {
-      debugPrint('❌ Error enabling notifications: $e');
-    }
-  }
-
-  void _showSettingsDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('🔔 Notifications Disabled'),
-        content: const Text(
-          'To enable notifications, please go to your device settings.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _permissionService.openAppSettings();
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFFF6B8B),
-            ),
-            child: const Text('Open Settings'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _handleNotNow() async {
-    setState(() => _showPermissionCard = false);
-    await _permissionManager.markPermissionShown('customer_dashboard');
-  }
-
-  // ============================================================
-  // NAVIGATION METHODS
-  // ============================================================
-
-  void _viewMyBookings() {
-    context.push('/customer/my-bookings');
-  }
-
-  void _viewVipBookings() {
-    context.push('/customer/vip-bookings');
-  }
-
-  void _createVipBooking() {
-    context.push('/customer/vip-booking');
-  }
-
-  void _bookAppointment() {
-    context.push('/customer/booking-flow');
-  }
-
-  void _viewAllOffers() {
-    context.push('/customer/offers');
-  }
-
-  Future<void> _viewNotifications() async {
-    debugPrint('🔔 Navigating to notifications page');
-
-    final result = await context.push('/notifications?role=customer');
-
-    debugPrint('🔔 Returning from notifications page, refreshing count');
-    await _refreshUnreadCount();
-
-    if (result == true) {
-      debugPrint('🔔 Notifications were marked as read, refreshing dashboard');
-      _loadDashboardData();
-    }
-  }
-
-  void _viewLoyaltyProgram() {
-    context.push('/customer/loyalty');
-  }
-
-  void _viewFavoriteBarbers() {
-    context.push('/customer/favorites');
-  }
-
-  // ============================================================
-  // APPLY OFFER METHOD
-  // ============================================================
-
-  void _showSnackBar(String message, Color color) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: color,
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 3),
-      ),
-    );
-  }
-
-  // ============================================================
-  // ✅ APPLY OFFER WITH STATUS CHECK (UPDATED)
-  // ============================================================
-
-  Future<void> _applyOffer(Map<String, dynamic> offer) async {
-    try {
-      final user = supabase.auth.currentUser;
-      if (user == null) {
-        if (mounted) {
-          _showSnackBar('Please login to apply offers', Colors.orange);
-          context.push('/login');
-        }
-        return;
-      }
-
-      // ✅ STEP 1: Check if customer has active role
-      final customerCheck = await supabase
-          .from('user_roles')
-          .select('status')
-          .eq('user_id', user.id)
-          .eq('role_id', 3) // customer role ID
-          .maybeSingle();
-
-      if (customerCheck == null || customerCheck['status'] != 'active') {
-        if (mounted) {
-          _showSnackBar(
-            'Your account is not active. Please contact support.',
-            Colors.red,
-          );
-        }
-        return;
-      }
-
-      // ✅ STEP 2: Check if profile is active and not blocked
-      final profileCheck = await supabase
-          .from('profiles')
-          .select('is_active, is_blocked')
-          .eq('id', user.id)
-          .maybeSingle();
-
-      if (profileCheck != null) {
-        if (profileCheck['is_blocked'] == true) {
-          if (mounted) {
-            _showSnackBar(
-              'Your account has been blocked. Please contact support.',
-              Colors.red,
-            );
-          }
-          return;
-        }
-        if (profileCheck['is_active'] == false) {
-          if (mounted) {
-            _showSnackBar(
-              'Your profile is inactive. Please contact support.',
-              Colors.red,
-            );
-          }
-          return;
-        }
-      }
-
-      // Check offer validity
-      if (!_isOfferActive(offer)) {
-        if (mounted) {
-          _showSnackBar('This offer has expired', Colors.red);
-        }
-        return;
-      }
-
-      // Check points requirement
-      final pointsRequired = offer['points_required'] ?? 0;
-      if (pointsRequired > 0) {
-        final loyaltyResult = await supabase
-            .from('customer_loyalty')
-            .select('current_points')
-            .eq('customer_id', user.id)
-            .maybeSingle();
-
-        final userPoints = loyaltyResult?['current_points'] ?? 0;
-        if (userPoints < pointsRequired) {
-          if (mounted) {
-            _showSnackBar(
-              'You need $pointsRequired points to apply this offer',
-              Colors.orange,
-            );
-          }
-          return;
-        }
-      }
-
-      // Check usage limit
-      final usageLimit = offer['usage_limit'];
-      final usedCount = offer['used_count'] ?? 0;
-      if (usageLimit != null && usedCount >= usageLimit) {
-        if (mounted) {
-          _showSnackBar('This offer has reached its usage limit', Colors.red);
-        }
-        return;
-      }
-
-      // Check if already applied
-      final existingOffer = await supabase
-          .from('customer_offers')
-          .select('id, status')
-          .eq('customer_id', user.id)
-          .eq('offer_id', offer['id'])
-          .maybeSingle();
-
-      if (existingOffer != null) {
-        if (existingOffer['status'] == 'active') {
-          if (mounted) {
-            _showSnackBar('You have already applied this offer', Colors.orange);
-          }
-          return;
-        } else if (existingOffer['status'] == 'used') {
-          if (mounted) {
-            _showSnackBar('You have already used this offer', Colors.red);
-          }
-          return;
-        }
-      }
-
-      if (!mounted) return;
-
-      // Show confirmation dialog
-      final confirmed = await showDialog<bool>(
-        context: context,
-        barrierDismissible: false,
-        builder: (BuildContext dialogContext) => AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
-          title: Row(
-            children: [
-              Text(
-                _getDiscountIcon(offer['discount_type']),
-                style: const TextStyle(fontSize: 28),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  offer['title'],
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(offer['description'] ?? ''),
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: _getDiscountColor(
-                    offer['discount_type'],
-                  ).withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Center(
-                  child: Text(
-                    _getDiscountText(offer),
-                    style: TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                      color: _getDiscountColor(offer['discount_type']),
-                    ),
-                  ),
-                ),
-              ),
-              if (pointsRequired > 0) ...[
-                const SizedBox(height: 12),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.star, color: Colors.amber, size: 20),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Requires $pointsRequired loyalty points',
-                      style: const TextStyle(fontSize: 14),
-                    ),
-                  ],
-                ),
-              ],
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                if (mounted) {
-                  Navigator.pop(dialogContext, false);
-                }
-              },
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                if (mounted) {
-                  Navigator.pop(dialogContext, true);
-                }
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFFF6B8B),
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              child: const Text('Apply Offer'),
-            ),
-          ],
-        ),
-      );
-
-      if (!mounted) return;
-      if (confirmed != true) return;
-
-      // Save to customer_offers table
-      await supabase.from('customer_offers').insert({
-        'customer_id': user.id,
-        'offer_id': offer['id'],
-        'claimed_at': DateTime.now().toIso8601String(),
-        'expires_at': offer['valid_to'],
-        'status': 'active',
-      });
-
-      // Update offer usage count
-      await supabase
-          .from('offers')
-          .update({'used_count': (usedCount + 1)})
-          .eq('id', offer['id']);
-
-      // Deduct points if required
-      if (pointsRequired > 0) {
-        final loyaltyResult = await supabase
-            .from('customer_loyalty')
-            .select('current_points')
-            .eq('customer_id', user.id)
-            .maybeSingle();
-
-        final currentPoints = loyaltyResult?['current_points'] ?? 0;
-        final newPoints = currentPoints - pointsRequired;
-
-        await supabase
-            .from('customer_loyalty')
-            .update({
-              'current_points': newPoints,
-              'updated_at': DateTime.now().toIso8601String(),
-            })
-            .eq('customer_id', user.id);
-
-        await supabase.from('loyalty_transactions').insert({
-          'customer_id': user.id,
-          'points': -pointsRequired,
-          'type': 'redeem',
-          'source': 'offer',
-          'reference_id': offer['id'].toString(),
-          'description':
-              'Redeemed $pointsRequired points for ${offer['title']}',
-          'created_at': DateTime.now().toIso8601String(),
-        });
-      }
-
-      // Show success message
-      if (mounted) {
-        _showSnackBar(
-          '✅ "${offer['title']}" applied successfully!',
-          Colors.green,
-        );
-      }
-
-      // Navigate to booking flow
-      if (mounted) {
-        context.push('/customer/booking-flow', extra: {'offer': offer});
-      }
-    } catch (e) {
-      debugPrint('Error applying offer: $e');
-      if (mounted) {
-        _showSnackBar('Error applying offer. Please try again.', Colors.red);
-      }
-    }
-  }
-
-  String _getDiscountText(Map<String, dynamic> offer) {
-    if (offer['discount_type'] == 'percentage') {
-      return '${offer['discount_value']}% OFF';
-    } else if (offer['discount_type'] == 'fixed') {
-      return 'Rs. ${offer['discount_value']} OFF';
-    } else {
-      return 'FREE SERVICE';
-    }
-  }
-
-  String _getDiscountIcon(String? discountType) {
-    switch (discountType) {
-      case 'percentage':
-        return '💰';
-      case 'fixed':
-        return '💵';
-      case 'free_service':
-        return '🎁';
-      default:
-        return '🏷️';
-    }
-  }
-
-  Color _getDiscountColor(String? discountType) {
-    switch (discountType) {
-      case 'percentage':
-        return const Color(0xFFFF6B8B);
-      case 'fixed':
-        return Colors.green.shade600;
-      case 'free_service':
-        return Colors.purple.shade600;
-      default:
-        return Colors.orange.shade600;
-    }
-  }
-
-  void _openDrawer() {
-    try {
-      if (_scaffoldKey.currentState != null) {
-        _scaffoldKey.currentState!.openDrawer();
-      } else {
-        Scaffold.of(context).openDrawer();
-      }
-    } catch (e) {
-      debugPrint('❌ Error opening drawer: $e');
-    }
-  }
-
-  // ============================================================
-  // WIDGET BUILDERS
+  // WIDGET BUILDERS - UI COMPONENTS
   // ============================================================
 
   Widget _buildHorizontalSalonCard(Map<String, dynamic> salon) {
@@ -3073,7 +3255,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       );
     }
 
-    // ✅ Show inactive message if not active
     if (!_isActive) {
       return Scaffold(
         key: _scaffoldKey,
@@ -3110,10 +3291,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
               const SizedBox(height: 8),
               Text(
                 'Your customer profile is not active.\nPlease contact support for assistance.',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.grey[500],
-                ),
+                style: TextStyle(fontSize: 14, color: Colors.grey[500]),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 24),
@@ -3218,13 +3396,13 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                   physics: const AlwaysScrollableScrollPhysics(),
                   child: Column(
                     children: [
+                      // ✅ PERMISSION CARD - Contextual Support
                       if (_showPermissionCard && !_hasPermission)
                         PermissionCard(
-                          onEnable: _enableNotifications,
+                          onEnable: () => _enableNotifications(action: null),
                           onNotNow: _handleNotNow,
-                          title: '🔔 Get Booking Updates',
-                          message:
-                              'Get instant notifications for booking confirmations, VIP approvals, and special offers',
+                          title: _permissionManager.getPermissionCardTitle(),
+                          message: _permissionManager.getPermissionCardMessage(),
                           compact: false,
                         ),
                       const SizedBox(height: 8),

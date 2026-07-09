@@ -3,8 +3,12 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:universal_platform/universal_platform.dart';
 import '../../services/notification_service.dart';
+import '../../services/permission_service.dart';
 import '../../services/timezone_service.dart';
+import '../../screens/settings/permission_manager.dart';
+import '../../widgets/permission_card.dart';
 
 class NotificationScreen extends StatefulWidget {
   final String? role; // 'customer', 'barber', 'owner'
@@ -20,6 +24,8 @@ class NotificationScreen extends StatefulWidget {
 
 class _NotificationScreenState extends State<NotificationScreen> {
   final NotificationService _notificationService = NotificationService();
+  final PermissionService _permissionService = PermissionService();
+  final PermissionManager _permissionManager = PermissionManager();
   final supabase = Supabase.instance.client;
 
   List<Map<String, dynamic>> _notifications = [];
@@ -27,6 +33,10 @@ class _NotificationScreenState extends State<NotificationScreen> {
   bool _hasError = false;
   String _errorMessage = '';
   String _selectedFilter = 'all'; // all, unread, read
+
+  // Permission state
+  bool _hasPermission = false;
+  bool _showPermissionCard = false;
 
   // Pagination variables
   bool _isLoadingMore = false;
@@ -46,6 +56,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
   void initState() {
     super.initState();
     _initializeTimezone();
+    _checkPermission();
     _scrollController.addListener(_onScroll);
   }
 
@@ -53,6 +64,275 @@ class _NotificationScreenState extends State<NotificationScreen> {
   void dispose() {
     _scrollController.dispose();
     super.dispose();
+  }
+
+  // ============================================
+  // 🔥 PERMISSION CHECK
+  // ============================================
+
+  Future<void> _checkPermission() async {
+    _hasPermission = await _notificationService.hasPermission();
+    
+    if (!_hasPermission) {
+      _showPermissionCard = await _permissionManager.shouldShowPermissionCard(
+        screen: 'notifications',
+        action: 'notification', // ✅ Important action
+      );
+      
+      if (UniversalPlatform.isWeb && _showPermissionCard) {
+        final status = await _notificationService.getWebPermissionStatus();
+        if (status == 'denied') {
+          _showPermissionCard = false;
+          if (mounted) {
+            _showWebPermissionHelp();
+          }
+        }
+      }
+    } else {
+      _showPermissionCard = false;
+    }
+    
+    if (mounted) setState(() {});
+  }
+
+  // ============================================
+  // 🔥 ENABLE NOTIFICATIONS
+  // ============================================
+
+  Future<void> _enableNotifications({String? action}) async {
+    setState(() => _showPermissionCard = false);
+
+    try {
+      final bool isWeb = UniversalPlatform.isWeb;
+
+      if (isWeb) {
+        final status = await _notificationService.getWebPermissionStatus();
+        if (status == 'denied') {
+          if (mounted) {
+            _showWebPermissionHelp();
+          }
+          return;
+        }
+      }
+
+      final canAsk = await _permissionManager.canAskSystemPermission();
+      if (!canAsk) {
+        if (mounted) {
+          _showSettingsDialog();
+        }
+        return;
+      }
+
+      if (!mounted) return;
+
+      await _permissionService.requestPermissionAtAction(
+        context: context,
+        action: action ?? 'notifications',
+        customTitle: _permissionManager.getPermissionCardTitle(action: action),
+        customMessage: _permissionManager.getPermissionCardMessage(action: action),
+        onGranted: () async {
+          debugPrint('✅ Permission granted callback');
+          await _permissionManager.markPermissionGranted();
+
+          if (mounted) {
+            setState(() {
+              _hasPermission = true;
+              _showPermissionCard = false;
+            });
+
+            final message = isWeb
+                ? '✅ Notifications enabled in browser!'
+                : '✅ Notifications enabled!';
+
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(message),
+                backgroundColor: Colors.green,
+                duration: const Duration(seconds: 3),
+              ),
+            );
+
+            await _loadNotifications();
+          }
+        },
+        onDenied: () async {
+          debugPrint('❌ Permission denied callback');
+          await _permissionManager.markPermissionDenied(permanent: false);
+
+          if (mounted) {
+            final message = isWeb
+                ? 'You can enable notifications later from browser settings'
+                : 'You can enable later from settings';
+
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(message),
+                backgroundColor: Colors.orange,
+                duration: const Duration(seconds: 3),
+              ),
+            );
+          }
+        },
+      );
+    } catch (e) {
+      debugPrint('❌ Error enabling notifications: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  // ============================================
+  // 🔥 SHOW WEB PERMISSION HELP
+  // ============================================
+
+  void _showWebPermissionHelp() {
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        title: const Row(
+          children: [
+            Text('🌐'),
+            SizedBox(width: 8),
+            Text('Browser Notification Settings'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'To enable notifications, please follow these steps:',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            _buildWebStep('1', 'Click the 🔒 lock icon in the address bar'),
+            const SizedBox(height: 8),
+            _buildWebStep('2', 'Click "Site settings" or "Permissions"'),
+            const SizedBox(height: 8),
+            _buildWebStep('3', 'Find "Notifications" and select "Allow"'),
+            const SizedBox(height: 8),
+            _buildWebStep('4', 'Refresh the page'),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.amber.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.amber.shade200),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline, color: Colors.amber.shade700),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Once enabled, you\'ll receive notifications even when the tab is not active',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.amber.shade800,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Later'),
+          ),
+          ElevatedButton.icon(
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              _permissionService.refreshWebPage();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFFF6B8B),
+              foregroundColor: Colors.white,
+            ),
+            icon: const Icon(Icons.refresh),
+            label: const Text('Refresh Page'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWebStep(String number, String text) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 24,
+          height: 24,
+          decoration: BoxDecoration(
+            color: const Color(0xFFFF6B8B).withAlpha(20),
+            shape: BoxShape.circle,
+          ),
+          child: Center(
+            child: Text(
+              number,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFFFF6B8B),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            text,
+            style: const TextStyle(fontSize: 14),
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _showSettingsDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('🔔 Notifications Disabled'),
+        content: const Text(
+          'To enable notifications, please go to your device settings.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _permissionService.openAppSettings();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFFF6B8B),
+            ),
+            child: const Text('Open Settings'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _handleNotNow() async {
+    setState(() => _showPermissionCard = false);
+    await _permissionManager.markPermissionShown('notifications');
   }
 
   // ============================================
@@ -142,7 +422,6 @@ class _NotificationScreenState extends State<NotificationScreen> {
         return;
       }
 
-      // ✅ Use role-based notification loading
       final result = await _notificationService.getNotificationsWithRole(
         userId: user.id,
         role: widget.role!,
@@ -184,7 +463,6 @@ class _NotificationScreenState extends State<NotificationScreen> {
       final start = _currentPage * _pageSize;
       final end = start + _pageSize - 1;
 
-      // ✅ Load more with role filter
       final allNotifications = await _notificationService.getNotificationsWithRole(
         userId: user.id,
         role: widget.role!,
@@ -705,43 +983,19 @@ class _NotificationScreenState extends State<NotificationScreen> {
                 ],
               ),
             )
-          : _notifications.isEmpty
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(24),
-                    decoration: BoxDecoration(
-                      color: _getAppBarColor().withValues(alpha: 0.1),
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(
-                      Icons.notifications_none,
-                      size: 64,
-                      color: _getAppBarColor().withValues(alpha: 0.5),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  Text(
-                    _getEmptyMessage(),
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.grey[700],
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    _getEmptySubMessage(),
-                    style: TextStyle(fontSize: 14, color: Colors.grey[500]),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
-            )
           : Column(
               children: [
+                // ✅ PERMISSION CARD
+                if (_showPermissionCard && !_hasPermission)
+                  PermissionCard(
+                    onEnable: () => _enableNotifications(action: 'notification'),
+                    onNotNow: _handleNotNow,
+                    title: _permissionManager.getPermissionCardTitle(action: 'notification'),
+                    message: _permissionManager.getPermissionCardMessage(action: 'notification'),
+                    compact: true,
+                    iconEmoji: _permissionManager.getPermissionCardIcon(action: 'notification'),
+                  ),
+                
                 // Filter Bar
                 Container(
                   padding: const EdgeInsets.symmetric(
@@ -780,7 +1034,42 @@ class _NotificationScreenState extends State<NotificationScreen> {
                   child: RefreshIndicator(
                     onRefresh: _refreshNotifications,
                     color: _getAppBarColor(),
-                    child: _filteredNotifications.isEmpty
+                    child: _notifications.isEmpty
+                        ? Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(24),
+                                  decoration: BoxDecoration(
+                                    color: _getAppBarColor().withValues(alpha: 0.1),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Icon(
+                                    Icons.notifications_none,
+                                    size: 64,
+                                    color: _getAppBarColor().withValues(alpha: 0.5),
+                                  ),
+                                ),
+                                const SizedBox(height: 24),
+                                Text(
+                                  _getEmptyMessage(),
+                                  style: TextStyle(
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.grey[700],
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  _getEmptySubMessage(),
+                                  style: TextStyle(fontSize: 14, color: Colors.grey[500]),
+                                  textAlign: TextAlign.center,
+                                ),
+                              ],
+                            ),
+                          )
+                        : _filteredNotifications.isEmpty
                         ? Center(
                             child: Column(
                               mainAxisAlignment: MainAxisAlignment.center,

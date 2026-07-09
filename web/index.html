@@ -81,7 +81,7 @@
   <link rel="icon" type="image/png" href="favicon.png">
   <link rel="manifest" href="manifest.json">
   
-  <!-- ==================== 🔥 FIREBASE SCRIPTS (WEB NOTIFICATIONS) ==================== -->
+  <!-- ==================== 🔥 FIREBASE SCRIPTS ==================== -->
   <!-- Firebase Core SDK -->
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
   <!-- Firebase Messaging SDK -->
@@ -186,7 +186,7 @@
     <div class="spinner"></div>
   </div>
   
-  <!-- ==================== 🔥 FIREBASE INITIALIZATION (FIXED VERSION) ==================== -->
+  <!-- ==================== 🔥 FIREBASE INITIALIZATION (FIXED) ==================== -->
   <script>
     // Your Firebase Configuration
     const firebaseConfig = {
@@ -216,8 +216,13 @@
       }
     }
     
-    // Request Notification Permission
-    async function requestNotificationPermission() {
+    // ================================================================
+    // ✅ EXPOSE FUNCTIONS TO FLUTTER (User action එකෙන් පස්සේ call කරන්න)
+    // ================================================================
+    
+    // ✅ Flutter එකෙන් call කරන්න - Permission Request
+    window.requestNotificationPermission = async function() {
+      console.log('🌐 Web: Requesting notification permission from user action');
       try {
         const permission = await Notification.requestPermission();
         console.log('🔔 Notification permission:', permission);
@@ -227,13 +232,40 @@
             vapidKey: 'BFj7Eoc2BRmQQrXHBFvWXjcmeb3seAyHmOpVZEOLpKTpwbelZoo5tqci-o7KR-sr0hgO9yIYDRV1KP88vhV0l6k'
           });
           saveTokenAndNotify(token);
+          return true;
         }
+        return false;
       } catch (error) {
         console.error('❌ Error getting notification permission:', error);
+        return false;
       }
-    }
+    };
     
-    // Handle foreground messages (app is open)
+    // ✅ Flutter එකෙන් call කරන්න - Get Permission Status
+    window.getNotificationPermissionStatus = function() {
+      return Notification.permission;
+    };
+    
+    // ✅ Flutter එකෙන් call කරන්න - Get Token
+    window.getFcmToken = async function() {
+      try {
+        if (Notification.permission === 'granted') {
+          const token = await messaging.getToken();
+          if (token) {
+            saveTokenAndNotify(token);
+            return token;
+          }
+        }
+        return null;
+      } catch (error) {
+        console.error('❌ Error getting FCM token:', error);
+        return null;
+      }
+    };
+    
+    // ================================================================
+    // ✅ Handle foreground messages (app is open)
+    // ================================================================
     messaging.onMessage((payload) => {
       console.log('📩 Foreground message received:', payload);
       
@@ -249,7 +281,9 @@
       window.dispatchEvent(new CustomEvent('fcm-message-received', { detail: payload }));
     });
     
-    // Listen for token refresh from service worker
+    // ================================================================
+    // ✅ Listen for token refresh from service worker
+    // ================================================================
     if (navigator.serviceWorker) {
       navigator.serviceWorker.addEventListener('message', (event) => {
         if (event.data && event.data.type === 'TOKEN_REFRESHED') {
@@ -259,7 +293,9 @@
       });
     }
     
-    // Periodic token check (every 24 hours)
+    // ================================================================
+    // ✅ Periodic token check (every 24 hours)
+    // ================================================================
     setInterval(async () => {
       if (Notification.permission === 'granted') {
         try {
@@ -274,16 +310,28 @@
       }
     }, 24 * 60 * 60 * 1000);
     
-    // Initialize notifications on page load
-    if (Notification.permission === 'default') {
-      requestNotificationPermission();
-    } else if (Notification.permission === 'granted') {
+    // ================================================================
+    // 🔥 FIXED: DO NOT AUTO-REQUEST PERMISSION ON PAGE LOAD
+    // ================================================================
+    
+    // ✅ Only get token if permission already granted
+    // ✅ This replaces the old auto-request code
+    if (Notification.permission === 'granted') {
+      console.log('🔔 Notification permission already granted, getting token...');
       messaging.getToken()
-        .then(token => saveTokenAndNotify(token))
+        .then(token => {
+          if (token) saveTokenAndNotify(token);
+        })
         .catch(err => console.error('Error getting token:', err));
+    } else {
+      console.log('🔔 Notification permission NOT granted.');
+      console.log('📌 Will ask when user clicks "Enable" in the app.');
+      console.log('📌 Current status:', Notification.permission);
     }
     
-    // Handle notification click when app is opened via notification
+    // ================================================================
+    // ✅ Handle notification click when app is opened via notification
+    // ================================================================
     window.addEventListener('load', () => {
       const pendingNotification = sessionStorage.getItem('pending_notification');
       if (pendingNotification) {
@@ -296,6 +344,8 @@
         }
       }
     });
+    
+    console.log('🌐 Web: Notification service initialized WITHOUT auto-permission request');
   </script>
   
   <!-- ==================== SERVICE WORKER REGISTRATION ==================== -->

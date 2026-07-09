@@ -157,7 +157,12 @@ Future<void> main() async {
     );
 
     // ========== PHASE 4: NOTIFICATION SERVICE ==========
-    await NotificationService().init();
+    // await NotificationService().init();
+    final notificationService = NotificationService();
+    
+    // ✅ Web සහ Mobile දෙකටම - Permission ඉල්ලන්නේ නැහැ
+    await notificationService.initWithoutPermission();
+    debugPrint('🔔 Notification service initialized WITHOUT permission (Web + Mobile)');
 
     // ========== PHASE 5: PLATFORM CONFIG ==========
     await _setupPlatformSpecificConfig();

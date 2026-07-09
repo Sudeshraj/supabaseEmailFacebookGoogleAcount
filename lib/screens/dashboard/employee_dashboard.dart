@@ -4,7 +4,7 @@ import 'package:flutter_application_1/alertBox/show_logout_conf.dart';
 import 'package:flutter_application_1/main.dart';
 import 'package:flutter_application_1/services/notification_service.dart';
 import 'package:flutter_application_1/services/permission_service.dart';
-import 'package:flutter_application_1/services/permission_manager.dart';
+import 'package:flutter_application_1/screens/settings/permission_manager.dart';
 import 'package:flutter_application_1/services/session_manager.dart';
 import 'package:flutter_application_1/widgets/permission_card.dart';
 import 'package:flutter_application_1/widgets/side_menu.dart';
@@ -14,6 +14,7 @@ import 'package:flutter_application_1/widgets/section_header.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:universal_platform/universal_platform.dart';
 import '../../services/timezone_service.dart';
 
 class EmployeeDashboard extends StatefulWidget {
@@ -212,6 +213,131 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
       'December',
     ];
     return months[DateTime.now().month - 1];
+  }
+
+  // ==================== CONTEXTUAL PERMISSION METHODS ====================
+
+  Future<void> _showPermissionCardContext({String? action}) async {
+    final shouldShow = await _permissionManager.shouldShowPermissionCard(
+      screen: 'employee_dashboard',
+      action: action,
+    );
+    
+    if (mounted) {
+      setState(() {
+        _showPermissionCard = shouldShow;
+      });
+    }
+  }
+
+  // ============================================================
+  // 🔥 SHOW WEB PERMISSION HELP
+  // ============================================================
+
+  void _showWebPermissionHelp() {
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        title: const Row(
+          children: [
+            Text('🌐'),
+            SizedBox(width: 8),
+            Text('Browser Notification Settings'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'To enable notifications, please follow these steps:',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            _buildWebStep('1', 'Click the 🔒 lock icon in the address bar'),
+            const SizedBox(height: 8),
+            _buildWebStep('2', 'Click "Site settings" or "Permissions"'),
+            const SizedBox(height: 8),
+            _buildWebStep('3', 'Find "Notifications" and select "Allow"'),
+            const SizedBox(height: 8),
+            _buildWebStep('4', 'Refresh the page'),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.amber.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.amber.shade200),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline, color: Colors.amber.shade700),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Once enabled, you\'ll receive notifications even when the tab is not active',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.amber.shade800,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Later'),
+          ),
+          ElevatedButton.icon(
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              _permissionService.refreshWebPage();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFFF6B8B),
+              foregroundColor: Colors.white,
+            ),
+            icon: const Icon(Icons.refresh),
+            label: const Text('Refresh Page'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWebStep(String number, String text) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 24,
+          height: 24,
+          decoration: BoxDecoration(
+            color: const Color(0xFFFF6B8B).withAlpha(20),
+            shape: BoxShape.circle,
+          ),
+          child: Center(
+            child: Text(
+              number,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFFFF6B8B),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(child: Text(text, style: const TextStyle(fontSize: 14))),
+      ],
+    );
   }
 
   // ==================== LOAD BREAK STATUS ====================
@@ -1341,8 +1467,20 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
       if (!_hasPermission) {
         _showPermissionCard = await _permissionManager.shouldShowPermissionCard(
-          'employee_dashboard',
+          screen: 'employee_dashboard',
+          action: null, // No action - normal check
         );
+
+        // ✅ Web: Check if permission is denied in browser
+        if (UniversalPlatform.isWeb && _showPermissionCard) {
+          final status = await _notificationService.getWebPermissionStatus();
+          if (status == 'denied') {
+            _showPermissionCard = false;
+            if (mounted) {
+              _showWebPermissionHelp();
+            }
+          }
+        }
       } else {
         _showPermissionCard = false;
       }
@@ -1735,6 +1873,19 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
     setState(() => _showPermissionCard = false);
 
     try {
+      final bool isWeb = UniversalPlatform.isWeb;
+
+      // Web - Check if already denied in browser
+      if (isWeb) {
+        final status = await _notificationService.getWebPermissionStatus();
+        if (status == 'denied') {
+          if (mounted) {
+            _showWebPermissionHelp();
+          }
+          return;
+        }
+      }
+
       final canAsk = await _permissionManager.canAskSystemPermission();
 
       if (!canAsk) {
@@ -1742,12 +1893,12 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         return;
       }
       if (!mounted) return;
+      
       await _permissionService.requestPermissionAtAction(
         context: context,
         action: 'employee_dashboard',
-        customTitle: '🔔 Get Booking Updates',
-        customMessage:
-            'Get instant notifications for new bookings, reminders, and schedule changes',
+        customTitle: _permissionManager.getPermissionCardTitle(action: null),
+        customMessage: _permissionManager.getPermissionCardMessage(action: null),
         onGranted: () async {
           await _permissionManager.markPermissionGranted();
           setState(() {
@@ -1756,8 +1907,10 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
           });
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('✅ Notifications enabled!'),
+              SnackBar(
+                content: Text(isWeb 
+                    ? '✅ Notifications enabled in browser!' 
+                    : '✅ Notifications enabled!'),
                 backgroundColor: Colors.green,
               ),
             );
@@ -1767,8 +1920,10 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
           await _permissionManager.markPermissionDenied(permanent: false);
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('You can enable later from settings'),
+              SnackBar(
+                content: Text(isWeb
+                    ? 'You can enable notifications later from browser settings'
+                    : 'You can enable later from settings'),
                 backgroundColor: Colors.orange,
               ),
             );
@@ -1813,25 +1968,60 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
     await _permissionManager.markPermissionShown('employee_dashboard');
   }
 
-  // ==================== NAVIGATION ====================
+  // ==================== CONTEXTUAL NAVIGATION ====================
 
   void _viewMySchedule() {
+    // ✅ Show permission card before schedule
+    if (!_hasPermission) {
+      _showPermissionCardContext(action: 'schedule');
+      if (_showPermissionCard) {
+        return;
+      }
+    }
     context.push('/barber/appointments');
   }
 
   void _viewMyCustomers() {
+    // ✅ Show permission card before customers
+    if (!_hasPermission) {
+      _showPermissionCardContext(action: 'customer');
+      if (_showPermissionCard) {
+        return;
+      }
+    }
     context.push('/employee/customers');
   }
 
   void _viewTodayEarnings() {
+    // ✅ Show permission card before earnings
+    if (!_hasPermission) {
+      _showPermissionCardContext(action: 'earnings');
+      if (_showPermissionCard) {
+        return;
+      }
+    }
     context.push('/employee/earnings');
   }
 
   void _viewUpcomingAppointments() {
+    // ✅ Show permission card before appointments
+    if (!_hasPermission) {
+      _showPermissionCardContext(action: 'appointment');
+      if (_showPermissionCard) {
+        return;
+      }
+    }
     context.push('/employee/appointments');
   }
 
   void _viewNotifications() {
+    // ✅ Show permission card before notifications
+    if (!_hasPermission) {
+      _showPermissionCardContext(action: 'notification');
+      if (_showPermissionCard) {
+        return;
+      }
+    }
     context.push('/notifications?role=barber');
   }
 
@@ -2123,7 +2313,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
   }
 
   // =====================================================
-  // ✅ BUILD METHOD
+  // ✅ BUILD METHOD - UPDATED WITH PERMISSION CARD
   // =====================================================
   @override
   Widget build(BuildContext context) {
@@ -2227,13 +2417,13 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                 padding: const EdgeInsets.only(bottom: 20),
                 child: Column(
                   children: [
+                    // ✅ PERMISSION CARD - Contextual Support
                     if (_showPermissionCard && !_hasPermission)
                       PermissionCard(
                         onEnable: _enableNotifications,
                         onNotNow: _handleNotNow,
-                        title: '🔔 Get Booking Updates',
-                        message:
-                            'Get instant notifications for new bookings and schedule changes',
+                        title: _permissionManager.getPermissionCardTitle(),
+                        message: _permissionManager.getPermissionCardMessage(),
                         compact: false,
                       ),
 

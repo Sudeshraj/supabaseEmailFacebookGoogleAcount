@@ -4,7 +4,7 @@ import 'package:flutter_application_1/alertBox/show_logout_conf.dart';
 import 'package:flutter_application_1/main.dart';
 import 'package:flutter_application_1/services/notification_service.dart';
 import 'package:flutter_application_1/services/permission_service.dart';
-import 'package:flutter_application_1/services/permission_manager.dart';
+import 'package:flutter_application_1/screens/settings/permission_manager.dart';
 import 'package:flutter_application_1/services/session_manager.dart';
 import 'package:flutter_application_1/widgets/permission_card.dart';
 import 'package:flutter_application_1/widgets/side_menu.dart';
@@ -12,9 +12,9 @@ import 'package:flutter_application_1/widgets/dashboard_stat_card.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:universal_platform/universal_platform.dart';
 import '../../services/timezone_service.dart';
 
-// ✅ Add route observer
 final RouteObserver<ModalRoute<void>> routeObserver =
     RouteObserver<ModalRoute<void>>();
 
@@ -27,7 +27,6 @@ class OwnerDashboard extends StatefulWidget {
 
 class _OwnerDashboardState extends State<OwnerDashboard>
     with SingleTickerProviderStateMixin, RouteAware {
-  // ✅ Added RouteAware
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   final NotificationService _notificationService = NotificationService();
@@ -95,14 +94,12 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // ✅ Subscribe to route changes
     final route = ModalRoute.of(context);
     if (route is PageRoute) {
       routeObserver.subscribe(this, route);
     }
   }
 
-  // ✅ Called when user comes back from child screen
   @override
   void didPopNext() {
     debugPrint('🔄 Dashboard: Returning from child screen, refreshing data');
@@ -111,10 +108,418 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
   @override
   void dispose() {
-    // ✅ Unsubscribe from route changes
     routeObserver.unsubscribe(this);
     _pulseCtrl.dispose();
     super.dispose();
+  }
+
+  // ============================================================
+  // 🔥 SHOW PERMISSION CARD - WITH CONTEXT
+  // ============================================================
+
+  Future<void> _showPermissionCardContext({String? action}) async {
+    final shouldShow = await _permissionManager.shouldShowPermissionCard(
+      screen: 'owner_dashboard',
+      action: action,
+    );
+
+    if (mounted) {
+      setState(() {
+        _showPermissionCard = shouldShow;
+      });
+    }
+  }
+
+  // ============================================================
+  // 🔥 ENABLE NOTIFICATIONS - WITH CONTEXT
+  // ============================================================
+
+  Future<void> _enableNotifications({String? action}) async {
+    setState(() => _showPermissionCard = false);
+
+    try {
+      final bool isWeb = UniversalPlatform.isWeb;
+
+      if (isWeb) {
+        final status = await _notificationService.getWebPermissionStatus();
+        if (status == 'denied') {
+          if (mounted) {
+            _showWebPermissionHelp();
+          }
+          return;
+        }
+      }
+
+      final canAsk = await _permissionManager.canAskSystemPermission();
+      if (!canAsk) {
+        if (mounted) {
+          _showSettingsDialog();
+        }
+        return;
+      }
+
+      if (!mounted) return;
+
+      await _permissionService.requestPermissionAtAction(
+        context: context,
+        action: action ?? 'owner_dashboard',
+        customTitle: _permissionManager.getPermissionCardTitle(action: action),
+        customMessage: _permissionManager.getPermissionCardMessage(
+          action: action,
+        ),
+        onGranted: () async {
+          debugPrint('✅ Permission granted callback');
+          await _permissionManager.markPermissionGranted();
+
+          if (mounted) {
+            setState(() {
+              _hasPermission = true;
+              _showPermissionCard = false;
+            });
+
+            final message = isWeb
+                ? '✅ Notifications enabled in browser!'
+                : '✅ Notifications enabled!';
+
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(message),
+                backgroundColor: Colors.green,
+                duration: const Duration(seconds: 3),
+              ),
+            );
+
+            _refreshAllData();
+          }
+        },
+        onDenied: () async {
+          debugPrint('❌ Permission denied callback');
+          await _permissionManager.markPermissionDenied(permanent: false);
+
+          if (mounted) {
+            final message = isWeb
+                ? 'You can enable notifications later from browser settings'
+                : 'You can enable later from settings';
+
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(message),
+                backgroundColor: Colors.orange,
+                duration: const Duration(seconds: 3),
+              ),
+            );
+          }
+        },
+      );
+    } catch (e) {
+      debugPrint('❌ Error enabling notifications: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  // ============================================================
+  // 🔥 SHOW WEB PERMISSION HELP
+  // ============================================================
+
+  void _showWebPermissionHelp() {
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        title: const Row(
+          children: [
+            Text('🌐'),
+            SizedBox(width: 8),
+            Text('Browser Notification Settings'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'To enable notifications, please follow these steps:',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            _buildWebStep('1', 'Click the 🔒 lock icon in the address bar'),
+            const SizedBox(height: 8),
+            _buildWebStep('2', 'Click "Site settings" or "Permissions"'),
+            const SizedBox(height: 8),
+            _buildWebStep('3', 'Find "Notifications" and select "Allow"'),
+            const SizedBox(height: 8),
+            _buildWebStep('4', 'Refresh the page'),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.amber.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.amber.shade200),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline, color: Colors.amber.shade700),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Once enabled, you\'ll receive notifications even when the tab is not active',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.amber.shade800,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Later'),
+          ),
+          ElevatedButton.icon(
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              _permissionService.refreshWebPage();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFFF6B8B),
+              foregroundColor: Colors.white,
+            ),
+            icon: const Icon(Icons.refresh),
+            label: const Text('Refresh Page'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWebStep(String number, String text) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 24,
+          height: 24,
+          decoration: BoxDecoration(
+            color: const Color(0xFFFF6B8B).withAlpha(20),
+            shape: BoxShape.circle,
+          ),
+          child: Center(
+            child: Text(
+              number,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFFFF6B8B),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            text,
+            style: const TextStyle(fontSize: 14),
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _showSettingsDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('🔔 Notifications Disabled'),
+        content: const Text(
+          'To enable notifications, please go to your device settings.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _permissionService.openAppSettings();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFFF6B8B),
+            ),
+            child: const Text('Open Settings'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _handleNotNow() async {
+    setState(() => _showPermissionCard = false);
+    await _permissionManager.markPermissionShown('owner_dashboard');
+  }
+
+  // ============================================================
+  // 🔥 CONTEXTUAL ACTIONS - SHOW PERMISSION CARD
+  // ============================================================
+
+  void _viewBookings() {
+    if (!_hasPermission) {
+      _showPermissionCardContext(action: 'booking');
+      if (_showPermissionCard) return;
+    }
+    if (_selectedSalonId != null) {
+      context.push('/owner/appointments?salonId=$_selectedSalonId');
+    } else {
+      context.push('/owner/appointments');
+    }
+  }
+
+  void _navigateToOffers() {
+    if (!_hasPermission) {
+      _showPermissionCardContext(action: 'offer');
+      if (_showPermissionCard) return;
+    }
+    if (_ownerSalons.isEmpty) {
+      _showCreateSalonFirstDialog();
+      return;
+    }
+    if (_selectedSalonId != null) {
+      context.push('/owner/offers/$_selectedSalonId');
+    } else {
+      context.push('/owner/offers');
+    }
+  }
+
+  void _navigateToAddBarber() {
+    if (!_hasPermission) {
+      _showPermissionCardContext(action: 'barber');
+      if (_showPermissionCard) return;
+    }
+    if (_ownerSalons.isEmpty) {
+      _showCreateSalonFirstDialog();
+      return;
+    }
+    context.push('/owner/add-barber?salonId=$_selectedSalonId');
+  }
+
+  void _navigateToAddService() async {
+    if (!_hasPermission) {
+      _showPermissionCardContext(action: 'booking');
+      if (_showPermissionCard) return;
+    }
+    if (_ownerSalons.isEmpty) {
+      _showCreateSalonFirstDialog();
+      return;
+    }
+    final result = await context.push(
+      '/owner/services/add?salonId=$_selectedSalonId',
+    );
+    if (result == true) await _refreshAllData();
+  }
+
+  void _navigateToBarberLeaves() {
+    if (!_hasPermission) {
+      _showPermissionCardContext(action: 'barber');
+      if (_showPermissionCard) return;
+    }
+    if (_ownerSalons.isEmpty) {
+      _showCreateSalonFirstDialog();
+      return;
+    }
+    context.push('/owner/barber-leaves?salonId=$_selectedSalonId');
+  }
+
+  void _navigateToBarberSchedule() {
+    if (!_hasPermission) {
+      _showPermissionCardContext(action: 'barber');
+      if (_showPermissionCard) return;
+    }
+    if (_ownerSalons.isEmpty) {
+      _showCreateSalonFirstDialog();
+      return;
+    }
+    context.push('/owner/barber-schedule?salonId=$_selectedSalonId');
+  }
+
+  void _navigateToBarberList() {
+    if (!_hasPermission) {
+      _showPermissionCardContext(action: 'barber');
+      if (_showPermissionCard) return;
+    }
+    if (_ownerSalons.isEmpty) {
+      _showCreateSalonFirstDialog();
+      return;
+    }
+    context.push('/owner/barbers?salonId=$_selectedSalonId');
+  }
+
+  void _navigateToServiceList() {
+    if (!_hasPermission) {
+      _showPermissionCardContext(action: 'booking');
+      if (_showPermissionCard) return;
+    }
+    if (_ownerSalons.isEmpty) {
+      _showCreateSalonFirstDialog();
+      return;
+    }
+    if (_ownerSalons.length == 1) {
+      final salon = _ownerSalons.first;
+      context.push(
+        '/owner/services?salonId=${salon['id']}&salonName=${Uri.encodeComponent(salon['name'])}',
+      );
+    } else {
+      _showSalonSelectionDialogForServices();
+    }
+  }
+
+  void _viewAllCustomers() {
+    if (!_hasPermission) {
+      _showPermissionCardContext(action: 'booking');
+      if (_showPermissionCard) return;
+    }
+    if (_selectedSalonId != null) {
+      context.push('/owner/customers?salonId=$_selectedSalonId');
+    } else {
+      context.push('/owner/customers');
+    }
+  }
+
+  void _viewRevenue() {
+    if (!_hasPermission) {
+      _showPermissionCardContext(action: 'booking');
+      if (_showPermissionCard) return;
+    }
+    if (_selectedSalonId != null) {
+      context.push('/owner/revenue?salonId=$_selectedSalonId');
+    } else {
+      context.push('/owner/revenue');
+    }
+  }
+
+  void _viewSalonHolidays() {
+    if (!_hasPermission) {
+      _showPermissionCardContext(action: 'booking');
+      if (_showPermissionCard) return;
+    }
+    if (_ownerSalons.isEmpty) {
+      _showCreateSalonFirstDialog();
+      return;
+    }
+    context.push('/owner/salon/holidays?salonId=$_selectedSalonId');
   }
 
   // ============================================================
@@ -792,10 +1197,22 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       await _checkOnboardingStatus();
 
       _hasPermission = await _notificationService.hasPermission();
+
       if (!_hasPermission) {
         _showPermissionCard = await _permissionManager.shouldShowPermissionCard(
-          'owner_dashboard',
+          screen: 'owner_dashboard',
+          action: null,
         );
+
+        if (UniversalPlatform.isWeb && _showPermissionCard) {
+          final status = await _notificationService.getWebPermissionStatus();
+          if (status == 'denied') {
+            _showPermissionCard = false;
+            if (mounted) {
+              _showWebPermissionHelp();
+            }
+          }
+        }
       } else {
         _showPermissionCard = false;
       }
@@ -820,12 +1237,11 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       final userId = supabase.auth.currentUser?.id;
       if (userId == null) return;
 
-      // ✅ Check if user has active owner role
       final ownerCheck = await supabase
           .from('user_roles')
           .select('status')
           .eq('user_id', userId)
-          .eq('role_id', 1) // owner role ID
+          .eq('role_id', 1)
           .maybeSingle();
 
       if (ownerCheck == null || ownerCheck['status'] != 'active') {
@@ -869,7 +1285,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       final currentUser = supabase.auth.currentUser;
       if (currentUser == null) return;
 
-      // ✅ Check if profile is active and not blocked
       final profileCheck = await supabase
           .from('profiles')
           .select('is_active, is_blocked')
@@ -947,7 +1362,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           .eq('appointment_date', today)
           .eq('status', 'pending');
 
-      // ✅ Updated: Get active barbers with user_roles.status check
       final activeBarbers = await supabase
           .from('salon_barbers')
           .select('''
@@ -1019,7 +1433,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           .limit(1);
       _hasServices = servicesResponse.isNotEmpty;
 
-      // ✅ Updated: Check barbers with user_roles.status
       final barbersResponse = await supabase
           .from('salon_barbers')
           .select('''
@@ -2032,76 +2445,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     if (result == true) await _refreshAllData();
   }
 
-  void _navigateToOffers() {
-    if (_ownerSalons.isEmpty) {
-      _showCreateSalonFirstDialog();
-      return;
-    }
-    if (_selectedSalonId != null) {
-      context.push('/owner/offers/$_selectedSalonId');
-    } else {
-      context.push('/owner/offers');
-    }
-  }
-
-  void _navigateToAddBarber() {
-    if (_ownerSalons.isEmpty) {
-      _showCreateSalonFirstDialog();
-      return;
-    }
-    context.push('/owner/add-barber?salonId=$_selectedSalonId');
-  }
-
-  void _navigateToBarberLeaves() {
-    if (_ownerSalons.isEmpty) {
-      _showCreateSalonFirstDialog();
-      return;
-    }
-    context.push('/owner/barber-leaves?salonId=$_selectedSalonId');
-  }
-
-  void _navigateToBarberSchedule() {
-    if (_ownerSalons.isEmpty) {
-      _showCreateSalonFirstDialog();
-      return;
-    }
-    context.push('/owner/barber-schedule?salonId=$_selectedSalonId');
-  }
-
-  void _navigateToBarberList() {
-    if (_ownerSalons.isEmpty) {
-      _showCreateSalonFirstDialog();
-      return;
-    }
-    context.push('/owner/barbers?salonId=$_selectedSalonId');
-  }
-
-  void _navigateToAddService() async {
-    if (_ownerSalons.isEmpty) {
-      _showCreateSalonFirstDialog();
-      return;
-    }
-    final result = await context.push(
-      '/owner/services/add?salonId=$_selectedSalonId',
-    );
-    if (result == true) await _refreshAllData();
-  }
-
-  void _navigateToServiceList() {
-    if (_ownerSalons.isEmpty) {
-      _showCreateSalonFirstDialog();
-      return;
-    }
-    if (_ownerSalons.length == 1) {
-      final salon = _ownerSalons.first;
-      context.push(
-        '/owner/services?salonId=${salon['id']}&salonName=${Uri.encodeComponent(salon['name'])}',
-      );
-    } else {
-      _showSalonSelectionDialogForServices();
-    }
-  }
-
   void _showSalonSelectionDialogForServices() {
     showDialog(
       context: context,
@@ -2137,41 +2480,9 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     );
   }
 
-  void _viewBookings() {
-    if (_selectedSalonId != null) {
-      context.push('/owner/appointments?salonId=$_selectedSalonId');
-    } else {
-      context.push('/owner/appointments');
-    }
-  }
-
-  void _viewAllCustomers() {
-    if (_selectedSalonId != null) {
-      context.push('/owner/customers?salonId=$_selectedSalonId');
-    } else {
-      context.push('/owner/customers');
-    }
-  }
-
-  void _viewRevenue() {
-    if (_selectedSalonId != null) {
-      context.push('/owner/revenue?salonId=$_selectedSalonId');
-    } else {
-      context.push('/owner/revenue');
-    }
-  }
-
   void _viewReports() => context.push('/owner/reports');
   void _viewAnalytics() => context.push('/owner/analytics');
   void _viewSettings() => context.push('/owner/settings');
-
-  void _viewSalonHolidays() {
-    if (_ownerSalons.isEmpty) {
-      _showCreateSalonFirstDialog();
-      return;
-    }
-    context.push('/owner/salon/holidays?salonId=$_selectedSalonId');
-  }
 
   void _showCreateSalonFirstDialog() {
     showDialog(
@@ -2202,7 +2513,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   }
 
   // ============================================================
-  // NOTIFICATION METHODS
+  // NOTIFICATION LISTENERS
   // ============================================================
 
   void _setupNotificationListeners() {
@@ -2253,34 +2564,9 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     );
   }
 
-  Future<void> _enableNotifications() async {
-    setState(() => _showPermissionCard = false);
-    try {
-      await _permissionService.requestPermissionAtAction(
-        context: context,
-        action: 'owner_dashboard',
-        customTitle: '🔔 Get Booking Alerts',
-        customMessage:
-            'Get instant notifications when customers book appointments',
-        onGranted: () async {
-          await _permissionManager.markPermissionGranted();
-          setState(() {
-            _hasPermission = true;
-            _showPermissionCard = false;
-          });
-        },
-        onDenied: () async =>
-            await _permissionManager.markPermissionDenied(permanent: false),
-      );
-    } catch (e) {
-      debugPrint('Error: $e');
-    }
-  }
-
-  Future<void> _handleNotNow() async {
-    setState(() => _showPermissionCard = false);
-    await _permissionManager.markPermissionShown('owner_dashboard');
-  }
+  // ============================================================
+  // DRAWER & LOGOUT
+  // ============================================================
 
   void _openDrawer() {
     try {
@@ -2434,13 +2720,13 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                 physics: const AlwaysScrollableScrollPhysics(),
                 child: Column(
                   children: [
+                    // ✅ PERMISSION CARD - Updated with contextual support
                     if (_showPermissionCard && !_hasPermission)
                       PermissionCard(
-                        onEnable: _enableNotifications,
+                        onEnable: () => _enableNotifications(action: null),
                         onNotNow: _handleNotNow,
-                        title: '🔔 Get Booking Alerts',
-                        message:
-                            'Get instant notifications when customers book appointments',
+                        title: _permissionManager.getPermissionCardTitle(),
+                        message: _permissionManager.getPermissionCardMessage(),
                         compact: true,
                       ),
                     _buildSimpleHeader(),

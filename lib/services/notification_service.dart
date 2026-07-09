@@ -43,44 +43,84 @@ class NotificationService {
     return 'unknown';
   }
 
-  // ============= MAIN INITIALIZATION =============
-  Future<void> init() async {
+  // ===============================================================
+  // 🔥 MAIN INITIALIZATION - FINAL FIX
+  // ===============================================================
+  
+  /// Initialize with optional permission request
+  /// For Web: Pass requestPermission: false to avoid auto-prompt
+  Future<void> init({bool requestPermission = true}) async {
     if (isWeb) {
-      await _initWebNotifications();
+      await _initWebNotifications(requestPermission: requestPermission);
     } else {
       await _initMobileNotifications();
     }
 
-    await _getTokenAndSave();
+    // ✅ Web - NEVER get token (triggers permission request)
+    // ✅ Mobile - Always get token
+    if (!isWeb) {
+      await _getTokenAndSave();
+    } else {
+      debugPrint('🌐 Web: Skipping token get (web token handled by JavaScript)');
+    }
+    
     _setupMessageListeners();
   }
 
-  // ============= WEB INIT =============
-  Future<void> _initWebNotifications() async {
-    try {
-      String? token = await _firebaseMessaging.getToken(vapidKey: _webVapidKey);
+  /// Initialize WITHOUT requesting permission (for Web)
+  Future<void> initWithoutPermission() async {
+    await init(requestPermission: false);
+    debugPrint('✅ Notification service initialized without permission');
+  }
 
-      if (token != null) {
-        await _saveTokenToSupabase(token);
+  // ===============================================================
+  // 🔥 WEB INIT - COMPLETE FIX
+  // ===============================================================
+  
+  Future<void> _initWebNotifications({bool requestPermission = true}) async {
+    try {
+      if (requestPermission) {
+        // ✅ User action එකෙන් පස්සේ විතරක් permission ඉල්ලන්න
+        debugPrint('🌐 Web: Initializing with permission request');
+        // Web එකේදී getToken() call කරන්න එපා - JavaScript එකෙන් කරන්න
+        // Token එක JavaScript එකෙන් Flutter එකට එනවා
+      } else {
+        // ✅ Permission ඉල්ලන්නේ නැතුව Firebase initialize කරන්න
+        debugPrint('🌐 Web: Initializing WITHOUT permission request');
+        
+        // Setup message listeners without requesting permission
+        _setupWebMessageListeners();
+        
+        // ✅ DO NOT call getToken() here - it triggers permission request
+        // Token will be obtained via JavaScript when user grants permission
       }
 
+      // ✅ Token refresh listener - only if token already exists
       _firebaseMessaging.onTokenRefresh.listen((newToken) {
-        _saveTokenToSupabase(newToken);
+        if (newToken.isNotEmpty) {
+          _saveTokenToSupabase(newToken);
+        }
       });
 
-      _setupWebMessageListeners();
     } catch (e) {
       debugPrint('❌ Web notification init error: $e');
     }
   }
 
-  // ============= MOBILE INIT =============
+  // ===============================================================
+  // 🔥 MOBILE INIT - SAME
+  // ===============================================================
+  
   Future<void> _initMobileNotifications() async {
     await _initLocalNotifications();
   }
 
-  // ============= WEB MESSAGE LISTENERS =============
+  // ===============================================================
+  // 🔥 WEB MESSAGE LISTENERS
+  // ===============================================================
+  
   void _setupWebMessageListeners() {
+    // ✅ Web messages handle කරන්න - permission නැතුව වුණත් වැඩ කරයි
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       _handleWebForegroundMessage(message);
     });
@@ -110,7 +150,10 @@ class NotificationService {
     }
   }
 
-  // ============= LOCAL NOTIFICATIONS (Mobile) =============
+  // ===============================================================
+  // 🔥 LOCAL NOTIFICATIONS (Mobile)
+  // ===============================================================
+  
   Future<void> _initLocalNotifications() async {
     if (isWeb) return;
 
@@ -175,18 +218,58 @@ class NotificationService {
         ?.createNotificationChannel(channel);
   }
 
-  // ============= PERMISSION METHODS =============
+  // ===============================================================
+  // 🔥 PERMISSION METHODS
+  // ===============================================================
+  
+  /// Request Web Permission - Call from user action only
   Future<bool> requestWebPermission() async {
     try {
+      debugPrint('🌐 Requesting web permission (user action)');
+      
       final settings = await _firebaseMessaging.requestPermission(
         alert: true,
         badge: true,
         sound: true,
       );
-      return settings.authorizationStatus == AuthorizationStatus.authorized;
+      
+      final granted = settings.authorizationStatus == AuthorizationStatus.authorized;
+      
+      if (granted) {
+        debugPrint('✅ Web permission granted');
+        // Token එක get කරන්න
+        String? token = await _firebaseMessaging.getToken(vapidKey: _webVapidKey);
+        if (token != null) {
+          await _saveTokenToSupabase(token);
+        }
+      } else {
+        debugPrint('❌ Web permission denied');
+      }
+      
+      return granted;
     } catch (e) {
       debugPrint('❌ Web permission error: $e');
       return false;
+    }
+  }
+
+  /// Get Web Permission Status
+  Future<String> getWebPermissionStatus() async {
+    if (!isWeb) return 'not_applicable';
+    
+    try {
+      final settings = await _firebaseMessaging.getNotificationSettings();
+      
+      if (settings.authorizationStatus == AuthorizationStatus.authorized) {
+        return 'granted';
+      } else if (settings.authorizationStatus == AuthorizationStatus.denied) {
+        return 'denied';
+      } else {
+        return 'not_determined';
+      }
+    } catch (e) {
+      debugPrint('❌ Error getting web permission status: $e');
+      return 'error';
     }
   }
 
@@ -237,7 +320,10 @@ class NotificationService {
     }
   }
 
-  // ============= TOKEN MANAGEMENT =============
+  // ===============================================================
+  // 🔥 TOKEN MANAGEMENT
+  // ===============================================================
+  
   Future<String?> getToken() async {
     try {
       if (isWeb) {
@@ -252,6 +338,12 @@ class NotificationService {
   }
 
   Future<void> saveTokenManually() async {
+    // ✅ Mobile only - Web uses JavaScript
+    if (isWeb) {
+      debugPrint('🌐 Web: Use requestWebPermission() to get token');
+      return;
+    }
+    
     String? token = await getToken();
     if (token != null) {
       await _saveTokenToSupabase(token);
@@ -261,6 +353,12 @@ class NotificationService {
   }
 
   Future<void> _getTokenAndSave() async {
+    // ✅ Mobile only - Web handled separately
+    if (isWeb) {
+      debugPrint('🌐 Web: _getTokenAndSave should not be called on web');
+      return;
+    }
+    
     String? token = await getToken();
     if (token != null) {
       await _saveTokenToSupabase(token);
@@ -344,9 +442,10 @@ class NotificationService {
     }
   }
 
-  // ============= DATABASE OPERATIONS USING RPC =============
+  // ===============================================================
+  // 🔥 DATABASE OPERATIONS USING RPC
+  // ===============================================================
 
-  /// Save notification to database
   Future<void> _saveNotificationToDatabase({
     required String title,
     required String body,
@@ -371,7 +470,6 @@ class NotificationService {
     }
   }
 
-  /// Get unread notification count (RPC)
   Future<int> getUnreadCount(String userId) async {
     try {
       final result = await supabase.rpc(
@@ -386,7 +484,6 @@ class NotificationService {
     }
   }
 
-  /// Get all notifications for user (RPC)
   Future<List<Map<String, dynamic>>> getNotifications(String userId) async {
     try {
       final result = await supabase.rpc(
@@ -406,9 +503,10 @@ class NotificationService {
     }
   }
 
-  // ============= ROLE-BASED NOTIFICATION METHODS (UPDATED) =============
+  // ===============================================================
+  // 🔥 ROLE-BASED NOTIFICATION METHODS
+  // ===============================================================
 
-  /// ✅ Updated: Get notifications filtered by role with status check
   Future<List<Map<String, dynamic>>> getNotificationsWithRole({
     required String userId,
     required String role,
@@ -416,7 +514,6 @@ class NotificationService {
     bool unreadOnly = false,
   }) async {
     try {
-      // ✅ Check if user has active role
       final userRoles = await supabase
           .from('user_roles')
           .select('status')
@@ -430,7 +527,6 @@ class NotificationService {
         return [];
       }
 
-      // Get all notifications via RPC
       final result = await supabase.rpc(
         'get_user_notifications',
         params: {'p_user_id': userId},
@@ -441,7 +537,6 @@ class NotificationService {
         notifications = List<Map<String, dynamic>>.from(result);
       }
 
-      // Filter by role
       notifications = notifications.where((n) {
         final data = n['data'] as Map? ?? {};
         final notificationRole = data['role'] ?? 'customer';
@@ -454,7 +549,6 @@ class NotificationService {
             .toList();
       }
 
-      // Apply limit
       if (notifications.length > limit) {
         notifications = notifications.take(limit).toList();
       }
@@ -469,7 +563,6 @@ class NotificationService {
     }
   }
 
-  /// ✅ Updated: Get unread notification count with role filter
   Future<int> getUnreadCountWithRole({
     required String userId,
     required String role,
@@ -487,7 +580,6 @@ class NotificationService {
     }
   }
 
-  /// ✅ Updated: Send notification to specific user with role status check
   Future<void> sendNotificationWithRole({
     required String userId,
     required String title,
@@ -497,7 +589,6 @@ class NotificationService {
     required String role,
   }) async {
     try {
-      // ✅ Check if user has active role
       final userRoles = await supabase
           .from('user_roles')
           .select('status')
@@ -511,7 +602,6 @@ class NotificationService {
         return;
       }
 
-      // 1. Save to database
       await supabase.from('notifications').insert({
         'user_id': userId,
         'title': title,
@@ -524,7 +614,6 @@ class NotificationService {
 
       debugPrint('✅ Notification saved for $userId (role: $role)');
 
-      // 2. Send push notification
       await _sendPushNotificationWithToken(
         userId: userId,
         title: title,
@@ -537,7 +626,6 @@ class NotificationService {
     }
   }
 
-  /// Send push notification using FCM token via Edge Function
   Future<void> _sendPushNotificationWithToken({
     required String userId,
     required String title,
@@ -546,7 +634,6 @@ class NotificationService {
     required String role,
   }) async {
     try {
-      // Get FCM token
       final userProfile = await supabase
           .from('profiles')
           .select('fcm_token')
@@ -560,7 +647,6 @@ class NotificationService {
         return;
       }
 
-      // Call Edge Function
       final result = await supabase.functions.invoke(
         'send-notification',
         body: {
@@ -592,9 +678,10 @@ class NotificationService {
     }
   }
 
-  // ============= NEW: BULK NOTIFICATION METHODS =============
+  // ===============================================================
+  // 🔥 BULK NOTIFICATION METHODS
+  // ===============================================================
 
-  /// ✅ NEW: Send notification to all active users with a specific role
   Future<void> sendNotificationToActiveUsers({
     required String role,
     required String title,
@@ -604,7 +691,6 @@ class NotificationService {
     int? salonId,
   }) async {
     try {
-      // Get all active users with the specified role
       var query = supabase
           .from('user_roles')
           .select('user_id, profiles!inner (id, fcm_token)')
@@ -639,7 +725,6 @@ class NotificationService {
     }
   }
 
-  /// ✅ NEW: Get all active users by role
   Future<List<Map<String, dynamic>>> getActiveUsersByRole({
     required String role,
     int? salonId,
@@ -688,7 +773,6 @@ class NotificationService {
     }
   }
 
-  /// ✅ NEW: Check if user has active role before sending notification
   Future<bool> hasActiveRole({
     required String userId,
     required String role,
@@ -709,9 +793,10 @@ class NotificationService {
     }
   }
 
-  // ============= MARK AS READ METHODS =============
+  // ===============================================================
+  // 🔥 MARK AS READ METHODS
+  // ===============================================================
 
-  /// Mark notification as read (RPC)
   Future<bool> markAsRead(int notificationId) async {
     try {
       final user = supabase.auth.currentUser;
@@ -746,7 +831,6 @@ class NotificationService {
     }
   }
 
-  /// Fallback: Direct update without RPC
   Future<bool> _markAsReadDirect(int notificationId) async {
     try {
       final user = supabase.auth.currentUser;
@@ -778,7 +862,6 @@ class NotificationService {
     }
   }
 
-  /// Mark all notifications as read (RPC)
   Future<bool> markAllAsRead(String userId) async {
     try {
       debugPrint('🔍 [RPC] Marking all notifications as read for user $userId');
@@ -803,7 +886,6 @@ class NotificationService {
     }
   }
 
-  /// Fallback: Direct update for mark all as read
   Future<bool> _markAllAsReadDirect(String userId) async {
     try {
       debugPrint(
@@ -824,7 +906,6 @@ class NotificationService {
     }
   }
 
-  /// Delete notification (RPC)
   Future<bool> deleteNotification(int notificationId) async {
     try {
       final user = supabase.auth.currentUser;
@@ -842,7 +923,6 @@ class NotificationService {
     } catch (e) {
       debugPrint('❌ [RPC] Error deleting notification: $e');
 
-      // Fallback
       try {
         await supabase
             .from('notifications')
@@ -857,7 +937,6 @@ class NotificationService {
     }
   }
 
-  /// Clear all notifications (RPC)
   Future<bool> clearAllNotifications(String userId) async {
     try {
       debugPrint('🔍 [RPC] Clearing all notifications for user $userId');
@@ -872,7 +951,6 @@ class NotificationService {
     } catch (e) {
       debugPrint('❌ [RPC] Error clearing notifications: $e');
 
-      // Fallback
       try {
         await supabase.from('notifications').delete().eq('user_id', userId);
         return true;
@@ -883,7 +961,9 @@ class NotificationService {
     }
   }
 
-  // ============= ROLE-SPECIFIC NOTIFICATION SENDING METHODS =============
+  // ===============================================================
+  // 🔥 ROLE-SPECIFIC NOTIFICATION SENDING METHODS
+  // ===============================================================
 
   // -------------------- CUSTOMER NOTIFICATIONS --------------------
 
@@ -1631,7 +1711,9 @@ class NotificationService {
     );
   }
 
-  // ============= GENERIC NOTIFICATION METHODS =============
+  // ===============================================================
+  // 🔥 GENERIC NOTIFICATION METHODS
+  // ===============================================================
 
   Future<void> sendGenericNotification({
     required String userId,
@@ -1672,11 +1754,12 @@ class NotificationService {
     );
   }
 
-  // ============= MESSAGE HANDLING =============
+  // ===============================================================
+  // 🔥 MESSAGE HANDLING
+  // ===============================================================
 
   void _setupMessageListeners() {
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-      // Save to database
       _saveNotificationToDatabase(
         title: message.notification?.title ?? 'Notification',
         body: message.notification?.body ?? '',
@@ -1684,7 +1767,6 @@ class NotificationService {
         data: message.data,
       );
 
-      // Show local notification on mobile
       if (!isWeb) {
         _showMobileNotification(message);
       }
@@ -1777,7 +1859,9 @@ class NotificationService {
     }
   }
 
-  // ============= NAVIGATION HANDLING =============
+  // ===============================================================
+  // 🔥 NAVIGATION HANDLING
+  // ===============================================================
 
   void _handleMessage(RemoteMessage message) {
     Map<String, dynamic> data = message.data;
@@ -1879,7 +1963,10 @@ class NotificationService {
   }
 }
 
-// ============= BACKGROUND HANDLER =============
+// ===============================================================
+// 🔥 BACKGROUND HANDLER
+// ===============================================================
+
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
