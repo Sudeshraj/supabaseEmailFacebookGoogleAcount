@@ -1010,7 +1010,7 @@ Future<void> _handleProfileLogin(
     }
   }
 
-  Color _getButtonColor(provider) {
+  Color _getButtonColor(String provider) {
     switch (provider) {
       case 'google':
         return const Color.fromARGB(255, 227, 44, 8);

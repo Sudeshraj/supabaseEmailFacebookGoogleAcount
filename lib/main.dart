@@ -147,7 +147,7 @@ Future<void> main() async {
     // ========== PHASE 2: SUPABASE ==========
     await Supabase.initialize(
       url: environment.supabaseUrl,
-      anonKey: environment.supabaseAnonKey,
+      publishableKey: environment.supabaseAnonKey, // ✅ Use publishableKey
       debug: kDebugMode,
     );
 
@@ -159,10 +159,12 @@ Future<void> main() async {
     // ========== PHASE 4: NOTIFICATION SERVICE ==========
     // await NotificationService().init();
     final notificationService = NotificationService();
-    
+
     // ✅ Web සහ Mobile දෙකටම - Permission ඉල්ලන්නේ නැහැ
     await notificationService.initWithoutPermission();
-    debugPrint('🔔 Notification service initialized WITHOUT permission (Web + Mobile)');
+    debugPrint(
+      '🔔 Notification service initialized WITHOUT permission (Web + Mobile)',
+    );
 
     // ========== PHASE 5: PLATFORM CONFIG ==========
     await _setupPlatformSpecificConfig();
@@ -632,7 +634,7 @@ GoRouter _createRouter() {
       return null;
     },
     routes: [
-      GoRoute(path: '/', builder: (_, __) => const SplashScreen()),
+      GoRoute(path: '/', builder: (_, _) => const SplashScreen()),
       GoRoute(
         path: '/login',
         builder: (context, state) {
@@ -644,7 +646,7 @@ GoRouter _createRouter() {
           );
         },
       ),
-      GoRoute(path: '/signup', builder: (_, __) => const SignupFlow()),
+      GoRoute(path: '/signup', builder: (_, _) => const SignupFlow()),
       GoRoute(
         path: '/reg',
         name: 'registration',
@@ -656,13 +658,13 @@ GoRouter _createRouter() {
       ),
       GoRoute(
         path: '/verify-email',
-        builder: (_, __) => const EmailVerifyChecker(),
+        builder: (_, _) => const EmailVerifyChecker(),
       ),
       GoRoute(
         path: '/verify-invalid',
-        builder: (_, __) => const VerifyInvalidScreen(),
+        builder: (_, _) => const VerifyInvalidScreen(),
       ),
-      GoRoute(path: '/continue', builder: (_, __) => const ContinueScreen()),
+      GoRoute(path: '/continue', builder: (_, _) => const ContinueScreen()),
       GoRoute(
         path: '/role-selector',
         name: 'roleSelector',
@@ -693,14 +695,14 @@ GoRouter _createRouter() {
       ),
       GoRoute(
         path: '/barber',
-        builder: (_, __) {
+        builder: (_, _) {
           debugPrint('💇 Navigating to EmployeeDashboard');
           return const EmployeeDashboard();
         },
       ),
       GoRoute(
         path: '/owner',
-        builder: (_, __) {
+        builder: (_, _) {
           debugPrint('👑 Navigating to OwnerDashboard');
           return const OwnerDashboard();
         },
@@ -719,17 +721,17 @@ GoRouter _createRouter() {
       ),
       GoRoute(
         path: '/help',
-        builder: (_, __) => const HelpScreen(screenType: 'help'),
+        builder: (_, _) => const HelpScreen(screenType: 'help'),
       ),
       GoRoute(
         path: '/contact',
-        builder: (_, __) => const HelpScreen(screenType: 'contact'),
+        builder: (_, _) => const HelpScreen(screenType: 'contact'),
       ),
       GoRoute(
         path: '/about',
-        builder: (_, __) => const HelpScreen(screenType: 'about'),
+        builder: (_, _) => const HelpScreen(screenType: 'about'),
       ),
-      GoRoute(path: '/clear-data', builder: (_, __) => const ClearDataScreen()),
+      GoRoute(path: '/clear-data', builder: (_, _) => const ClearDataScreen()),
       GoRoute(
         path: '/data-consent',
         builder: (context, state) {
@@ -757,11 +759,11 @@ GoRouter _createRouter() {
       ),
       GoRoute(
         path: '/reset-password',
-        builder: (_, __) => const ResetPasswordRequestScreen(),
+        builder: (_, _) => const ResetPasswordRequestScreen(),
       ),
       GoRoute(
         path: '/reset-password-form',
-        builder: (_, __) => const ResetPasswordFormScreen(),
+        builder: (_, _) => const ResetPasswordFormScreen(),
       ),
       GoRoute(
         path: '/reset-password-confirm',
@@ -999,7 +1001,7 @@ GoRouter _createRouter() {
       // ============================================
       GoRoute(
         path: '/customer',
-        builder: (_, __) {
+        builder: (_, _) {
           debugPrint('🏠 Navigating to CustomerDashboard');
           return const CustomerDashboard();
         },

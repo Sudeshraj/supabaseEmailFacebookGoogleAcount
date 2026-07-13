@@ -102,7 +102,7 @@ class PermissionDialog extends StatelessWidget {
                   ),
                 ],
               ),
-              child: const Icon(
+              child: const FaIcon(
                 FontAwesomeIcons.bell,
                 color: Colors.white,
                 size: 32,

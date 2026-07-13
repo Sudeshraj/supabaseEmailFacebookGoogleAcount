@@ -18,7 +18,7 @@ Future<void> showNotYouDialog({
     barrierLabel: "NotYouDialog",
     barrierColor: Colors.black.withValues(alpha:0.6),
     transitionDuration: const Duration(milliseconds: 300),
-    pageBuilder: (_, __, ___) {
+    pageBuilder: (_, _, _) {
       return SafeArea(
         child: Center(
           child: Material(
@@ -36,7 +36,7 @@ Future<void> showNotYouDialog({
         ),
       );
     },
-    transitionBuilder: (_, animation, __, child) {
+    transitionBuilder: (_, animation, _, child) {
       return FadeTransition(
         opacity: animation,
         child: ScaleTransition(

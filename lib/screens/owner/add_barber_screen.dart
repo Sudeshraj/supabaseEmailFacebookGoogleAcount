@@ -2337,7 +2337,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
                 itemCount: _ownerSalons.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 8),
+                separatorBuilder: (_, _) => const SizedBox(height: 8),
                 itemBuilder: (context, index) {
                   final salon = _ownerSalons[index];
                   final isSelected = _selectedSalonId == salon['id'].toString();
@@ -2606,7 +2606,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
                 itemCount: _searchResults.length,
-                separatorBuilder: (_, __) => const Divider(height: 1),
+                separatorBuilder: (_, _) => const Divider(height: 1),
                 itemBuilder: (context, index) {
                   final barber = _searchResults[index];
                   final isSelected = _selectedBarberId == barber['id'];

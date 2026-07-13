@@ -50,31 +50,31 @@ class SessionManager {
   }
 
   static const String _pendingRoleKey = 'pending_oauth_role';
-static const String _pendingEmailKey = 'pending_oauth_email';
+  static const String _pendingEmailKey = 'pending_oauth_email';
 
-/// ✅ OAuth redirect එකට කලින් තෝරාගත්ත role එක save කරනවා
-static Future<void> setPendingRoleSelection({
-  required String email,
-  required String role,
-}) async {
-  await _prefs.setString(_pendingRoleKey, role);
-  await _prefs.setString(_pendingEmailKey, email);
-  debugPrint('📌 Pending role saved before OAuth redirect: $email -> $role');
-}
-
-/// ✅ OAuth callback එකෙන් ආපහු ආවම, pending role එක ගන්නවා (once only)
-static Future<String?> consumePendingRoleSelection(String email) async {
-  final pendingEmail = _prefs.getString(_pendingEmailKey);
-  final pendingRole = _prefs.getString(_pendingRoleKey);
-
-  if (pendingEmail == email && pendingRole != null) {
-    await _prefs.remove(_pendingRoleKey);
-    await _prefs.remove(_pendingEmailKey);
-    debugPrint('✅ Consumed pending role: $email -> $pendingRole');
-    return pendingRole;
+  /// ✅ OAuth redirect එකට කලින් තෝරාගත්ත role එක save කරනවා
+  static Future<void> setPendingRoleSelection({
+    required String email,
+    required String role,
+  }) async {
+    await _prefs.setString(_pendingRoleKey, role);
+    await _prefs.setString(_pendingEmailKey, email);
+    debugPrint('📌 Pending role saved before OAuth redirect: $email -> $role');
   }
-  return null;
-}
+
+  /// ✅ OAuth callback එකෙන් ආපහු ආවම, pending role එක ගන්නවා (once only)
+  static Future<String?> consumePendingRoleSelection(String email) async {
+    final pendingEmail = _prefs.getString(_pendingEmailKey);
+    final pendingRole = _prefs.getString(_pendingRoleKey);
+
+    if (pendingEmail == email && pendingRole != null) {
+      await _prefs.remove(_pendingRoleKey);
+      await _prefs.remove(_pendingEmailKey);
+      debugPrint('✅ Consumed pending role: $email -> $pendingRole');
+      return pendingRole;
+    }
+    return null;
+  }
 
   // =====================================================
   // ✅ CONSENT MANAGEMENT FUNCTIONS
@@ -583,31 +583,34 @@ static Future<String?> consumePendingRoleSelection(String email) async {
     }
   }
 
-static Future<String?> getCurrentRole() async {
-  try {
-    final role = _prefs.getString(_keyCurrentRole);
-    debugPrint('📖 Getting current role from SharedPreferences: $role');
+  static Future<String?> getCurrentRole() async {
+    try {
+      final role = _prefs.getString(_keyCurrentRole);
+      debugPrint('📖 Getting current role from SharedPreferences: $role');
 
-    // ✅ FIX: SessionManager pref එකේ තියෙන stale email එකට වඩා 
-    // actual authenticated supabase user email එක use කරන්න
-    final email = Supabase.instance.client.auth.currentUser?.email 
-        ?? await getCurrentUserEmail();
+      // ✅ FIX: SessionManager pref එකේ තියෙන stale email එකට වඩා
+      // actual authenticated supabase user email එක use කරන්න
+      final email =
+          Supabase.instance.client.auth.currentUser?.email ??
+          await getCurrentUserEmail();
 
-    if (email != null && role != null) {
-      final userRoles = await getUserRoles(email);
-      if (!userRoles.contains(role)) {
-        debugPrint('⚠️ Stored role $role not in user roles $userRoles, clearing');
-        await _prefs.remove(_keyCurrentRole);
-        return null;
+      if (email != null && role != null) {
+        final userRoles = await getUserRoles(email);
+        if (!userRoles.contains(role)) {
+          debugPrint(
+            '⚠️ Stored role $role not in user roles $userRoles, clearing',
+          );
+          await _prefs.remove(_keyCurrentRole);
+          return null;
+        }
       }
-    }
 
-    return role;
-  } catch (e) {
-    debugPrint('❌ Error getting current role: $e');
-    return null;
+      return role;
+    } catch (e) {
+      debugPrint('❌ Error getting current role: $e');
+      return null;
+    }
   }
-}
 
   static Future<void> updateUserRole(String newRole) async {
     try {
@@ -1828,8 +1831,7 @@ static Future<String?> getCurrentRole() async {
     return profile?['provider'] as String?;
   }
 
-  static AndroidOptions _getAndroidOptions() =>
-      const AndroidOptions(encryptedSharedPreferences: true);
+  static AndroidOptions _getAndroidOptions() => const AndroidOptions();
 
   static IOSOptions _getIOSOptions() => const IOSOptions(
     accessibility: KeychainAccessibility.unlocked,
@@ -2532,111 +2534,107 @@ static Future<String?> getCurrentRole() async {
   }
 
   // =====================================================
-// ✅ AUTO-RESTORE FUNCTIONS - COMPLETE
-// =====================================================
+  // ✅ AUTO-RESTORE FUNCTIONS - COMPLETE
+  // =====================================================
 
-/// ✅ Auto-restore individual role on login (Facebook style)
-static Future<void> autoRestoreRoleOnLogin({
-  required String email,
-  required String role,
-}) async {
-  try {
-    final supabase = Supabase.instance.client;
-    final user = supabase.auth.currentUser;
-
-    if (user == null) {
-      debugPrint('⚠️ No user logged in');
-      return;
-    }
-
-    debugPrint('🔄 Checking auto-restore for role: $role for $email');
-
-    // ✅ Check if role is scheduled_for_deletion
-    final roleCheck = await supabase
-        .from('user_roles')
-        .select('status, roles!inner (name)')
-        .eq('user_id', user.id)
-        .eq('roles.name', role)
-        .maybeSingle();
-
-    if (roleCheck == null) {
-      debugPrint('⚠️ Role $role not found for user');
-      return;
-    }
-
-    final status = roleCheck['status'] as String? ?? 'active';
-
-    // ✅ Only restore if scheduled_for_deletion
-    if (status != 'scheduled_for_deletion') {
-      debugPrint('ℹ️ Role $role is not scheduled for deletion (status: $status)');
-      return;
-    }
-
-    // ✅ Call database function to restore
+  /// ✅ Auto-restore individual role on login (Facebook style)
+  static Future<void> autoRestoreRoleOnLogin({
+    required String email,
+    required String role,
+  }) async {
     try {
-      final response = await supabase.rpc(
-        'auto_restore_role_on_login',
-        params: {
-          'p_user_id': user.id,
-          'p_role': role,
-        },
-      );
+      final supabase = Supabase.instance.client;
+      final user = supabase.auth.currentUser;
 
-      final success = response['success'] as bool? ?? false;
+      if (user == null) {
+        debugPrint('⚠️ No user logged in');
+        return;
+      }
 
-      if (success) {
-        debugPrint('✅ Role auto-restored: $role');
+      debugPrint('🔄 Checking auto-restore for role: $role for $email');
 
-        // ✅ Update local available profiles
-        final availableProfiles = await getAvailableProfiles();
-        final exists = availableProfiles.any(
-          (p) => p['email'] == email && p['role'] == role,
+      // ✅ Check if role is scheduled_for_deletion
+      final roleCheck = await supabase
+          .from('user_roles')
+          .select('status, roles!inner (name)')
+          .eq('user_id', user.id)
+          .eq('roles.name', role)
+          .maybeSingle();
+
+      if (roleCheck == null) {
+        debugPrint('⚠️ Role $role not found for user');
+        return;
+      }
+
+      final status = roleCheck['status'] as String? ?? 'active';
+
+      // ✅ Only restore if scheduled_for_deletion
+      if (status != 'scheduled_for_deletion') {
+        debugPrint(
+          'ℹ️ Role $role is not scheduled for deletion (status: $status)',
+        );
+        return;
+      }
+
+      // ✅ Call database function to restore
+      try {
+        final response = await supabase.rpc(
+          'auto_restore_role_on_login',
+          params: {'p_user_id': user.id, 'p_role': role},
         );
 
-        if (!exists) {
-          availableProfiles.add({
-            'id': user.id,
-            'email': email,
-            'role': role,
-            'role_id': _getRoleIdFromName(role),
-            'status': 'active',
-            'is_active': true,
-            'last_used': DateTime.now().toIso8601String(),
-            'restored_at': DateTime.now().toIso8601String(),
-          });
-          await saveAvailableProfiles(availableProfiles);
+        final success = response['success'] as bool? ?? false;
+
+        if (success) {
+          debugPrint('✅ Role auto-restored: $role');
+
+          // ✅ Update local available profiles
+          final availableProfiles = await getAvailableProfiles();
+          final exists = availableProfiles.any(
+            (p) => p['email'] == email && p['role'] == role,
+          );
+
+          if (!exists) {
+            availableProfiles.add({
+              'id': user.id,
+              'email': email,
+              'role': role,
+              'role_id': _getRoleIdFromName(role),
+              'status': 'active',
+              'is_active': true,
+              'last_used': DateTime.now().toIso8601String(),
+              'restored_at': DateTime.now().toIso8601String(),
+            });
+            await saveAvailableProfiles(availableProfiles);
+          }
+
+          // ✅ Update user roles cache
+          final rolesKey = '$email$_keyUserRoles';
+          final cachedRoles = _prefs.getStringList(rolesKey) ?? [];
+          if (!cachedRoles.contains(role)) {
+            cachedRoles.add(role);
+            await _prefs.setStringList(rolesKey, cachedRoles);
+          }
+
+          // ✅ Remove schedule
+          await _prefs.remove('del_${email}_$role');
+
+          // ✅ Refresh app state
+          appState.refreshState();
+
+          debugPrint('✅ Role $role restored and synced for: $email');
+        } else {
+          final message = response['message'] as String? ?? 'Unknown error';
+          debugPrint('⚠️ Failed to restore role $role: $message');
         }
-
-        // ✅ Update user roles cache
-        final rolesKey = '$email$_keyUserRoles';
-        final cachedRoles = _prefs.getStringList(rolesKey) ?? [];
-        if (!cachedRoles.contains(role)) {
-          cachedRoles.add(role);
-          await _prefs.setStringList(rolesKey, cachedRoles);
-        }
-
-        // ✅ Remove schedule
-        await _prefs.remove('del_${email}_$role');
-
-        // ✅ Refresh app state
-        appState.refreshState();
-
-        debugPrint('✅ Role $role restored and synced for: $email');
-      } else {
-        final message = response['message'] as String? ?? 'Unknown error';
-        debugPrint('⚠️ Failed to restore role $role: $message');
+      } on PostgrestException catch (e) {
+        debugPrint('⚠️ RPC error for auto_restore_role_on_login: $e');
+        // RPC function not found - skip
+      } catch (e) {
+        debugPrint('⚠️ Error calling auto_restore_role_on_login: $e');
       }
-    } on PostgrestException catch (e) {
-      debugPrint('⚠️ RPC error for auto_restore_role_on_login: $e');
-      // RPC function not found - skip
     } catch (e) {
-      debugPrint('⚠️ Error calling auto_restore_role_on_login: $e');
+      debugPrint('❌ Error in autoRestoreRoleOnLogin: $e');
     }
-  } catch (e) {
-    debugPrint('❌ Error in autoRestoreRoleOnLogin: $e');
   }
-}
-
-
-
 }
