@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
-import 'package:flutter_native_timezone/flutter_native_timezone.dart';
+import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class TimezoneService {
@@ -374,8 +374,7 @@ class TimezoneService {
         return;
       }
 
-      final String deviceTimezone =
-          await FlutterNativeTimezone.getLocalTimezone();
+      final String deviceTimezone = await FlutterTimezone.getLocalTimezone();
       debugPrint('📱 Device timezone detected: $deviceTimezone');
 
       if (_isValidTimezone(deviceTimezone)) {

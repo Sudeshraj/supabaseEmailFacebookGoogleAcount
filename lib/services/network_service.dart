@@ -1,7 +1,8 @@
 import 'dart:async';
 import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart';
-import 'package:web/web.dart' as web;
+
+import 'package:flutter_application_1/services/web_online_checker_stub.dart' if (dart.library.js_interop) 'web_online_checker_web.dart' as platform;
 
 class NetworkService {
   final _controller = StreamController<bool>.broadcast();
@@ -24,9 +25,7 @@ class NetworkService {
     try {
       // ----- WEB -----
       if (kIsWeb) {
-        final navigator = web.window.navigator;
-        final online = navigator.onLine;
-        return online;
+        return platform.isBrowserOnline();
       }
 
       // ----- MOBILE (Android/iOS) -----
