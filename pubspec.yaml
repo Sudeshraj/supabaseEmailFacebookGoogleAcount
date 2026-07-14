@@ -5,28 +5,32 @@ publish_to: 'none'
 version: 1.0.0+1
 
 environment:
-  sdk: ^3.9.2
+  sdk: ^3.12.2
 
 dependencies:
   flutter:
     sdk: flutter
 
-  # Firebase
+  # ================================================================
+  # 🔥 FIREBASE
+  # ================================================================
   firebase_core: ^4.1.1 
   firebase_messaging: ^16.1.1
-  firebase_messaging_web: ^4.1.2
-  firebase_core_web: ^3.4.0
   
-  # Notifications
-  flutter_local_notifications: ^20.1.0
+  # ================================================================
+  # 🔥 NOTIFICATIONS
+  # ================================================================
+  flutter_local_notifications: ^22.0.1
 
-  # Utilities
+  # ================================================================
+  # 🔥 UTILITIES
+  # ================================================================
   universal_platform: ^1.1.0
   cupertino_icons: ^1.0.8   
   provider: ^6.1.5+1   
   shared_preferences: ^2.5.3
   url_launcher: ^6.3.2
-  flutter_secure_storage: ^9.2.4
+  flutter_secure_storage: ^10.3.1
   country_picker: ^2.0.27
   flutter_libphonenumber: ^2.5.1
   flutter_multi_formatter: ^2.13.10  
@@ -34,69 +38,95 @@ dependencies:
   http: ^1.6.0
   web: ^1.1.1
 
-  # Navigation & Auth
+  # ================================================================
+  # 🔥 NAVIGATION & AUTH
+  # ================================================================
   supabase_flutter: ^2.12.0
   go_router: ^17.0.1
   
-  # Environment
+  # ================================================================
+  # 🔥 ENVIRONMENT
+  # ================================================================
   flutter_dotenv: ^6.0.0
   url_strategy: ^0.3.0
 
-  # Icons & Images
+  # ================================================================
+  # 🔥 ICONS & IMAGES
+  # ================================================================
   flutter_launcher_icons: ^0.14.4
   flutter_svg: ^2.2.3
-  package_info_plus: ^9.0.0
+  package_info_plus: ^10.2.0
   cached_network_image: ^3.4.1
-  font_awesome_flutter: ^10.12.0
+  font_awesome_flutter: ^11.0.0
 
-   # NEW SOCIAL LOGIN DEPENDENCIES 
-  google_sign_in: ^7.2.0           # Google Sign-In
-  google_sign_in_web: ^1.1.2      # Google Web Support
-  flutter_facebook_auth: ^7.1.5    # Facebook Login
-  flutter_facebook_auth_web: ^6.1.2 # Facebook Web Support
-  sign_in_with_apple: ^7.0.1       # Apple Sign-In (iOS/Android/Web)
-  flutter_web_auth_2: ^5.0.1       # (දැනටමත් තියෙනවා - OAuth flows for only supabse)
+  # ================================================================
+  # 🔥 SOCIAL LOGIN
+  # ================================================================
+  google_sign_in: ^7.2.0
+  flutter_facebook_auth: ^7.1.5
+  sign_in_with_apple: ^8.1.0
+  flutter_web_auth_2: ^5.0.1
 
-
-  # Settings
+  # ================================================================
+  # 🔥 SETTINGS & IMAGES
+  # ================================================================
   app_settings: ^7.0.0
   image_picker: ^1.2.1
   intl: ^0.20.2
   path: ^1.9.1
   image_cropper: ^12.1.0
 
-  timezone: ^0.10.1
-  flutter_native_timezone: ^2.0.0 # Device timezone eka ganna
+  # ================================================================
+  # 🔥 TIMEZONE
+  # ================================================================
+  timezone: ^0.11.1
+  # flutter_native_timezone: ^2.0.0
+  flutter_timezone: ^4.1.1
   google_fonts: ^8.1.0
- 
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^5.0.0
+  flutter_lints: ^6.0.0
 
-# ========== FLUTTER LAUNCHER ICONS CONFIG meka use karanne icon auto genarate karagnna==========
+# ================================================================
+# 🔥 FLUTTER LAUNCHER ICONS
+# ================================================================
+
 flutter_launcher_icons:
-  # Android icons
   android: true
   image_path_android: "assets/logo.png"
   adaptive_icon_background: "#FF6B8B"
   adaptive_icon_foreground: "assets/logo.png"
   
-  # iOS icons  
   ios: true
   image_path_ios: "assets/logo.png"
   remove_alpha_ios: true
   
-  # Web icons
   web:
     generate: true
     image_path: "assets/logo.png"
     background_color: "#FF6B8B"
 
-# ========== FLUTTER CONFIG ==========
+# ================================================================
+# 🔥 FLUTTER CONFIG
+# ================================================================
+
 flutter:
   uses-material-design: true
+  
   assets:
     - assets/
     - .env
+  #   - assets/images/
+  #   - assets/icons/
+  #   - assets/fonts/
+  
+  # fonts:
+  #   - family: NotoSans
+  #     fonts:
+  #       - asset: assets/fonts/NotoSans-Regular.ttf
+  #       - asset: assets/fonts/NotoSans-Bold.ttf
+  #         weight: 700
+  #       - asset: assets/fonts/NotoSans-Light.ttf
+  #         weight: 300

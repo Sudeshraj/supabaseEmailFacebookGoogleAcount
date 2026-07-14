@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">MySalon</string>
+    <string name="facebook_app_id">1957218565146104</string>
+    <string name="facebook_client_token">fac153a4848f8ee9a80543c379b01b2f</string>
+    <string name="fb_login_protocol_scheme">fb1957218565146104</string>
+</resources>

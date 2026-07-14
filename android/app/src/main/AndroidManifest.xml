@@ -1,26 +1,106 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
-<!-- for notification -->
-<uses-permission android:name="android.permission.INTERNET" />
-<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
-<!-- for notification -->
+    <!-- ================================================================ -->
+    <!-- 🔥 PERMISSIONS -->
+    <!-- ================================================================ -->
 
-<!-- Profile image Upload-->
-<!-- ✅ Camera Permission -->
-<uses-permission android:name="android.permission.CAMERA" />
-    
-<!-- ✅ Read External Storage (Android 12 and below) -->
-<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
-<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
-    
-<!-- ✅ Read Media Images (Android 13+) -->
+    <!-- Network -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Notifications - Android 13+ (API 33+) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Vibration for notifications -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!-- Camera -->
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <!-- Storage - Android 12 and below (API 32-) -->
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+
+    <!-- Storage - Android 13+ (API 33+) -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
-<!-- Profile image Upload-->
+
+    <!-- ================================================================ -->
+    <!-- 🔥 OPTIONAL HARDWARE FEATURES -->
+    <!-- ================================================================ -->
+    <!-- required="false" so devices without a camera can still install the app -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+
+    <!-- ================================================================ -->
+    <!-- 🔥 APPLICATION -->
+    <!-- ================================================================ -->
 
     <application
         android:label="flutter_application_1"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:usesCleartextTraffic="true"
+        android:requestLegacyExternalStorage="true"
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        tools:targetApi="33">
+
+        <!-- ================================================================ -->
+        <!-- 🔥 NOTIFICATION CHANNEL -->
+        <!-- ================================================================ -->
+
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@mipmap/ic_launcher" />
+
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/notification_color" />
+
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="salon_channel" />
+
+        <!-- ================================================================ -->
+        <!-- 🔥 FACEBOOK LOGIN (flutter_facebook_auth) -->
+        <!-- ================================================================ -->
+        <!-- ⚠️ IMPORTANT: facebook_app_id, facebook_client_token, and         -->
+        <!-- fb_login_protocol_scheme must be defined in                      -->
+        <!-- android/app/src/main/res/values/strings.xml                      -->
+        <!-- Get these values from https://developers.facebook.com/apps       -->
+
+        <meta-data
+            android:name="com.facebook.sdk.ApplicationId"
+            android:value="@string/facebook_app_id" />
+
+        <meta-data
+            android:name="com.facebook.sdk.ClientToken"
+            android:value="@string/facebook_client_token" />
+
+        <activity
+            android:name="com.facebook.FacebookActivity"
+            android:configChanges="keyboard|keyboardHidden|screenLayout|screenSize|orientation"
+            android:label="@string/app_name" />
+
+        <activity
+            android:name="com.facebook.CustomTabActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="@string/fb_login_protocol_scheme" />
+            </intent-filter>
+        </activity>
+
+        <!-- ================================================================ -->
+        <!-- 🔥 MAIN ACTIVITY -->
+        <!-- ================================================================ -->
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -30,15 +110,13 @@
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
             android:windowSoftInputMode="adjustResize">
-            <!-- Specifies an Android theme to apply to this Activity as soon as
-                 the Android process has started. This theme is visible to the user
-                 while the Flutter UI initializes. After that, this theme continues
-                 to determine the Window background behind the Flutter UI. -->
+
+            <!-- Normal Theme -->
             <meta-data
-              android:name="io.flutter.embedding.android.NormalTheme"
-              android:resource="@style/NormalTheme"
-              />
-                     <!-- Launcher -->
+                android:name="io.flutter.embedding.android.NormalTheme"
+                android:resource="@style/NormalTheme" />
+
+            <!-- Launcher -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -52,22 +130,22 @@
                 <data android:scheme="myapp" />
             </intent-filter>
 
-            <!-- Android App Links: https://yourdomain.com -->
+            <!-- Android App Links -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
 
-               <!-- Scheme-based deep link -->
+                <!-- Scheme-based deep link -->
                 <data android:scheme="myapp" />
-                
+
                 <!-- Supabase callback URL -->
                 <data
                     android:scheme="https"
                     android:host="ifhenrgfpahandumdwmt.supabase.co"
                     android:pathPrefix="/auth/v1/callback" />
 
-                <data 
+                <data
                     android:scheme="https"
                     android:host="yourdomain.com"
                     android:pathPrefix="/auth/callback" />
@@ -78,24 +156,24 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data 
+
+                <data
                     android:scheme="https"
                     android:host="localhost"
                     android:pathPrefix="/auth/callback" />
 
-                     <!-- For HTTP links -->
-                <data 
+                <data
                     android:scheme="http"
                     android:host="localhost"
-                    android:pathPrefix="/auth/callback" />               
-
+                    android:pathPrefix="/auth/callback" />
             </intent-filter>
 
-             <!-- Add another intent filter for specific host -->
+            <!-- Specific host intent filter -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
+
                 <data
                     android:scheme="https"
                     android:host="ifhenrgfpahandumdwmt.supabase.co"
@@ -105,24 +183,31 @@
                 <data android:scheme="tel" />
             </intent-filter>
 
-             <intent-filter>
+            <!-- Auth scheme intent filter -->
+            <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="myapp" android:host="auth" />
             </intent-filter>
 
-            <meta-data android:name="com.google.android.geo.API_KEY" android:value="AIzaSyAneT1e71a84MIL76EgSHjJ1LG3TIU9yMI"/> <!-- for map -->
-
-
         </activity>
-        <!-- Don't delete the meta-data below.
-             This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
+
+        <!-- ================================================================ -->
+        <!-- 🔥 FLUTTER EMBEDDING -->
+        <!-- ================================================================ -->
+
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
 
-<!-- cropping start -->
+        <!-- ================================================================ -->
+        <!-- 🔥 IMAGE CROPPING (UCrop) -->
+        <!-- ================================================================ -->
+        <!-- ⚠️ NOTE: image_cropper v6+ registers this provider automatically. -->
+        <!-- If the build fails with a "duplicate provider authority" /       -->
+        <!-- manifest merger conflict error, remove this <provider> block.    -->
+
         <provider
             android:name="com.yalantis.ucrop.UCropFileProvider"
             android:authorities="${applicationId}.ucrop"
@@ -132,18 +217,52 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/ucrop_paths" />
         </provider>
-<!-- cropping end -->
 
     </application>
-    <!-- Required to query activities that can process text, see:
-         https://developer.android.com/training/package-visibility and
-         https://developer.android.com/reference/android/content/Intent#ACTION_PROCESS_TEXT.
 
-         In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
+    <!-- ================================================================ -->
+    <!-- 🔥 TEXT PROCESSING & URL LAUNCHER (QUERIES) -->
+    <!-- ================================================================ -->
+    <!-- Android 11+ (API 30+) requires explicit package visibility        -->
+    <!-- declarations, otherwise url_launcher's canLaunchUrl() may fail.    -->
+
     <queries>
         <intent>
-            <action android:name="android.intent.action.PROCESS_TEXT"/>
-            <data android:mimeType="text/plain"/>
+            <action android:name="android.intent.action.PROCESS_TEXT" />
+            <data android:mimeType="text/plain" />
+        </intent>
+
+        <!-- Web links (https/http) -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="http" />
+        </intent>
+
+        <!-- Phone calls -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="tel" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.DIAL" />
+            <data android:scheme="tel" />
+        </intent>
+
+        <!-- Email -->
+        <intent>
+            <action android:name="android.intent.action.SENDTO" />
+            <data android:scheme="mailto" />
+        </intent>
+
+        <!-- SMS -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="sms" />
         </intent>
     </queries>
+
 </manifest>
