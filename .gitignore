@@ -163,3 +163,8 @@ target/
 # Personal files (optional)
 *.personal
 *.backup
+
+# Keystore
+android/key.properties
+android/app/*.jks
+android/app/*.keystore
