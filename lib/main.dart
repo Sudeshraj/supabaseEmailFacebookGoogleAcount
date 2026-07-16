@@ -2,6 +2,8 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:app_links/app_links.dart';
 import 'package:flutter_application_1/firebase_options.dart';
 import 'package:flutter_application_1/screens/authantication/command/auth_callback_handler.dart';
 import 'package:flutter_application_1/screens/authantication/command/clear_data_screen.dart';
@@ -74,6 +76,23 @@ late final GoRouter router;
 late final AppState appState;
 late final EnvironmentManager environment;
 String? pendingDeepLink;
+
+// Deep link handling (mobile)
+final AppLinks _appLinks = AppLinks();
+StreamSubscription<Uri>? _linkSubscription;
+
+// ====================
+// FIREBASE BACKGROUND MESSAGE HANDLER
+// ====================
+@pragma('vm:entry-point')
+Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  // Background isolate එකක් නිසා Firebase වෙනම initialize කරන්න ඕන
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+  debugPrint('📨 Background message received: ${message.messageId}');
+  debugPrint('📨 Background message data: ${message.data}');
+}
 
 // ====================
 // ERROR HANDLER
@@ -155,6 +174,10 @@ Future<void> main() async {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
+
+    // ✅ Background message handler register කිරීම - app closed
+    // state එකේදී notifications reliably ලැබෙන්න මේක අනිවාර්යයි
+    FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
     // ========== PHASE 4: NOTIFICATION SERVICE ==========
     // await NotificationService().init();
@@ -273,18 +296,49 @@ Future<void> _setupPlatformSpecificConfig() async {
   }
 }
 
+// ✅ app_links package පාවිච්චි කරලා, Android/iOS වලට reliable
+// deep link handling (Uri.base වෙනුවට)
 Future<void> _setupMobileDeepLinks() async {
   try {
-    final uri = Uri.base;
-    if (uri.toString().isNotEmpty && uri.toString() != '/') {
-      if (uri.toString().contains('myapp://') ||
-          uri.toString().contains('/auth/callback')) {
-        debugPrint('Mobile deep link detected!');
-        pendingDeepLink = uri.toString();
-      }
+    // App එක closed state එකේදී, deep link එකකින් open වුනානම්
+    final initialUri = await _appLinks.getInitialLink();
+    if (initialUri != null) {
+      debugPrint('📱 Initial deep link: $initialUri');
+      pendingDeepLink = initialUri.toString();
+      _handleDeepLink(initialUri);
     }
+
+    // App එක foreground/background තියෙද්දී, deep link එකක් click කළොත්
+    _linkSubscription = _appLinks.uriLinkStream.listen(
+      (uri) {
+        debugPrint('📱 Deep link received: $uri');
+        pendingDeepLink = uri.toString();
+        _handleDeepLink(uri);
+      },
+      onError: (err) {
+        debugPrint('❌ Deep link stream error: $err');
+      },
+    );
   } catch (e) {
     debugPrint('Mobile deep link error: $e');
+  }
+}
+
+void _handleDeepLink(Uri uri) {
+  final uriString = uri.toString();
+
+  if (uriString.contains('myapp://') || uriString.contains('/auth/callback')) {
+    debugPrint('🔗 Auth deep link detected: $uriString');
+
+    final queryParams = uri.queryParameters;
+    if (queryParams.containsKey('code') ||
+        queryParams.containsKey('access_token')) {
+      try {
+        router.go('/auth/callback', extra: queryParams);
+      } catch (e) {
+        debugPrint('❌ Error navigating to auth callback: $e');
+      }
+    }
   }
 }
 
@@ -1101,6 +1155,7 @@ class _MyAppState extends State<MyApp> {
   void dispose() {
     _networkSub?.cancel();
     _networkService.dispose();
+    _linkSubscription?.cancel();
     super.dispose();
   }
 
