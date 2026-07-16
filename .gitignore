@@ -51,7 +51,6 @@ out/
 .flutter-plugins-dependencies
 
 # Web related
-lib/generated_plugin_registrant.dart
 web/
 
 # Symbolication related
