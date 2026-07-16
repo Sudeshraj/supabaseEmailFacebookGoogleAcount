@@ -4,6 +4,7 @@ import 'package:flutter_application_1/main.dart';
 import 'package:flutter_application_1/services/session_manager.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 
 class SideMenu extends StatefulWidget {
   final String userRole;
@@ -72,7 +73,6 @@ class _SideMenuState extends State<SideMenu> {
 
       debugPrint('📋 Loading roles for user: ${currentUser.id}');
 
-      // ✅ Get user roles with status
       final userRolesResponse = await supabase
           .from('user_roles')
           .select('''
@@ -85,7 +85,7 @@ class _SideMenuState extends State<SideMenu> {
             status
           ''')
           .eq('user_id', currentUser.id)
-          .eq('status', 'active'); // ✅ Only active roles
+          .eq('status', 'active');
 
       final List<String> roleNames = [];
       final List<Map<String, dynamic>> roleData = [];
@@ -106,7 +106,6 @@ class _SideMenuState extends State<SideMenu> {
       _allUserRoles = roleNames.toSet().toList();
       debugPrint('📋 Active user roles: $_allUserRoles');
 
-      // ✅ Get profile data
       final profileResponse = await supabase
           .from('profiles')
           .select('''
@@ -124,13 +123,11 @@ class _SideMenuState extends State<SideMenu> {
       final List<Map<String, dynamic>> profiles = [];
 
       if (profileResponse != null) {
-        final extraData =
-            profileResponse['extra_data'] as Map<String, dynamic>? ?? {};
+        final extraData = profileResponse['extra_data'] as Map<String, dynamic>? ?? {};
 
         for (var roleName in _allUserRoles) {
           final roleKey = 'profile_$roleName';
-          final roleStatus =
-              extraData[roleKey]?['status'] as String? ?? 'active';
+          final roleStatus = extraData[roleKey]?['status'] as String? ?? 'active';
 
           String displayName = profileResponse['full_name'] ?? widget.userName;
           if (displayName.isEmpty) {
@@ -141,10 +138,7 @@ class _SideMenuState extends State<SideMenu> {
 
           profiles.add({
             'id': profileResponse['id'],
-            'email':
-                profileResponse['email'] ??
-                widget.userEmail ??
-                currentUser.email,
+            'email': profileResponse['email'] ?? widget.userEmail ?? currentUser.email,
             'role': roleName,
             'role_id': roleData.firstWhere(
               (r) => r['name'] == roleName,
@@ -225,11 +219,9 @@ class _SideMenuState extends State<SideMenu> {
 
       if (email == null) throw Exception('No email found');
 
-      // ✅ Step 1: Save current role to SessionManager
       await SessionManager.updateUserRole(profile['role']);
       debugPrint('✅ Role saved to SessionManager: ${profile['role']}');
 
-      // ✅ Step 2: Update user metadata in Supabase
       if (currentUser != null) {
         final currentMetadata = currentUser.userMetadata ?? {};
         await supabase.auth.updateUser(
@@ -242,10 +234,8 @@ class _SideMenuState extends State<SideMenu> {
 
       if (!mounted) return;
 
-      // Close the drawer
       Navigator.pop(context);
 
-      // Show success message
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -256,7 +246,6 @@ class _SideMenuState extends State<SideMenu> {
         ),
       );
 
-      // ✅ Step 3: Navigate IMMEDIATELY
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
 
@@ -282,7 +271,6 @@ class _SideMenuState extends State<SideMenu> {
         }
       });
 
-      // ✅ Step 4: Refresh app state in BACKGROUND
       appState
           .refreshState()
           .then((_) {
@@ -292,7 +280,6 @@ class _SideMenuState extends State<SideMenu> {
             debugPrint('❌ Background refresh error: $e');
           });
 
-      // ✅ Step 5: Clear loading state after delay
       Future.delayed(const Duration(milliseconds: 300), () {
         if (mounted) {
           setState(() => _isLoading = false);
@@ -337,7 +324,6 @@ class _SideMenuState extends State<SideMenu> {
       return;
     }
 
-    // ✅ Show role selection dialog only (NO NAME INPUT)
     final selectedRole = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
@@ -377,261 +363,237 @@ class _SideMenuState extends State<SideMenu> {
 
     debugPrint('🔄 Creating new profile for role: $selectedRole');
 
-    // ✅ Create profile directly (NO INPUT FIELDS)
     await _createProfileDirectly(selectedRole);
   }
 
   // ============================================================
-  // 🔥 CREATE PROFILE DIRECTLY - FIXED (No Role Selector)
+  // 🔥 CREATE PROFILE DIRECTLY - COMPLETE
   // ============================================================
-// ============================================================
-// 🔥 CREATE PROFILE DIRECTLY - FIXED
-// ============================================================
-Future<void> _createProfileDirectly(String role) async {
-  if (!mounted) return;
+  Future<void> _createProfileDirectly(String role) async {
+    if (!mounted) return;
 
-  setState(() => _isLoading = true);
+    setState(() => _isLoading = true);
 
-  try {
-    final currentUser = supabase.auth.currentUser;
-    if (currentUser == null) {
-      throw Exception('User not logged in');
-    }
+    try {
+      final currentUser = supabase.auth.currentUser;
+      if (currentUser == null) {
+        throw Exception('User not logged in');
+      }
 
-    final email = currentUser.email;
-    if (email == null) throw Exception('No email found');
+      final email = currentUser.email;
+      if (email == null) throw Exception('No email found');
 
-    debugPrint('📝 Creating new $role profile for user: ${currentUser.id}');
+      debugPrint('📝 Creating new $role profile for user: ${currentUser.id}');
 
-    // ✅ 1. Get role ID
-    final roleResponse = await supabase
-        .from('roles')
-        .select('id')
-        .eq('name', role)
-        .single();
+      final roleResponse = await supabase
+          .from('roles')
+          .select('id')
+          .eq('name', role)
+          .single();
 
-    final roleId = roleResponse['id'];
+      final roleId = roleResponse['id'];
 
-    // ✅ 2. Get existing profile
-    final existingProfile = await supabase
-        .from('profiles')
-        .select()
-        .eq('id', currentUser.id)
-        .maybeSingle();
-
-    Map<String, dynamic> extraData = {};
-    String fullName = widget.userName;
-
-    if (existingProfile != null) {
-      extraData = existingProfile['extra_data'] as Map<String, dynamic>? ?? {};
-      fullName = existingProfile['full_name'] ?? widget.userName;
-      debugPrint('📋 Existing profile found, updating extra_data');
-    } else {
-      debugPrint('📋 No existing profile, creating new');
-    }
-
-    // ✅ 3. Update extra_data with new role
-    final roleKey = 'profile_$role';
-    extraData[roleKey] = {
-      'role': role,
-      'status': 'active',
-      'created_at': DateTime.now().toIso8601String(),
-    };
-
-    if (!extraData.containsKey('full_name')) {
-      extraData['full_name'] = fullName;
-    }
-
-    debugPrint('📝 Extra data updated: ${extraData.keys}');
-
-    // ✅ 4. Update or Insert profile
-    if (existingProfile == null) {
-      await supabase.from('profiles').insert({
-        'id': currentUser.id,
-        'email': email,
-        'full_name': fullName,
-        'avatar_url': currentUser.userMetadata?['avatar_url'] ?? 
-                     currentUser.userMetadata?['picture'],
-        'extra_data': extraData,
-        'is_active': true,
-        'is_blocked': false,
-        'created_at': DateTime.now().toIso8601String(),
-        'updated_at': DateTime.now().toIso8601String(),
-      });
-      debugPrint('✅ New profile created');
-    } else {
-      await supabase
+      final existingProfile = await supabase
           .from('profiles')
-          .update({
-            'full_name': fullName,
-            'extra_data': extraData,
-            'updated_at': DateTime.now().toIso8601String(),
-          })
-          .eq('id', currentUser.id);
-      debugPrint('✅ Profile updated with new role');
-    }
+          .select()
+          .eq('id', currentUser.id)
+          .maybeSingle();
 
-    // ✅ 5. Check if user already has this role
-    final existingRole = await supabase
-        .from('user_roles')
-        .select()
-        .eq('user_id', currentUser.id)
-        .eq('role_id', roleId)
-        .maybeSingle();
+      Map<String, dynamic> extraData = {};
+      String fullName = widget.userName;
 
-    if (existingRole == null) {
-      // ✅ Insert with status 'active'
-      await supabase.from('user_roles').insert({
-        'user_id': currentUser.id,
-        'role_id': roleId,
+      if (existingProfile != null) {
+        extraData = existingProfile['extra_data'] as Map<String, dynamic>? ?? {};
+        fullName = existingProfile['full_name'] ?? widget.userName;
+        debugPrint('📋 Existing profile found, updating extra_data');
+      } else {
+        debugPrint('📋 No existing profile, creating new');
+      }
+
+      final roleKey = 'profile_$role';
+      extraData[roleKey] = {
+        'role': role,
         'status': 'active',
         'created_at': DateTime.now().toIso8601String(),
-        'updated_at': DateTime.now().toIso8601String(),
-      });
-      debugPrint('✅ Role assigned: $role (status: active)');
-    } else {
-      // ✅ If role exists but inactive, reactivate
-      if (existingRole['status'] != 'active') {
+      };
+
+      if (!extraData.containsKey('full_name')) {
+        extraData['full_name'] = fullName;
+      }
+
+      debugPrint('📝 Extra data updated: ${extraData.keys}');
+
+      if (existingProfile == null) {
+        await supabase.from('profiles').insert({
+          'id': currentUser.id,
+          'email': email,
+          'full_name': fullName,
+          'avatar_url': currentUser.userMetadata?['avatar_url'] ?? 
+                       currentUser.userMetadata?['picture'],
+          'extra_data': extraData,
+          'is_active': true,
+          'is_blocked': false,
+          'created_at': DateTime.now().toIso8601String(),
+          'updated_at': DateTime.now().toIso8601String(),
+        });
+        debugPrint('✅ New profile created');
+      } else {
         await supabase
-            .from('user_roles')
+            .from('profiles')
             .update({
-              'status': 'active',
+              'full_name': fullName,
+              'extra_data': extraData,
               'updated_at': DateTime.now().toIso8601String(),
             })
-            .eq('user_id', currentUser.id)
-            .eq('role_id', roleId);
-        debugPrint('✅ Role reactivated: $role');
-      } else {
-        debugPrint('⚠️ Role already exists: $role');
+            .eq('id', currentUser.id);
+        debugPrint('✅ Profile updated with new role');
       }
-    }
 
-    // ✅ 6. Get all active user roles
-    final userRolesResponse = await supabase
-        .from('user_roles')
-        .select('''
-          role_id,
-          roles!inner (name),
-          status
-        ''')
-        .eq('user_id', currentUser.id)
-        .eq('status', 'active');
+      final existingRole = await supabase
+          .from('user_roles')
+          .select()
+          .eq('user_id', currentUser.id)
+          .eq('role_id', roleId)
+          .maybeSingle();
 
-    final List<String> userRoles = userRolesResponse
-        .map((r) => r['roles']['name'] as String)
-        .toList();
+      if (existingRole == null) {
+        await supabase.from('user_roles').insert({
+          'user_id': currentUser.id,
+          'role_id': roleId,
+          'status': 'active',
+          'created_at': DateTime.now().toIso8601String(),
+          'updated_at': DateTime.now().toIso8601String(),
+        });
+        debugPrint('✅ Role assigned: $role (status: active)');
+      } else {
+        if (existingRole['status'] != 'active') {
+          await supabase
+              .from('user_roles')
+              .update({
+                'status': 'active',
+                'updated_at': DateTime.now().toIso8601String(),
+              })
+              .eq('user_id', currentUser.id)
+              .eq('role_id', roleId);
+          debugPrint('✅ Role reactivated: $role');
+        } else {
+          debugPrint('⚠️ Role already exists: $role');
+        }
+      }
 
-    debugPrint('📝 Active user roles after update: $userRoles');
+      final userRolesResponse = await supabase
+          .from('user_roles')
+          .select('''
+            role_id,
+            roles!inner (name),
+            status
+          ''')
+          .eq('user_id', currentUser.id)
+          .eq('status', 'active');
 
-    // ✅ 7. Update user metadata
-    final currentMetadata = currentUser.userMetadata ?? {};
-    await supabase.auth.updateUser(
-      UserAttributes(
-        data: {
-          ...currentMetadata,
-          'roles': userRoles,
-          'current_role': role,
-          'profile_updated_at': DateTime.now().toIso8601String(),
-        },
-      ),
-    );
-    debugPrint('✅ User metadata updated');
+      final List<String> userRoles = userRolesResponse
+          .map((r) => r['roles']['name'] as String)
+          .toList();
 
-    // ✅ 8. Save to SessionManager
-    debugPrint('📱 Saving to SessionManager');
+      debugPrint('📝 Active user roles after update: $userRoles');
 
-    final photoUrl = currentUser.userMetadata?['avatar_url'] ?? 
-                     currentUser.userMetadata?['picture'];
-
-    await SessionManager.saveUserProfile(
-      email: email,
-      userId: currentUser.id,
-      name: fullName,
-      photo: photoUrl,
-      roles: userRoles,
-      rememberMe: true,
-      provider: await _getUserProvider(currentUser, photoUrl),
-    );
-
-    await SessionManager.saveCurrentRole(role);   
-
-
-    // ✅ Refresh available profiles
-    await _loadUserRolesFromDatabase();
-
-    // ============================================================
-    // 🔥 CRITICAL FIX: Navigate FIRST, then refresh in background
-    // ============================================================
-
-    // ✅ Step 9: Show success message
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            '✅ ${_getRoleDisplayName(role)} profile created successfully!',
-          ),
-          backgroundColor: Colors.green,
-          duration: const Duration(seconds: 3),
+      final currentMetadata = currentUser.userMetadata ?? {};
+      await supabase.auth.updateUser(
+        UserAttributes(
+          data: {
+            ...currentMetadata,
+            'roles': userRoles,
+            'current_role': role,
+            'profile_updated_at': DateTime.now().toIso8601String(),
+          },
         ),
       );
-    }
+      debugPrint('✅ User metadata updated');
 
-    // ✅ Step 10: Navigate IMMEDIATELY (before refresh)
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
+      debugPrint('📱 Saving to SessionManager');
 
-      debugPrint('🎯 Navigating directly to dashboard: $role');
+      final photoUrl = currentUser.userMetadata?['avatar_url'] ?? 
+                       currentUser.userMetadata?['picture'];
 
-      try {
-        switch (role) {
-          case 'owner':
-            context.go('/owner');
-            break;
-          case 'barber':
-            context.go('/barber');
-            break;
-          case 'customer':
-            context.go('/customer');
-            break;
-          default:
-            context.go('/');
-        }
-      } catch (e) {
-        debugPrint('❌ Navigation error: $e');
+      await SessionManager.saveUserProfile(
+        email: email,
+        userId: currentUser.id,
+        name: fullName,
+        photo: photoUrl,
+        roles: userRoles,
+        rememberMe: true,
+        provider: await _getUserProvider(currentUser, photoUrl),
+      );
+
+      await SessionManager.saveCurrentRole(role);
+
+      await _loadUserRolesFromDatabase();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '✅ ${_getRoleDisplayName(role)} profile created successfully!',
+            ),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 3),
+          ),
+        );
       }
-    });
 
-    // ✅ Step 11: Refresh app state in BACKGROUND
-    appState
-        .refreshState()
-        .then((_) {
-          debugPrint('✅ App state refreshed in background');
-        })
-        .catchError((e) {
-          debugPrint('❌ Background refresh error: $e');
-        });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
 
-    // ✅ Step 12: Clear loading state after delay
-    Future.delayed(const Duration(milliseconds: 500), () {
+        debugPrint('🎯 Navigating directly to dashboard: $role');
+
+        try {
+          switch (role) {
+            case 'owner':
+              context.go('/owner');
+              break;
+            case 'barber':
+              context.go('/barber');
+              break;
+            case 'customer':
+              context.go('/customer');
+              break;
+            default:
+              context.go('/');
+          }
+        } catch (e) {
+          debugPrint('❌ Navigation error: $e');
+        }
+      });
+
+      appState
+          .refreshState()
+          .then((_) {
+            debugPrint('✅ App state refreshed in background');
+          })
+          .catchError((e) {
+            debugPrint('❌ Background refresh error: $e');
+          });
+
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (mounted) {
+          setState(() => _isLoading = false);
+        }
+      });
+    } catch (e) {
+      debugPrint('❌ Error creating profile directly: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error creating profile: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
       if (mounted) {
         setState(() => _isLoading = false);
       }
-    });
-  } catch (e) {
-    debugPrint('❌ Error creating profile directly: $e');
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error creating profile: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
-    if (mounted) {
-      setState(() => _isLoading = false);
     }
   }
-}
 
   // ============================================================
   // 🔥 HELPER: Get user provider
@@ -708,6 +670,9 @@ Future<void> _createProfileDirectly(String role) async {
     }
   }
 
+  // ============================================================
+  // 🔥 BUILD PROFILE TYPE OPTION
+  // ============================================================
   Widget _buildProfileTypeOption({
     required IconData icon,
     required Color color,
@@ -715,53 +680,55 @@ Future<void> _createProfileDirectly(String role) async {
     required String description,
     required String role,
   }) {
-    return InkWell(
-      onTap: () => Navigator.pop(context, role),
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.1),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: color.withValues(alpha: 0.3)),
-        ),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.2),
-                shape: BoxShape.circle,
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: () => Navigator.pop(context, role),
+        borderRadius: BorderRadius.circular(12),
+        splashColor: color.withValues(alpha: 0.1),
+        highlightColor: color.withValues(alpha: 0.05),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.2),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(icon, color: color),
               ),
-              child: Icon(icon, color: color),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: color,
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: color,
+                      ),
                     ),
-                  ),
-                  Text(
-                    description,
-                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                  ),
-                ],
+                    Text(
+                      description,
+                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
 
   // ============================================================
-  // 🔥 PROFILE HEADER
+  // 🔥 PROFILE HEADER - WITH CACHED IMAGE
   // ============================================================
   Widget _buildProfileHeader() {
     final hasMultipleProfiles = _availableProfiles.length > 1;
@@ -788,7 +755,7 @@ Future<void> _createProfileDirectly(String role) async {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Profile Image / Avatar
+                  // ✅ Profile Image with CachedNetworkImage
                   GestureDetector(
                     onTap: hasMultipleProfiles
                         ? () {
@@ -807,19 +774,8 @@ Future<void> _createProfileDirectly(String role) async {
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             border: Border.all(color: Colors.white, width: 3),
-                            image:
-                                (widget.profileImageUrl != null &&
-                                    widget.profileImageUrl!.isNotEmpty)
-                                ? DecorationImage(
-                                    image: NetworkImage(
-                                      widget.profileImageUrl!,
-                                    ),
-                                    fit: BoxFit.cover,
-                                  )
-                                : null,
                           ),
-                          child:
-                              (widget.profileImageUrl == null ||
+                          child: (widget.profileImageUrl == null ||
                                   widget.profileImageUrl!.isEmpty)
                               ? CircleAvatar(
                                   backgroundColor: Colors.white,
@@ -834,7 +790,40 @@ Future<void> _createProfileDirectly(String role) async {
                                     ),
                                   ),
                                 )
-                              : null,
+                              : ClipOval(
+                                  child: CachedNetworkImage(
+                                    imageUrl: widget.profileImageUrl!,
+                                    fit: BoxFit.cover,
+                                    width: 70,
+                                    height: 70,
+                                    placeholder: (context, url) => 
+                                        const CircleAvatar(
+                                          backgroundColor: Colors.white,
+                                          child: SizedBox(
+                                            width: 25,
+                                            height: 25,
+                                            child: CircularProgressIndicator(
+                                              color: Color(0xFFFF6B8B),
+                                              strokeWidth: 2,
+                                            ),
+                                          ),
+                                        ),
+                                    errorWidget: (context, url, error) => 
+                                        CircleAvatar(
+                                          backgroundColor: Colors.white,
+                                          child: Text(
+                                            widget.userName.isNotEmpty
+                                                ? widget.userName[0].toUpperCase()
+                                                : 'U',
+                                            style: const TextStyle(
+                                              fontSize: 28,
+                                              fontWeight: FontWeight.bold,
+                                              color: Color(0xFFFF6B8B),
+                                            ),
+                                          ),
+                                        ),
+                                  ),
+                                ),
                         ),
                         if (hasMultipleProfiles)
                           Positioned(
@@ -1020,126 +1009,176 @@ Future<void> _createProfileDirectly(String role) async {
   }
 
   // ============================================================
-  // 🔥 PROFILE SWITCHER ITEM
+  // 🔥 PROFILE SWITCHER ITEM - WITH CACHED IMAGE
   // ============================================================
   Widget _buildProfileSwitcherItem(Map<String, dynamic> profile) {
-    return InkWell(
-      onTap: profile['is_active'] == true && profile['is_blocked'] == false
-          ? () => _switchProfile(profile)
-          : null,
-      borderRadius: BorderRadius.circular(16),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-        child: Row(
-          children: [
-            Container(
-              width: 50,
-              height: 50,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: _getRoleColor(profile['role']).withValues(alpha: 0.1),
-                image:
-                    profile['photo'] != null &&
-                        profile['photo'].toString().isNotEmpty
-                    ? DecorationImage(
-                        image: NetworkImage(profile['photo']),
-                        fit: BoxFit.cover,
+    final bool isActive = profile['is_active'] == true && profile['is_blocked'] == false;
+    final Color roleColor = _getRoleColor(profile['role']);
+    
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: isActive ? () => _switchProfile(profile) : null,
+        borderRadius: BorderRadius.circular(12),
+        splashColor: roleColor.withValues(alpha: 0.1),
+        highlightColor: roleColor.withValues(alpha: 0.05),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            children: [
+              // ✅ Profile Image with CachedNetworkImage
+              Container(
+                width: 50,
+                height: 50,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: roleColor.withValues(alpha: 0.1),
+                ),
+                child: profile['photo'] != null && profile['photo'].toString().isNotEmpty
+                    ? ClipOval(
+                        child: CachedNetworkImage(
+                          imageUrl: profile['photo'],
+                          fit: BoxFit.cover,
+                          width: 50,
+                          height: 50,
+                          placeholder: (context, url) => Center(
+                            child: SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                color: roleColor,
+                                strokeWidth: 2,
+                              ),
+                            ),
+                          ),
+                          errorWidget: (context, url, error) => Center(
+                            child: Text(
+                              profile['name'][0].toUpperCase(),
+                              style: TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                                color: roleColor,
+                              ),
+                            ),
+                          ),
+                        ),
                       )
-                    : null,
-              ),
-              child:
-                  profile['photo'] == null ||
-                      profile['photo'].toString().isEmpty
-                  ? Center(
-                      child: Text(
-                        profile['name'][0].toUpperCase(),
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                          color: _getRoleColor(profile['role']),
-                        ),
-                      ),
-                    )
-                  : null,
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Wrap(
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    spacing: 6,
-                    runSpacing: 4,
-                    children: [
-                      Text(
-                        profile['name'],
-                        style: const TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF1A1A1A),
-                        ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 3,
-                        ),
-                        decoration: BoxDecoration(
-                          color: _getRoleColor(
-                            profile['role'],
-                          ).withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
+                    : Center(
                         child: Text(
-                          _getRoleDisplayName(profile['role']),
+                          profile['name'][0].toUpperCase(),
                           style: TextStyle(
-                            fontSize: 10,
-                            color: _getRoleColor(profile['role']),
-                            fontWeight: FontWeight.w600,
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: roleColor,
                           ),
                         ),
                       ),
-                      if (profile['is_current'] == true)
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 6,
+                      runSpacing: 4,
+                      children: [
+                        Text(
+                          profile['name'],
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF1A1A1A),
+                          ),
+                        ),
                         Container(
                           padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
+                            horizontal: 8,
                             vertical: 3,
                           ),
                           decoration: BoxDecoration(
-                            color: Colors.green,
-                            borderRadius: BorderRadius.circular(8),
+                            color: roleColor.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(12),
                           ),
-                          child: const Text(
-                            'Active',
-                            style: TextStyle(fontSize: 8, color: Colors.white),
+                          child: Text(
+                            _getRoleDisplayName(profile['role']),
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: roleColor,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ),
-                    ],
+                        if (profile['is_current'] == true)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 3,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.green,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Text(
+                              'Active',
+                              style: TextStyle(
+                                fontSize: 8,
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        if (!isActive)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 3,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.orange,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              profile['is_blocked'] == true ? 'Blocked' : 'Inactive',
+                              style: const TextStyle(
+                                fontSize: 8,
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      profile['email'] ?? '',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey[500],
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              if (isActive && profile['is_current'] != true)
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                    shape: BoxShape.circle,
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    profile['email'] ?? '',
-                    style: TextStyle(fontSize: 12, color: Colors.grey[500]),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                  child: const Icon(
+                    Icons.arrow_forward_ios,
+                    size: 14,
+                    color: Color(0xFFFF6B8B),
                   ),
-                ],
-              ),
-            ),
-            Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                Icons.arrow_forward_ios,
-                size: 14,
-                color: const Color(0xFFFF6B8B),
-              ),
-            ),
-          ],
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -1149,44 +1188,54 @@ Future<void> _createProfileDirectly(String role) async {
   // 🔥 CREATE NEW PROFILE ITEM
   // ============================================================
   Widget _buildCreateNewProfileItem() {
-    return InkWell(
-      onTap: () {
-        setState(() {
-          _showProfileSwitcher = false;
-        });
-        _createNewProfile();
-      },
-      borderRadius: BorderRadius.circular(16),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
-                shape: BoxShape.circle,
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: () {
+          setState(() {
+            _showProfileSwitcher = false;
+          });
+          _createNewProfile();
+        },
+        borderRadius: BorderRadius.circular(12),
+        splashColor: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+        highlightColor: const Color(0xFFFF6B8B).withValues(alpha: 0.05),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.add,
+                  size: 18,
+                  color: Color(0xFFFF6B8B),
+                ),
               ),
-              child: const Icon(Icons.add, size: 18, color: Color(0xFFFF6B8B)),
-            ),
-            const SizedBox(width: 10),
-            const Text(
-              'Create New Profile',
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
-                color: Color(0xFFFF6B8B),
+              const SizedBox(width: 10),
+              const Text(
+                'Create New Profile',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  color: Color(0xFFFF6B8B),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
 
   // ============================================================
-  // 🔥 BOTTOM SECTION
+  // 🔥 BOTTOM SECTION - COMPLETE FIX FOR FLUTTER 3.44.6
   // ============================================================
   Widget _buildBottomSection() {
     return Container(
@@ -1198,41 +1247,91 @@ Future<void> _createProfileDirectly(String role) async {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          ListTile(
-            leading: Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.grey.withValues(alpha: 0.08),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.settings_outlined,
-                color: Colors.grey,
-                size: 22,
+          // ✅ Settings - Fixed for Flutter 3.44.6
+          Material(
+            color: Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+            child: InkWell(
+              onTap: () {
+                Navigator.pop(context);
+                _navigateToSettings(context);
+              },
+              borderRadius: BorderRadius.circular(8),
+              splashColor: Colors.grey.withValues(alpha: 0.1),
+              highlightColor: Colors.grey.withValues(alpha: 0.05),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.withValues(alpha: 0.08),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.settings_outlined,
+                        color: Colors.grey,
+                        size: 22,
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    const Text(
+                      'Settings',
+                      style: TextStyle(fontSize: 15, color: Color(0xFF333333)),
+                    ),
+                    const Spacer(),
+                    Icon(
+                      Icons.arrow_forward_ios,
+                      size: 14,
+                      color: Colors.grey[400],
+                    ),
+                  ],
+                ),
               ),
             ),
-            title: const Text('Settings', style: TextStyle(fontSize: 15)),
-            onTap: () {
-              Navigator.pop(context);
-              _navigateToSettings(context);
-            },
           ),
-          ListTile(
-            leading: Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.red.withValues(alpha: 0.08),
-                shape: BoxShape.circle,
+          
+          // ✅ Logout - Fixed for Flutter 3.44.6
+          Material(
+            color: Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+            child: InkWell(
+              onTap: () => _logout(context),
+              borderRadius: BorderRadius.circular(8),
+              splashColor: Colors.red.withValues(alpha: 0.1),
+              highlightColor: Colors.red.withValues(alpha: 0.05),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.red.withValues(alpha: 0.08),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.logout, color: Colors.red, size: 22),
+                    ),
+                    const SizedBox(width: 16),
+                    const Text(
+                      'Logout',
+                      style: TextStyle(fontSize: 15, color: Colors.red),
+                    ),
+                    const Spacer(),
+                    Icon(
+                      Icons.arrow_forward_ios,
+                      size: 14,
+                      color: Colors.grey[400],
+                    ),
+                  ],
+                ),
               ),
-              child: const Icon(Icons.logout, color: Colors.red, size: 22),
             ),
-            title: const Text(
-              'Logout',
-              style: TextStyle(fontSize: 15, color: Colors.red),
-            ),
-            onTap: () => _logout(context),
           ),
-          const SizedBox(height: 12),
+          
+          const SizedBox(height: 8),
+          
           Padding(
             padding: const EdgeInsets.all(16),
             child: Text(
@@ -1240,13 +1339,14 @@ Future<void> _createProfileDirectly(String role) async {
               style: TextStyle(fontSize: 12, color: Colors.grey[400]),
             ),
           ),
+          const SizedBox(height: 8),
         ],
       ),
     );
   }
 
   // ============================================================
-  // 🔥 BUILD MENU ITEMS
+  // 🔥 BUILD MENU ITEMS - COMPLETE FIX FOR FLUTTER 3.44.6
   // ============================================================
   List<Widget> _buildMenuItems(BuildContext context) {
     final List<Map<String, dynamic>> items = [];
@@ -1271,68 +1371,82 @@ Future<void> _createProfileDirectly(String role) async {
         itemColor = item['color'] as Color;
       }
 
-      return Column(
-        children: [
-          if (item['divider'] == true)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Divider(
-                color: Colors.grey.withValues(alpha: 0.15),
-                height: 1,
-              ),
-            ),
-          ListTile(
-            leading: Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: itemColor.withValues(alpha: 0.1),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                item['icon'] as IconData? ?? Icons.error,
-                color: itemColor,
-                size: 22,
-              ),
-            ),
-            title: Text(
-              item['title'] as String? ?? 'Unknown',
-              style: const TextStyle(fontSize: 15, color: Color(0xFF333333)),
-            ),
-            trailing: item['badge'] != null
-                ? Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 3,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.red,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      item['badge'].toString(),
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  )
-                : Icon(
-                    Icons.arrow_forward_ios,
-                    size: 14,
-                    color: Colors.grey[400],
-                  ),
-            onTap: () {
-              Navigator.pop(context);
-              if (widget.onMenuItemSelected != null) {
-                widget.onMenuItemSelected!();
-              }
-              if (item['route'] != null) {
-                _navigateToScreen(context, item['route'] as String);
-              }
-            },
+      if (item['divider'] == true) {
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Divider(
+            color: Colors.grey.withValues(alpha: 0.15),
+            height: 1,
           ),
-        ],
+        );
+      }
+
+      // ✅ ListTile - Fixed for Flutter 3.44.6
+      return Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(8),
+        child: ListTile(
+          leading: Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: itemColor.withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              item['icon'] as IconData? ?? Icons.error,
+              color: itemColor,
+              size: 22,
+            ),
+          ),
+          title: Text(
+            item['title'] as String? ?? 'Unknown',
+            style: const TextStyle(
+              fontSize: 15,
+              color: Color(0xFF333333),
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          trailing: item['badge'] != null
+              ? Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.red,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    item['badge'].toString(),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                )
+              : Icon(
+                  Icons.arrow_forward_ios,
+                  size: 14,
+                  color: Colors.grey[400],
+                ),
+          onTap: () {
+            Navigator.pop(context);
+            if (widget.onMenuItemSelected != null) {
+              widget.onMenuItemSelected!();
+            }
+            if (item['route'] != null) {
+              _navigateToScreen(context, item['route'] as String);
+            }
+          },
+          tileColor: Colors.transparent,
+          splashColor: itemColor.withValues(alpha: 0.1),
+          hoverColor: itemColor.withValues(alpha: 0.05),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+          ),
+        ),
       );
     }).toList();
   }
@@ -1495,20 +1609,7 @@ Future<void> _createProfileDirectly(String role) async {
 
   void _navigateToSettings(BuildContext context) {
     try {
-       context.push('/settings');
-      // switch (widget.userRole) {
-      //   case 'owner':
-      //     context.push('/owner/settings');
-      //     break;
-      //   case 'barber':
-      //     context.push('/barber/settings');
-      //     break;
-      //   case 'customer':
-      //     context.push('/customer/settings');
-      //     break;
-      //   default:
-      //     context.push('/settings');
-      // }
+      context.push('/settings');
     } catch (e) {
       debugPrint('Settings navigation error: $e');
     }
@@ -1569,6 +1670,9 @@ Future<void> _createProfileDirectly(String role) async {
     );
   }
 
+  // ============================================================
+  // 🔥 BUILD METHOD
+  // ============================================================
   @override
   Widget build(BuildContext context) {
     return Drawer(
@@ -1583,7 +1687,8 @@ Future<void> _createProfileDirectly(String role) async {
                   _buildProfileHeader(),
                   Expanded(
                     child: ListView(
-                      padding: EdgeInsets.zero,
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      physics: const BouncingScrollPhysics(),
                       children: _buildMenuItems(context),
                     ),
                   ),
