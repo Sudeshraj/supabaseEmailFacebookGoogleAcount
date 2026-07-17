@@ -87,8 +87,87 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       begin: 1.0,
       end: 1.06,
     ).animate(CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut));
-    _loadAllData();
+    
+    _initializeAndLoad();
     _setupNotificationListeners();
+  }
+
+  // ✅ Initialize and load data with role fix
+  Future<void> _initializeAndLoad() async {
+    await _ensureOwnerRole();
+    await _loadAllData();
+  }
+
+  // ✅ Ensure user has owner role
+  Future<void> _ensureOwnerRole() async {
+    try {
+      final userId = supabase.auth.currentUser?.id;
+      if (userId == null) {
+        debugPrint('❌ No user logged in');
+        return;
+      }
+
+      debugPrint('🔍 Ensuring owner role for user: $userId');
+
+      final ownerCheck = await supabase
+          .from('user_roles')
+          .select('id, status')
+          .eq('user_id', userId)
+          .eq('role_id', 1)
+          .maybeSingle();
+
+      if (ownerCheck == null) {
+        debugPrint('🔄 Creating owner role...');
+        await supabase.from('user_roles').insert({
+          'user_id': userId,
+          'role_id': 1,
+          'status': 'active'
+        });
+        debugPrint('✅ Owner role created');
+      } else if (ownerCheck['status'] != 'active') {
+        debugPrint('🔄 Updating owner role to active...');
+        await supabase
+            .from('user_roles')
+            .update({'status': 'active', 'updated_at': DateTime.now().toIso8601String()})
+            .eq('user_id', userId)
+            .eq('role_id', 1);
+        debugPrint('✅ Owner role activated');
+      } else {
+        debugPrint('✅ Owner role already active');
+      }
+
+      // Also ensure barber and customer roles exist
+      for (var roleId in [2, 3]) {
+        final check = await supabase
+            .from('user_roles')
+            .select('id, status')
+            .eq('user_id', userId)
+            .eq('role_id', roleId)
+            .maybeSingle();
+
+        if (check == null) {
+          await supabase.from('user_roles').insert({
+            'user_id': userId,
+            'role_id': roleId,
+            'status': 'active'
+          });
+          debugPrint('✅ Role $roleId created');
+        } else if (check['status'] != 'active') {
+          await supabase
+              .from('user_roles')
+              .update({'status': 'active', 'updated_at': DateTime.now().toIso8601String()})
+              .eq('user_id', userId)
+              .eq('role_id', roleId);
+          debugPrint('✅ Role $roleId activated');
+        }
+      }
+
+      await supabase.auth.refreshSession();
+      debugPrint('✅ Session refreshed');
+
+    } catch (e) {
+      debugPrint('❌ Error ensuring owner role: $e');
+    }
   }
 
   @override
@@ -236,53 +315,62 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       barrierDismissible: false,
       builder: (dialogContext) => AlertDialog(
         title: const Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
             Text('🌐'),
             SizedBox(width: 8),
-            Text('Browser Notification Settings'),
+            Flexible(
+              child: Text(
+                'Browser Notification Settings',
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
           ],
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'To enable notifications, please follow these steps:',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 16),
-            _buildWebStep('1', 'Click the 🔒 lock icon in the address bar'),
-            const SizedBox(height: 8),
-            _buildWebStep('2', 'Click "Site settings" or "Permissions"'),
-            const SizedBox(height: 8),
-            _buildWebStep('3', 'Find "Notifications" and select "Allow"'),
-            const SizedBox(height: 8),
-            _buildWebStep('4', 'Refresh the page'),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.amber.shade50,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.amber.shade200),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'To enable notifications, please follow these steps:',
+                style: TextStyle(fontWeight: FontWeight.bold),
               ),
-              child: Row(
-                children: [
-                  Icon(Icons.info_outline, color: Colors.amber.shade700),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Once enabled, you\'ll receive notifications even when the tab is not active',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.amber.shade800,
+              const SizedBox(height: 16),
+              _buildWebStep('1', 'Click the 🔒 lock icon in the address bar'),
+              const SizedBox(height: 8),
+              _buildWebStep('2', 'Click "Site settings" or "Permissions"'),
+              const SizedBox(height: 8),
+              _buildWebStep('3', 'Find "Notifications" and select "Allow"'),
+              const SizedBox(height: 8),
+              _buildWebStep('4', 'Refresh the page'),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.amber.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.amber.shade200),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.info_outline, color: Colors.amber.shade700),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        'Once enabled, you\'ll receive notifications even when the tab is not active',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.amber.shade800,
+                        ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -297,8 +385,9 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFFFF6B8B),
               foregroundColor: Colors.white,
+              minimumSize: const Size(0, 36),
             ),
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh, size: 16),
             label: const Text('Refresh Page'),
           ),
         ],
@@ -308,6 +397,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
   Widget _buildWebStep(String number, String text) {
     return Row(
+      mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Container(
@@ -329,7 +419,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           ),
         ),
         const SizedBox(width: 12),
-        Expanded(
+        Flexible(
           child: Text(
             text,
             style: const TextStyle(fontSize: 14),
@@ -359,6 +449,8 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFFFF6B8B),
+              foregroundColor: Colors.white,
+              minimumSize: const Size(0, 36),
             ),
             child: const Text('Open Settings'),
           ),
@@ -757,6 +849,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         border: Border.all(color: Colors.grey[200]!),
       ),
       child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
           Text(flag, style: const TextStyle(fontSize: 24)),
           const SizedBox(width: 12),
@@ -804,6 +897,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 12),
       child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
           Container(
             padding: const EdgeInsets.all(8),
@@ -1034,6 +1128,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                                         vertical: 12,
                                       ),
                                       child: Row(
+                                        mainAxisSize: MainAxisSize.min,
                                         children: [
                                           Text(
                                             _getContinentEmoji(continent),
@@ -1192,9 +1287,35 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     setState(() => _isLoading = true);
     try {
       await _loadTimezone();
-      await Future.wait([_loadUserProfile(), _loadOwnerSalons()]);
-      await _loadDashboardStats();
-      await _checkOnboardingStatus();
+      
+      await _loadUserProfile();
+      
+      await _loadOwnerSalons();
+      
+      // ✅ Load dashboard stats with error handling
+      try {
+        await _loadDashboardStats();
+      } catch (e) {
+        debugPrint('⚠️ Dashboard stats error (non-critical): $e');
+        if (mounted) {
+          setState(() {
+            _todayAppointments = 0;
+            _pendingBookings = 0;
+            _activeBarbers = 0;
+            _totalCustomers = 0;
+            _totalRevenue = 0;
+            pendingAppointments = 0;
+            completedToday = 0;
+          });
+        }
+      }
+      
+      // ✅ Check onboarding status with error handling
+      try {
+        await _checkOnboardingStatus();
+      } catch (e) {
+        debugPrint('⚠️ Onboarding status error (non-critical): $e');
+      }
 
       _hasPermission = await _notificationService.hasPermission();
 
@@ -1218,8 +1339,9 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       }
 
       if (mounted) setState(() => _isLoading = false);
+      
     } catch (e) {
-      debugPrint('Error loading data: $e');
+      debugPrint('❌ Error loading data: $e');
       if (mounted) {
         setState(() => _isLoading = false);
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1232,20 +1354,15 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     }
   }
 
+  // ✅ FIX 5: Load Owner Salons with auto-creation
   Future<void> _loadOwnerSalons() async {
     try {
       final userId = supabase.auth.currentUser?.id;
-      if (userId == null) return;
-
-      final ownerCheck = await supabase
-          .from('user_roles')
-          .select('status')
-          .eq('user_id', userId)
-          .eq('role_id', 1)
-          .maybeSingle();
-
-      if (ownerCheck == null || ownerCheck['status'] != 'active') {
-        debugPrint('⚠️ User does not have active owner role');
+      debugPrint('🔍 Current User ID: $userId');
+      debugPrint('🔍 Current User Email: ${supabase.auth.currentUser?.email}');
+      
+      if (userId == null) {
+        debugPrint('❌ No user logged in');
         if (mounted) {
           setState(() {
             _ownerSalons = [];
@@ -1255,28 +1372,105 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         return;
       }
 
+      // ✅ Check and ensure owner role
+      final ownerCheck = await supabase
+          .from('user_roles')
+          .select('''
+            id,
+            role_id,
+            status,
+            roles!inner (
+              id,
+              name,
+              description
+            )
+          ''')
+          .eq('user_id', userId)
+          .eq('role_id', 1)
+          .maybeSingle();
+
+      debugPrint('🔍 Owner role check: $ownerCheck');
+
+      if (ownerCheck == null) {
+        debugPrint('🔄 Creating owner role...');
+        try {
+          await supabase.from('user_roles').insert({
+            'user_id': userId,
+            'role_id': 1,
+            'status': 'active'
+          });
+          debugPrint('✅ Owner role created');
+        } catch (createError) {
+          debugPrint('❌ Error creating owner role: $createError');
+        }
+      } else if (ownerCheck['status'] != 'active') {
+        debugPrint('🔄 Updating owner role to active...');
+        try {
+          await supabase
+              .from('user_roles')
+              .update({'status': 'active', 'updated_at': DateTime.now().toIso8601String()})
+              .eq('user_id', userId)
+              .eq('role_id', 1);
+          debugPrint('✅ Owner role activated');
+        } catch (updateError) {
+          debugPrint('❌ Error updating owner role: $updateError');
+        }
+      } else {
+        debugPrint('✅ User has active owner role');
+      }
+
+      // ✅ Load salons
+      debugPrint('🔍 Loading salons for owner: $userId');
+      
       final response = await supabase
           .from('salons')
-          .select('id, name, address, is_active, created_at')
+          .select('''
+            id,
+            name,
+            address,
+            phone,
+            email,
+            description,
+            is_active,
+            created_at,
+            updated_at,
+            logo_url,
+            cover_url,
+            open_time,
+            close_time,
+            timezone
+          ''')
           .eq('owner_id', userId)
           .eq('is_active', true)
           .order('created_at', ascending: false);
 
+      debugPrint('🔍 Found ${response.length} salons');
+      debugPrint('🔍 Salon names: ${response.map((s) => s['name']).toList()}');
+
       if (mounted) {
         setState(() {
           _ownerSalons = List<Map<String, dynamic>>.from(response);
-          if (_ownerSalons.isNotEmpty && _selectedSalonId == null) {
-            _selectedSalonId = _ownerSalons.first['id'].toString();
+          if (_ownerSalons.isNotEmpty) {
             _hasSalon = true;
-          } else if (_ownerSalons.isEmpty) {
-            _hasSalon = false;
+            if (_selectedSalonId == null) {
+              _selectedSalonId = _ownerSalons.first['id'].toString();
+              debugPrint('✅ Selected first salon: ${_ownerSalons.first['name']} (ID: $_selectedSalonId)');
+            }
           } else {
-            _hasSalon = true;
+            _hasSalon = false;
+            debugPrint('⚠️ No active salons found for this owner');
           }
         });
       }
-    } catch (e) {
-      debugPrint('Error loading salons: $e');
+    } catch (e, stackTrace) {
+      debugPrint('❌ Error loading salons: $e');
+      debugPrint('📚 Stack trace: $stackTrace');
+      if (mounted) {
+        setState(() {
+          _ownerSalons = [];
+          _hasSalon = false;
+        });
+      }
     }
   }
 
@@ -1343,18 +1537,22 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     }
   }
 
+  // ✅ FIX 5: Load Dashboard Stats - SIMPLEST APPROACH
   Future<void> _loadDashboardStats() async {
     if (_selectedSalonId == null || _ownerSalons.isEmpty) return;
+    
     try {
       final today = DateTime.now().toIso8601String().split('T')[0];
       final salonIdInt = int.parse(_selectedSalonId!);
 
+      // 1. Today's appointments
       final todayAppointments = await supabase
           .from('appointments')
           .select('id, status, price')
           .eq('salon_id', salonIdInt)
           .eq('appointment_date', today);
 
+      // 2. Pending bookings
       final pendingBookings = await supabase
           .from('appointments')
           .select('id')
@@ -1362,21 +1560,30 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           .eq('appointment_date', today)
           .eq('status', 'pending');
 
+      // ✅ 3. ACTIVE BARBERS - SIMPLEST APPROACH (FIX 5)
+      // Step 1: Get all active barbers from salon_barbers
       final activeBarbers = await supabase
           .from('salon_barbers')
-          .select('''
-          id,
-          profiles!inner (
-            user_roles!inner (
-              status
-            )
-          )
-        ''')
+          .select('barber_id')
           .eq('salon_id', salonIdInt)
-          .eq('salon_barbers.status', 'active')
-          .eq('profiles.user_roles.role_id', 2)
-          .eq('profiles.user_roles.status', 'active');
+          .eq('status', 'active');
+      
+      // Step 2: Count how many have active user_roles
+      int activeBarberCount = 0;
+      if (activeBarbers.isNotEmpty) {
+        final barberIds = activeBarbers.map((b) => b['barber_id'] as String).toList();
+        
+        final validBarbers = await supabase
+            .from('user_roles')
+            .select('user_id')
+            .inFilter('user_id', barberIds)
+            .eq('role_id', 2) // barber role
+            .eq('status', 'active');
+        
+        activeBarberCount = validBarbers.length;
+      }
 
+      // 4. Total customers (unique)
       final totalCustomers = await supabase
           .from('appointments')
           .select('customer_id')
@@ -1386,6 +1593,8 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           .map((a) => a['customer_id'] as String)
           .toSet()
           .length;
+          
+      // 5. Revenue
       final revenue = todayAppointments.fold<int>(
         0,
         (sum, item) => sum + ((item['price'] as num?)?.toInt() ?? 0),
@@ -1395,7 +1604,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         setState(() {
           _todayAppointments = todayAppointments.length;
           _pendingBookings = pendingBookings.length;
-          _activeBarbers = activeBarbers.length;
+          _activeBarbers = activeBarberCount;
           _totalCustomers = uniqueCustomers;
           _totalRevenue = revenue;
           pendingAppointments = _pendingBookings;
@@ -1404,11 +1613,26 @@ class _OwnerDashboardState extends State<OwnerDashboard>
               .length;
         });
       }
+      
+      debugPrint('📊 Stats: Today: $_todayAppointments, Pending: $_pendingBookings, Barbers: $_activeBarbers');
+      
     } catch (e) {
-      debugPrint('Error loading dashboard stats: $e');
+      debugPrint('❌ Dashboard stats error: $e');
+      if (mounted) {
+        setState(() {
+          _todayAppointments = 0;
+          _pendingBookings = 0;
+          _activeBarbers = 0;
+          _totalCustomers = 0;
+          _totalRevenue = 0;
+          pendingAppointments = 0;
+          completedToday = 0;
+        });
+      }
     }
   }
 
+  // ✅ FIX 5: Check Onboarding Status - SIMPLEST APPROACH
   Future<void> _checkOnboardingStatus() async {
     if (_ownerSalons.isEmpty || _selectedSalonId == null) {
       setState(() {
@@ -1425,6 +1649,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     try {
       final salonId = int.parse(_selectedSalonId!);
 
+      // 1. Check services
       final servicesResponse = await supabase
           .from('services')
           .select('id')
@@ -1433,23 +1658,30 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           .limit(1);
       _hasServices = servicesResponse.isNotEmpty;
 
-      final barbersResponse = await supabase
+      // ✅ 2. CHECK BARBERS - SIMPLEST APPROACH (FIX 5)
+      final barbers = await supabase
           .from('salon_barbers')
-          .select('''
-          id,
-          profiles!inner (
-            user_roles!inner (
-              status
-            )
-          )
-        ''')
+          .select('barber_id')
           .eq('salon_id', salonId)
-          .eq('salon_barbers.status', 'active')
-          .eq('profiles.user_roles.role_id', 2)
-          .eq('profiles.user_roles.status', 'active')
-          .limit(1);
-      _hasBarbers = barbersResponse.isNotEmpty;
+          .eq('status', 'active');
+      
+      bool hasActiveBarbers = false;
+      if (barbers.isNotEmpty) {
+        final barberIds = barbers.map((b) => b['barber_id'] as String).toList();
+        
+        final validBarbers = await supabase
+            .from('user_roles')
+            .select('user_id')
+            .inFilter('user_id', barberIds)
+            .eq('role_id', 2)
+            .eq('status', 'active')
+            .limit(1);
+        
+        hasActiveBarbers = validBarbers.isNotEmpty;
+      }
+      _hasBarbers = hasActiveBarbers;
 
+      // 3. Check barber schedules
       if (_hasBarbers) {
         final schedulesResponse = await supabase
             .from('barber_schedules')
@@ -1461,6 +1693,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         _hasBarberSchedule = false;
       }
 
+      // 4. Check holidays
       final holidaysResponse = await supabase
           .from('salon_holidays')
           .select('id')
@@ -1479,8 +1712,11 @@ class _OwnerDashboardState extends State<OwnerDashboard>
               (_hasHolidays ? 1 : 0);
         });
       }
+      
+      debugPrint('📊 Onboarding: Salon: $_hasSalon, Services: $_hasServices, Barbers: $_hasBarbers');
+      
     } catch (e) {
-      debugPrint('Error checking onboarding status: $e');
+      debugPrint('❌ Onboarding error: $e');
     }
   }
 
@@ -1573,9 +1809,11 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         ],
       ),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
               Container(
                 width: 42,
@@ -1669,6 +1907,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
               final availableWidth = constraints.maxWidth - (arrowSlot * 4);
               final cardWidth = availableWidth > 0 ? availableWidth / 5 : 60.0;
               return Row(
+                mainAxisSize: MainAxisSize.min,
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: List.generate(steps.length, (i) {
                   final step = steps[i];
@@ -1677,6 +1916,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                   final isActive = !isCompleted && !isLocked;
                   final isNext = i == nextIdx;
                   return Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       _buildStepCard(
                         label: step['label'] as String,
@@ -1714,6 +1954,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             Padding(
               padding: const EdgeInsets.only(top: 16),
               child: Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Container(
                     width: 6,
@@ -1724,12 +1965,15 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Text(
-                    'Up next:  ${steps[nextIdx]['label'] as String}',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: pink,
-                      fontWeight: FontWeight.w500,
+                  Flexible(
+                    child: Text(
+                      'Up next:  ${steps[nextIdx]['label'] as String}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: pink,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 ],
@@ -1755,6 +1999,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                       borderRadius: BorderRadius.circular(14),
                     ),
                     child: const Row(
+                      mainAxisSize: MainAxisSize.min,
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Icon(
@@ -1763,12 +2008,14 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                           size: 18,
                         ),
                         SizedBox(width: 8),
-                        Text(
-                          'Your salon is ready to launch! 🎉',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
+                        Flexible(
+                          child: Text(
+                            'Your salon is ready to launch! 🎉',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ),
                       ],
@@ -1953,9 +2200,11 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         ],
       ),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
               Icon(Icons.settings, size: 20, color: Color(0xFFFF6B8B)),
               SizedBox(width: 8),
@@ -1976,28 +2225,35 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           ),
           const SizedBox(height: 8),
           Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              _buildQuickAction(
-                icon: Icons.add_business,
-                label: 'Create Salon',
-                color: const Color(0xFFFF6B8B),
-                onTap: _navigateToCreateSalon,
+              Expanded(
+                child: _buildQuickAction(
+                  icon: Icons.add_business,
+                  label: 'Create Salon',
+                  color: const Color(0xFFFF6B8B),
+                  onTap: _navigateToCreateSalon,
+                ),
               ),
               const SizedBox(width: 8),
-              _buildQuickAction(
-                icon: Icons.edit,
-                label: 'Edit Salon',
-                color: Colors.blue,
-                onTap: _navigateToEditSalon,
-                enabled: _ownerSalons.isNotEmpty,
+              Expanded(
+                child: _buildQuickAction(
+                  icon: Icons.edit,
+                  label: 'Edit Salon',
+                  color: Colors.blue,
+                  onTap: _navigateToEditSalon,
+                  enabled: _ownerSalons.isNotEmpty,
+                ),
               ),
               const SizedBox(width: 8),
-              _buildQuickAction(
-                icon: Icons.beach_access,
-                label: 'Holidays',
-                color: Colors.teal,
-                onTap: _viewSalonHolidays,
-                enabled: _ownerSalons.isNotEmpty,
+              Expanded(
+                child: _buildQuickAction(
+                  icon: Icons.beach_access,
+                  label: 'Holidays',
+                  color: Colors.teal,
+                  onTap: _viewSalonHolidays,
+                  enabled: _ownerSalons.isNotEmpty,
+                ),
               ),
             ],
           ),
@@ -2012,21 +2268,26 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           ),
           const SizedBox(height: 8),
           Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              _buildQuickAction(
-                icon: Icons.build,
-                label: 'Add Service',
-                color: Colors.green,
-                onTap: _navigateToAddService,
-                enabled: _ownerSalons.isNotEmpty,
+              Expanded(
+                child: _buildQuickAction(
+                  icon: Icons.build,
+                  label: 'Add Service',
+                  color: Colors.green,
+                  onTap: _navigateToAddService,
+                  enabled: _ownerSalons.isNotEmpty,
+                ),
               ),
               const SizedBox(width: 8),
-              _buildQuickAction(
-                icon: Icons.list,
-                label: 'Service List',
-                color: Colors.cyan,
-                onTap: _navigateToServiceList,
-                enabled: _ownerSalons.isNotEmpty,
+              Expanded(
+                child: _buildQuickAction(
+                  icon: Icons.list,
+                  label: 'Service List',
+                  color: Colors.cyan,
+                  onTap: _navigateToServiceList,
+                  enabled: _ownerSalons.isNotEmpty,
+                ),
               ),
             ],
           ),
@@ -2041,41 +2302,51 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           ),
           const SizedBox(height: 8),
           Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              _buildQuickAction(
-                icon: Icons.person_add,
-                label: 'Add Barber',
-                color: Colors.purple,
-                onTap: _navigateToAddBarber,
-                enabled: _ownerSalons.isNotEmpty,
+              Expanded(
+                child: _buildQuickAction(
+                  icon: Icons.person_add,
+                  label: 'Add Barber',
+                  color: Colors.purple,
+                  onTap: _navigateToAddBarber,
+                  enabled: _ownerSalons.isNotEmpty,
+                ),
               ),
               const SizedBox(width: 8),
-              _buildQuickAction(
-                icon: Icons.calendar_month,
-                label: 'Schedule',
-                color: Colors.teal,
-                onTap: _navigateToBarberSchedule,
-                enabled: _ownerSalons.isNotEmpty,
+              Expanded(
+                child: _buildQuickAction(
+                  icon: Icons.calendar_month,
+                  label: 'Schedule',
+                  color: Colors.teal,
+                  onTap: _navigateToBarberSchedule,
+                  enabled: _ownerSalons.isNotEmpty,
+                ),
               ),
               const SizedBox(width: 8),
-              _buildQuickAction(
-                icon: Icons.beach_access,
-                label: 'Leaves',
-                color: Colors.orange,
-                onTap: _navigateToBarberLeaves,
-                enabled: _ownerSalons.isNotEmpty,
+              Expanded(
+                child: _buildQuickAction(
+                  icon: Icons.beach_access,
+                  label: 'Leaves',
+                  color: Colors.orange,
+                  onTap: _navigateToBarberLeaves,
+                  enabled: _ownerSalons.isNotEmpty,
+                ),
               ),
             ],
           ),
           const SizedBox(height: 8),
           Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              _buildQuickAction(
-                icon: Icons.list,
-                label: 'Barber List',
-                color: Colors.indigo,
-                onTap: _navigateToBarberList,
-                enabled: _ownerSalons.isNotEmpty,
+              Expanded(
+                child: _buildQuickAction(
+                  icon: Icons.list,
+                  label: 'Barber List',
+                  color: Colors.indigo,
+                  onTap: _navigateToBarberList,
+                  enabled: _ownerSalons.isNotEmpty,
+                ),
               ),
             ],
           ),
@@ -2090,13 +2361,16 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           ),
           const SizedBox(height: 8),
           Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              _buildQuickAction(
-                icon: Icons.local_offer,
-                label: 'Manage Offers',
-                color: const Color(0xFFFF6B8B),
-                onTap: _navigateToOffers,
-                enabled: _ownerSalons.isNotEmpty,
+              Expanded(
+                child: _buildQuickAction(
+                  icon: Icons.local_offer,
+                  label: 'Manage Offers',
+                  color: const Color(0xFFFF6B8B),
+                  onTap: _navigateToOffers,
+                  enabled: _ownerSalons.isNotEmpty,
+                ),
               ),
             ],
           ),
@@ -2111,27 +2385,33 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           ),
           const SizedBox(height: 8),
           Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              const SizedBox(width: 8),
-              _buildQuickAction(
-                icon: Icons.bar_chart,
-                label: 'Reports',
-                color: Colors.deepOrange,
-                onTap: _viewReports,
+              Expanded(
+                child: _buildQuickAction(
+                  icon: Icons.bar_chart,
+                  label: 'Reports',
+                  color: Colors.deepOrange,
+                  onTap: _viewReports,
+                ),
               ),
               const SizedBox(width: 8),
-              _buildQuickAction(
-                icon: Icons.analytics,
-                label: 'Analytics',
-                color: Colors.indigoAccent,
-                onTap: _viewAnalytics,
+              Expanded(
+                child: _buildQuickAction(
+                  icon: Icons.analytics,
+                  label: 'Analytics',
+                  color: Colors.indigoAccent,
+                  onTap: _viewAnalytics,
+                ),
               ),
               const SizedBox(width: 8),
-              _buildQuickAction(
-                icon: Icons.settings,
-                label: 'Settings',
-                color: Colors.grey,
-                onTap: _viewSettings,
+              Expanded(
+                child: _buildQuickAction(
+                  icon: Icons.settings,
+                  label: 'Settings',
+                  color: Colors.grey,
+                  onTap: _viewSettings,
+                ),
               ),
             ],
           ),
@@ -2148,32 +2428,32 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     required VoidCallback onTap,
     bool enabled = true,
   }) {
-    return Expanded(
-      child: GestureDetector(
-        onTap: enabled ? onTap : null,
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          decoration: BoxDecoration(
-            color: enabled
-                ? color.withValues(alpha: 0.1)
-                : Colors.grey.withValues(alpha: 0.05),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Column(
-            children: [
-              Icon(icon, color: enabled ? color : Colors.grey[400], size: 28),
-              const SizedBox(height: 4),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: enabled ? color : Colors.grey[500],
-                  fontWeight: FontWeight.w500,
-                ),
-                textAlign: TextAlign.center,
+    return GestureDetector(
+      onTap: enabled ? onTap : null,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(
+          color: enabled
+              ? color.withValues(alpha: 0.1)
+              : Colors.grey.withValues(alpha: 0.05),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: enabled ? color : Colors.grey[400], size: 28),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                color: enabled ? color : Colors.grey[500],
+                fontWeight: FontWeight.w500,
               ),
-            ],
-          ),
+              textAlign: TextAlign.center,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
         ),
       ),
     );
@@ -2196,6 +2476,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         ],
       ),
       child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
           const Icon(Icons.store, size: 18, color: Color(0xFFFF6B8B)),
           const SizedBox(width: 8),
@@ -2207,6 +2488,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: Row(
+                mainAxisSize: MainAxisSize.min,
                 children: _ownerSalons.map((salon) {
                   final isSelected = _selectedSalonId == salon['id'].toString();
                   return Padding(
@@ -2215,6 +2497,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                       label: Text(
                         salon['name'] ?? 'Salon',
                         style: const TextStyle(fontSize: 12),
+                        overflow: TextOverflow.ellipsis,
                       ),
                       selected: isSelected,
                       onSelected: (_) => _switchSalon(salon['id'].toString()),
@@ -2259,6 +2542,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       child: isWeb
           ? Row(
+              mainAxisSize: MainAxisSize.min,
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
                 Container(
@@ -2294,21 +2578,25 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                             borderRadius: BorderRadius.circular(20),
                           ),
                           child: Row(
+                            mainAxisSize: MainAxisSize.min,
                             children: [
                               Text(
                                 _currentTimezoneFlag,
                                 style: const TextStyle(fontSize: 14),
                               ),
                               const SizedBox(width: 6),
-                              Text(
-                                _currentTimezone
-                                    .split('/')
-                                    .last
-                                    .replaceAll('_', ' '),
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w500,
-                                  color: Color(0xFFFF6B8B),
+                              Flexible(
+                                child: Text(
+                                  _currentTimezone
+                                      .split('/')
+                                      .last
+                                      .replaceAll('_', ' '),
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                    color: Color(0xFFFF6B8B),
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ),
                               const SizedBox(width: 4),
@@ -2335,11 +2623,14 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                         color: Colors.grey,
                       ),
                       const SizedBox(width: 6),
-                      Text(
-                        _currentDate,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey,
+                      Flexible(
+                        child: Text(
+                          _currentDate,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey,
+                          ),
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                     ],
@@ -2362,9 +2653,11 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                 ],
               ),
               child: Row(
+                mainAxisSize: MainAxisSize.min,
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       const Icon(
                         Icons.calendar_today,
@@ -2372,11 +2665,14 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                         color: Colors.grey,
                       ),
                       const SizedBox(width: 4),
-                      Text(
-                        _currentDate,
-                        style: const TextStyle(
-                          fontSize: 10,
-                          color: Colors.grey,
+                      Flexible(
+                        child: Text(
+                          _currentDate,
+                          style: const TextStyle(
+                            fontSize: 10,
+                            color: Colors.grey,
+                          ),
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                     ],
@@ -2393,21 +2689,25 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Row(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
                           Text(
                             _currentTimezoneFlag,
                             style: const TextStyle(fontSize: 12),
                           ),
                           const SizedBox(width: 4),
-                          Text(
-                            _currentTimezone
-                                .split('/')
-                                .last
-                                .replaceAll('_', ' '),
-                            style: const TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w500,
-                              color: Color(0xFFFF6B8B),
+                          Flexible(
+                            child: Text(
+                              _currentTimezone
+                                  .split('/')
+                                  .last
+                                  .replaceAll('_', ' '),
+                              style: const TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w500,
+                                color: Color(0xFFFF6B8B),
+                              ),
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
                           const Icon(
@@ -2459,11 +2759,14 @@ class _OwnerDashboardState extends State<OwnerDashboard>
               final salon = _ownerSalons[index];
               return ListTile(
                 leading: const Icon(Icons.store, color: Color(0xFFFF6B8B)),
-                title: Text(salon['name']),
+                title: Text(
+                  salon['name'] ?? 'Salon',
+                  overflow: TextOverflow.ellipsis,
+                ),
                 onTap: () {
                   Navigator.pop(context);
                   context.push(
-                    '/owner/services?salonId=${salon['id']}&salonName=${Uri.encodeComponent(salon['name'])}',
+                    '/owner/services?salonId=${salon['id']}&salonName=${Uri.encodeComponent(salon['name'] ?? 'Salon')}',
                   );
                 },
               );
@@ -2504,6 +2807,8 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFFFF6B8B),
+              foregroundColor: Colors.white,
+              minimumSize: const Size(0, 36),
             ),
             child: const Text('Create Salon'),
           ),
@@ -2556,6 +2861,8 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFFFF6B8B),
+              foregroundColor: Colors.white,
+              minimumSize: const Size(0, 36),
             ),
             child: const Text('View'),
           ),
@@ -2719,6 +3026,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
               child: SingleChildScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
                 child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
                     // ✅ PERMISSION CARD - Updated with contextual support
                     if (_showPermissionCard && !_hasPermission)
@@ -2741,6 +3049,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                           borderRadius: BorderRadius.circular(16),
                         ),
                         child: Column(
+                          mainAxisSize: MainAxisSize.min,
                           children: [
                             const Icon(
                               Icons.warning,
@@ -2772,6 +3081,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: const Color(0xFFFF6B8B),
                                 foregroundColor: Colors.white,
+                                minimumSize: const Size(0, 40),
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: 16,
                                   vertical: 8,
@@ -2792,12 +3102,14 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                               ),
                             )
                           : Column(
+                              mainAxisSize: MainAxisSize.min,
                               children: [
                                 Padding(
                                   padding: const EdgeInsets.symmetric(
                                     horizontal: 16,
                                   ),
                                   child: Row(
+                                    mainAxisSize: MainAxisSize.min,
                                     children: [
                                       Expanded(
                                         child: DashboardStatCard(
@@ -2827,6 +3139,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                                     horizontal: 16,
                                   ),
                                   child: Row(
+                                    mainAxisSize: MainAxisSize.min,
                                     children: [
                                       Expanded(
                                         child: DashboardStatCard(
