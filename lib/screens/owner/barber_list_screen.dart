@@ -17,7 +17,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
   bool _isLoading = true;
   String? _selectedFilter = 'all';
   List<Map<String, dynamic>> _barbers = [];
-  
+
   // Alternating card colors
   final List<Color> _cardColors = [
     const Color(0xFFE3F2FD), // Light Blue
@@ -54,7 +54,8 @@ class _BarberListScreenState extends State<BarberListScreen> {
 
     try {
       final salonIdInt = int.parse(widget.salonId!);
-      
+
+      // ✅ Step 1: Get salon barbers
       var query = supabase
           .from('salon_barbers')
           .select('id, barber_id, status, joined_at')
@@ -68,7 +69,10 @@ class _BarberListScreenState extends State<BarberListScreen> {
         query = query.eq('status', 'deleted');
       }
 
-      final salonBarbersResponse = await query.order('joined_at', ascending: false);
+      final salonBarbersResponse = await query.order(
+        'joined_at',
+        ascending: false,
+      );
 
       if (salonBarbersResponse.isEmpty) {
         if (mounted) {
@@ -80,47 +84,45 @@ class _BarberListScreenState extends State<BarberListScreen> {
         return;
       }
 
-      final barberIds = salonBarbersResponse.map((sb) => sb['barber_id'] as String).toList();
+      final barberIds = salonBarbersResponse
+          .map((sb) => sb['barber_id'] as String)
+          .toList();
 
-      // ✅ UPDATED: Get profiles with user_roles status check
+      // ✅ Step 2: Get profiles for these barbers (NO join with user_roles)
       final profilesResponse = await supabase
           .from('profiles')
           .select('''
-            id,
-            full_name,
-            email,
-            phone,
-            avatar_url,
-            created_at,
-            is_active,
-            is_blocked,
-            user_roles!inner (
-              status,
-              role_id,
-              roles!inner (name)
-            )
-          ''')
-          .inFilter('id', barberIds)
-          .eq('user_roles.roles.name', 'barber');
+          id,
+          full_name,
+          email,
+          phone,
+          avatar_url,
+          created_at,
+          is_active,
+          is_blocked
+        ''')
+          .inFilter('id', barberIds);
 
+      // ✅ Step 3: Get user_roles for these barbers (separate query)
+      final userRolesResponse = await supabase
+          .from('user_roles')
+          .select('user_id, status, role_id')
+          .inFilter('user_id', barberIds)
+          .eq('role_id', 2); // barber role ID
+
+      // Create maps for quick lookup
       final Map<String, Map<String, dynamic>> profileMap = {};
-      final Map<String, String> roleStatusMap = {};
-
       for (var profile in profilesResponse) {
-        final userId = profile['id'];
-        profileMap[userId] = profile;
-        
-        // ✅ Get user_roles status
-        final userRoles = profile['user_roles'] as List? ?? [];
-        for (var role in userRoles) {
-          if (role['roles']?['name'] == 'barber') {
-            roleStatusMap[userId] = role['status'] ?? 'active';
-            break;
-          }
-        }
+        profileMap[profile['id']] = profile;
       }
 
-      // Get service counts for each barber
+      // Create user_roles status map
+      final Map<String, String> roleStatusMap = {};
+      for (var role in userRolesResponse) {
+        roleStatusMap[role['user_id']] = role['status'] ?? 'active';
+      }
+
+      // ✅ Step 4: Get service counts for each barber
       Map<String, int> serviceCountMap = {};
       for (var sb in salonBarbersResponse) {
         final salonBarberId = sb['id'] as int;
@@ -128,10 +130,11 @@ class _BarberListScreenState extends State<BarberListScreen> {
             .from('barber_services')
             .select('id')
             .eq('salon_barber_id', salonBarberId);
-        
+
         serviceCountMap[sb['barber_id']] = count.length;
       }
 
+      // ✅ Step 5: Combine all data
       List<Map<String, dynamic>> combinedList = [];
 
       for (var sb in salonBarbersResponse) {
@@ -139,18 +142,18 @@ class _BarberListScreenState extends State<BarberListScreen> {
         final profile = profileMap[barberId] ?? {};
         final roleStatus = roleStatusMap[barberId] ?? 'active';
 
-        // ✅ Check profile status
+        // Check profile status
         final isProfileActive = profile['is_active'] ?? true;
         final isProfileBlocked = profile['is_blocked'] ?? false;
 
-        // ✅ Determine actual status (combine all statuses)
+        // Determine actual status (combine all statuses)
         String actualStatus = sb['status'] ?? 'active';
-        
+
         // If user_roles status is not active, override
         if (roleStatus != 'active') {
           actualStatus = roleStatus;
         }
-        
+
         // If profile is blocked, override
         if (isProfileBlocked) {
           actualStatus = 'blocked';
@@ -180,7 +183,6 @@ class _BarberListScreenState extends State<BarberListScreen> {
           _barbers = combinedList;
         });
       }
-
     } catch (e) {
       debugPrint('❌ Error loading barbers: $e');
       if (mounted) {
@@ -196,7 +198,11 @@ class _BarberListScreenState extends State<BarberListScreen> {
   // ============================================================
   // ✅ UPDATED: ACTIVATE BARBER (Update user_roles.status)
   // ============================================================
-  Future<void> _activateBarber(int salonBarberId, String barberName, String barberId) async {
+  Future<void> _activateBarber(
+    int salonBarberId,
+    String barberName,
+    String barberId,
+  ) async {
     try {
       // ✅ Update salon_barbers status
       await supabase
@@ -212,10 +218,10 @@ class _BarberListScreenState extends State<BarberListScreen> {
             'updated_at': DateTime.now().toIso8601String(),
           })
           .eq('user_id', barberId)
-          .eq('role_id', 2);  // barber role ID
+          .eq('role_id', 2); // barber role ID
 
       await _loadData();
-      
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -238,13 +244,19 @@ class _BarberListScreenState extends State<BarberListScreen> {
   // ============================================================
   // ✅ UPDATED: DEACTIVATE BARBER (Update user_roles.status)
   // ============================================================
-  Future<void> _deactivateBarber(int salonBarberId, String barberName, String barberId) async {
+  Future<void> _deactivateBarber(
+    int salonBarberId,
+    String barberName,
+    String barberId,
+  ) async {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Deactivate Barber'),
-        content: Text('Temporarily deactivate $barberName? They can be reactivated later.'),
+        content: Text(
+          'Temporarily deactivate $barberName? They can be reactivated later.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -252,9 +264,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.orange,
-            ),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
             child: const Text('Deactivate'),
           ),
         ],
@@ -277,10 +287,10 @@ class _BarberListScreenState extends State<BarberListScreen> {
               'updated_at': DateTime.now().toIso8601String(),
             })
             .eq('user_id', barberId)
-            .eq('role_id', 2);  // barber role ID
+            .eq('role_id', 2); // barber role ID
 
         await _loadData();
-        
+
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -304,7 +314,11 @@ class _BarberListScreenState extends State<BarberListScreen> {
   // ============================================================
   // ✅ UPDATED: DELETE BARBER (Update user_roles.status)
   // ============================================================
-  Future<void> _deleteBarber(int salonBarberId, String barberName, String barberId) async {
+  Future<void> _deleteBarber(
+    int salonBarberId,
+    String barberName,
+    String barberId,
+  ) async {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -337,9 +351,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-            ),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             child: const Text('Delete'),
           ),
         ],
@@ -362,10 +374,10 @@ class _BarberListScreenState extends State<BarberListScreen> {
               'updated_at': DateTime.now().toIso8601String(),
             })
             .eq('user_id', barberId)
-            .eq('role_id', 2);  // barber role ID
+            .eq('role_id', 2); // barber role ID
 
         await _loadData();
-        
+
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -389,7 +401,11 @@ class _BarberListScreenState extends State<BarberListScreen> {
   // ============================================================
   // ✅ UPDATED: RESTORE BARBER (Update user_roles.status)
   // ============================================================
-  Future<void> _restoreBarber(int salonBarberId, String barberName, String barberId) async {
+  Future<void> _restoreBarber(
+    int salonBarberId,
+    String barberName,
+    String barberId,
+  ) async {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -403,9 +419,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.blue,
-            ),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
             child: const Text('Restore'),
           ),
         ],
@@ -428,10 +442,10 @@ class _BarberListScreenState extends State<BarberListScreen> {
               'updated_at': DateTime.now().toIso8601String(),
             })
             .eq('user_id', barberId)
-            .eq('role_id', 2);  // barber role ID
+            .eq('role_id', 2); // barber role ID
 
         await _loadData();
-        
+
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -474,7 +488,20 @@ class _BarberListScreenState extends State<BarberListScreen> {
     if (dateStr == null) return 'Unknown';
     try {
       final date = DateTime.parse(dateStr);
-      final months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      final months = [
+        'Jan',
+        'Feb',
+        'Mar',
+        'Apr',
+        'May',
+        'Jun',
+        'Jul',
+        'Aug',
+        'Sep',
+        'Oct',
+        'Nov',
+        'Dec',
+      ];
       return '${months[date.month - 1]} ${date.day}, ${date.year}';
     } catch (e) {
       return dateStr;
@@ -486,31 +513,46 @@ class _BarberListScreenState extends State<BarberListScreen> {
   // ============================================================
   String _getStatusText(String status) {
     switch (status) {
-      case 'active': return 'Active';
-      case 'inactive': return 'Inactive';
-      case 'deleted': return 'Deleted';
-      case 'blocked': return 'Blocked';
-      default: return status;
+      case 'active':
+        return 'Active';
+      case 'inactive':
+        return 'Inactive';
+      case 'deleted':
+        return 'Deleted';
+      case 'blocked':
+        return 'Blocked';
+      default:
+        return status;
     }
   }
 
   Color _getStatusColor(String status) {
     switch (status) {
-      case 'active': return Colors.green;
-      case 'inactive': return Colors.orange;
-      case 'deleted': return Colors.red;
-      case 'blocked': return Colors.purple;
-      default: return Colors.grey;
+      case 'active':
+        return Colors.green;
+      case 'inactive':
+        return Colors.orange;
+      case 'deleted':
+        return Colors.red;
+      case 'blocked':
+        return Colors.purple;
+      default:
+        return Colors.grey;
     }
   }
 
   IconData _getStatusIcon(String status) {
     switch (status) {
-      case 'active': return Icons.check_circle;
-      case 'inactive': return Icons.pause_circle;
-      case 'deleted': return Icons.delete;
-      case 'blocked': return Icons.block;
-      default: return Icons.help;
+      case 'active':
+        return Icons.check_circle;
+      case 'inactive':
+        return Icons.pause_circle;
+      case 'deleted':
+        return Icons.delete;
+      case 'blocked':
+        return Icons.block;
+      default:
+        return Icons.help;
     }
   }
 
@@ -585,9 +627,8 @@ class _BarberListScreenState extends State<BarberListScreen> {
             ),
             const SizedBox(height: 16),
             ElevatedButton.icon(
-              onPressed: () => context.push(
-                '/owner/add-barber?salonId=${widget.salonId}',
-              ),
+              onPressed: () =>
+                  context.push('/owner/add-barber?salonId=${widget.salonId}'),
               icon: const Icon(Icons.person_add),
               label: const Text('Add Barber'),
               style: ElevatedButton.styleFrom(
@@ -601,10 +642,12 @@ class _BarberListScreenState extends State<BarberListScreen> {
   }
 
   // ==================== DESKTOP VIEW ====================
-  
+
   Widget _buildDesktopView(double padding) {
     final activeCount = _barbers.where((b) => b['status'] == 'active').length;
-    final inactiveCount = _barbers.where((b) => b['status'] == 'inactive').length;
+    final inactiveCount = _barbers
+        .where((b) => b['status'] == 'inactive')
+        .length;
     final deletedCount = _barbers.where((b) => b['status'] == 'deleted').length;
     final blockedCount = _barbers.where((b) => b['status'] == 'blocked').length;
 
@@ -615,15 +658,40 @@ class _BarberListScreenState extends State<BarberListScreen> {
           // Stats Cards
           Row(
             children: [
-              _buildStatCard('Total', _barbers.length.toString(), Icons.people, Colors.blue),
+              _buildStatCard(
+                'Total',
+                _barbers.length.toString(),
+                Icons.people,
+                Colors.blue,
+              ),
               const SizedBox(width: 12),
-              _buildStatCard('Active', activeCount.toString(), Icons.check_circle, Colors.green),
+              _buildStatCard(
+                'Active',
+                activeCount.toString(),
+                Icons.check_circle,
+                Colors.green,
+              ),
               const SizedBox(width: 12),
-              _buildStatCard('Inactive', inactiveCount.toString(), Icons.pause_circle, Colors.orange),
+              _buildStatCard(
+                'Inactive',
+                inactiveCount.toString(),
+                Icons.pause_circle,
+                Colors.orange,
+              ),
               const SizedBox(width: 12),
-              _buildStatCard('Deleted', deletedCount.toString(), Icons.delete, Colors.red),
+              _buildStatCard(
+                'Deleted',
+                deletedCount.toString(),
+                Icons.delete,
+                Colors.red,
+              ),
               const SizedBox(width: 12),
-              _buildStatCard('Blocked', blockedCount.toString(), Icons.block, Colors.purple),
+              _buildStatCard(
+                'Blocked',
+                blockedCount.toString(),
+                Icons.block,
+                Colors.purple,
+              ),
             ],
           ),
           const SizedBox(height: 16),
@@ -634,23 +702,66 @@ class _BarberListScreenState extends State<BarberListScreen> {
             decoration: BoxDecoration(
               color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFFFF6B8B).withValues(alpha: 0.3)),
+              border: Border.all(
+                color: const Color(0xFFFF6B8B).withValues(alpha: 0.3),
+              ),
             ),
             child: const Row(
               children: [
-                Expanded(flex: 3, child: Text('Barber', style: TextStyle(fontWeight: FontWeight.bold))),
-                Expanded(flex: 2, child: Text('Contact', style: TextStyle(fontWeight: FontWeight.bold))),
-                Expanded(flex: 2, child: Text('Joined', style: TextStyle(fontWeight: FontWeight.bold))),
-                Expanded(flex: 1, child: Text('Services', style: TextStyle(fontWeight: FontWeight.bold), textAlign: TextAlign.center)),
-                Expanded(flex: 1, child: Text('Status', style: TextStyle(fontWeight: FontWeight.bold), textAlign: TextAlign.center)),
-                Expanded(flex: 3, child: Text('Actions', style: TextStyle(fontWeight: FontWeight.bold), textAlign: TextAlign.center)),
+                Expanded(
+                  flex: 3,
+                  child: Text(
+                    'Barber',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+                Expanded(
+                  flex: 2,
+                  child: Text(
+                    'Contact',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+                Expanded(
+                  flex: 2,
+                  child: Text(
+                    'Joined',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+                Expanded(
+                  flex: 1,
+                  child: Text(
+                    'Services',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+                Expanded(
+                  flex: 1,
+                  child: Text(
+                    'Status',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+                Expanded(
+                  flex: 3,
+                  child: Text(
+                    'Actions',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
               ],
             ),
           ),
           const SizedBox(height: 8),
 
           // Table Rows
-          ..._barbers.asMap().entries.map((entry) => _buildDesktopBarberRow(entry.value, entry.key)),
+          ..._barbers.asMap().entries.map(
+            (entry) => _buildDesktopBarberRow(entry.value, entry.key),
+          ),
         ],
       ),
     );
@@ -741,10 +852,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
                       ),
                       Text(
                         barber['email'],
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Colors.grey[600],
-                        ),
+                        style: TextStyle(fontSize: 13, color: Colors.grey[600]),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -761,7 +869,9 @@ class _BarberListScreenState extends State<BarberListScreen> {
             child: Text(
               barber['phone'] ?? 'No phone',
               style: TextStyle(
-                color: barber['phone'] == 'No phone' ? Colors.grey[400] : Colors.grey[800],
+                color: barber['phone'] == 'No phone'
+                    ? Colors.grey[400]
+                    : Colors.grey[800],
               ),
             ),
           ),
@@ -810,11 +920,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(
-                      statusIcon,
-                      color: statusColor,
-                      size: 14,
-                    ),
+                    Icon(statusIcon, color: statusColor, size: 14),
                     const SizedBox(width: 4),
                     Text(
                       statusText,
@@ -855,9 +961,9 @@ class _BarberListScreenState extends State<BarberListScreen> {
                   IconButton(
                     icon: const Icon(Icons.pause_circle, color: Colors.orange),
                     onPressed: () => _deactivateBarber(
-                      barber['salon_barber_id'], 
+                      barber['salon_barber_id'],
                       barber['name'],
-                      barber['id'],  // ✅ Pass barber ID
+                      barber['id'], // ✅ Pass barber ID
                     ),
                     tooltip: 'Deactivate',
                   ),
@@ -865,18 +971,18 @@ class _BarberListScreenState extends State<BarberListScreen> {
                   IconButton(
                     icon: const Icon(Icons.play_circle, color: Colors.green),
                     onPressed: () => _activateBarber(
-                      barber['salon_barber_id'], 
+                      barber['salon_barber_id'],
                       barber['name'],
-                      barber['id'],  // ✅ Pass barber ID
+                      barber['id'], // ✅ Pass barber ID
                     ),
                     tooltip: 'Activate',
                   ),
                   IconButton(
                     icon: const Icon(Icons.delete, color: Colors.red),
                     onPressed: () => _deleteBarber(
-                      barber['salon_barber_id'], 
+                      barber['salon_barber_id'],
                       barber['name'],
-                      barber['id'],  // ✅ Pass barber ID
+                      barber['id'], // ✅ Pass barber ID
                     ),
                     tooltip: 'Delete',
                   ),
@@ -885,19 +991,24 @@ class _BarberListScreenState extends State<BarberListScreen> {
                   IconButton(
                     icon: const Icon(Icons.restore, color: Colors.blue),
                     onPressed: () => _restoreBarber(
-                      barber['salon_barber_id'], 
+                      barber['salon_barber_id'],
                       barber['name'],
-                      barber['id'],  // ✅ Pass barber ID
+                      barber['id'], // ✅ Pass barber ID
                     ),
                     tooltip: 'Restore',
                   ),
                 if (status == 'blocked')
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.purple.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.purple.withValues(alpha: 0.3)),
+                      border: Border.all(
+                        color: Colors.purple.withValues(alpha: 0.3),
+                      ),
                     ),
                     child: const Text(
                       'Contact Support',
@@ -917,7 +1028,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
   }
 
   // ==================== MOBILE VIEW ====================
-  
+
   Widget _buildMobileView(double padding) {
     return ListView.builder(
       padding: EdgeInsets.all(padding),
@@ -939,12 +1050,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
             decoration: BoxDecoration(
               color: cardColor,
               borderRadius: BorderRadius.circular(16),
-              border: Border(
-                left: BorderSide(
-                  color: statusColor,
-                  width: 4,
-                ),
-              ),
+              border: Border(left: BorderSide(color: statusColor, width: 4)),
             ),
             child: Column(
               children: [
@@ -981,7 +1087,10 @@ class _BarberListScreenState extends State<BarberListScreen> {
                                 decoration: BoxDecoration(
                                   color: statusColor,
                                   shape: BoxShape.circle,
-                                  border: Border.all(color: Colors.white, width: 2),
+                                  border: Border.all(
+                                    color: Colors.white,
+                                    width: 2,
+                                  ),
                                 ),
                                 child: Icon(
                                   statusIcon,
@@ -1087,7 +1196,11 @@ class _BarberListScreenState extends State<BarberListScreen> {
                         Expanded(
                           child: Row(
                             children: [
-                              Icon(Icons.phone, size: 14, color: Colors.grey[600]),
+                              Icon(
+                                Icons.phone,
+                                size: 14,
+                                color: Colors.grey[600],
+                              ),
                               const SizedBox(width: 6),
                               Expanded(
                                 child: Text(
@@ -1103,12 +1216,20 @@ class _BarberListScreenState extends State<BarberListScreen> {
                             ],
                           ),
                         ),
-                        Container(width: 1, height: 20, color: Colors.grey[300]),
+                        Container(
+                          width: 1,
+                          height: 20,
+                          color: Colors.grey[300],
+                        ),
                         Expanded(
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.end,
                             children: [
-                              Icon(Icons.calendar_today, size: 12, color: Colors.grey[600]),
+                              Icon(
+                                Icons.calendar_today,
+                                size: 12,
+                                color: Colors.grey[600],
+                              ),
                               const SizedBox(width: 4),
                               Text(
                                 _formatDate(barber['joined_at']),
@@ -1157,9 +1278,9 @@ class _BarberListScreenState extends State<BarberListScreen> {
                           label: 'Deactivate',
                           color: Colors.orange,
                           onTap: () => _deactivateBarber(
-                            barber['salon_barber_id'], 
+                            barber['salon_barber_id'],
                             barber['name'],
-                            barber['id'],  // ✅ Pass barber ID
+                            barber['id'], // ✅ Pass barber ID
                           ),
                         ),
                       if (status == 'inactive') ...[
@@ -1168,9 +1289,9 @@ class _BarberListScreenState extends State<BarberListScreen> {
                           label: 'Activate',
                           color: Colors.green,
                           onTap: () => _activateBarber(
-                            barber['salon_barber_id'], 
+                            barber['salon_barber_id'],
                             barber['name'],
-                            barber['id'],  // ✅ Pass barber ID
+                            barber['id'], // ✅ Pass barber ID
                           ),
                         ),
                         _buildMobileActionChip(
@@ -1178,9 +1299,9 @@ class _BarberListScreenState extends State<BarberListScreen> {
                           label: 'Delete',
                           color: Colors.red,
                           onTap: () => _deleteBarber(
-                            barber['salon_barber_id'], 
+                            barber['salon_barber_id'],
                             barber['name'],
-                            barber['id'],  // ✅ Pass barber ID
+                            barber['id'], // ✅ Pass barber ID
                           ),
                         ),
                       ],
@@ -1190,18 +1311,23 @@ class _BarberListScreenState extends State<BarberListScreen> {
                           label: 'Restore',
                           color: Colors.blue,
                           onTap: () => _restoreBarber(
-                            barber['salon_barber_id'], 
+                            barber['salon_barber_id'],
                             barber['name'],
-                            barber['id'],  // ✅ Pass barber ID
+                            barber['id'], // ✅ Pass barber ID
                           ),
                         ),
                       if (status == 'blocked')
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
                           decoration: BoxDecoration(
                             color: Colors.purple.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(20),
-                            border: Border.all(color: Colors.purple.withValues(alpha: 0.3)),
+                            border: Border.all(
+                              color: Colors.purple.withValues(alpha: 0.3),
+                            ),
                           ),
                           child: const Text(
                             'Blocked',
@@ -1258,7 +1384,12 @@ class _BarberListScreenState extends State<BarberListScreen> {
     );
   }
 
-  Widget _buildStatCard(String label, String value, IconData icon, Color color) {
+  Widget _buildStatCard(
+    String label,
+    String value,
+    IconData icon,
+    Color color,
+  ) {
     return Expanded(
       child: Container(
         padding: const EdgeInsets.all(12),
@@ -1298,10 +1429,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
                 ),
                 Text(
                   label,
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: Colors.grey[600],
-                  ),
+                  style: TextStyle(fontSize: 10, color: Colors.grey[600]),
                 ),
               ],
             ),
@@ -1312,7 +1440,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
   }
 
   // ==================== FILTER DIALOG ====================
-  
+
   void _showFilterDialog() {
     String tempFilter = _selectedFilter!;
 
@@ -1321,7 +1449,9 @@ class _BarberListScreenState extends State<BarberListScreen> {
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) {
           return AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
             title: const Text('Filter Barbers'),
             content: Column(
               mainAxisSize: MainAxisSize.min,
@@ -1425,13 +1555,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
                     : Colors.transparent,
               ),
               child: currentFilter == value
-                  ? Center(
-                      child: Icon(
-                        Icons.circle,
-                        color: color,
-                        size: 12,
-                      ),
-                    )
+                  ? Center(child: Icon(Icons.circle, color: color, size: 12))
                   : null,
             ),
             const SizedBox(width: 12),
@@ -1444,10 +1568,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
               child: Icon(icon, color: color, size: 16),
             ),
             const SizedBox(width: 8),
-            Text(
-              title,
-              style: const TextStyle(fontSize: 16),
-            ),
+            Text(title, style: const TextStyle(fontSize: 16)),
           ],
         ),
       ),

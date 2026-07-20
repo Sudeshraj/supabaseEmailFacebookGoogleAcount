@@ -277,9 +277,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   String _getChildNameForBooking() =>
       _isSameAsCustomer ? '' : (_selectedChildName?.trim() ?? '');
 
-  String _getTimezoneDisplay() {
-    return '${TimezoneService.getCurrentFlag()} ${TimezoneService.getTimezoneDisplayName()} (${TimezoneService.getUtcOffsetString()})';
-  }
 
   bool _isDST() {
     final timezone = _userTimezone;
