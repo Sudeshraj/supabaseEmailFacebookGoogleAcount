@@ -17,6 +17,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:universal_platform/universal_platform.dart';
 import '../../services/timezone_service.dart';
 
+final RouteObserver<ModalRoute<void>> routeObserver =
+    RouteObserver<ModalRoute<void>>();
+
 class EmployeeDashboard extends StatefulWidget {
   const EmployeeDashboard({super.key});
 
@@ -49,9 +52,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
   String _employeeEmail = '';
   String _employeeAvatar = '';
 
-  // Salon information
+  // ✅ Salon information - FIXED: String? instead of int?
   List<Map<String, dynamic>> _assignedSalons = [];
-  int? _selectedSalonId;
+  String? _selectedSalonId;
   String _selectedSalonName = '';
 
   // Break status
@@ -1342,7 +1345,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
     }
   }
 
-  // Load assigned salons for the barber
+  // ✅ FIXED: Load assigned salons with String ID
   Future<void> _loadAssignedSalons() async {
     try {
       final response = await supabase
@@ -1374,7 +1377,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         final salonData = item['salons'] as Map?;
         if (salonData != null) {
           final salon = {
-            'id': salonData['id'],
+            'id': salonData['id'].toString(), // ✅ Convert to String
             'name': salonData['name'],
             'address': salonData['address'],
             'phone': salonData['phone'],
@@ -1389,8 +1392,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
           // First active salon becomes selected
           if (_selectedSalonId == null && salonData['is_active'] == true) {
-            _selectedSalonId = salonData['id'];
-            _selectedSalonName = salonData['name'];
+            _selectedSalonId = salonData['id'].toString(); // ✅ Convert to String
+            _selectedSalonName = salonData['name'] ?? '';
           }
         }
       }
@@ -1398,7 +1401,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
       setState(() {
         _assignedSalons = salons;
         if (_selectedSalonId == null && salons.isNotEmpty) {
-          _selectedSalonId = salons[0]['id'] as int;
+          _selectedSalonId = salons[0]['id'] as String;
           _selectedSalonName = salons[0]['name'] ?? '';
         } else if (salons.isNotEmpty) {
           final selected = salons.firstWhere(
@@ -1409,9 +1412,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         }
       });
 
-      debugPrint(
-        '✅ Selected salon: $_selectedSalonName (ID: $_selectedSalonId)',
-      );
+      debugPrint('✅ Selected salon: $_selectedSalonName (ID: $_selectedSalonId)');
       debugPrint('✅ Total assigned salons: ${_assignedSalons.length}');
     } catch (e) {
       debugPrint('❌ Error loading assigned salons: $e');
@@ -1420,7 +1421,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
   // ==================== SALON SELECTION ====================
 
-  void _selectSalon(int salonId) {
+  // ✅ FIXED: Accept String parameter
+  void _selectSalon(String salonId) {
     setState(() {
       _selectedSalonId = salonId;
       final selected = _assignedSalons.firstWhere(
@@ -1468,10 +1470,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
       if (!_hasPermission) {
         _showPermissionCard = await _permissionManager.shouldShowPermissionCard(
           screen: 'employee_dashboard',
-          action: null, // No action - normal check
+          action: null,
         );
 
-        // ✅ Web: Check if permission is denied in browser
         if (UniversalPlatform.isWeb && _showPermissionCard) {
           final status = await _notificationService.getWebPermissionStatus();
           if (status == 'denied') {
@@ -1514,7 +1515,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
   }
 
   // =====================================================
-  // ✅ LOAD APPOINTMENTS - DIRECT QUERY (NO RPC)
+  // ✅ LOAD APPOINTMENTS - FIXED: Parse salon ID
   // =====================================================
   Future<void> _loadAppointments() async {
     try {
@@ -1532,6 +1533,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         return;
       }
 
+      // ✅ Parse String to int for database query
+      final salonIdInt = int.parse(salonId);
+
       final today = DateTime.now();
       final todayStr = today.toIso8601String().split('T').first;
       final futureDate = today.add(const Duration(days: 30));
@@ -1539,7 +1543,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
       debugPrint('📊 Loading appointments from $todayStr to $futureStr');
 
-      // ✅ DIRECT QUERY - NO RPC
       final response = await supabase
           .from('appointments')
           .select('''
@@ -1577,7 +1580,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
             )
           ''')
           .eq('barber_id', _employeeId)
-          .eq('salon_id', salonId)
+          .eq('salon_id', salonIdInt) // ✅ Use int
           .gte('appointment_date', todayStr)
           .lte('appointment_date', futureStr)
           .neq('status', 'cancelled')
@@ -1613,7 +1616,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         final startTimeLocal = _utcToLocalTimeString(apt['start_time']);
         final endTimeLocal = _utcToLocalTimeString(apt['end_time']);
 
-        // Count TODAY's appointments
         if (isToday) {
           todayTotal++;
           if (status == 'completed') {
@@ -1622,7 +1624,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
           }
         }
 
-        // Count ALL PENDING (today + future)
         if (status == 'pending' ||
             status == 'confirmed' ||
             status == 'in_progress') {
@@ -1675,7 +1676,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
   }
 
   // =====================================================
-  // ✅ LOAD STATISTICS - DIRECT QUERY (NO RPC)
+  // ✅ LOAD STATISTICS - FIXED: Parse salon ID
   // =====================================================
   Future<void> _loadStatistics() async {
     try {
@@ -1691,6 +1692,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         return;
       }
 
+      // ✅ Parse String to int for database query
+      final salonIdInt = int.parse(salonId);
+
       debugPrint('📊 Loading statistics for salon: $salonId');
 
       // 1. TOTAL CUSTOMERS SERVED
@@ -1699,7 +1703,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
           .select('customer_id')
           .eq('barber_id', _employeeId)
           .eq('status', 'completed')
-          .eq('salon_id', salonId);
+          .eq('salon_id', salonIdInt); // ✅ Use int
 
       final uniqueCustomers = customersResponse
           .map((a) => a['customer_id'])
@@ -1726,7 +1730,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
           .select('price')
           .eq('barber_id', _employeeId)
           .eq('status', 'completed')
-          .eq('salon_id', salonId)
+          .eq('salon_id', salonIdInt) // ✅ Use int
           .gte('appointment_date', firstDayStr)
           .lte('appointment_date', lastDayStr);
 
@@ -1740,7 +1744,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
           .from('reviews')
           .select('overall_rating')
           .eq('barber_id', _employeeId)
-          .eq('salon_id', salonId);
+          .eq('salon_id', salonIdInt); // ✅ Use int
 
       double avgRating = 0.0;
       if (reviewsResponse.isNotEmpty) {
@@ -1875,7 +1879,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
     try {
       final bool isWeb = UniversalPlatform.isWeb;
 
-      // Web - Check if already denied in browser
       if (isWeb) {
         final status = await _notificationService.getWebPermissionStatus();
         if (status == 'denied') {
@@ -1971,7 +1974,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
   // ==================== CONTEXTUAL NAVIGATION ====================
 
   void _viewMySchedule() {
-    // ✅ Show permission card before schedule
     if (!_hasPermission) {
       _showPermissionCardContext(action: 'schedule');
       if (_showPermissionCard) {
@@ -1982,7 +1984,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
   }
 
   void _viewMyCustomers() {
-    // ✅ Show permission card before customers
     if (!_hasPermission) {
       _showPermissionCardContext(action: 'customer');
       if (_showPermissionCard) {
@@ -1993,7 +1994,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
   }
 
   void _viewTodayEarnings() {
-    // ✅ Show permission card before earnings
     if (!_hasPermission) {
       _showPermissionCardContext(action: 'earnings');
       if (_showPermissionCard) {
@@ -2004,7 +2004,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
   }
 
   void _viewUpcomingAppointments() {
-    // ✅ Show permission card before appointments
     if (!_hasPermission) {
       _showPermissionCardContext(action: 'appointment');
       if (_showPermissionCard) {
@@ -2015,7 +2014,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
   }
 
   void _viewNotifications() {
-    // ✅ Show permission card before notifications
     if (!_hasPermission) {
       _showPermissionCardContext(action: 'notification');
       if (_showPermissionCard) {
@@ -2243,6 +2241,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
   // ==================== SALON SELECTOR DIALOG ====================
 
+  // ✅ FIXED: Use String salon ID
   Future<void> _showSalonSelectorDialog() async {
     await showModalBottomSheet(
       context: context,
@@ -2287,9 +2286,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                 title: Text(
                   salon['name'] ?? 'Unknown Salon',
                   style: TextStyle(
-                    fontWeight: isSelected
-                        ? FontWeight.bold
-                        : FontWeight.normal,
+                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                   ),
                 ),
                 subtitle: Text(
@@ -2302,7 +2299,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                     : null,
                 onTap: () {
                   Navigator.pop(context);
-                  _selectSalon(salon['id'] as int);
+                  _selectSalon(salon['id'] as String);
                 },
               );
             }),
@@ -2313,7 +2310,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
   }
 
   // =====================================================
-  // ✅ BUILD METHOD - UPDATED WITH PERMISSION CARD
+  // ✅ BUILD METHOD
   // =====================================================
   @override
   Widget build(BuildContext context) {
@@ -2403,6 +2400,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         userName: _employeeName,
         userEmail: _employeeEmail,
         profileImageUrl: _employeeAvatar.isNotEmpty ? _employeeAvatar : null,
+        selectedSalonId: _selectedSalonId, // ✅ Now String? type
         onMenuItemSelected: () => _loadData(),
       ),
       body: _isLoading
@@ -2417,7 +2415,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                 padding: const EdgeInsets.only(bottom: 20),
                 child: Column(
                   children: [
-                    // ✅ PERMISSION CARD - Contextual Support
+                    // ✅ PERMISSION CARD
                     if (_showPermissionCard && !_hasPermission)
                       PermissionCard(
                         onEnable: _enableNotifications,
@@ -2919,6 +2917,3 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
     );
   }
 }
-
-final RouteObserver<ModalRoute<void>> routeObserver =
-    RouteObserver<ModalRoute<void>>();

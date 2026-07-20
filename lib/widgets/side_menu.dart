@@ -11,6 +11,7 @@ class SideMenu extends StatefulWidget {
   final String userName;
   final String? userEmail;
   final String? profileImageUrl;
+  final String? selectedSalonId; // ✅ From Dashboard
   final VoidCallback? onMenuItemSelected;
 
   const SideMenu({
@@ -19,6 +20,7 @@ class SideMenu extends StatefulWidget {
     required this.userName,
     this.userEmail,
     this.profileImageUrl,
+    this.selectedSalonId,
     this.onMenuItemSelected,
   });
 
@@ -32,14 +34,33 @@ class _SideMenuState extends State<SideMenu> {
   List<String> _allUserRoles = [];
   bool _isLoading = false;
 
+  // ✅ Notification counts
+  int _unreadNotificationCount = 0;
+  int _pendingBookingsCount = 0;
+
+  // ✅ Owner salons
+  List<Map<String, dynamic>> _ownerSalons = [];
+  String? _selectedSalonId;
+  String? _selectedSalonName;
+
   final supabase = Supabase.instance.client;
 
   @override
   void initState() {
     super.initState();
+    // ✅ Initialize with widget's selectedSalonId
+    _selectedSalonId = widget.selectedSalonId;
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         _loadUserRolesFromDatabase();
+        _loadNotificationCounts();
+        if (widget.userRole == 'owner') {
+          _loadOwnerSalons();
+        } else if (widget.userRole == 'barber') {
+          _loadBarberSalon();
+        }
+        // Customer doesn't need to load salon
       }
     });
   }
@@ -47,12 +68,276 @@ class _SideMenuState extends State<SideMenu> {
   @override
   void didUpdateWidget(SideMenu oldWidget) {
     super.didUpdateWidget(oldWidget);
+
+    // ✅ Update salon ID when widget updates
+    if (widget.selectedSalonId != oldWidget.selectedSalonId) {
+      setState(() {
+        _selectedSalonId = widget.selectedSalonId;
+      });
+      _loadNotificationCounts();
+    }
+
     if (widget.userRole != oldWidget.userRole) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           _loadUserRolesFromDatabase();
+          _loadNotificationCounts();
+          if (widget.userRole == 'owner') {
+            _loadOwnerSalons();
+          } else if (widget.userRole == 'barber') {
+            _loadBarberSalon();
+          }
         }
       });
+    }
+  }
+
+  // ============================================================
+  // 🔥 LOAD BARBER'S SALON
+  // ============================================================
+  Future<void> _loadBarberSalon() async {
+    if (widget.userRole != 'barber') return;
+
+
+    try {
+      final currentUser = supabase.auth.currentUser;
+      if (currentUser == null) {
+        return;
+      }
+
+      // ✅ Get barber's salon
+      final salonBarberResponse = await supabase
+          .from('salon_barbers')
+          .select('''
+            salon_id,
+            salons!inner (
+              id,
+              name,
+              logo_url,
+              address,
+              open_time,
+              close_time
+            )
+          ''')
+          .eq('barber_id', currentUser.id)
+          .eq('status', 'active')
+          .maybeSingle();
+
+      if (salonBarberResponse != null) {
+        final salon = salonBarberResponse['salons'] as Map?;
+        if (salon != null) {
+          setState(() {
+            _selectedSalonId = salon['id'].toString();
+            _selectedSalonName = salon['name']?.toString();
+            // ✅ Store in ownerSalons list for consistency (only one salon)
+            _ownerSalons = [
+              {
+                'id': salon['id'],
+                'name': salon['name'],
+                'logo_url': salon['logo_url'],
+                'address': salon['address'],
+                'open_time': salon['open_time'],
+                'close_time': salon['close_time'],
+              }
+            ];
+          });
+
+          // Save to SessionManager
+          if (_selectedSalonId != null) {
+            await SessionManager.saveSalonId(_selectedSalonId!);
+          }
+          if (_selectedSalonName != null) {
+            await SessionManager.saveSalonName(_selectedSalonName!);
+          }
+        }
+      }
+
+      debugPrint('✅ Barber salon loaded: $_selectedSalonName (ID: $_selectedSalonId)');
+
+    } catch (e) {
+      debugPrint('❌ Error loading barber salon: $e');
+    } finally {
+      if (mounted) {
+      }
+    }
+  }
+
+  // ============================================================
+  // 🔥 LOAD OWNER SALONS
+  // ============================================================
+  Future<void> _loadOwnerSalons() async {
+    if (widget.userRole != 'owner') return;
+
+
+    try {
+      final currentUser = supabase.auth.currentUser;
+      if (currentUser == null) {
+        return;
+      }
+
+      final response = await supabase
+          .from('salons')
+          .select('id, name, logo_url, address')
+          .eq('owner_id', currentUser.id)
+          .eq('is_active', true)
+          .order('name');
+
+      if (response.isNotEmpty) {
+        setState(() {
+          _ownerSalons = List<Map<String, dynamic>>.from(response);
+        });
+
+        // ✅ Use the passed salon ID first
+        if (widget.selectedSalonId != null &&
+            _ownerSalons.any((s) => s['id'].toString() == widget.selectedSalonId)) {
+          _selectedSalonId = widget.selectedSalonId;
+          _selectedSalonName = _ownerSalons.firstWhere(
+            (s) => s['id'].toString() == widget.selectedSalonId,
+          )['name']?.toString();
+        } else {
+          // ✅ Use await with getSalonId()
+          final savedId = await SessionManager.getSalonId();
+          if (savedId != null && _ownerSalons.any((s) => s['id'].toString() == savedId)) {
+            _selectedSalonId = savedId;
+            _selectedSalonName = _ownerSalons.firstWhere(
+              (s) => s['id'].toString() == savedId,
+            )['name']?.toString();
+          } else {
+            _selectedSalonId = _ownerSalons.first['id'].toString();
+            _selectedSalonName = _ownerSalons.first['name']?.toString();
+          }
+        }
+
+        // Save to SessionManager
+        if (_selectedSalonId != null) {
+          await SessionManager.saveSalonId(_selectedSalonId!);
+        }
+        if (_selectedSalonName != null) {
+          await SessionManager.saveSalonName(_selectedSalonName!);
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ Error loading owner salons: $e');
+    } finally {
+      if (mounted) {
+      }
+    }
+  }
+
+  // ============================================================
+  // 🔥 ON SALON CHANGED (Only for Owner)
+  // ============================================================
+  void _onSalonChanged(String? newSalonId) async {
+    if (widget.userRole != 'owner') return;
+    if (newSalonId == null || newSalonId == _selectedSalonId) return;
+
+    final selectedSalon = _ownerSalons.firstWhere(
+      (s) => s['id'].toString() == newSalonId,
+    );
+
+    setState(() {
+      _selectedSalonId = newSalonId;
+      _selectedSalonName = selectedSalon['name']?.toString();
+    });
+
+    // Save to SessionManager
+    await SessionManager.saveSalonId(_selectedSalonId!);
+    if (_selectedSalonName != null) {
+      await SessionManager.saveSalonName(_selectedSalonName!);
+    }
+
+    // ✅ Refresh notification counts with new salon
+    await _loadNotificationCounts();
+
+    // ✅ Notify parent widget about salon change
+    if (widget.onMenuItemSelected != null) {
+      widget.onMenuItemSelected!();
+    }
+
+    // Close drawer
+    if (mounted) {
+      Navigator.pop(context);
+    }
+  }
+
+  // ============================================================
+  // 🔥 LOAD NOTIFICATION COUNTS
+  // ============================================================
+  Future<void> _loadNotificationCounts() async {
+    try {
+      final currentUser = supabase.auth.currentUser;
+      if (currentUser == null) return;
+
+      // ✅ Get unread notification count
+      final notificationResponse = await supabase
+          .from('notifications')
+          .select('id')
+          .eq('user_id', currentUser.id)
+          .eq('is_read', false);
+
+      final unreadCount = notificationResponse.length;
+
+      // ✅ Get pending bookings count based on role and selected salon
+      int pendingBookings = 0;
+
+      if (widget.userRole == 'customer') {
+        final bookingsResponse = await supabase
+            .from('appointments')
+            .select('id')
+            .eq('customer_id', currentUser.id)
+            .inFilter('status', ['pending', 'confirmed']);
+        pendingBookings = bookingsResponse.length;
+      } else if (widget.userRole == 'barber') {
+        // ✅ Barber: Get pending bookings for this barber
+        final bookingsResponse = await supabase
+            .from('appointments')
+            .select('id')
+            .eq('barber_id', currentUser.id)
+            .inFilter('status', ['pending', 'confirmed']);
+        pendingBookings = bookingsResponse.length;
+      } else if (widget.userRole == 'owner') {
+        // ✅ Use selected salon ID if available
+        if (_selectedSalonId != null) {
+          final bookingsResponse = await supabase
+              .from('appointments')
+              .select('id')
+              .eq('salon_id', int.parse(_selectedSalonId!))
+              .inFilter('status', ['pending', 'confirmed']);
+          pendingBookings = bookingsResponse.length;
+        } else {
+          // If no salon selected, get all salons
+          final salonsResponse = await supabase
+              .from('salons')
+              .select('id')
+              .eq('owner_id', currentUser.id);
+
+          final List<int> salonIds = salonsResponse
+              .map<int>((s) => s['id'] as int)
+              .toList();
+
+          if (salonIds.isNotEmpty) {
+            final bookingsResponse = await supabase
+                .from('appointments')
+                .select('id')
+                .inFilter('salon_id', salonIds.map((e) => e.toString()).toList())
+                .inFilter('status', ['pending', 'confirmed']);
+            pendingBookings = bookingsResponse.length;
+          }
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _unreadNotificationCount = unreadCount;
+          _pendingBookingsCount = pendingBookings;
+        });
+      }
+
+      debugPrint(
+        '📬 Unread: $_unreadNotificationCount, Pending: $_pendingBookingsCount',
+      );
+    } catch (e) {
+      debugPrint('❌ Error loading notification counts: $e');
     }
   }
 
@@ -123,11 +408,13 @@ class _SideMenuState extends State<SideMenu> {
       final List<Map<String, dynamic>> profiles = [];
 
       if (profileResponse != null) {
-        final extraData = profileResponse['extra_data'] as Map<String, dynamic>? ?? {};
+        final extraData =
+            profileResponse['extra_data'] as Map<String, dynamic>? ?? {};
 
         for (var roleName in _allUserRoles) {
           final roleKey = 'profile_$roleName';
-          final roleStatus = extraData[roleKey]?['status'] as String? ?? 'active';
+          final roleStatus =
+              extraData[roleKey]?['status'] as String? ?? 'active';
 
           String displayName = profileResponse['full_name'] ?? widget.userName;
           if (displayName.isEmpty) {
@@ -138,7 +425,10 @@ class _SideMenuState extends State<SideMenu> {
 
           profiles.add({
             'id': profileResponse['id'],
-            'email': profileResponse['email'] ?? widget.userEmail ?? currentUser.email,
+            'email':
+                profileResponse['email'] ??
+                widget.userEmail ??
+                currentUser.email,
             'role': roleName,
             'role_id': roleData.firstWhere(
               (r) => r['name'] == roleName,
@@ -300,7 +590,7 @@ class _SideMenuState extends State<SideMenu> {
   }
 
   // ============================================================
-  // 🔥 CREATE NEW PROFILE - DIRECT (No Registration Flow)
+  // 🔥 CREATE NEW PROFILE
   // ============================================================
   Future<void> _createNewProfile() async {
     if (!mounted) return;
@@ -367,7 +657,7 @@ class _SideMenuState extends State<SideMenu> {
   }
 
   // ============================================================
-  // 🔥 CREATE PROFILE DIRECTLY - COMPLETE
+  // 🔥 CREATE PROFILE DIRECTLY
   // ============================================================
   Future<void> _createProfileDirectly(String role) async {
     if (!mounted) return;
@@ -403,7 +693,8 @@ class _SideMenuState extends State<SideMenu> {
       String fullName = widget.userName;
 
       if (existingProfile != null) {
-        extraData = existingProfile['extra_data'] as Map<String, dynamic>? ?? {};
+        extraData =
+            existingProfile['extra_data'] as Map<String, dynamic>? ?? {};
         fullName = existingProfile['full_name'] ?? widget.userName;
         debugPrint('📋 Existing profile found, updating extra_data');
       } else {
@@ -428,8 +719,9 @@ class _SideMenuState extends State<SideMenu> {
           'id': currentUser.id,
           'email': email,
           'full_name': fullName,
-          'avatar_url': currentUser.userMetadata?['avatar_url'] ?? 
-                       currentUser.userMetadata?['picture'],
+          'avatar_url':
+              currentUser.userMetadata?['avatar_url'] ??
+              currentUser.userMetadata?['picture'],
           'extra_data': extraData,
           'is_active': true,
           'is_blocked': false,
@@ -512,8 +804,9 @@ class _SideMenuState extends State<SideMenu> {
 
       debugPrint('📱 Saving to SessionManager');
 
-      final photoUrl = currentUser.userMetadata?['avatar_url'] ?? 
-                       currentUser.userMetadata?['picture'];
+      final photoUrl =
+          currentUser.userMetadata?['avatar_url'] ??
+          currentUser.userMetadata?['picture'];
 
       await SessionManager.saveUserProfile(
         email: email,
@@ -728,7 +1021,7 @@ class _SideMenuState extends State<SideMenu> {
   }
 
   // ============================================================
-  // 🔥 PROFILE HEADER - WITH CACHED IMAGE
+  // 🔥 PROFILE HEADER
   // ============================================================
   Widget _buildProfileHeader() {
     final hasMultipleProfiles = _availableProfiles.length > 1;
@@ -755,7 +1048,6 @@ class _SideMenuState extends State<SideMenu> {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // ✅ Profile Image with CachedNetworkImage
                   GestureDetector(
                     onTap: hasMultipleProfiles
                         ? () {
@@ -775,7 +1067,8 @@ class _SideMenuState extends State<SideMenu> {
                             shape: BoxShape.circle,
                             border: Border.all(color: Colors.white, width: 3),
                           ),
-                          child: (widget.profileImageUrl == null ||
+                          child:
+                              (widget.profileImageUrl == null ||
                                   widget.profileImageUrl!.isEmpty)
                               ? CircleAvatar(
                                   backgroundColor: Colors.white,
@@ -796,7 +1089,7 @@ class _SideMenuState extends State<SideMenu> {
                                     fit: BoxFit.cover,
                                     width: 70,
                                     height: 70,
-                                    placeholder: (context, url) => 
+                                    placeholder: (context, url) =>
                                         const CircleAvatar(
                                           backgroundColor: Colors.white,
                                           child: SizedBox(
@@ -808,12 +1101,13 @@ class _SideMenuState extends State<SideMenu> {
                                             ),
                                           ),
                                         ),
-                                    errorWidget: (context, url, error) => 
+                                    errorWidget: (context, url, error) =>
                                         CircleAvatar(
                                           backgroundColor: Colors.white,
                                           child: Text(
                                             widget.userName.isNotEmpty
-                                                ? widget.userName[0].toUpperCase()
+                                                ? widget.userName[0]
+                                                      .toUpperCase()
                                                 : 'U',
                                             style: const TextStyle(
                                               fontSize: 28,
@@ -1009,12 +1303,13 @@ class _SideMenuState extends State<SideMenu> {
   }
 
   // ============================================================
-  // 🔥 PROFILE SWITCHER ITEM - WITH CACHED IMAGE
+  // 🔥 PROFILE SWITCHER ITEM
   // ============================================================
   Widget _buildProfileSwitcherItem(Map<String, dynamic> profile) {
-    final bool isActive = profile['is_active'] == true && profile['is_blocked'] == false;
+    final bool isActive =
+        profile['is_active'] == true && profile['is_blocked'] == false;
     final Color roleColor = _getRoleColor(profile['role']);
-    
+
     return Material(
       color: Colors.transparent,
       borderRadius: BorderRadius.circular(12),
@@ -1027,7 +1322,6 @@ class _SideMenuState extends State<SideMenu> {
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           child: Row(
             children: [
-              // ✅ Profile Image with CachedNetworkImage
               Container(
                 width: 50,
                 height: 50,
@@ -1035,7 +1329,9 @@ class _SideMenuState extends State<SideMenu> {
                   shape: BoxShape.circle,
                   color: roleColor.withValues(alpha: 0.1),
                 ),
-                child: profile['photo'] != null && profile['photo'].toString().isNotEmpty
+                child:
+                    profile['photo'] != null &&
+                        profile['photo'].toString().isNotEmpty
                     ? ClipOval(
                         child: CachedNetworkImage(
                           imageUrl: profile['photo'],
@@ -1141,7 +1437,9 @@ class _SideMenuState extends State<SideMenu> {
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Text(
-                              profile['is_blocked'] == true ? 'Blocked' : 'Inactive',
+                              profile['is_blocked'] == true
+                                  ? 'Blocked'
+                                  : 'Inactive',
                               style: const TextStyle(
                                 fontSize: 8,
                                 color: Colors.white,
@@ -1154,10 +1452,7 @@ class _SideMenuState extends State<SideMenu> {
                     const SizedBox(height: 4),
                     Text(
                       profile['email'] ?? '',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey[500],
-                      ),
+                      style: TextStyle(fontSize: 12, color: Colors.grey[500]),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -1235,7 +1530,375 @@ class _SideMenuState extends State<SideMenu> {
   }
 
   // ============================================================
-  // 🔥 BOTTOM SECTION - COMPLETE FIX FOR FLUTTER 3.44.6
+  // 🔥 BUILD SALON SELECTOR ITEM (Only for Owner)
+  // ============================================================
+  Widget _buildSalonSelectorItem(Map<String, dynamic> item) {
+    final salons = item['salons'] as List<Map<String, dynamic>>;
+    final selectedId = item['selectedSalonId'] as String?;
+    final onChanged = item['onSalonChanged'] as Function(String?)?;
+
+    // Only show for owner
+    if (widget.userRole != 'owner') return const SizedBox.shrink();
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.grey[50],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey[200]!),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.store_outlined,
+                color: Colors.grey[600],
+                size: 18,
+              ),
+              const SizedBox(width: 10),
+              Text(
+                'Select Salon',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: Colors.grey[600],
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ...salons.map((salon) {
+            final isSelected = salon['id'].toString() == selectedId;
+            final salonName = salon['name']?.toString() ?? 'Salon';
+
+            return ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(
+                isSelected ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[400],
+                size: 18,
+              ),
+              title: Text(
+                salonName,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                  color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[800],
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+              trailing: isSelected
+                  ? Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.green.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Text(
+                        'Active',
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: Colors.green,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    )
+                  : null,
+              onTap: () {
+                if (onChanged != null) {
+                  onChanged(salon['id'].toString());
+                }
+              },
+              dense: true,
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  // ============================================================
+  // 🔥 BUILD SALON INFO ITEM (For Barber)
+  // ============================================================
+  Widget _buildSalonInfoItem(Map<String, dynamic> item) {
+    final salonId = item['salonId'] as String?;
+    final subtitle = item['subtitle'] as String? ?? 'No salon assigned';
+    
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Divider(color: Colors.grey, thickness: 0.5),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  item['icon'] as IconData? ?? Icons.store,
+                  color: const Color(0xFFFF6B8B),
+                  size: 18,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      item['title'] as String? ?? 'Salon',
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF1A1A1A),
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            subtitle,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: salonId != null 
+                                  ? const Color(0xFFFF6B8B) 
+                                  : Colors.grey[500],
+                              fontWeight: salonId != null 
+                                  ? FontWeight.w500 
+                                  : FontWeight.normal,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (salonId != null)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.green.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Text(
+                              'Active',
+                              style: TextStyle(
+                                fontSize: 8,
+                                color: Colors.green,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+
+  // ============================================================
+  // 🔥 GET OWNER MENU ITEMS
+  // ============================================================
+  List<Map<String, dynamic>> _getOwnerMenuItems() {
+    return [
+      {
+        'icon': Icons.dashboard_outlined,
+        'title': 'Dashboard',
+        'route': '/owner',
+        'color': Colors.blue,
+      },
+      // ✅ Salon selector (only if multiple salons)
+      if (_ownerSalons.length > 1)
+        {
+          'icon': Icons.swap_horiz,
+          'title': 'Switch Salon',
+          'isSalonSelector': true,
+          'salons': _ownerSalons,
+          'selectedSalonId': _selectedSalonId,
+          'onSalonChanged': _onSalonChanged,
+          'color': Colors.blueGrey,
+        },
+      {
+        'icon': Icons.calendar_month_outlined,
+        'title': 'Appointments',
+        'route': _selectedSalonId != null
+            ? '/owner/appointments?salonId=$_selectedSalonId'
+            : '/owner/appointments',
+        'color': Colors.green,
+        'badge': _pendingBookingsCount > 0 ? _pendingBookingsCount : null,
+      },
+      {
+        'icon': Icons.people_outline,
+        'title': 'Customers',
+        'route': _selectedSalonId != null
+            ? '/owner/customers?salonId=$_selectedSalonId'
+            : '/owner/customers',
+        'color': Colors.purple,
+      },
+      {
+        'icon': Icons.content_cut_outlined,
+        'title': 'Barbers',
+        'route': _selectedSalonId != null
+            ? '/owner/barbers?salonId=$_selectedSalonId'
+            : '/owner/barbers',
+        'color': Colors.orange,
+      },
+      {
+        'icon': Icons.inventory_2_outlined,
+        'title': 'Services',
+        'route': _selectedSalonId != null
+            ? '/owner/services?salonId=$_selectedSalonId'
+            : '/owner/services',
+        'color': Colors.teal,
+      },
+      {
+        'icon': Icons.attach_money_outlined,
+        'title': 'Revenue',
+        'route': _selectedSalonId != null
+            ? '/owner/revenue?salonId=$_selectedSalonId'
+            : '/owner/revenue',
+        'color': Colors.green,
+      },
+      {
+        'icon': Icons.notifications_outlined,
+        'title': 'Notifications',
+        'route': '/notifications?role=owner',
+        'color': Colors.purple,
+        'badge': _unreadNotificationCount > 0 ? _unreadNotificationCount : null,
+      },
+      {'divider': true},
+    ];
+  }
+
+  // ============================================================
+  // 🔥 GET BARBER MENU ITEMS - WITH SALON ID IN ROUTES
+  // ============================================================
+  List<Map<String, dynamic>> _getBarberMenuItems() {
+    return [
+      {
+        'icon': Icons.dashboard_outlined,
+        'title': 'My Dashboard',
+        'route': '/barber',
+        'color': Colors.blue,
+      },
+      // ✅ Show salon info for barber
+      {
+        'icon': Icons.store_outlined,
+        'title': 'My Salon',
+        'subtitle': _selectedSalonName ?? 'No salon assigned',
+        'color': const Color(0xFFFF6B8B),
+        'isSalonInfo': true,
+        'salonId': _selectedSalonId,
+      },
+      {
+        'icon': Icons.calendar_month_outlined,
+        'title': 'My Schedule',
+        // ✅ Add salon ID to route
+        'route': _selectedSalonId != null
+            ? '/barber/schedule?salonId=$_selectedSalonId'
+            : '/barber/schedule',
+        'color': Colors.green,
+      },
+      {
+        'icon': Icons.pending_actions_outlined,
+        'title': 'Pending Jobs',
+        // ✅ Add salon ID to route
+        'route': _selectedSalonId != null
+            ? '/barber/pending?salonId=$_selectedSalonId'
+            : '/barber/pending',
+        'color': Colors.orange,
+        'badge': _pendingBookingsCount > 0 ? _pendingBookingsCount : null,
+      },
+      {
+        'icon': Icons.history_outlined,
+        'title': 'Completed',
+        // ✅ Add salon ID to route
+        'route': _selectedSalonId != null
+            ? '/barber/completed?salonId=$_selectedSalonId'
+            : '/barber/completed',
+        'color': Colors.purple,
+      },
+      {
+        'icon': Icons.star_outline,
+        'title': 'My Reviews',
+        // ✅ Add salon ID to route
+        'route': _selectedSalonId != null
+            ? '/barber/reviews?salonId=$_selectedSalonId'
+            : '/barber/reviews',
+        'color': Colors.amber,
+      },
+      {
+        'icon': Icons.notifications_outlined,
+        'title': 'Notifications',
+        'route': '/notifications?role=barber',
+        'color': Colors.purple,
+        'badge': _unreadNotificationCount > 0 ? _unreadNotificationCount : null,
+      },
+      {'divider': true},
+    ];
+  }
+
+  // ============================================================
+  // 🔥 GET CUSTOMER MENU ITEMS - NO CHANGES
+  // ============================================================
+  List<Map<String, dynamic>> _getCustomerMenuItems() {
+    return [
+      {
+        'icon': Icons.home_outlined,
+        'title': 'Home',
+        'route': '/customer',
+        'color': Colors.blue,
+      },
+      {
+        'icon': Icons.calendar_month_outlined,
+        'title': 'My Bookings',
+        'route': '/customer/my-bookings',
+        'color': Colors.green,
+        'badge': _pendingBookingsCount > 0 ? _pendingBookingsCount : null,
+      },
+      {
+        'icon': Icons.history_outlined,
+        'title': 'History',
+        'route': '/customer/history',
+        'color': Colors.orange,
+      },
+      {
+        'icon': Icons.favorite_outline,
+        'title': 'Favorite Barbers',
+        'route': '/customer/favorites',
+        'color': Colors.red,
+      },
+      {
+        'icon': Icons.notifications_outlined,
+        'title': 'Notifications',
+        'route': '/notifications?role=customer',
+        'color': Colors.purple,
+        'badge': _unreadNotificationCount > 0 ? _unreadNotificationCount : null,
+      },
+      {'divider': true},
+    ];
+  }
+
+  // ============================================================
+  // 🔥 BOTTOM SECTION
   // ============================================================
   Widget _buildBottomSection() {
     return Container(
@@ -1247,7 +1910,7 @@ class _SideMenuState extends State<SideMenu> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // ✅ Settings - Fixed for Flutter 3.44.6
+          // Settings
           Material(
             color: Colors.transparent,
             borderRadius: BorderRadius.circular(8),
@@ -1260,7 +1923,10 @@ class _SideMenuState extends State<SideMenu> {
               splashColor: Colors.grey.withValues(alpha: 0.1),
               highlightColor: Colors.grey.withValues(alpha: 0.05),
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
                 child: Row(
                   children: [
                     Container(
@@ -1291,8 +1957,8 @@ class _SideMenuState extends State<SideMenu> {
               ),
             ),
           ),
-          
-          // ✅ Logout - Fixed for Flutter 3.44.6
+
+          // Logout
           Material(
             color: Colors.transparent,
             borderRadius: BorderRadius.circular(8),
@@ -1302,7 +1968,10 @@ class _SideMenuState extends State<SideMenu> {
               splashColor: Colors.red.withValues(alpha: 0.1),
               highlightColor: Colors.red.withValues(alpha: 0.05),
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
                 child: Row(
                   children: [
                     Container(
@@ -1311,7 +1980,11 @@ class _SideMenuState extends State<SideMenu> {
                         color: Colors.red.withValues(alpha: 0.08),
                         shape: BoxShape.circle,
                       ),
-                      child: const Icon(Icons.logout, color: Colors.red, size: 22),
+                      child: const Icon(
+                        Icons.logout,
+                        color: Colors.red,
+                        size: 22,
+                      ),
                     ),
                     const SizedBox(width: 16),
                     const Text(
@@ -1329,9 +2002,9 @@ class _SideMenuState extends State<SideMenu> {
               ),
             ),
           ),
-          
+
           const SizedBox(height: 8),
-          
+
           Padding(
             padding: const EdgeInsets.all(16),
             child: Text(
@@ -1346,9 +2019,38 @@ class _SideMenuState extends State<SideMenu> {
   }
 
   // ============================================================
-  // 🔥 BUILD MENU ITEMS - COMPLETE FIX FOR FLUTTER 3.44.6
+  // 🔥 BUILD METHOD
   // ============================================================
-  List<Widget> _buildMenuItems(BuildContext context) {
+  @override
+  Widget build(BuildContext context) {
+    return Drawer(
+      child: _isLoading
+          ? const Center(
+              child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+            )
+          : Container(
+              color: Colors.white,
+              child: Column(
+                children: [
+                  _buildProfileHeader(),
+                  Expanded(
+                    child: ListView(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      physics: const BouncingScrollPhysics(),
+                      children: _buildMenuItems(),
+                    ),
+                  ),
+                  _buildBottomSection(),
+                ],
+              ),
+            ),
+    );
+  }
+
+  // ============================================================
+  // 🔥 BUILD MENU ITEMS
+  // ============================================================
+  List<Widget> _buildMenuItems() {
     final List<Map<String, dynamic>> items = [];
 
     switch (widget.userRole) {
@@ -1366,6 +2068,16 @@ class _SideMenuState extends State<SideMenu> {
     items.addAll(_getCommonMenuItems());
 
     return items.map((item) {
+      // ✅ Handle salon selector (only for owner)
+      if (item['isSalonSelector'] == true && widget.userRole == 'owner') {
+        return _buildSalonSelectorItem(item);
+      }
+
+      // ✅ Handle salon info (for barber)
+      if (item['isSalonInfo'] == true) {
+        return _buildSalonInfoItem(item);
+      }
+
       Color itemColor = Colors.grey.shade700;
       if (item['color'] != null) {
         itemColor = item['color'] as Color;
@@ -1374,14 +2086,10 @@ class _SideMenuState extends State<SideMenu> {
       if (item['divider'] == true) {
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Divider(
-            color: Colors.grey.withValues(alpha: 0.15),
-            height: 1,
-          ),
+          child: Divider(color: Colors.grey.withValues(alpha: 0.15), height: 1),
         );
       }
 
-      // ✅ ListTile - Fixed for Flutter 3.44.6
       return Material(
         color: Colors.transparent,
         borderRadius: BorderRadius.circular(8),
@@ -1442,132 +2150,14 @@ class _SideMenuState extends State<SideMenu> {
           tileColor: Colors.transparent,
           splashColor: itemColor.withValues(alpha: 0.1),
           hoverColor: itemColor.withValues(alpha: 0.05),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 4,
           ),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         ),
       );
     }).toList();
-  }
-
-  List<Map<String, dynamic>> _getOwnerMenuItems() {
-    return [
-      {
-        'icon': Icons.dashboard_outlined,
-        'title': 'Dashboard',
-        'route': '/owner',
-        'color': Colors.blue,
-      },
-      {
-        'icon': Icons.calendar_month_outlined,
-        'title': 'Appointments',
-        'route': '/owner/appointments',
-        'color': Colors.green,
-        'badge': 5,
-      },
-      {
-        'icon': Icons.people_outline,
-        'title': 'Customers',
-        'route': '/owner/customers',
-        'color': Colors.purple,
-      },
-      {
-        'icon': Icons.content_cut_outlined,
-        'title': 'Barbers',
-        'route': '/owner/barbers',
-        'color': Colors.orange,
-      },
-      {
-        'icon': Icons.inventory_2_outlined,
-        'title': 'Services',
-        'route': '/owner/services',
-        'color': Colors.teal,
-      },
-      {
-        'icon': Icons.attach_money_outlined,
-        'title': 'Revenue',
-        'route': '/owner/revenue',
-        'color': Colors.green,
-      },
-      {'divider': true},
-    ];
-  }
-
-  List<Map<String, dynamic>> _getBarberMenuItems() {
-    return [
-      {
-        'icon': Icons.dashboard_outlined,
-        'title': 'My Dashboard',
-        'route': '/barber',
-        'color': Colors.blue,
-      },
-      {
-        'icon': Icons.calendar_month_outlined,
-        'title': 'My Schedule',
-        'route': '/barber/schedule',
-        'color': Colors.green,
-      },
-      {
-        'icon': Icons.pending_actions_outlined,
-        'title': 'Pending Jobs',
-        'route': '/barber/pending',
-        'color': Colors.orange,
-        'badge': 3,
-      },
-      {
-        'icon': Icons.history_outlined,
-        'title': 'Completed',
-        'route': '/barber/completed',
-        'color': Colors.purple,
-      },
-      {
-        'icon': Icons.star_outline,
-        'title': 'My Reviews',
-        'route': '/barber/reviews',
-        'color': Colors.amber,
-        'badge': '4.8',
-      },
-      {'divider': true},
-    ];
-  }
-
-  List<Map<String, dynamic>> _getCustomerMenuItems() {
-    return [
-      {
-        'icon': Icons.home_outlined,
-        'title': 'Home',
-        'route': '/customer',
-        'color': Colors.blue,
-      },
-      {
-        'icon': Icons.calendar_month_outlined,
-        'title': 'My Bookings',
-        'route': '/customer/bookings',
-        'color': Colors.green,
-        'badge': 2,
-      },
-      {
-        'icon': Icons.history_outlined,
-        'title': 'History',
-        'route': '/customer/history',
-        'color': Colors.orange,
-      },
-      {
-        'icon': Icons.favorite_outline,
-        'title': 'Favorite Barbers',
-        'route': '/customer/favorites',
-        'color': Colors.red,
-      },
-      {
-        'icon': Icons.notifications_outlined,
-        'title': 'Notifications',
-        'route': '/customer/notifications',
-        'color': Colors.purple,
-        'badge': 3,
-      },
-      {'divider': true},
-    ];
   }
 
   List<Map<String, dynamic>> _getCommonMenuItems() {
@@ -1667,35 +2257,6 @@ class _SideMenuState extends State<SideMenu> {
           }
         }
       },
-    );
-  }
-
-  // ============================================================
-  // 🔥 BUILD METHOD
-  // ============================================================
-  @override
-  Widget build(BuildContext context) {
-    return Drawer(
-      child: _isLoading
-          ? const Center(
-              child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
-            )
-          : Container(
-              color: Colors.white,
-              child: Column(
-                children: [
-                  _buildProfileHeader(),
-                  Expanded(
-                    child: ListView(
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      physics: const BouncingScrollPhysics(),
-                      children: _buildMenuItems(context),
-                    ),
-                  ),
-                  _buildBottomSection(),
-                ],
-              ),
-            ),
     );
   }
 }

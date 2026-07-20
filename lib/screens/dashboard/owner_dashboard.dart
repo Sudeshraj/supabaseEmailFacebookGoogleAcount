@@ -3014,6 +3014,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         userName: _userName,
         userEmail: _userEmail,
         profileImageUrl: _profileImageUrl,
+        selectedSalonId: _selectedSalonId,
         onMenuItemSelected: () => _refreshAllData(),
       ),
       body: _isLoading
