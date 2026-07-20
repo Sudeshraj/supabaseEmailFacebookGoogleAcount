@@ -2888,7 +2888,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   Future<void> _loadAvailableBarbers() async {
     if (_isLoadingBarbers) return;
     if (_barbersLoaded && _availableBarbers.isNotEmpty) return;
+
     setState(() => _isLoadingBarbers = true);
+
     try {
       final user = supabase.auth.currentUser;
       if (user == null) {
@@ -2899,24 +2901,19 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         });
         return;
       }
-      final salonBarbers = await supabase
-          .from('salon_barbers')
-          .select('''
-        barber_id,
-        profiles!inner (
-            id,
-            full_name,
-            avatar_url,
-            user_roles!inner (
-                status
-            )
-        )
-    ''')
-          .eq('salon_id', _selectedSalon!['id'])
-          .eq('salon_barbers.status', 'active')
-          .eq('profiles.user_roles.status', 'active') // ✅ Added
-          .eq('profiles.user_roles.role_id', 2);
-      if (salonBarbers.isEmpty) {
+
+      // ✅ Using RPC function
+      final result = await supabase.rpc(
+        'get_active_barbers_for_salon',
+        params: {
+          'p_salon_id': _selectedSalon!['id'],
+          'p_date': DateFormat(
+            'yyyy-MM-dd',
+          ).format(_selectedDate ?? DateTime.now()),
+        },
+      );
+
+      if (result == null || result.isEmpty) {
         setState(() {
           _availableBarbers = [];
           _isLoadingBarbers = false;
@@ -2924,66 +2921,46 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         });
         return;
       }
-      final List<String> barberIds = salonBarbers
-          .map<String>((b) => b['barber_id'].toString())
-          .toList();
-      final profiles = await supabase
-          .from('profiles')
-          .select('id, full_name, avatar_url')
-          .inFilter('id', barberIds);
-      final List<Map<String, dynamic>> barberList = [];
+
+      List<Map<String, dynamic>> barberList = List<Map<String, dynamic>>.from(
+        result,
+      );
+
+      // Check full availability for each barber
       final dateToCheck = _selectedDate ?? DateTime.now();
-      for (var profile in profiles) {
-        final barberId = profile['id'];
+
+      for (var i = 0; i < barberList.length; i++) {
+        final barber = barberList[i];
+        final barberId = barber['barber_id'];
+
         final availability = await _checkBarberFullAvailability(
           barberId,
           dateToCheck,
         );
+
         _barberAvailability[barberId] = availability;
-        final todayAppointments = await supabase
-            .from('appointments')
-            .select('id')
-            .eq('barber_id', barberId)
-            .eq(
-              'appointment_date',
-              DateFormat('yyyy-MM-dd').format(DateTime.now()),
-            )
-            .inFilter('status', ['confirmed', 'pending']);
-        final ratings = await supabase
-            .from('reviews')
-            .select('overall_rating')
-            .eq('barber_id', barberId);
-        double avgRating = 0.0;
-        if (ratings.isNotEmpty) {
-          double total = 0;
-          for (var r in ratings) {
-            total += (r['overall_rating'] as num?)?.toDouble() ?? 0;
-          }
-          avgRating = total / ratings.length;
-        }
-        barberList.add({
-          'id': barberId,
-          'full_name': profile['full_name']?.toString() ?? 'Barber',
-          'avatar_url': profile['avatar_url']?.toString(),
-          'avg_rating': avgRating,
-          'today_appointments': todayAppointments.length,
-          'is_available': availability['is_available'],
-          'unavailable_reason': availability['reason'],
-          'has_special_schedule': availability['has_special_schedule'],
-          'has_special_break': availability['has_special_break'],
-        });
+
+        barberList[i]['is_available'] = availability['is_available'];
+        barberList[i]['unavailable_reason'] = availability['reason'];
+        barberList[i]['has_special_schedule'] =
+            availability['has_special_schedule'];
+        barberList[i]['has_special_break'] = availability['has_special_break'];
       }
+
+      // Sort: available first, then by rating
       barberList.sort((a, b) {
         if (a['is_available'] && !b['is_available']) return -1;
         if (!a['is_available'] && b['is_available']) return 1;
-        return (b['avg_rating'] as double).compareTo(a['avg_rating'] as double);
+        return (b['avg_rating'] as num).compareTo(a['avg_rating'] as num);
       });
+
       setState(() {
         _availableBarbers = barberList;
         _isLoadingBarbers = false;
         _barbersLoaded = true;
       });
     } catch (e) {
+      debugPrint('❌ Error loading barbers: $e');
       setState(() {
         _isLoadingBarbers = false;
         _barbersLoaded = false;
@@ -4246,35 +4223,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(16),
             child: Column(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  margin: const EdgeInsets.only(bottom: 16),
-                  decoration: BoxDecoration(
-                    color: Colors.blue.shade50,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.blue.shade200),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(
-                        Icons.access_time,
-                        size: 20,
-                        color: Colors.blue,
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          '⏰ Times shown in your local timezone: ${_getTimezoneDisplay()}',
-                          style: const TextStyle(
-                            fontSize: 13,
-                            color: Colors.blueGrey,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+              children: [               
                 _buildConfirmationTile(
                   Icons.store,
                   'Salon',

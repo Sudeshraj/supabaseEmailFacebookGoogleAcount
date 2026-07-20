@@ -387,26 +387,22 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     return '$openLocal - $closeLocal';
   }
 
-  // ✅ FIXED: Simple time formatter - NO timezone conversion
   String _formatTimeWithAmPm(DateTime time) {
     final period = time.hour >= 12 ? 'PM' : 'AM';
     final displayHour = time.hour % 12 == 0 ? 12 : time.hour % 12;
     return '$displayHour:${time.minute.toString().padLeft(2, '0')} $period';
   }
 
-  // ✅ FIXED: Past slot check - disables past AND ongoing slots
   bool _isSlotInPast(DateTime localSlotStart, int durationMinutes) {
     final now = DateTime.now();
     final slotEnd = localSlotStart.add(Duration(minutes: durationMinutes));
 
-    // Slot is in past if end time is before or equal to now
     if (slotEnd.isBefore(now) || slotEnd.isAtSameMomentAs(now)) {
       return true;
     }
 
-    // Slot is ongoing if start is before now and end is after now
     if (localSlotStart.isBefore(now) && slotEnd.isAfter(now)) {
-      return true; // Ongoing slot should also be disabled
+      return true;
     }
 
     return false;
@@ -789,7 +785,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         }
       });
 
-      // ✅ Auto-select next available date ONLY if today is a holiday
+      // Auto-select next available date if today is a holiday
       final today = DateTime(
         DateTime.now().year,
         DateTime.now().month,
@@ -843,21 +839,17 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     final maxDate = today.add(const Duration(days: 30));
     final isMobile = MediaQuery.of(context).size.width < 600;
 
-    // ✅ Check if date is selectable - ONLY DISABLE HOLIDAYS
     bool isDateSelectable(DateTime date) {
-      // Disable holidays ONLY
       if (_holidays.contains(date)) return false;
+      if (date.isBefore(today)) return false;
       return true;
     }
 
-    // Find first available date (skip holidays)
     DateTime getFirstAvailableDate() {
       DateTime checkDate = today;
-      // Check today first
       if (!_holidays.contains(checkDate)) {
         return checkDate;
       }
-      // If today is a holiday, find next available
       for (int i = 1; i < 30; i++) {
         checkDate = today.add(Duration(days: i));
         if (!_holidays.contains(checkDate)) {
@@ -867,7 +859,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       return today.add(const Duration(days: 1));
     }
 
-    // ✅ Auto-select next available date if today is a holiday
     void initializeDefaultDate() {
       if (_selectedDate == null) {
         final firstAvailable = getFirstAvailableDate();
@@ -883,7 +874,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       }
     }
 
-    // Call this when holidays change or widget builds
     initializeDefaultDate();
 
     final isSelectedDateHoliday =
@@ -896,6 +886,74 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
 
     return Column(
       children: [
+        Container(
+          padding: const EdgeInsets.all(16),
+          color: Colors.white,
+          child: Row(
+            children: [
+              Container(
+                width: 45,
+                height: 45,
+                decoration: BoxDecoration(
+                  color: _primaryColor.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                  image:
+                      (_selectedSalon?['logo_url'] as String?) != null &&
+                          (_selectedSalon!['logo_url'] as String).isNotEmpty
+                      ? DecorationImage(
+                          image: NetworkImage(_selectedSalon!['logo_url']),
+                          fit: BoxFit.cover,
+                        )
+                      : null,
+                ),
+                child:
+                    (_selectedSalon?['logo_url'] == null ||
+                        (_selectedSalon!['logo_url'] as String).isEmpty)
+                    ? Center(
+                        child: Text(
+                          (_selectedSalon?['name'] as String?)
+                                  ?.substring(0, 1)
+                                  .toUpperCase() ??
+                              'S',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: _primaryColor,
+                          ),
+                        ),
+                      )
+                    : null,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Selected Salon',
+                      style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _selectedSalon?['name'] ?? '',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              TextButton(
+                onPressed: () => setState(() => _currentStep = 0),
+                child: Text(
+                  'Change',
+                  style: TextStyle(color: _primaryColor, fontSize: 14),
+                ),
+              ),
+            ],
+          ),
+        ),
         Expanded(
           child: SingleChildScrollView(
             physics: const BouncingScrollPhysics(),
@@ -957,7 +1015,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                       ],
                     ),
                   ),
-
                 Card(
                   elevation: 3,
                   shape: RoundedRectangleBorder(
@@ -980,7 +1037,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                     ),
                   ),
                 ),
-
                 if (isSelectedDateHoliday)
                   Container(
                     margin: const EdgeInsets.only(top: 16),
@@ -1045,7 +1101,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                       ],
                     ),
                   ),
-
                 if (_isDateUnavailable &&
                     !_holidays.contains(_selectedDate) &&
                     _selectedDate != null)
@@ -1076,7 +1131,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                       ],
                     ),
                   ),
-
                 if (_selectedDate != null && !_holidays.contains(_selectedDate))
                   Container(
                     margin: const EdgeInsets.only(top: 16),
@@ -1107,8 +1161,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
             ),
           ),
         ),
-
-        // Bottom button
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
@@ -2312,7 +2364,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   }
 
   // ============================================
-  // STEP 4: BARBER SELECTION (UPDATED)
+  // STEP 4: BARBER SELECTION (UPDATED - FIXED)
   // ============================================
 
   Future<Map<String, dynamic>> _checkBarberFullAvailability(
@@ -2328,9 +2380,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     };
 
     try {
-      // ============================================================
-      // ✅ STEP 1: CHECK BARBER ACTIVE STATUS IN user_roles
-      // ============================================================
+      // Check if barber has active role
       final roleCheck = await supabase
           .from('user_roles')
           .select('''
@@ -2370,9 +2420,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         return result;
       }
 
-      // ============================================================
-      // ✅ STEP 2: CHECK PROFILE IS_ACTIVE
-      // ============================================================
+      // Check profile is_active
       final profileCheck = await supabase
           .from('profiles')
           .select('is_active, is_blocked')
@@ -2392,9 +2440,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         }
       }
 
-      // ============================================================
-      // ✅ STEP 3: CHECK SALON BARBER STATUS
-      // ============================================================
+      // Check salon barber status
       final salonBarberCheck = await supabase
           .from('salon_barbers')
           .select('status')
@@ -2415,9 +2461,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         return result;
       }
 
-      // ============================================================
-      // ✅ STEP 4: GET BARBER EFFECTIVE SCHEDULE
-      // ============================================================
+      // Get effective schedule
       final scheduleResult = await supabase.rpc(
         'get_barber_effective_schedule',
         params: {
@@ -2460,6 +2504,91 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       result['is_available'] = false;
       result['reason'] = 'Error checking availability';
       return result;
+    }
+  }
+
+  // ✅ UPDATED: Load available barbers with RPC function
+  Future<void> _loadAvailableBarbers() async {
+    if (_isLoadingBarbers) return;
+    if (_barbersLoaded && _availableBarbers.isNotEmpty) return;
+
+    setState(() => _isLoadingBarbers = true);
+
+    try {
+      final user = supabase.auth.currentUser;
+      if (user == null) {
+        setState(() {
+          _availableBarbers = [];
+          _isLoadingBarbers = false;
+          _barbersLoaded = true;
+        });
+        return;
+      }
+
+      // ✅ Using RPC function - same as working code
+      final result = await supabase.rpc(
+        'get_active_barbers_for_salon',
+        params: {
+          'p_salon_id': _selectedSalon!['id'],
+          'p_date': DateFormat(
+            'yyyy-MM-dd',
+          ).format(_selectedDate ?? DateTime.now()),
+        },
+      );
+
+      if (result == null || result.isEmpty) {
+        setState(() {
+          _availableBarbers = [];
+          _isLoadingBarbers = false;
+          _barbersLoaded = true;
+        });
+        return;
+      }
+
+      List<Map<String, dynamic>> barberList = List<Map<String, dynamic>>.from(
+        result,
+      );
+
+      // Check full availability for each barber
+      final dateToCheck = _selectedDate ?? DateTime.now();
+
+      for (var i = 0; i < barberList.length; i++) {
+        final barber = barberList[i];
+        final barberId = barber['barber_id']; // ✅ Use barber_id
+
+        final availability = await _checkBarberFullAvailability(
+          barberId,
+          dateToCheck,
+        );
+
+        _barberAvailability[barberId] = availability;
+
+        barberList[i]['is_available'] = availability['is_available'];
+        barberList[i]['unavailable_reason'] = availability['reason'];
+        barberList[i]['has_special_schedule'] =
+            availability['has_special_schedule'];
+        barberList[i]['has_special_break'] = availability['has_special_break'];
+      }
+
+      // Sort: available first, then by rating
+      barberList.sort((a, b) {
+        if (a['is_available'] && !b['is_available']) return -1;
+        if (!a['is_available'] && b['is_available']) return 1;
+        return (b['avg_rating'] as num).compareTo(a['avg_rating'] as num);
+      });
+
+      setState(() {
+        _availableBarbers = barberList;
+        _isLoadingBarbers = false;
+        _barbersLoaded = true;
+      });
+    } catch (e) {
+      debugPrint('❌ Error loading barbers: $e');
+      setState(() {
+        _isLoadingBarbers = false;
+        _barbersLoaded = false;
+        _availableBarbers = [];
+      });
     }
   }
 
@@ -2646,9 +2775,11 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     );
   }
 
+  // ✅ UPDATED: Build barber card with correct ID
   Widget _buildBarberCard(Map<String, dynamic> barber) {
-    final isSelected = _selectedBarber?['id'] == barber['id'];
-    final availability = _barberAvailability[barber['id']];
+    final barberId = barber['barber_id'] ?? barber['id']; // ✅ Use barber_id
+    final isSelected = (_selectedBarber?['barber_id'] ?? _selectedBarber?['id']) == barberId;
+    final availability = _barberAvailability[barberId];
     final isAvailable = availability?['is_available'] ?? true;
     final hasSpecialSchedule = availability?['has_special_schedule'] ?? false;
     final hasSpecialBreak = availability?['has_special_break'] ?? false;
@@ -2854,118 +2985,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         ),
       ),
     );
-  }
-
-  // ✅ UPDATED: Load available barbers with user_roles.status check
-  Future<void> _loadAvailableBarbers() async {
-    if (_isLoadingBarbers) return;
-    if (_barbersLoaded && _availableBarbers.isNotEmpty) return;
-    setState(() => _isLoadingBarbers = true);
-    try {
-      final user = supabase.auth.currentUser;
-      if (user == null) {
-        setState(() {
-          _availableBarbers = [];
-          _isLoadingBarbers = false;
-          _barbersLoaded = true;
-        });
-        return;
-      }
-
-      // ✅ Updated: Get barbers with user_roles.status check
-      final salonBarbers = await supabase
-          .from('salon_barbers')
-          .select('''
-            barber_id,
-            profiles!inner (
-                id,
-                full_name,
-                avatar_url,
-                user_roles!inner (
-                    status
-                )
-            )
-        ''')
-          .eq('salon_id', _selectedSalon!['id'])
-          .eq('salon_barbers.status', 'active')
-          .eq('profiles.user_roles.status', 'active')  // ✅ Added
-          .eq('profiles.user_roles.role_id', 2);  // barber role
-
-      if (salonBarbers.isEmpty) {
-        setState(() {
-          _availableBarbers = [];
-          _isLoadingBarbers = false;
-          _barbersLoaded = true;
-        });
-        return;
-      }
-
-      final List<String> barberIds = salonBarbers
-          .map<String>((b) => b['barber_id'].toString())
-          .toList();
-      final profiles = await supabase
-          .from('profiles')
-          .select('id, full_name, avatar_url')
-          .inFilter('id', barberIds);
-      final List<Map<String, dynamic>> barberList = [];
-      final dateToCheck = _selectedDate ?? DateTime.now();
-      for (var profile in profiles) {
-        final barberId = profile['id'];
-        final availability = await _checkBarberFullAvailability(
-          barberId,
-          dateToCheck,
-        );
-        _barberAvailability[barberId] = availability;
-        final todayAppointments = await supabase
-            .from('appointments')
-            .select('id')
-            .eq('barber_id', barberId)
-            .eq(
-              'appointment_date',
-              DateFormat('yyyy-MM-dd').format(DateTime.now()),
-            )
-            .inFilter('status', ['confirmed', 'pending']);
-        final ratings = await supabase
-            .from('reviews')
-            .select('overall_rating')
-            .eq('barber_id', barberId);
-        double avgRating = 0.0;
-        if (ratings.isNotEmpty) {
-          double total = 0;
-          for (var r in ratings) {
-            total += (r['overall_rating'] as num?)?.toDouble() ?? 0;
-          }
-          avgRating = total / ratings.length;
-        }
-        barberList.add({
-          'id': barberId,
-          'full_name': profile['full_name']?.toString() ?? 'Barber',
-          'avatar_url': profile['avatar_url']?.toString(),
-          'avg_rating': avgRating,
-          'today_appointments': todayAppointments.length,
-          'is_available': availability['is_available'],
-          'unavailable_reason': availability['reason'],
-          'has_special_schedule': availability['has_special_schedule'],
-          'has_special_break': availability['has_special_break'],
-        });
-      }
-      barberList.sort((a, b) {
-        if (a['is_available'] && !b['is_available']) return -1;
-        if (!a['is_available'] && b['is_available']) return 1;
-        return (b['avg_rating'] as double).compareTo(a['avg_rating'] as double);
-      });
-      setState(() {
-        _availableBarbers = barberList;
-        _isLoadingBarbers = false;
-        _barbersLoaded = true;
-      });
-    } catch (e) {
-      setState(() {
-        _isLoadingBarbers = false;
-        _barbersLoaded = false;
-        _availableBarbers = [];
-      });
-    }
   }
 
   // ============================================
@@ -3413,7 +3432,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   }
 
   // ============================================
-  // STEP 6: VIP TIME SLOT SELECTION
+  // STEP 6: VIP TIME SLOT SELECTION (UPDATED - FIXED)
   // ============================================
 
   Widget _buildTimezoneIndicator() => Container(
@@ -3467,6 +3486,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     ),
   );
 
+  // ✅ FIXED: Load available slots with correct barber ID
   Future<void> _loadAvailableSlots() async {
     if (!mounted) return;
 
@@ -3490,10 +3510,14 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate!);
       final totalDuration = _calculateTotalDuration();
 
+      // ✅ FIXED: Get barber ID correctly
+      final barberId = _selectedBarber!['barber_id'] ?? _selectedBarber!['id'];
+      debugPrint('🔍 Loading slots for barber: $barberId');
+
       final scheduleResult = await supabase.rpc(
         'get_barber_effective_schedule',
         params: {
-          'p_barber_id': _selectedBarber!['id'],
+          'p_barber_id': barberId, // ✅ Use correct barber ID
           'p_salon_id': _selectedSalon!['id'],
           'p_date': dateStr,
         },
@@ -3574,7 +3598,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       final existingAppointments = await supabase
           .from('appointments')
           .select('id, start_time, end_time, vip_queue_number, is_vip, status')
-          .eq('barber_id', _selectedBarber!['id'])
+          .eq('barber_id', barberId) // ✅ Use correct barber ID
           .eq('appointment_date', dateStr)
           .eq('is_vip', true)
           .neq('status', 'cancelled')
@@ -3796,10 +3820,12 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           int.parse(selectedStartTime.split(':')[0]) * 60 +
           int.parse(selectedStartTime.split(':')[1]);
 
+      final barberId = _selectedBarber!['barber_id'] ?? _selectedBarber!['id'];
+
       final existingVIP = await supabase
           .from('appointments')
           .select('start_time, vip_queue_number')
-          .eq('barber_id', _selectedBarber!['id'])
+          .eq('barber_id', barberId)
           .eq('appointment_date', dateStr)
           .eq('is_vip', true)
           .neq('status', 'cancelled')
@@ -4382,7 +4408,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   }
 
   // ============================================
-  // STEP 7: CONFIRMATION (UPDATED)
+  // STEP 7: CONFIRMATION
   // ============================================
 
   Widget _buildConfirmationStep() {
@@ -4450,34 +4476,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
             padding: const EdgeInsets.all(16),
             child: Column(
               children: [
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  margin: const EdgeInsets.only(bottom: 16),
-                  decoration: BoxDecoration(
-                    color: Colors.blue.shade50,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.blue.shade200),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(
-                        Icons.access_time,
-                        size: 20,
-                        color: Colors.blue,
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          '⏰ Times shown in your local timezone: $_getTimezoneDisplay()',
-                          style: const TextStyle(
-                            fontSize: 13,
-                            color: Colors.blueGrey,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
                 _buildConfirmationTile(
                   Icons.star,
                   'VIP Booking',
@@ -4660,7 +4658,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     ),
   );
 
-  // ✅ UPDATED: Confirm booking with status checks
   Future<void> _confirmBooking() async {
     if (!mounted) return;
     setState(() => _isBooking = true);
@@ -4669,33 +4666,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       final user = supabase.auth.currentUser;
       if (user == null) throw Exception('Please login');
 
-      // ============================================================
-      // ✅ CHECK IF CUSTOMER HAS ACTIVE ROLE
-      // ============================================================
-      final customerCheck = await supabase
-          .from('user_roles')
-          .select('status')
-          .eq('user_id', user.id)
-          .eq('role_id', 3)  // customer role ID
-          .maybeSingle();
-
-      if (customerCheck == null || customerCheck['status'] != 'active') {
-        throw Exception('Your account is not active. Please contact support.');
-      }
-
-      // ============================================================
-      // ✅ CHECK IF BARBER HAS ACTIVE ROLE
-      // ============================================================
-      final barberCheck = await supabase
-          .from('user_roles')
-          .select('status')
-          .eq('user_id', _selectedBarber!['id'])
-          .eq('role_id', 2)  // barber role ID
-          .maybeSingle();
-
-      if (barberCheck == null || barberCheck['status'] != 'active') {
-        throw Exception('Barber is not available. Please select another barber.');
-      }
+      final barberId = _selectedBarber!['barber_id'] ?? _selectedBarber!['id'];
 
       final utcStartTime = _selectedSlot!['utc_start_time'];
       final utcEndTime = _selectedSlot!['utc_end_time'];
@@ -4705,7 +4676,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         params: {
           'p_customer_id': user.id,
           'p_salon_id': _selectedSalon!['id'],
-          'p_barber_id': _selectedBarber!['id'],
+          'p_barber_id': barberId,
           'p_service_id': _selectedServices.first['id'],
           'p_variant_id': _selectedServices.first['variant_id'],
           'p_appointment_date': DateFormat('yyyy-MM-dd').format(_selectedDate!),
