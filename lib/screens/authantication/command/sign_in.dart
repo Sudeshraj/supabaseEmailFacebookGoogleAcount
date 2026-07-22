@@ -480,7 +480,7 @@ class _SignInScreenState extends State<SignInScreen>
         status
       ''')
             .eq('user_id', user.id)
-            .eq('status', 'active'); // ✅ Only active roles
+            .eq('status', 'active');
 
         for (var roleEntry in userRolesResponse) {
           final role = roleEntry['roles'] as Map?;
@@ -671,10 +671,11 @@ class _SignInScreenState extends State<SignInScreen>
               borderRadius: BorderRadius.circular(20),
             ),
             title: Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
                 _getProviderIcon(provider, size: 24),
                 const SizedBox(width: 12),
-                Expanded(
+                Flexible(
                   child: Text(
                     "Sign in with $provider",
                     style: const TextStyle(
@@ -687,6 +688,7 @@ class _SignInScreenState extends State<SignInScreen>
               ],
             ),
             content: SingleChildScrollView(
+              physics: const BouncingScrollPhysics(),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -705,6 +707,7 @@ class _SignInScreenState extends State<SignInScreen>
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Row(
+                            mainAxisSize: MainAxisSize.min,
                             children: [
                               Icon(
                                 Icons.info,
@@ -712,7 +715,7 @@ class _SignInScreenState extends State<SignInScreen>
                                 color: Colors.blue.shade700,
                               ),
                               const SizedBox(width: 8),
-                              Expanded(
+                              Flexible(
                                 child: Text(
                                   "You have existing profiles",
                                   style: TextStyle(
@@ -766,6 +769,7 @@ class _SignInScreenState extends State<SignInScreen>
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Row(
+                          mainAxisSize: MainAxisSize.min,
                           children: [
                             Icon(
                               Icons.shield,
@@ -773,7 +777,7 @@ class _SignInScreenState extends State<SignInScreen>
                               color: Colors.grey.shade700,
                             ),
                             const SizedBox(width: 8),
-                            Expanded(
+                            Flexible(
                               child: Text(
                                 "$provider will share:",
                                 style: const TextStyle(
@@ -789,6 +793,7 @@ class _SignInScreenState extends State<SignInScreen>
                           Padding(
                             padding: const EdgeInsets.only(left: 16, bottom: 4),
                             child: Row(
+                              mainAxisSize: MainAxisSize.min,
                               children: [
                                 Icon(
                                   Icons.check_circle,
@@ -796,7 +801,7 @@ class _SignInScreenState extends State<SignInScreen>
                                   color: Colors.green.shade600,
                                 ),
                                 const SizedBox(width: 8),
-                                Expanded(
+                                Flexible(
                                   child: Text(
                                     "• $scope",
                                     style: const TextStyle(fontSize: 13),
@@ -823,6 +828,7 @@ class _SignInScreenState extends State<SignInScreen>
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Row(
+                          mainAxisSize: MainAxisSize.min,
                           children: [
                             Icon(
                               Icons.description,
@@ -830,7 +836,7 @@ class _SignInScreenState extends State<SignInScreen>
                               color: Colors.blue.shade700,
                             ),
                             const SizedBox(width: 8),
-                            Expanded(
+                            Flexible(
                               child: Text(
                                 "Terms & Privacy",
                                 style: TextStyle(
@@ -860,6 +866,7 @@ class _SignInScreenState extends State<SignInScreen>
                               style: TextButton.styleFrom(
                                 foregroundColor: Colors.blue.shade700,
                                 textStyle: const TextStyle(fontSize: 12),
+                                minimumSize: const Size(0, 30),
                               ),
                             ),
                             TextButton.icon(
@@ -874,6 +881,7 @@ class _SignInScreenState extends State<SignInScreen>
                               style: TextButton.styleFrom(
                                 foregroundColor: Colors.blue.shade700,
                                 textStyle: const TextStyle(fontSize: 12),
+                                minimumSize: const Size(0, 30),
                               ),
                             ),
                           ],
@@ -908,6 +916,7 @@ class _SignInScreenState extends State<SignInScreen>
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Row(
+                          mainAxisSize: MainAxisSize.min,
                           children: [
                             Icon(
                               Icons.remember_me,
@@ -917,7 +926,7 @@ class _SignInScreenState extends State<SignInScreen>
                                   : Colors.grey.shade700,
                             ),
                             const SizedBox(width: 8),
-                            Expanded(
+                            Flexible(
                               child: Text(
                                 "Quick Sign-in",
                                 style: TextStyle(
@@ -967,6 +976,7 @@ class _SignInScreenState extends State<SignInScreen>
                           Padding(
                             padding: const EdgeInsets.only(top: 8, left: 8),
                             child: Row(
+                              mainAxisSize: MainAxisSize.min,
                               children: [
                                 Icon(
                                   Icons.check_circle,
@@ -974,7 +984,7 @@ class _SignInScreenState extends State<SignInScreen>
                                   color: Colors.green.shade600,
                                 ),
                                 const SizedBox(width: 4),
-                                Expanded(
+                                Flexible(
                                   child: Text(
                                     "Saved preference applied",
                                     style: TextStyle(
@@ -997,6 +1007,7 @@ class _SignInScreenState extends State<SignInScreen>
                   Container(
                     padding: const EdgeInsets.all(8),
                     child: Row(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
                         Checkbox(
                           value: marketingConsent,
@@ -1005,7 +1016,7 @@ class _SignInScreenState extends State<SignInScreen>
                           activeColor: _getProviderColor(provider),
                         ),
                         const SizedBox(width: 4),
-                        Expanded(
+                        Flexible(
                           child: Text(
                             "Send me occasional offers and updates (optional)",
                             style: TextStyle(
@@ -1046,6 +1057,7 @@ class _SignInScreenState extends State<SignInScreen>
                 style: ElevatedButton.styleFrom(
                   backgroundColor: _getProviderColor(provider),
                   foregroundColor: Colors.white,
+                  minimumSize: const Size(0, 40),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
@@ -1972,7 +1984,7 @@ class _SignInScreenState extends State<SignInScreen>
       status
     ''')
           .eq('user_id', userId)
-          .eq('status', 'active'); // ✅ Only active roles
+          .eq('status', 'active');
 
       debugPrint('📋 Active user roles response: $userRolesResponse');
 
@@ -2103,10 +2115,12 @@ $provider OAuth Configuration Required:
     }
   }
 
+  // ✅ FIXED: _buildOAuthButtons with proper overflow handling
   Widget _buildOAuthButtons() {
     final enabledProviders = _env.enabledOAuthProviders;
 
     return Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 20),
@@ -2216,12 +2230,15 @@ $provider OAuth Configuration Required:
                     border: Border.all(color: Colors.white12),
                   ),
                   child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
+                      // Top section with back button
                       if (_hasSavedProfile)
                         Align(
                           alignment: Alignment.topLeft,
                           child: Row(
+                            mainAxisSize: MainAxisSize.min,
                             children: [
                               IconButton(
                                 icon: const Icon(
@@ -2245,16 +2262,19 @@ $provider OAuth Configuration Required:
                             ],
                           ),
                         ),
+                      
+                      // Main content - scrollable
                       Expanded(
                         child: SingleChildScrollView(
                           physics: const BouncingScrollPhysics(),
                           child: Column(
+                            mainAxisSize: MainAxisSize.min,
                             crossAxisAlignment: CrossAxisAlignment.center,
                             children: [
                               // Logo
                               Container(
                                 margin: const EdgeInsets.only(
-                                  top: 5,
+                                  top: 10,
                                   bottom: 25,
                                 ),
                                 child: Center(
@@ -2318,6 +2338,10 @@ $provider OAuth Configuration Required:
                                   filled: true,
                                   fillColor: Colors.white.withValues(
                                     alpha: 0.05,
+                                  ),
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    vertical: 16,
+                                    horizontal: 16,
                                   ),
                                   enabledBorder: OutlineInputBorder(
                                     borderSide: const BorderSide(
@@ -2383,6 +2407,10 @@ $provider OAuth Configuration Required:
                                   filled: true,
                                   fillColor: Colors.white.withValues(
                                     alpha: 0.05,
+                                  ),
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    vertical: 16,
+                                    horizontal: 16,
                                   ),
                                   enabledBorder: OutlineInputBorder(
                                     borderSide: const BorderSide(
@@ -2476,6 +2504,7 @@ $provider OAuth Configuration Required:
                                             CrossAxisAlignment.start,
                                         children: [
                                           Row(
+                                            mainAxisSize: MainAxisSize.min,
                                             children: [
                                               const Text(
                                                 'Remember Me',
@@ -2548,6 +2577,7 @@ $provider OAuth Configuration Required:
                                     backgroundColor: const Color(0xFF1877F3),
                                     disabledBackgroundColor: Colors.white12,
                                     foregroundColor: Colors.white,
+                                    minimumSize: const Size(0, 50),
                                     padding: const EdgeInsets.symmetric(
                                       vertical: 14,
                                     ),
@@ -2663,7 +2693,7 @@ $provider OAuth Configuration Required:
   }
 }
 
-// Social Login Button
+// ✅ FIXED: Social Login Button with proper overflow handling
 class _SocialLoginButton extends StatelessWidget {
   final String provider;
   final VoidCallback onPressed;
@@ -2734,7 +2764,8 @@ class _SocialLoginButton extends StatelessWidget {
         onPressed: isLoading ? null : onPressed,
         style: OutlinedButton.styleFrom(
           side: BorderSide(color: buttonColor.withValues(alpha: 0.5)),
-          padding: const EdgeInsets.symmetric(vertical: 12),
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+          minimumSize: const Size(0, 48),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
           ),
@@ -2750,16 +2781,20 @@ class _SocialLoginButton extends StatelessWidget {
                 ),
               )
             : Row(
+                mainAxisSize: MainAxisSize.min,
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   _getIcon(),
                   const SizedBox(width: 8),
-                  Text(
-                    _getButtonText(),
-                    style: TextStyle(
-                      color: buttonColor,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 14,
+                  Flexible(
+                    child: Text(
+                      _getButtonText(),
+                      style: TextStyle(
+                        color: buttonColor,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                      ),
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 ],
