@@ -17,11 +17,17 @@ import 'package:flutter_application_1/screens/authantication/command/reset_passw
 import 'package:flutter_application_1/screens/authantication/command/role_selector_screen.dart';
 import 'package:flutter_application_1/screens/baber/barber_appointments_screen.dart';
 import 'package:flutter_application_1/screens/customer/booking_flow_screen.dart';
+import 'package:flutter_application_1/screens/customer/customer_history_screen.dart';
+import 'package:flutter_application_1/screens/customer/followed_salons_screen.dart';
 import 'package:flutter_application_1/screens/customer/my_bookings_screen.dart';
 import 'package:flutter_application_1/screens/customer/offers_screen.dart';
 import 'package:flutter_application_1/screens/customer/salon_profile_screen.dart';
 import 'package:flutter_application_1/screens/customer/vip_booking_screen.dart';
+import 'package:flutter_application_1/screens/owner/analytics_screen.dart';
+import 'package:flutter_application_1/screens/owner/appointments_screen.dart';
 import 'package:flutter_application_1/screens/owner/customer_list_screen.dart';
+import 'package:flutter_application_1/screens/owner/reports_screen.dart';
+import 'package:flutter_application_1/screens/owner/revenue_screen.dart';
 import 'package:flutter_application_1/screens/settings/auth_settings_screen.dart';
 import 'package:flutter_application_1/screens/settings/change_password_screen.dart';
 import 'package:flutter_application_1/screens/settings/delete_account_screen.dart';
@@ -907,6 +913,13 @@ GoRouter _createRouter() {
           return ResetPasswordConfirmScreen(email: extra?['email'] ?? '');
         },
       ),
+      GoRoute(
+        path: '/notifications',
+        builder: (context, state) {
+          final role = state.uri.queryParameters['role'] ?? 'customer';
+          return NotificationScreen(role: role);
+        },
+      ),
       // Settings Routes
       GoRoute(
         path: '/settings',
@@ -1142,6 +1155,44 @@ GoRouter _createRouter() {
           );
         },
       ),
+      // With salonId parameter (from dashboard)
+      GoRoute(
+        path: '/owner/offers/:salonId',
+        name: 'owner-offers',
+        builder: (context, state) {
+          final salonId = state.pathParameters['salonId'];
+          return OwnerOffersScreen(salonId: salonId);
+        },
+      ),
+      GoRoute(
+        path: '/owner/appointments',
+        builder: (context, state) {
+          final salonId = state.uri.queryParameters['salonId'];
+          final filter = state.uri.queryParameters['filter'];
+          return AppointmentsScreen(salonId: salonId, filter: filter);
+        },
+      ),
+      GoRoute(
+        path: '/owner/revenue',
+        builder: (context, state) {
+          final salonId = state.uri.queryParameters['salonId'];
+          return RevenueScreen(salonId: salonId, role: 'owner');
+        },
+      ),
+      GoRoute(
+        path: '/owner/reports',
+        builder: (context, state) {
+          final salonId = state.uri.queryParameters['salonId'];
+          return ReportsScreen(salonId: salonId, role: 'owner');
+        },
+      ),
+      GoRoute(
+        path: '/owner/analytics',
+        builder: (context, state) {
+          final salonId = state.uri.queryParameters['salonId'];
+          return AnalyticsScreen(salonId: salonId, role: 'owner');
+        },
+      ),
 
       // ============================================
       // CUSTOMER ROUTES
@@ -1182,26 +1233,20 @@ GoRouter _createRouter() {
         name: 'my-bookings',
         builder: (context, state) => const MyBookingsScreen(),
       ),
-      // With salonId parameter (from dashboard)
-      GoRoute(
-        path: '/owner/offers/:salonId',
-        name: 'owner-offers',
-        builder: (context, state) {
-          final salonId = state.pathParameters['salonId'];
-          return OwnerOffersScreen(salonId: salonId);
-        },
-      ),
       GoRoute(
         path: '/customer/offers',
         name: 'customer-offers',
         builder: (context, state) => const OffersScreen(),
       ),
       GoRoute(
-        path: '/notifications',
-        builder: (context, state) {
-          final role = state.uri.queryParameters['role'] ?? 'customer';
-          return NotificationScreen(role: role);
-        },
+        path: '/customer/my-salons',
+        name: 'my-salons',
+        builder: (context, state) => const FollowedSalonsScreen(),
+      ),
+      GoRoute(
+        path: '/customer/history',
+        name: 'customer-history',
+        builder: (context, state) => const CustomerHistoryScreen(),
       ),
 
       // ============================================
@@ -1211,6 +1256,27 @@ GoRouter _createRouter() {
         path: '/barber/appointments',
         name: 'barber-appointments',
         builder: (context, state) => const BarberAppointmentsScreen(),
+      ),
+      GoRoute(
+        path: '/barber/revenue',
+        builder: (context, state) {
+          final salonId = state.uri.queryParameters['salonId'];
+          return RevenueScreen(salonId: salonId, role: 'barber');
+        },
+      ),
+      GoRoute(
+        path: '/barber/reports',
+        builder: (context, state) {
+          final salonId = state.uri.queryParameters['salonId'];
+          return ReportsScreen(salonId: salonId, role: 'barber');
+        },
+      ),
+      GoRoute(
+        path: '/barber/analytics',
+        builder: (context, state) {
+          final salonId = state.uri.queryParameters['salonId'];
+          return AnalyticsScreen(salonId: salonId, role: 'barber');
+        },
       ),
     ],
   );

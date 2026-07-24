@@ -1880,12 +1880,12 @@ class _SideMenuState extends State<SideMenu> {
         'route': '/customer/history',
         'color': Colors.orange,
       },
-      {
-        'icon': Icons.favorite_outline,
-        'title': 'Favorite Barbers',
-        'route': '/customer/favorites',
-        'color': Colors.red,
-      },
+      // {
+      //   'icon': Icons.favorite_outline,
+      //   'title': 'Favorite Barbers',
+      //   'route': '/customer/favorites',
+      //   'color': Colors.red,
+      // },
       {
         'icon': Icons.notifications_outlined,
         'title': 'Notifications',

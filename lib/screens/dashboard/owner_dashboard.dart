@@ -42,8 +42,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   bool _isSwitchingSalon = false;
 
   // Dashboard data
-  int completedToday = 0;
-  int pendingAppointments = 0;
+  int _completedToday = 0;
   int _pendingBookings = 0;
   int _todayAppointments = 0;
   int _totalRevenue = 0;
@@ -53,6 +52,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   // Multiple salons support
   List<Map<String, dynamic>> _ownerSalons = [];
   String? _selectedSalonId;
+  String? _selectedSalonName;
 
   // User info
   String _userName = 'Salon Owner';
@@ -92,13 +92,11 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     _setupNotificationListeners();
   }
 
-  // ✅ Initialize and load data with role fix
   Future<void> _initializeAndLoad() async {
     await _ensureOwnerRole();
     await _loadAllData();
   }
 
-  // ✅ Ensure user has owner role
   Future<void> _ensureOwnerRole() async {
     try {
       final userId = supabase.auth.currentUser?.id;
@@ -193,7 +191,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   }
 
   // ============================================================
-  // 🔥 SHOW PERMISSION CARD - WITH CONTEXT
+  // 🔥 PERMISSION METHODS
   // ============================================================
 
   Future<void> _showPermissionCardContext({String? action}) async {
@@ -208,10 +206,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       });
     }
   }
-
-  // ============================================================
-  // 🔥 ENABLE NOTIFICATIONS - WITH CONTEXT
-  // ============================================================
 
   Future<void> _enableNotifications({String? action}) async {
     setState(() => _showPermissionCard = false);
@@ -302,10 +296,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       }
     }
   }
-
-  // ============================================================
-  // 🔥 SHOW WEB PERMISSION HELP
-  // ============================================================
 
   void _showWebPermissionHelp() {
     if (!mounted) return;
@@ -465,19 +455,49 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   }
 
   // ============================================================
-  // 🔥 CONTEXTUAL ACTIONS - SHOW PERMISSION CARD
+  // 🔥 NAVIGATION METHODS - WITH SALON CHECK
   // ============================================================
+
+  void _showNoSalonSelectedDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('No Salon Selected'),
+        content: const Text(
+          'Please select a salon first to view this data.\n\n'
+          'You can select a salon from the dropdown above or create a new salon.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _navigateToCreateSalon();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFFF6B8B),
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Create Salon'),
+          ),
+        ],
+      ),
+    );
+  }
 
   void _viewBookings() {
     if (!_hasPermission) {
       _showPermissionCardContext(action: 'booking');
       if (_showPermissionCard) return;
     }
-    if (_selectedSalonId != null) {
-      context.push('/owner/appointments?salonId=$_selectedSalonId');
-    } else {
-      context.push('/owner/appointments');
+    if (_selectedSalonId == null || _ownerSalons.isEmpty) {
+      _showNoSalonSelectedDialog();
+      return;
     }
+    context.push('/owner/appointments?salonId=$_selectedSalonId');
   }
 
   void _navigateToOffers() {
@@ -489,11 +509,11 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       _showCreateSalonFirstDialog();
       return;
     }
-    if (_selectedSalonId != null) {
-      context.push('/owner/offers/$_selectedSalonId');
-    } else {
-      context.push('/owner/offers');
+    if (_selectedSalonId == null) {
+      _showNoSalonSelectedDialog();
+      return;
     }
+    context.push('/owner/offers/$_selectedSalonId');
   }
 
   void _navigateToAddBarber() {
@@ -503,6 +523,10 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     }
     if (_ownerSalons.isEmpty) {
       _showCreateSalonFirstDialog();
+      return;
+    }
+    if (_selectedSalonId == null) {
+      _showNoSalonSelectedDialog();
       return;
     }
     context.push('/owner/add-barber?salonId=$_selectedSalonId');
@@ -515,6 +539,10 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     }
     if (_ownerSalons.isEmpty) {
       _showCreateSalonFirstDialog();
+      return;
+    }
+    if (_selectedSalonId == null) {
+      _showNoSalonSelectedDialog();
       return;
     }
     final result = await context.push(
@@ -532,6 +560,10 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       _showCreateSalonFirstDialog();
       return;
     }
+    if (_selectedSalonId == null) {
+      _showNoSalonSelectedDialog();
+      return;
+    }
     context.push('/owner/barber-leaves?salonId=$_selectedSalonId');
   }
 
@@ -542,6 +574,10 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     }
     if (_ownerSalons.isEmpty) {
       _showCreateSalonFirstDialog();
+      return;
+    }
+    if (_selectedSalonId == null) {
+      _showNoSalonSelectedDialog();
       return;
     }
     context.push('/owner/barber-schedule?salonId=$_selectedSalonId');
@@ -556,6 +592,10 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       _showCreateSalonFirstDialog();
       return;
     }
+    if (_selectedSalonId == null) {
+      _showNoSalonSelectedDialog();
+      return;
+    }
     context.push('/owner/barbers?salonId=$_selectedSalonId');
   }
 
@@ -566,6 +606,10 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     }
     if (_ownerSalons.isEmpty) {
       _showCreateSalonFirstDialog();
+      return;
+    }
+    if (_selectedSalonId == null) {
+      _showNoSalonSelectedDialog();
       return;
     }
     if (_ownerSalons.length == 1) {
@@ -583,11 +627,11 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       _showPermissionCardContext(action: 'booking');
       if (_showPermissionCard) return;
     }
-    if (_selectedSalonId != null) {
-      context.push('/owner/customers?salonId=$_selectedSalonId');
-    } else {
-      context.push('/owner/customers');
+    if (_selectedSalonId == null || _ownerSalons.isEmpty) {
+      _showNoSalonSelectedDialog();
+      return;
     }
+    context.push('/owner/customers?salonId=$_selectedSalonId');
   }
 
   void _viewRevenue() {
@@ -595,11 +639,11 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       _showPermissionCardContext(action: 'booking');
       if (_showPermissionCard) return;
     }
-    if (_selectedSalonId != null) {
-      context.push('/owner/revenue?salonId=$_selectedSalonId');
-    } else {
-      context.push('/owner/revenue');
+    if (_selectedSalonId == null || _ownerSalons.isEmpty) {
+      _showNoSalonSelectedDialog();
+      return;
     }
+    context.push('/owner/revenue?salonId=$_selectedSalonId');
   }
 
   void _viewSalonHolidays() {
@@ -611,11 +655,39 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       _showCreateSalonFirstDialog();
       return;
     }
+    if (_selectedSalonId == null) {
+      _showNoSalonSelectedDialog();
+      return;
+    }
     context.push('/owner/salon/holidays?salonId=$_selectedSalonId');
   }
 
+  void _viewReports() {
+    if (!_hasPermission) {
+      _showPermissionCardContext(action: 'report');
+      if (_showPermissionCard) return;
+    }
+    if (_selectedSalonId == null || _ownerSalons.isEmpty) {
+      _showNoSalonSelectedDialog();
+      return;
+    }
+    context.push('/owner/reports?salonId=$_selectedSalonId');
+  }
+
+  void _viewAnalytics() {
+    if (!_hasPermission) {
+      _showPermissionCardContext(action: 'analytics');
+      if (_showPermissionCard) return;
+    }
+    if (_selectedSalonId == null || _ownerSalons.isEmpty) {
+      _showNoSalonSelectedDialog();
+      return;
+    }
+    context.push('/owner/analytics?salonId=$_selectedSalonId');
+  }
+
   // ============================================================
-  // TIMEZONE METHODS
+  // 🔥 TIMEZONE METHODS
   // ============================================================
 
   void _updateCurrentDate() {
@@ -662,273 +734,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     _currentTimezoneFlag = TimezoneService.getCurrentFlag();
     _currentTimezoneOffset = TimezoneService.getUtcOffsetString();
     _updateCurrentDate();
-  }
-
-  // ============================================================
-  // TIMEZONE PICKER
-  // ============================================================
-
-  String _extractCountryCode(String timezone) {
-    final countryMap = {
-      'Asia/Colombo': 'LK',
-      'Asia/Tokyo': 'JP',
-      'Asia/Seoul': 'KR',
-      'Asia/Shanghai': 'CN',
-      'Asia/Hong_Kong': 'HK',
-      'Asia/Taipei': 'TW',
-      'Asia/Kolkata': 'IN',
-      'Asia/Dubai': 'AE',
-      'Asia/Singapore': 'SG',
-      'Asia/Kuala_Lumpur': 'MY',
-      'Asia/Bangkok': 'TH',
-      'Asia/Jakarta': 'ID',
-      'Asia/Manila': 'PH',
-      'Asia/Ho_Chi_Minh': 'VN',
-      'Asia/Dhaka': 'BD',
-      'Asia/Karachi': 'PK',
-      'Asia/Kathmandu': 'NP',
-      'Asia/Riyadh': 'SA',
-      'Asia/Kuwait': 'KW',
-      'Asia/Doha': 'QA',
-      'Europe/London': 'GB',
-      'Europe/Paris': 'FR',
-      'Europe/Berlin': 'DE',
-      'Europe/Rome': 'IT',
-      'Europe/Madrid': 'ES',
-      'Europe/Amsterdam': 'NL',
-      'Europe/Zurich': 'CH',
-      'Europe/Moscow': 'RU',
-      'America/New_York': 'US',
-      'America/Chicago': 'US',
-      'America/Denver': 'US',
-      'America/Los_Angeles': 'US',
-      'America/Toronto': 'CA',
-      'America/Vancouver': 'CA',
-      'America/Mexico_City': 'MX',
-      'America/Sao_Paulo': 'BR',
-      'Australia/Sydney': 'AU',
-      'Australia/Melbourne': 'AU',
-      'Australia/Perth': 'AU',
-      'Australia/Adelaide': 'AU',
-      'Pacific/Auckland': 'NZ',
-      'Africa/Johannesburg': 'ZA',
-      'Africa/Cairo': 'EG',
-      'Africa/Lagos': 'NG',
-      'Africa/Nairobi': 'KE',
-      'America/Argentina/Buenos_Aires': 'AR',
-      'America/Santiago': 'CL',
-      'America/Bogota': 'CO',
-      'America/Lima': 'PE',
-    };
-    if (countryMap.containsKey(timezone)) return countryMap[timezone]!;
-    for (var entry in countryMap.entries) {
-      if (timezone.contains(entry.key) || entry.key.contains(timezone)) {
-        return entry.value;
-      }
-    }
-    return '';
-  }
-
-  String _getFlagByCountryCode(String countryCode) {
-    final flags = {
-      'LK': '🇱🇰',
-      'JP': '🇯🇵',
-      'KR': '🇰🇷',
-      'CN': '🇨🇳',
-      'HK': '🇭🇰',
-      'TW': '🇹🇼',
-      'IN': '🇮🇳',
-      'AE': '🇦🇪',
-      'SG': '🇸🇬',
-      'MY': '🇲🇾',
-      'TH': '🇹🇭',
-      'ID': '🇮🇩',
-      'PH': '🇵🇭',
-      'VN': '🇻🇳',
-      'BD': '🇧🇩',
-      'PK': '🇵🇰',
-      'NP': '🇳🇵',
-      'SA': '🇸🇦',
-      'KW': '🇰🇼',
-      'QA': '🇶🇦',
-      'GB': '🇬🇧',
-      'FR': '🇫🇷',
-      'DE': '🇩🇪',
-      'IT': '🇮🇹',
-      'ES': '🇪🇸',
-      'NL': '🇳🇱',
-      'CH': '🇨🇭',
-      'RU': '🇷🇺',
-      'US': '🇺🇸',
-      'CA': '🇨🇦',
-      'MX': '🇲🇽',
-      'BR': '🇧🇷',
-      'AU': '🇦🇺',
-      'NZ': '🇳🇿',
-      'ZA': '🇿🇦',
-      'EG': '🇪🇬',
-      'NG': '🇳🇬',
-      'KE': '🇰🇪',
-      'AR': '🇦🇷',
-      'CL': '🇨🇱',
-      'CO': '🇨🇴',
-      'PE': '🇵🇪',
-    };
-    return flags[countryCode] ?? '🌐';
-  }
-
-  Map<String, List<String>> _groupTimezonesByContinent(List<String> timezones) {
-    final groups = <String, List<String>>{};
-    for (final tz in timezones) {
-      final parts = tz.split('/');
-      if (parts.length >= 2) {
-        final continent = parts[0];
-        if (!groups.containsKey(continent)) groups[continent] = [];
-        groups[continent]!.add(tz);
-      } else {
-        if (!groups.containsKey('UTC')) groups['UTC'] = [];
-        groups['UTC']!.add(tz);
-      }
-    }
-    for (final key in groups.keys) {
-      groups[key]!.sort();
-    }
-    return groups;
-  }
-
-  Widget _buildTimezoneTile(String tz, String displayName, String flag) {
-    final isSelected = tz == _currentTimezone;
-
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 2),
-      decoration: BoxDecoration(
-        color: isSelected
-            ? const Color(0xFFFF6B8B).withValues(alpha: 0.1)
-            : null,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: ListTile(
-        leading: CircleAvatar(
-          radius: 20,
-          backgroundColor: isSelected
-              ? const Color(0xFFFF6B8B)
-              : Colors.grey[200],
-          child: Text(flag, style: const TextStyle(fontSize: 16)),
-        ),
-        title: Text(
-          displayName,
-          style: TextStyle(
-            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-            color: isSelected ? const Color(0xFFFF6B8B) : null,
-          ),
-        ),
-        subtitle: Text(
-          tz,
-          style: const TextStyle(fontSize: 11),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        trailing: isSelected
-            ? const Icon(Icons.check_circle, color: Color(0xFFFF6B8B))
-            : null,
-        onTap: () => Navigator.of(context).pop(tz),
-      ),
-    );
-  }
-
-  Widget _buildCurrentTimezoneInfo() {
-    final displayName = _currentTimezone.split('/').last.replaceAll('_', ' ');
-    final offset = TimezoneService.getUtcOffsetString();
-    final flag = TimezoneService.getCurrentFlag();
-
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.grey[50],
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[200]!),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(flag, style: const TextStyle(fontSize: 24)),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Current: $displayName',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 13,
-                  ),
-                ),
-                Text(
-                  _currentTimezone,
-                  style: const TextStyle(fontSize: 10, color: Colors.grey),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Text(
-              offset,
-              style: const TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 11,
-                color: Color(0xFFFF6B8B),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDialogHeader() {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Icon(
-              Icons.access_time,
-              color: Color(0xFFFF6B8B),
-              size: 28,
-            ),
-          ),
-          const SizedBox(width: 12),
-          const Expanded(
-            child: Text(
-              'Select Your Timezone',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: Color(0xFFFF6B8B),
-              ),
-            ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.close),
-            onPressed: () => Navigator.pop(context),
-          ),
-        ],
-      ),
-    );
   }
 
   Future<void> _changeTimezone() async {
@@ -1266,6 +1071,269 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     }
   }
 
+  String _extractCountryCode(String timezone) {
+    final countryMap = {
+      'Asia/Colombo': 'LK',
+      'Asia/Tokyo': 'JP',
+      'Asia/Seoul': 'KR',
+      'Asia/Shanghai': 'CN',
+      'Asia/Hong_Kong': 'HK',
+      'Asia/Taipei': 'TW',
+      'Asia/Kolkata': 'IN',
+      'Asia/Dubai': 'AE',
+      'Asia/Singapore': 'SG',
+      'Asia/Kuala_Lumpur': 'MY',
+      'Asia/Bangkok': 'TH',
+      'Asia/Jakarta': 'ID',
+      'Asia/Manila': 'PH',
+      'Asia/Ho_Chi_Minh': 'VN',
+      'Asia/Dhaka': 'BD',
+      'Asia/Karachi': 'PK',
+      'Asia/Kathmandu': 'NP',
+      'Asia/Riyadh': 'SA',
+      'Asia/Kuwait': 'KW',
+      'Asia/Doha': 'QA',
+      'Europe/London': 'GB',
+      'Europe/Paris': 'FR',
+      'Europe/Berlin': 'DE',
+      'Europe/Rome': 'IT',
+      'Europe/Madrid': 'ES',
+      'Europe/Amsterdam': 'NL',
+      'Europe/Zurich': 'CH',
+      'Europe/Moscow': 'RU',
+      'America/New_York': 'US',
+      'America/Chicago': 'US',
+      'America/Denver': 'US',
+      'America/Los_Angeles': 'US',
+      'America/Toronto': 'CA',
+      'America/Vancouver': 'CA',
+      'America/Mexico_City': 'MX',
+      'America/Sao_Paulo': 'BR',
+      'Australia/Sydney': 'AU',
+      'Australia/Melbourne': 'AU',
+      'Australia/Perth': 'AU',
+      'Australia/Adelaide': 'AU',
+      'Pacific/Auckland': 'NZ',
+      'Africa/Johannesburg': 'ZA',
+      'Africa/Cairo': 'EG',
+      'Africa/Lagos': 'NG',
+      'Africa/Nairobi': 'KE',
+      'America/Argentina/Buenos_Aires': 'AR',
+      'America/Santiago': 'CL',
+      'America/Bogota': 'CO',
+      'America/Lima': 'PE',
+    };
+    if (countryMap.containsKey(timezone)) return countryMap[timezone]!;
+    for (var entry in countryMap.entries) {
+      if (timezone.contains(entry.key) || entry.key.contains(timezone)) {
+        return entry.value;
+      }
+    }
+    return '';
+  }
+
+  String _getFlagByCountryCode(String countryCode) {
+    final flags = {
+      'LK': '🇱🇰',
+      'JP': '🇯🇵',
+      'KR': '🇰🇷',
+      'CN': '🇨🇳',
+      'HK': '🇭🇰',
+      'TW': '🇹🇼',
+      'IN': '🇮🇳',
+      'AE': '🇦🇪',
+      'SG': '🇸🇬',
+      'MY': '🇲🇾',
+      'TH': '🇹🇭',
+      'ID': '🇮🇩',
+      'PH': '🇵🇭',
+      'VN': '🇻🇳',
+      'BD': '🇧🇩',
+      'PK': '🇵🇰',
+      'NP': '🇳🇵',
+      'SA': '🇸🇦',
+      'KW': '🇰🇼',
+      'QA': '🇶🇦',
+      'GB': '🇬🇧',
+      'FR': '🇫🇷',
+      'DE': '🇩🇪',
+      'IT': '🇮🇹',
+      'ES': '🇪🇸',
+      'NL': '🇳🇱',
+      'CH': '🇨🇭',
+      'RU': '🇷🇺',
+      'US': '🇺🇸',
+      'CA': '🇨🇦',
+      'MX': '🇲🇽',
+      'BR': '🇧🇷',
+      'AU': '🇦🇺',
+      'NZ': '🇳🇿',
+      'ZA': '🇿🇦',
+      'EG': '🇪🇬',
+      'NG': '🇳🇬',
+      'KE': '🇰🇪',
+      'AR': '🇦🇷',
+      'CL': '🇨🇱',
+      'CO': '🇨🇴',
+      'PE': '🇵🇪',
+    };
+    return flags[countryCode] ?? '🌐';
+  }
+
+  Map<String, List<String>> _groupTimezonesByContinent(List<String> timezones) {
+    final groups = <String, List<String>>{};
+    for (final tz in timezones) {
+      final parts = tz.split('/');
+      if (parts.length >= 2) {
+        final continent = parts[0];
+        if (!groups.containsKey(continent)) groups[continent] = [];
+        groups[continent]!.add(tz);
+      } else {
+        if (!groups.containsKey('UTC')) groups['UTC'] = [];
+        groups['UTC']!.add(tz);
+      }
+    }
+    for (final key in groups.keys) {
+      groups[key]!.sort();
+    }
+    return groups;
+  }
+
+  Widget _buildTimezoneTile(String tz, String displayName, String flag) {
+    final isSelected = tz == _currentTimezone;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 2),
+      decoration: BoxDecoration(
+        color: isSelected
+            ? const Color(0xFFFF6B8B).withValues(alpha: 0.1)
+            : null,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: ListTile(
+        leading: CircleAvatar(
+          radius: 20,
+          backgroundColor: isSelected
+              ? const Color(0xFFFF6B8B)
+              : Colors.grey[200],
+          child: Text(flag, style: const TextStyle(fontSize: 16)),
+        ),
+        title: Text(
+          displayName,
+          style: TextStyle(
+            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+            color: isSelected ? const Color(0xFFFF6B8B) : null,
+          ),
+        ),
+        subtitle: Text(
+          tz,
+          style: const TextStyle(fontSize: 11),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        trailing: isSelected
+            ? const Icon(Icons.check_circle, color: Color(0xFFFF6B8B))
+            : null,
+        onTap: () => Navigator.of(context).pop(tz),
+      ),
+    );
+  }
+
+  Widget _buildCurrentTimezoneInfo() {
+    final displayName = _currentTimezone.split('/').last.replaceAll('_', ' ');
+    final offset = TimezoneService.getUtcOffsetString();
+    final flag = TimezoneService.getCurrentFlag();
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.grey[50],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey[200]!),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(flag, style: const TextStyle(fontSize: 24)),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Current: $displayName',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                  ),
+                ),
+                Text(
+                  _currentTimezone,
+                  style: const TextStyle(fontSize: 10, color: Colors.grey),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text(
+              offset,
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 11,
+                color: Color(0xFFFF6B8B),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDialogHeader() {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(
+              Icons.access_time,
+              color: Color(0xFFFF6B8B),
+              size: 28,
+            ),
+          ),
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Text(
+              'Select Your Timezone',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFFFF6B8B),
+              ),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.close),
+            onPressed: () => Navigator.pop(context),
+          ),
+        ],
+      ),
+    );
+  }
+
   String _getContinentEmoji(String continent) {
     final emojis = {
       'Asia': '🌏',
@@ -1280,44 +1348,47 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   }
 
   // ============================================================
-  // LOAD DATA
+  // 🔥 LOAD DATA - MAIN
   // ============================================================
 
   Future<void> _loadAllData() async {
     setState(() => _isLoading = true);
     try {
+      debugPrint('🔄 _loadAllData() started');
+      
       await _loadTimezone();
+      debugPrint('✅ Timezone loaded');
       
       await _loadUserProfile();
+      debugPrint('✅ User profile loaded');
       
       await _loadOwnerSalons();
+      debugPrint('✅ Owner salons loaded: ${_ownerSalons.length}');
       
-      // ✅ Load dashboard stats with error handling
       try {
         await _loadDashboardStats();
+        debugPrint('✅ Dashboard stats loaded');
       } catch (e) {
         debugPrint('⚠️ Dashboard stats error (non-critical): $e');
-        if (mounted) {
-          setState(() {
-            _todayAppointments = 0;
-            _pendingBookings = 0;
-            _activeBarbers = 0;
-            _totalCustomers = 0;
-            _totalRevenue = 0;
-            pendingAppointments = 0;
-            completedToday = 0;
-          });
-        }
+        setState(() {
+          _todayAppointments = 0;
+          _pendingBookings = 0;
+          _activeBarbers = 0;
+          _totalCustomers = 0;
+          _totalRevenue = 0;
+          _completedToday = 0;
+        });
       }
       
-      // ✅ Check onboarding status with error handling
       try {
         await _checkOnboardingStatus();
+        debugPrint('✅ Onboarding status checked');
       } catch (e) {
         debugPrint('⚠️ Onboarding status error (non-critical): $e');
       }
 
       _hasPermission = await _notificationService.hasPermission();
+      debugPrint('✅ Has permission: $_hasPermission');
 
       if (!_hasPermission) {
         _showPermissionCard = await _permissionManager.shouldShowPermissionCard(
@@ -1338,7 +1409,10 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         _showPermissionCard = false;
       }
 
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+        debugPrint('✅ _loadAllData() completed');
+      }
       
     } catch (e) {
       debugPrint('❌ Error loading data: $e');
@@ -1346,130 +1420,10 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         setState(() => _isLoading = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error loading data: $e'),
+            content: Text('Error loading data: ${e.toString()}'),
             backgroundColor: Colors.red,
           ),
         );
-      }
-    }
-  }
-
-  // ✅ FIX 5: Load Owner Salons with auto-creation
-  Future<void> _loadOwnerSalons() async {
-    try {
-      final userId = supabase.auth.currentUser?.id;
-      debugPrint('🔍 Current User ID: $userId');
-      debugPrint('🔍 Current User Email: ${supabase.auth.currentUser?.email}');
-      
-      if (userId == null) {
-        debugPrint('❌ No user logged in');
-        if (mounted) {
-          setState(() {
-            _ownerSalons = [];
-            _hasSalon = false;
-          });
-        }
-        return;
-      }
-
-      // ✅ Check and ensure owner role
-      final ownerCheck = await supabase
-          .from('user_roles')
-          .select('''
-            id,
-            role_id,
-            status,
-            roles!inner (
-              id,
-              name,
-              description
-            )
-          ''')
-          .eq('user_id', userId)
-          .eq('role_id', 1)
-          .maybeSingle();
-
-      debugPrint('🔍 Owner role check: $ownerCheck');
-
-      if (ownerCheck == null) {
-        debugPrint('🔄 Creating owner role...');
-        try {
-          await supabase.from('user_roles').insert({
-            'user_id': userId,
-            'role_id': 1,
-            'status': 'active'
-          });
-          debugPrint('✅ Owner role created');
-        } catch (createError) {
-          debugPrint('❌ Error creating owner role: $createError');
-        }
-      } else if (ownerCheck['status'] != 'active') {
-        debugPrint('🔄 Updating owner role to active...');
-        try {
-          await supabase
-              .from('user_roles')
-              .update({'status': 'active', 'updated_at': DateTime.now().toIso8601String()})
-              .eq('user_id', userId)
-              .eq('role_id', 1);
-          debugPrint('✅ Owner role activated');
-        } catch (updateError) {
-          debugPrint('❌ Error updating owner role: $updateError');
-        }
-      } else {
-        debugPrint('✅ User has active owner role');
-      }
-
-      // ✅ Load salons
-      debugPrint('🔍 Loading salons for owner: $userId');
-      
-      final response = await supabase
-          .from('salons')
-          .select('''
-            id,
-            name,
-            address,
-            phone,
-            email,
-            description,
-            is_active,
-            created_at,
-            updated_at,
-            logo_url,
-            cover_url,
-            open_time,
-            close_time,
-            timezone
-          ''')
-          .eq('owner_id', userId)
-          .eq('is_active', true)
-          .order('created_at', ascending: false);
-
-      debugPrint('🔍 Found ${response.length} salons');
-      debugPrint('🔍 Salon names: ${response.map((s) => s['name']).toList()}');
-
-      if (mounted) {
-        setState(() {
-          _ownerSalons = List<Map<String, dynamic>>.from(response);
-          if (_ownerSalons.isNotEmpty) {
-            _hasSalon = true;
-            if (_selectedSalonId == null) {
-              _selectedSalonId = _ownerSalons.first['id'].toString();
-              debugPrint('✅ Selected first salon: ${_ownerSalons.first['name']} (ID: $_selectedSalonId)');
-            }
-          } else {
-            _hasSalon = false;
-            debugPrint('⚠️ No active salons found for this owner');
-          }
-        });
-      }
-    } catch (e, stackTrace) {
-      debugPrint('❌ Error loading salons: $e');
-      debugPrint('📚 Stack trace: $stackTrace');
-      if (mounted) {
-        setState(() {
-          _ownerSalons = [];
-          _hasSalon = false;
-        });
       }
     }
   }
@@ -1537,38 +1491,131 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     }
   }
 
-  // ✅ FIX 5: Load Dashboard Stats - SIMPLEST APPROACH
+  // ============================================================
+  // 🔥 LOAD OWNER SALONS
+  // ============================================================
+  Future<void> _loadOwnerSalons() async {
+    try {
+      final userId = supabase.auth.currentUser?.id;
+      debugPrint('🔍 Current User ID: $userId');
+      
+      if (userId == null) {
+        debugPrint('❌ No user logged in');
+        if (mounted) {
+          setState(() {
+            _ownerSalons = [];
+            _hasSalon = false;
+          });
+        }
+        return;
+      }
+
+      debugPrint('🔍 Loading salons for owner: $userId');
+      
+      final response = await supabase
+          .from('salons')
+          .select('id, name, address, phone, email, description, is_active, created_at, updated_at, logo_url, cover_url, open_time, close_time, timezone')
+          .eq('owner_id', userId)
+          .eq('is_active', true)
+          .order('created_at', ascending: false);
+
+      debugPrint('🔍 Found ${response.length} salons');
+
+      if (mounted) {
+        setState(() {
+          _ownerSalons = List<Map<String, dynamic>>.from(response);
+          if (_ownerSalons.isNotEmpty) {
+            _hasSalon = true;
+            if (_selectedSalonId == null) {
+              _selectedSalonId = _ownerSalons.first['id'].toString();
+              _selectedSalonName = _ownerSalons.first['name']?.toString();
+              debugPrint('✅ Selected first salon: $_selectedSalonName (ID: $_selectedSalonId)');
+            } else {
+              final selected = _ownerSalons.firstWhere(
+                (s) => s['id'].toString() == _selectedSalonId,
+                orElse: () => {},
+              );
+              _selectedSalonName = selected['name']?.toString();
+            }
+          } else {
+            _hasSalon = false;
+            debugPrint('⚠️ No active salons found for this owner');
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ Error loading salons: $e');
+      if (mounted) {
+        setState(() {
+          _ownerSalons = [];
+          _hasSalon = false;
+        });
+      }
+    }
+  }
+
+  // ============================================================
+  // 🔥 LOAD DASHBOARD STATS - Customers = Followers
+  // ============================================================
   Future<void> _loadDashboardStats() async {
-    if (_selectedSalonId == null || _ownerSalons.isEmpty) return;
+    debugPrint('📊 _loadDashboardStats() called');
+    debugPrint('📊 _selectedSalonId: $_selectedSalonId');
+    debugPrint('📊 _ownerSalons.length: ${_ownerSalons.length}');
+    
+    if (_selectedSalonId == null || _ownerSalons.isEmpty) {
+      debugPrint('⚠️ No salon selected or no salons found');
+      setState(() {
+        _todayAppointments = 0;
+        _pendingBookings = 0;
+        _activeBarbers = 0;
+        _totalCustomers = 0;
+        _totalRevenue = 0;
+        _completedToday = 0;
+      });
+      return;
+    }
     
     try {
       final today = DateTime.now().toIso8601String().split('T')[0];
       final salonIdInt = int.parse(_selectedSalonId!);
-
-      // 1. Today's appointments
-      final todayAppointments = await supabase
-          .from('appointments')
-          .select('id, status, price')
-          .eq('salon_id', salonIdInt)
-          .eq('appointment_date', today);
-
-      // 2. Pending bookings
-      final pendingBookings = await supabase
-          .from('appointments')
-          .select('id')
-          .eq('salon_id', salonIdInt)
-          .eq('appointment_date', today)
-          .eq('status', 'pending');
-
-      // ✅ 3. ACTIVE BARBERS - SIMPLEST APPROACH (FIX 5)
-      // Step 1: Get all active barbers from salon_barbers
-      final activeBarbers = await supabase
-          .from('salon_barbers')
-          .select('barber_id')
-          .eq('salon_id', salonIdInt)
-          .eq('status', 'active');
       
-      // Step 2: Count how many have active user_roles
+      debugPrint('📊 Today: $today, Salon ID: $salonIdInt');
+
+      final results = await Future.wait([
+        supabase
+            .from('appointments')
+            .select('id, status, price')
+            .eq('salon_id', salonIdInt)
+            .eq('appointment_date', today),
+        
+        supabase
+            .from('appointments')
+            .select('id')
+            .eq('salon_id', salonIdInt)
+            .eq('appointment_date', today)
+            .eq('status', 'pending'),
+        
+        supabase
+            .from('salon_barbers')
+            .select('barber_id')
+            .eq('salon_id', salonIdInt)
+            .eq('status', 'active'),
+        
+        supabase
+            .from('salon_followers')
+            .select('id')
+            .eq('salon_id', salonIdInt),
+      ]);
+
+      final todayAppointments = results[0] as List;
+      final pendingBookings = results[1] as List;
+      final activeBarbers = results[2] as List;
+      final followers = results[3] as List;
+
+      debugPrint('📊 Today appointments count: ${todayAppointments.length}');
+      debugPrint('📊 Pending bookings count: ${pendingBookings.length}');
+      debugPrint('📊 Active barbers from salon_barbers: ${activeBarbers.length}');
+      
       int activeBarberCount = 0;
       if (activeBarbers.isNotEmpty) {
         final barberIds = activeBarbers.map((b) => b['barber_id'] as String).toList();
@@ -1577,44 +1624,37 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             .from('user_roles')
             .select('user_id')
             .inFilter('user_id', barberIds)
-            .eq('role_id', 2) // barber role
+            .eq('role_id', 2)
             .eq('status', 'active');
         
         activeBarberCount = validBarbers.length;
+        debugPrint('📊 Active barbers with valid roles: $activeBarberCount');
       }
 
-      // 4. Total customers (unique)
-      final totalCustomers = await supabase
-          .from('appointments')
-          .select('customer_id')
-          .eq('salon_id', salonIdInt);
+      final totalFollowers = followers.length;
+      debugPrint('📊 Total followers (Customers): $totalFollowers');
 
-      final uniqueCustomers = totalCustomers
-          .map((a) => a['customer_id'] as String)
-          .toSet()
-          .length;
-          
-      // 5. Revenue
       final revenue = todayAppointments.fold<int>(
         0,
         (sum, item) => sum + ((item['price'] as num?)?.toInt() ?? 0),
       );
+      debugPrint('📊 Revenue: $revenue');
+
+      final completedToday = todayAppointments
+          .where((a) => a['status'] == 'completed')
+          .length;
 
       if (mounted) {
         setState(() {
           _todayAppointments = todayAppointments.length;
           _pendingBookings = pendingBookings.length;
           _activeBarbers = activeBarberCount;
-          _totalCustomers = uniqueCustomers;
+          _totalCustomers = totalFollowers;
           _totalRevenue = revenue;
-          pendingAppointments = _pendingBookings;
-          completedToday = todayAppointments
-              .where((a) => a['status'] == 'completed')
-              .length;
+          _completedToday = completedToday;
         });
+        debugPrint('📊 Stats updated: Today: $_todayAppointments, Pending: $_pendingBookings, Customers(Followers): $_totalCustomers, Barbers: $_activeBarbers, Revenue: $_totalRevenue');
       }
-      
-      debugPrint('📊 Stats: Today: $_todayAppointments, Pending: $_pendingBookings, Barbers: $_activeBarbers');
       
     } catch (e) {
       debugPrint('❌ Dashboard stats error: $e');
@@ -1625,14 +1665,15 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           _activeBarbers = 0;
           _totalCustomers = 0;
           _totalRevenue = 0;
-          pendingAppointments = 0;
-          completedToday = 0;
+          _completedToday = 0;
         });
       }
     }
   }
 
-  // ✅ FIX 5: Check Onboarding Status - SIMPLEST APPROACH
+  // ============================================================
+  // 🔥 CHECK ONBOARDING STATUS
+  // ============================================================
   Future<void> _checkOnboardingStatus() async {
     if (_ownerSalons.isEmpty || _selectedSalonId == null) {
       setState(() {
@@ -1649,7 +1690,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     try {
       final salonId = int.parse(_selectedSalonId!);
 
-      // 1. Check services
       final servicesResponse = await supabase
           .from('services')
           .select('id')
@@ -1658,7 +1698,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           .limit(1);
       _hasServices = servicesResponse.isNotEmpty;
 
-      // ✅ 2. CHECK BARBERS - SIMPLEST APPROACH (FIX 5)
       final barbers = await supabase
           .from('salon_barbers')
           .select('barber_id')
@@ -1681,7 +1720,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       }
       _hasBarbers = hasActiveBarbers;
 
-      // 3. Check barber schedules
       if (_hasBarbers) {
         final schedulesResponse = await supabase
             .from('barber_schedules')
@@ -1693,7 +1731,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         _hasBarberSchedule = false;
       }
 
-      // 4. Check holidays
       final holidaysResponse = await supabase
           .from('salon_holidays')
           .select('id')
@@ -1713,7 +1750,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         });
       }
       
-      debugPrint('📊 Onboarding: Salon: $_hasSalon, Services: $_hasServices, Barbers: $_hasBarbers');
+      debugPrint('📊 Onboarding: Salon: $_hasSalon, Services: $_hasServices, Barbers: $_hasBarbers, Steps: $_completedSteps');
       
     } catch (e) {
       debugPrint('❌ Onboarding error: $e');
@@ -1728,6 +1765,11 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     setState(() {
       _isSwitchingSalon = true;
       _selectedSalonId = salonId;
+      final selected = _ownerSalons.firstWhere(
+        (s) => s['id'].toString() == salonId,
+        orElse: () => {},
+      );
+      _selectedSalonName = selected['name']?.toString();
     });
 
     try {
@@ -1740,7 +1782,364 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   }
 
   // ============================================================
-  // SALON SETUP STEP FLOW
+  // 🔥 NOTIFICATION LISTENERS
+  // ============================================================
+
+  void _setupNotificationListeners() {
+    try {
+      FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+        if (message.data['type'] == 'new_booking') {
+          _showNewBookingAlert(message);
+          setState(() {
+            _pendingBookings++;
+          });
+        }
+      });
+      FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+        if (message.data['type'] == 'new_booking') _viewBookings();
+      });
+    } catch (e) {
+      debugPrint('Error: $e');
+    }
+  }
+
+  void _showNewBookingAlert(RemoteMessage message) {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('New Booking!'),
+        content: Text(
+          message.notification?.body ?? 'A customer has booked an appointment',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Later'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _viewBookings();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFFF6B8B),
+              foregroundColor: Colors.white,
+              minimumSize: const Size(0, 36),
+            ),
+            child: const Text('View'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ============================================================
+  // 🔥 UI BUILDERS
+  // ============================================================
+
+  Widget _buildQuickAction({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+    bool enabled = true,
+  }) {
+    return GestureDetector(
+      onTap: enabled ? onTap : null,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(
+          color: enabled
+              ? color.withValues(alpha: 0.1)
+              : Colors.grey.withValues(alpha: 0.05),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: enabled ? color : Colors.grey[400], size: 28),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                color: enabled ? color : Colors.grey[500],
+                fontWeight: FontWeight.w500,
+              ),
+              textAlign: TextAlign.center,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSalonSelector() {
+    if (_ownerSalons.isEmpty) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withValues(alpha: 0.1),
+            blurRadius: 8.0,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.store, size: 18, color: Color(0xFFFF6B8B)),
+          const SizedBox(width: 8),
+          const Text(
+            'Salon:',
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+          ),
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: _ownerSalons.map((salon) {
+                  final isSelected = _selectedSalonId == salon['id'].toString();
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: FilterChip(
+                      label: Text(
+                        salon['name'] ?? 'Salon',
+                        style: const TextStyle(fontSize: 12),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      selected: isSelected,
+                      onSelected: (_) => _switchSalon(salon['id'].toString()),
+                      backgroundColor: Colors.grey[100],
+                      selectedColor: const Color(
+                        0xFFFF6B8B,
+                      ).withValues(alpha: 0.2),
+                      checkmarkColor: const Color(0xFFFF6B8B),
+                      labelStyle: TextStyle(
+                        fontSize: 12,
+                        color: isSelected
+                            ? const Color(0xFFFF6B8B)
+                            : Colors.grey[800],
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.edit, size: 18),
+            onPressed: _navigateToEditSalon,
+            tooltip: 'Edit Salon',
+            color: const Color(0xFFFF6B8B),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSimpleHeader() {
+    final isWeb = MediaQuery.of(context).size.width > 800;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: isWeb
+          ? Row(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.grey.withValues(alpha: 0.1),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      GestureDetector(
+                        onTap: _changeTimezone,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 5,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(
+                              0xFFFF6B8B,
+                            ).withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                _currentTimezoneFlag,
+                                style: const TextStyle(fontSize: 14),
+                              ),
+                              const SizedBox(width: 6),
+                              Flexible(
+                                child: Text(
+                                  _currentTimezone
+                                      .split('/')
+                                      .last
+                                      .replaceAll('_', ' '),
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                    color: Color(0xFFFF6B8B),
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                _currentTimezoneOffset,
+                                style: const TextStyle(
+                                  fontSize: 10,
+                                  color: Colors.grey,
+                                ),
+                              ),
+                              const Icon(
+                                Icons.arrow_drop_down,
+                                size: 16,
+                                color: Color(0xFFFF6B8B),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      const Icon(
+                        Icons.calendar_today,
+                        size: 14,
+                        color: Colors.grey,
+                      ),
+                      const SizedBox(width: 6),
+                      Flexible(
+                        child: Text(
+                          _currentDate,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            )
+          : Container(
+              margin: const EdgeInsets.symmetric(horizontal: 16),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.grey.withValues(alpha: 0.1),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.calendar_today,
+                        size: 12,
+                        color: Colors.grey,
+                      ),
+                      const SizedBox(width: 4),
+                      Flexible(
+                        child: Text(
+                          _currentDate,
+                          style: const TextStyle(
+                            fontSize: 10,
+                            color: Colors.grey,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                  GestureDetector(
+                    onTap: _changeTimezone,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            _currentTimezoneFlag,
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              _currentTimezone
+                                  .split('/')
+                                  .last
+                                  .replaceAll('_', ' '),
+                              style: const TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w500,
+                                color: Color(0xFFFF6B8B),
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const Icon(
+                            Icons.arrow_drop_down,
+                            size: 14,
+                            color: Color(0xFFFF6B8B),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+    );
+  }
+
+  // ============================================================
+  // 🔥 SALON SETUP STEP FLOW
   // ============================================================
 
   Widget _buildStepFlow() {
@@ -2181,7 +2580,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   );
 
   // ============================================================
-  // MANAGEMENT SECTION
+  // 🔥 MANAGEMENT SECTION
   // ============================================================
 
   Widget _buildManagementSection() {
@@ -2421,312 +2820,8 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     );
   }
 
-  Widget _buildQuickAction({
-    required IconData icon,
-    required String label,
-    required Color color,
-    required VoidCallback onTap,
-    bool enabled = true,
-  }) {
-    return GestureDetector(
-      onTap: enabled ? onTap : null,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        decoration: BoxDecoration(
-          color: enabled
-              ? color.withValues(alpha: 0.1)
-              : Colors.grey.withValues(alpha: 0.05),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, color: enabled ? color : Colors.grey[400], size: 28),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 12,
-                color: enabled ? color : Colors.grey[500],
-                fontWeight: FontWeight.w500,
-              ),
-              textAlign: TextAlign.center,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSalonSelector() {
-    if (_ownerSalons.isEmpty) return const SizedBox.shrink();
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withValues(alpha: 0.1),
-            blurRadius: 8.0,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.store, size: 18, color: Color(0xFFFF6B8B)),
-          const SizedBox(width: 8),
-          const Text(
-            'Salon:',
-            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
-          ),
-          Expanded(
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: _ownerSalons.map((salon) {
-                  final isSelected = _selectedSalonId == salon['id'].toString();
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: FilterChip(
-                      label: Text(
-                        salon['name'] ?? 'Salon',
-                        style: const TextStyle(fontSize: 12),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      selected: isSelected,
-                      onSelected: (_) => _switchSalon(salon['id'].toString()),
-                      backgroundColor: Colors.grey[100],
-                      selectedColor: const Color(
-                        0xFFFF6B8B,
-                      ).withValues(alpha: 0.2),
-                      checkmarkColor: const Color(0xFFFF6B8B),
-                      labelStyle: TextStyle(
-                        fontSize: 12,
-                        color: isSelected
-                            ? const Color(0xFFFF6B8B)
-                            : Colors.grey[800],
-                      ),
-                    ),
-                  );
-                }).toList(),
-              ),
-            ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.edit, size: 18),
-            onPressed: _navigateToEditSalon,
-            tooltip: 'Edit Salon',
-            color: const Color(0xFFFF6B8B),
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(),
-          ),
-        ],
-      ),
-    );
-  }
-
   // ============================================================
-  // SIMPLE HEADER
-  // ============================================================
-
-  Widget _buildSimpleHeader() {
-    final isWeb = MediaQuery.of(context).size.width > 800;
-
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: isWeb
-          ? Row(
-              mainAxisSize: MainAxisSize.min,
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 10,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.grey.withValues(alpha: 0.1),
-                        blurRadius: 8,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      GestureDetector(
-                        onTap: _changeTimezone,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 5,
-                          ),
-                          decoration: BoxDecoration(
-                            color: const Color(
-                              0xFFFF6B8B,
-                            ).withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                _currentTimezoneFlag,
-                                style: const TextStyle(fontSize: 14),
-                              ),
-                              const SizedBox(width: 6),
-                              Flexible(
-                                child: Text(
-                                  _currentTimezone
-                                      .split('/')
-                                      .last
-                                      .replaceAll('_', ' '),
-                                  style: const TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w500,
-                                    color: Color(0xFFFF6B8B),
-                                  ),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                              const SizedBox(width: 4),
-                              Text(
-                                _currentTimezoneOffset,
-                                style: const TextStyle(
-                                  fontSize: 10,
-                                  color: Colors.grey,
-                                ),
-                              ),
-                              const Icon(
-                                Icons.arrow_drop_down,
-                                size: 16,
-                                color: Color(0xFFFF6B8B),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      const Icon(
-                        Icons.calendar_today,
-                        size: 14,
-                        color: Colors.grey,
-                      ),
-                      const SizedBox(width: 6),
-                      Flexible(
-                        child: Text(
-                          _currentDate,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            )
-          : Container(
-              margin: const EdgeInsets.symmetric(horizontal: 16),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.grey.withValues(alpha: 0.1),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(
-                        Icons.calendar_today,
-                        size: 12,
-                        color: Colors.grey,
-                      ),
-                      const SizedBox(width: 4),
-                      Flexible(
-                        child: Text(
-                          _currentDate,
-                          style: const TextStyle(
-                            fontSize: 10,
-                            color: Colors.grey,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                  GestureDetector(
-                    onTap: _changeTimezone,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 5,
-                      ),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            _currentTimezoneFlag,
-                            style: const TextStyle(fontSize: 12),
-                          ),
-                          const SizedBox(width: 4),
-                          Flexible(
-                            child: Text(
-                              _currentTimezone
-                                  .split('/')
-                                  .last
-                                  .replaceAll('_', ' '),
-                              style: const TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w500,
-                                color: Color(0xFFFF6B8B),
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          const Icon(
-                            Icons.arrow_drop_down,
-                            size: 14,
-                            color: Color(0xFFFF6B8B),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-    );
-  }
-
-  // ============================================================
-  // NAVIGATION METHODS
+  // 🔥 NAVIGATION HELPERS
   // ============================================================
 
   void _navigateToCreateSalon() async {
@@ -2783,9 +2878,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     );
   }
 
-  void _viewReports() => context.push('/owner/reports');
-  void _viewAnalytics() => context.push('/owner/analytics');
-  void _viewSettings() => context.push('/owner/settings');
+  void _viewSettings() => context.push('/settings');
 
   void _showCreateSalonFirstDialog() {
     showDialog(
@@ -2818,61 +2911,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   }
 
   // ============================================================
-  // NOTIFICATION LISTENERS
-  // ============================================================
-
-  void _setupNotificationListeners() {
-    try {
-      FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-        if (message.data['type'] == 'new_booking') {
-          _showNewBookingAlert(message);
-          setState(() {
-            _pendingBookings++;
-            pendingAppointments++;
-          });
-        }
-      });
-      FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
-        if (message.data['type'] == 'new_booking') _viewBookings();
-      });
-    } catch (e) {
-      debugPrint('Error: $e');
-    }
-  }
-
-  void _showNewBookingAlert(RemoteMessage message) {
-    if (!mounted) return;
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('New Booking!'),
-        content: Text(
-          message.notification?.body ?? 'A customer has booked an appointment',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Later'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _viewBookings();
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFFF6B8B),
-              foregroundColor: Colors.white,
-              minimumSize: const Size(0, 36),
-            ),
-            child: const Text('View'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ============================================================
-  // DRAWER & LOGOUT
+  // 🔥 DRAWER & LOGOUT
   // ============================================================
 
   void _openDrawer() {
@@ -2985,7 +3024,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   }
 
   // ============================================================
-  // BUILD
+  // 🔥 BUILD
   // ============================================================
 
   @override
@@ -3029,7 +3068,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // ✅ PERMISSION CARD - Updated with contextual support
                     if (_showPermissionCard && !_hasPermission)
                       PermissionCard(
                         onEnable: () => _enableNotifications(action: null),
@@ -3039,8 +3077,11 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                         compact: true,
                       ),
                     _buildSimpleHeader(),
+                    
                     if (_completedSteps < _totalSteps) _buildStepFlow(),
+                    
                     if (_ownerSalons.length > 1) _buildSalonSelector(),
+                    
                     if (_ownerSalons.isEmpty)
                       Container(
                         margin: const EdgeInsets.all(16),
@@ -3092,6 +3133,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                           ],
                         ),
                       ),
+                    
                     if (_ownerSalons.isNotEmpty)
                       _isSwitchingSalon
                           ? const Padding(
@@ -3118,6 +3160,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                                           value: '$_todayAppointments',
                                           icon: Icons.calendar_today,
                                           color: Colors.blue,
+                                          subtitle: '$_completedToday completed',
                                           onTap: _viewBookings,
                                         ),
                                       ),
@@ -3135,6 +3178,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                                   ),
                                 ),
                                 const SizedBox(height: 12),
+                                
                                 Padding(
                                   padding: const EdgeInsets.symmetric(
                                     horizontal: 16,
@@ -3148,6 +3192,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                                           value: '$_totalCustomers',
                                           icon: Icons.people,
                                           color: Colors.purple,
+                                          subtitle: 'Active followers',
                                           onTap: _viewAllCustomers,
                                         ),
                                       ),
@@ -3165,6 +3210,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                                   ),
                                 ),
                                 const SizedBox(height: 12),
+                                
                                 Padding(
                                   padding: const EdgeInsets.symmetric(
                                     horizontal: 16,
@@ -3180,6 +3226,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                                 ),
                               ],
                             ),
+                    
                     const SizedBox(height: 16),
                     _buildManagementSection(),
                     const SizedBox(height: 80),
