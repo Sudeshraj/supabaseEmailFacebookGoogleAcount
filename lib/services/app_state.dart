@@ -28,6 +28,22 @@ class AppState extends ChangeNotifier {
   String? _currentEmail;
   User? _currentUser;
 
+  // ✅ NEW: Pending deletion-restore state.
+  // When a user logs back in and their profile is
+  // scheduled_for_deletion, we no longer silently restore it.
+  // Instead we surface this state so the UI can show an
+  // explicit confirmation dialog ("Restore your account?").
+  bool _pendingDeletionRestore = false;
+  DateTime? _deletionRestoreDueDate;
+  int? _deletionRestoreDaysRemaining;
+
+  // ✅ NEW: Pending reactivation state - same idea, but for the
+  // "Deactivate All" (self-deactivated, status = 'inactive')
+  // case, which previously forced an immediate silent logout
+  // with no way to reactivate inline. Now it's symmetric with
+  // the deletion-restore flow: surface state, let the UI ask.
+  bool _pendingReactivation = false;
+
   // ====================
   // PUBLIC GETTERS
   // ====================
@@ -50,6 +66,14 @@ class AppState extends ChangeNotifier {
   String? get loginProvider => _loginProvider;
   String? get currentEmail => _currentEmail;
   User? get currentUser => _currentUser;
+
+  // ✅ NEW: Pending deletion-restore getters
+  bool get pendingDeletionRestore => _pendingDeletionRestore;
+  DateTime? get deletionRestoreDueDate => _deletionRestoreDueDate;
+  int? get deletionRestoreDaysRemaining => _deletionRestoreDaysRemaining;
+
+  // ✅ NEW: Pending reactivation getter
+  bool get pendingReactivation => _pendingReactivation;
 
   // ====================
   // PRIVATE SETTERS (UPDATED)
@@ -143,6 +167,30 @@ class AppState extends ChangeNotifier {
   void _setCurrentUser(User? value) {
     if (_currentUser != value) {
       _currentUser = value;
+      notifyListeners();
+    }
+  }
+
+  // ✅ NEW: Set pending deletion-restore state (does not touch DB)
+  void _setPendingDeletionRestore({
+    required bool pending,
+    DateTime? dueDate,
+    int? daysRemaining,
+  }) {
+    if (_pendingDeletionRestore != pending ||
+        _deletionRestoreDueDate != dueDate ||
+        _deletionRestoreDaysRemaining != daysRemaining) {
+      _pendingDeletionRestore = pending;
+      _deletionRestoreDueDate = dueDate;
+      _deletionRestoreDaysRemaining = daysRemaining;
+      notifyListeners();
+    }
+  }
+
+  // ✅ NEW: Set pending reactivation state (does not touch DB)
+  void _setPendingReactivation(bool value) {
+    if (_pendingReactivation != value) {
+      _pendingReactivation = value;
       notifyListeners();
     }
   }
@@ -269,6 +317,8 @@ class AppState extends ChangeNotifier {
       _setCurrentRole(null); // Clear current role
       _setCurrentEmail(null);
       _setLoginProvider(null);
+      _setPendingDeletionRestore(pending: false); // ✅ clear any pending state
+      _setPendingReactivation(false); // ✅ clear any pending state
 
       developer.log('User logged out', name: 'AppState');
     } catch (e, stackTrace) {
@@ -299,6 +349,8 @@ class AppState extends ChangeNotifier {
       _setCurrentRole(null);
       _setCurrentEmail(null);
       _setLoginProvider(null);
+      _setPendingDeletionRestore(pending: false); // ✅ clear any pending state
+      _setPendingReactivation(false); // ✅ clear any pending state
 
       developer.log('User logged out for continue screen', name: 'AppState');
     } catch (e, stackTrace) {
@@ -329,69 +381,86 @@ class AppState extends ChangeNotifier {
     }
   }
 
-/// Check if user can access a route
-bool canAccessRoute(String route) {
-  if (_loading) return false;
+  // ============================================================
+  // ✅ NEW: EXPLICIT DELETION-RESTORE CONFIRMATION FLOW
+  // ============================================================
+  // These replace the old silent auto-restore behavior. The UI
+  // (e.g. a dialog shown right after login) must call one of
+  // these based on the user's explicit choice.
 
-  // ✅ Check if user has any active roles
-  if (_loggedIn && _roles.isEmpty) {
-    // User is logged in but has no active roles
-    switch (route) {
-      case '/reg':
-        return true;
-      case '/logout':
-        return true;
-      case '/verify-email':
-        return true;
-      default:
-        return false;
+  /// User confirmed they want to restore their scheduled-for-deletion
+  /// account. Call this only after explicit user confirmation
+  /// (e.g. tapping "Restore my account" in a dialog).
+  Future<void> confirmRestoreScheduledProfile() async {
+    final email = _currentEmail ?? _currentUser?.email;
+    if (email == null) {
+      developer.log(
+        'confirmRestoreScheduledProfile: no email available',
+        name: 'AppState',
+      );
+      return;
+    }
+
+    _setLoading(true);
+    try {
+      debugPrint('🔄 User confirmed restore for scheduled profile: $email');
+      await SessionManager.autoRestoreProfileLevelOnLogin(email: email);
+      _setPendingDeletionRestore(pending: false);
+      await refreshState();
+    } catch (e) {
+      debugPrint('❌ Error restoring profile: $e');
+      _setErrorMessage('Failed to restore your account. Please try again.');
+    } finally {
+      _setLoading(false);
     }
   }
 
-  switch (route) {
-    case '/owner':
-      return _loggedIn &&
-          _emailVerified &&
-          _profileCompleted &&
-          _currentRole == 'owner' &&
-          _roles.contains('owner');
-
-    case '/barber':
-      return _loggedIn &&
-          _emailVerified &&
-          _profileCompleted &&
-          _currentRole == 'barber' &&
-          _roles.contains('barber');
-
-    case '/customer':
-      return _loggedIn &&
-          _emailVerified &&
-          _profileCompleted &&
-          (_currentRole == 'customer' || _currentRole == null) &&
-          _roles.contains('customer');
-
-    case '/reg':
-      return _loggedIn && _emailVerified && !_profileCompleted;
-
-    case '/verify-email':
-      return _loggedIn && !_emailVerified;
-
-    case '/role-selector':
-      return _loggedIn &&
-          _emailVerified &&
-          _profileCompleted &&
-          _roles.length > 1;
-
-    case '/login':
-    case '/signup':
-    case '/continue':
-    case '/clear-data':
-      return !_loggedIn;
-
-    default:
-      return true;
+  /// User declined to restore their scheduled-for-deletion account
+  /// (respecting their original deletion request). Signs them out
+  /// rather than leaving them in a half-active state.
+  Future<void> declineRestoreAndLogout() async {
+    _setPendingDeletionRestore(pending: false);
+    await logout();
   }
-}
+
+  /// User confirmed they want to reactivate their self-deactivated
+  /// ("Deactivate All") account. Same underlying RPC as restore -
+  /// updateProfileLevelStatus(status: 'active') - since deactivation
+  /// and scheduled-deletion are both represented as inactive
+  /// profile states that this one call clears.
+  Future<void> confirmReactivateProfile() async {
+    final email = _currentEmail ?? _currentUser?.email;
+    if (email == null) {
+      developer.log(
+        'confirmReactivateProfile: no email available',
+        name: 'AppState',
+      );
+      return;
+    }
+
+    _setLoading(true);
+    try {
+      debugPrint('🔄 User confirmed reactivation for: $email');
+      await SessionManager.updateProfileLevelStatus(
+        email: email,
+        status: 'active',
+      );
+      _setPendingReactivation(false);
+      await refreshState();
+    } catch (e) {
+      debugPrint('❌ Error reactivating profile: $e');
+      _setErrorMessage('Failed to reactivate your account. Please try again.');
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  /// User declined to reactivate their deactivated account. Signs
+  /// them out rather than leaving them in a half-active state.
+  Future<void> declineReactivationAndLogout() async {
+    _setPendingReactivation(false);
+    await logout();
+  }
 
   /// Get user info
   Map<String, dynamic>? getCurrentUserInfo() {
@@ -562,163 +631,209 @@ bool canAccessRoute(String route) {
     }
   }
 
-// 🔥 FIXED: Update user profile with multiple roles using user_roles table
-Future<void> _updateUserProfile() async {
-  if (!_loggedIn) {
-    _setProfileCompleted(false);
-    _setRoles([]);
-    _setCurrentRole(null);
-    _setLoginProvider(null);
-    return;
-  }
-
-  try {
-    final supabase = Supabase.instance.client;
-    final user = supabase.auth.currentUser!;
-    final email = user.email!;
-
-    final provider =
-        user.userMetadata?['provider']?.toString().toLowerCase() ?? 'email';
-    _setLoginProvider(provider);
-    _setCurrentEmail(email);
-
-    // ✅ UPDATED: Get ONLY active user roles
-    final userRolesResponse = await supabase
-        .from('user_roles')
-        .select('''
-          role_id,
-          roles!inner (
-            name
-          ),
-          status
-        ''')
-        .eq('user_id', user.id)
-        .eq('status', 'active');
-
-    // Extract role names from active roles only
-    final List<String> roleNames = [];
-    for (var roleEntry in userRolesResponse) {
-      final role = roleEntry['roles'] as Map?;
-      if (role != null && role['name'] != null) {
-        roleNames.add(role['name'].toString());
-      }
+  // 🔥 FIXED: Update user profile with multiple roles using user_roles table
+  // ✅ SECURITY FIX: No longer silently auto-restores a
+  // scheduled-for-deletion profile. Instead it surfaces
+  // `pendingDeletionRestore` state so the UI can ask the user
+  // to explicitly confirm restoration (see
+  // confirmRestoreScheduledProfile() / declineRestoreAndLogout()
+  // above). This respects the user's original deletion request
+  // instead of silently overriding it on next login.
+  Future<void> _updateUserProfile() async {
+    if (!_loggedIn) {
+      _setProfileCompleted(false);
+      _setRoles([]);
+      _setCurrentRole(null);
+      _setLoginProvider(null);
+      _setPendingDeletionRestore(pending: false);
+      return;
     }
 
-    // Remove duplicates
-    final uniqueRoles = roleNames.toSet().toList();
+    try {
+      final supabase = Supabase.instance.client;
+      final user = supabase.auth.currentUser;
 
-    // Check if user has any active roles
-    _setProfileCompleted(uniqueRoles.isNotEmpty);
-    _setRoles(uniqueRoles);
+      if (user == null) {
+        _setProfileCompleted(false);
+        return;
+      }
 
-    // Get profile data for additional info
-    if (uniqueRoles.isNotEmpty) {
-      final profile = await supabase
-          .from('profiles')
-          .select('is_blocked, is_active, extra_data')
-          .eq('id', user.id)
-          .maybeSingle();
+      final email = user.email;
+      if (email == null) {
+        _setProfileCompleted(false);
+        return;
+      }
 
-      if (profile != null) {
-        if (profile['is_blocked'] == true) {
-          _setErrorMessage('Account blocked');
-          await logout();
-          return;
+      final provider =
+          user.userMetadata?['provider']?.toString().toLowerCase() ?? 'email';
+      _setLoginProvider(provider);
+      _setCurrentEmail(email);
+
+      // ✅ UPDATED: Get ONLY active user roles
+      final userRolesResponse = await supabase
+          .from('user_roles')
+          .select('''
+            role_id,
+            roles!inner (
+              name
+            ),
+            status
+          ''')
+          .eq('user_id', user.id)
+          .eq('status', 'active');
+
+      // Extract role names from active roles only
+      final List<String> roleNames = [];
+      for (var roleEntry in userRolesResponse) {
+        final role = roleEntry['roles'] as Map?;
+        if (role != null && role['name'] != null) {
+          roleNames.add(role['name'].toString());
         }
+      }
 
-        if (profile['is_active'] == false) {
-          // ✅ Check if scheduled for deletion
-          final extraData = profile['extra_data'] as Map<String, dynamic>? ?? {};
-          final profileStatus = extraData['profile_status'] as Map<String, dynamic>?;
-          
-          if (profileStatus != null && profileStatus['status'] == 'scheduled_for_deletion') {
-            // Auto-restore on refresh
-            debugPrint('🔄 Auto-restoring scheduled profile in AppState');
-            await SessionManager.autoRestoreProfileLevelOnLogin(email: email);
-            
-            // Refresh roles after restore
-            final restoredRoles = await supabase
-                .from('user_roles')
-                .select('''
-                  role_id,
-                  roles!inner (name),
-                  status
-                ''')
-                .eq('user_id', user.id)
-                .eq('status', 'active');
-            
-            final List<String> restoredRoleNames = [];
-            for (var roleEntry in restoredRoles) {
-              final role = roleEntry['roles'] as Map?;
-              if (role != null && role['name'] != null) {
-                restoredRoleNames.add(role['name'].toString());
-              }
-            }
-            _setRoles(restoredRoleNames);
-            _setProfileCompleted(restoredRoleNames.isNotEmpty);
-          } else {
-            _setErrorMessage('Account inactive');
+      // Remove duplicates
+      final uniqueRoles = roleNames.toSet().toList();
+
+      // Check if user has any active roles
+      _setProfileCompleted(uniqueRoles.isNotEmpty);
+      _setRoles(uniqueRoles);
+
+      // Get profile data for additional info
+      if (uniqueRoles.isNotEmpty) {
+        final profile = await supabase
+            .from('profiles')
+            .select('is_blocked, is_active, extra_data')
+            .eq('id', user.id)
+            .maybeSingle();
+
+        if (profile != null) {
+          if (profile['is_blocked'] == true) {
+            _setErrorMessage('Account blocked');
             await logout();
             return;
           }
+
+          if (profile['is_active'] == false) {
+            // ✅ Check if scheduled for deletion
+            final extraData =
+                profile['extra_data'] as Map<String, dynamic>? ?? {};
+            final profileStatus =
+                extraData['profile_status'] as Map<String, dynamic>?;
+
+            if (profileStatus != null &&
+                profileStatus['status'] == 'scheduled_for_deletion') {
+              // ✅ FIX: Do NOT auto-restore silently. Surface the
+              // pending state instead so the UI can ask the user.
+              debugPrint(
+                '⏸️ Profile scheduled for deletion - awaiting user confirmation to restore',
+              );
+
+              DateTime? dueDate;
+              int? daysRemaining;
+              final dueDateStr =
+                  profileStatus['deletion_due_date'] as String?;
+              if (dueDateStr != null) {
+                dueDate = DateTime.tryParse(dueDateStr);
+                if (dueDate != null) {
+                  daysRemaining = dueDate.difference(DateTime.now()).inDays;
+                }
+              }
+
+              _setPendingDeletionRestore(
+                pending: true,
+                dueDate: dueDate,
+                daysRemaining: daysRemaining,
+              );
+
+              // Keep profileCompleted false so routing sends the
+              // user to a safe screen until they decide, but do
+              // NOT log them out here - the confirmation dialog
+              // needs an active session to call the restore RPC.
+              _setProfileCompleted(false);
+              return;
+            } else if (profileStatus != null &&
+                profileStatus['status'] == 'inactive') {
+              // ✅ FIX: Self-deactivated via "Deactivate All" - this
+              // is a reversible, user-initiated pause, not a
+              // deletion. Symmetric with the restore flow above:
+              // surface pending state instead of a silent forced
+              // logout, so the UI can offer "Reactivate?".
+              debugPrint(
+                '⏸️ Profile deactivated - awaiting user confirmation to reactivate',
+              );
+              _setPendingReactivation(true);
+              _setProfileCompleted(false);
+              return;
+            } else {
+              // Unknown inactive state (e.g. set directly by an
+              // admin outside the profile_status flow) - no
+              // self-service option, force logout as before.
+              _setErrorMessage('Account inactive');
+              await logout();
+              return;
+            }
+          } else {
+            // Profile is active - make sure any stale pending flags are cleared
+            _setPendingDeletionRestore(pending: false);
+            _setPendingReactivation(false);
+          }
         }
       }
-    }
 
-    // Handle remember me
-    final rememberMe = await SessionManager.isRememberMeEnabled();
-    if (rememberMe && uniqueRoles.isNotEmpty) {
-      final session = supabase.auth.currentSession;
+      // Handle remember me
+      final rememberMe = await SessionManager.isRememberMeEnabled();
+      if (rememberMe && uniqueRoles.isNotEmpty) {
+        final session = supabase.auth.currentSession;
 
-      await SessionManager.saveUserProfile(
-        email: email,
-        userId: user.id,
-        name: user.userMetadata?['full_name'] ?? email.split('@').first,
-        photo:
-            user.userMetadata?['avatar_url'] ?? user.userMetadata?['picture'],
-        roles: uniqueRoles,
-        rememberMe: rememberMe,
-        provider: provider,
-        accessToken: session?.accessToken,
-        refreshToken: session?.refreshToken,
-      );
-    }
-
-    // Get current role from SessionManager
-    String? savedCurrentRole = await SessionManager.getCurrentRole();
-
-    if (savedCurrentRole == null) {
-      final pendingRole = await SessionManager.consumePendingRoleSelection(
-        email,
-      );
-      if (pendingRole != null && uniqueRoles.contains(pendingRole)) {       
-        savedCurrentRole = pendingRole;
-        await SessionManager.saveCurrentRole(pendingRole);
+        await SessionManager.saveUserProfile(
+          email: email,
+          userId: user.id,
+          name: user.userMetadata?['full_name'] ?? email.split('@').first,
+          photo:
+              user.userMetadata?['avatar_url'] ?? user.userMetadata?['picture'],
+          roles: uniqueRoles,
+          rememberMe: rememberMe,
+          provider: provider,
+          accessToken: session?.accessToken,
+          refreshToken: session?.refreshToken,
+        );
       }
-    }
 
-    // If saved role is valid, use it
-    if (savedCurrentRole != null && uniqueRoles.contains(savedCurrentRole)) {
-      _setCurrentRole(savedCurrentRole);
-    }
-    // If no saved role or saved role invalid, set first role in memory only
-    else {
-      final defaultRole = uniqueRoles.isNotEmpty ? uniqueRoles.first : null;
-      _setCurrentRole(defaultRole);
-    }
+      // Get current role from SessionManager
+      String? savedCurrentRole = await SessionManager.getCurrentRole();
 
-    developer.log(
-      'Profile updated: activeRoles=$uniqueRoles, current=$_currentRole, provider=$provider',
-      name: 'AppState',
-    );
-  } catch (e) {
-    developer.log('Profile update error: $e', name: 'AppState');
-    _setProfileCompleted(false);
-    _setRoles([]);
-    _setCurrentRole(null);
-    _setLoginProvider(null);
+      if (savedCurrentRole == null) {
+        final pendingRole = await SessionManager.consumePendingRoleSelection(
+          email,
+        );
+        if (pendingRole != null && uniqueRoles.contains(pendingRole)) {
+          savedCurrentRole = pendingRole;
+          await SessionManager.saveCurrentRole(pendingRole);
+        }
+      }
+
+      // If saved role is valid, use it
+      if (savedCurrentRole != null && uniqueRoles.contains(savedCurrentRole)) {
+        _setCurrentRole(savedCurrentRole);
+      }
+      // If no saved role or saved role invalid, set first role in memory only
+      else {
+        final defaultRole = uniqueRoles.isNotEmpty ? uniqueRoles.first : null;
+        _setCurrentRole(defaultRole);
+      }
+
+      developer.log(
+        'Profile updated: activeRoles=$uniqueRoles, current=$_currentRole, provider=$provider',
+        name: 'AppState',
+      );
+    } catch (e) {
+      developer.log('Profile update error: $e', name: 'AppState');
+      _setProfileCompleted(false);
+      _setRoles([]);
+      _setCurrentRole(null);
+      _setLoginProvider(null);
+    }
   }
-}
 
   /// Initialize user roles from database
   Future<void> initializeUserRole(String userId) async {
@@ -801,6 +916,8 @@ Future<void> _updateUserProfile() async {
     _setRememberMeEnabled(false);
     _setLoginProvider(null);
     _setCurrentEmail(null);
+    _setPendingDeletionRestore(pending: false);
+    _setPendingReactivation(false);
   }
 
   /// Email verification error handler

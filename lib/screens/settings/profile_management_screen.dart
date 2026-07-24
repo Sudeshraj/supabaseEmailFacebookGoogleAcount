@@ -274,6 +274,14 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
   // ============================================================
   // 🔥 PROFILE LEVEL ACTIONS
   // ============================================================
+  // ✅ NOTE: Complete profile *deletion* is intentionally not
+  // available from this screen anymore. Deleting the entire
+  // account is now handled exclusively by Settings → Delete
+  // Account (a dedicated, clearly-labeled screen), so there is
+  // a single, unambiguous path for that destructive action -
+  // matching Google Play / Apple App Store discoverability
+  // requirements. Deactivate/Reactivate All remain here since
+  // they're a non-destructive pause, not a deletion request.
 
   /// ✅ Deactivate entire profile
   Future<void> _deactivateCompleteProfile(ProfileData profile) async {
@@ -369,93 +377,6 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
     }
   }
 
-  /// ✅ Schedule complete profile deletion (3 months grace period)
-  Future<void> _scheduleCompleteProfileDeletion(ProfileData profile) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Delete Complete Profile?'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Are you sure you want to delete your entire profile?',
-              style: const TextStyle(fontSize: 16),
-            ),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.blue.withValues(alpha: 0.05),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.blue.withValues(alpha: 0.2)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: const [
-                  Text(
-                    '📌 What happens next? (Facebook style)',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                  ),
-                  SizedBox(height: 8),
-                  Text(
-                    '• Your entire profile will be deactivated immediately\n'
-                    '• All your roles will be deactivated\n'
-                    '• You have 90 days to reactivate it\n'
-                    '• After 90 days, it will be permanently deleted\n',
-                    style: TextStyle(fontSize: 13, height: 1.5),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.green.withValues(alpha: 0.05),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.green.withValues(alpha: 0.2)),
-              ),
-              child: const Row(
-                children: [
-                  Icon(Icons.restore, color: Colors.green),
-                  SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'You can restore your profile at any time within 90 days by logging in or clicking "Reactivate".',
-                      style: TextStyle(fontSize: 12, color: Colors.green),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Schedule Deletion'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm == true) {
-      // ✅ Schedule profile level deletion
-      await _updateProfileLevelStatus(profile, 'scheduled_for_deletion');
-    }
-  }
-
   /// ✅ Update profile level status
   Future<void> _updateProfileLevelStatus(
     ProfileData profile,
@@ -503,117 +424,6 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
       if (mounted) setState(() => _isLoading = false);
     }
   }
-
-  // ============================================================
-  // 🔥 COMPLETE PROFILE DELETE (Immediate - Admin only)
-  // ============================================================
-  // Future<void> _deleteCompleteProfileImmediate(ProfileData profile) async {
-  //   // ✅ Show warning dialog
-  //   final confirm = await showDialog<bool>(
-  //     context: context,
-  //     builder: (context) => AlertDialog(
-  //       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-  //       title: const Text(
-  //         '⚠️ Permanently Delete Profile?',
-  //         style: TextStyle(color: Colors.red),
-  //       ),
-  //       content: Column(
-  //         mainAxisSize: MainAxisSize.min,
-  //         crossAxisAlignment: CrossAxisAlignment.start,
-  //         children: const [
-  //           Text(
-  //             'This will permanently delete your entire profile immediately.',
-  //             style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-  //           ),
-  //           SizedBox(height: 12),
-  //           Text('• All your roles will be removed'),
-  //           Text('• All your data will be deleted'),
-  //           Text('• This action cannot be undone'),
-  //           SizedBox(height: 12),
-  //           Text(
-  //             'Are you sure you want to proceed?',
-  //             style: TextStyle(fontWeight: FontWeight.bold),
-  //           ),
-  //         ],
-  //       ),
-  //       actions: [
-  //         TextButton(
-  //           onPressed: () => Navigator.pop(context, false),
-  //           child: const Text('Cancel'),
-  //         ),
-  //         ElevatedButton(
-  //           onPressed: () => Navigator.pop(context, true),
-  //           style: ElevatedButton.styleFrom(
-  //             backgroundColor: Colors.red,
-  //             foregroundColor: Colors.white,
-  //           ),
-  //           child: const Text('Delete Permanently'),
-  //         ),
-  //       ],
-  //     ),
-  //   );
-
-  //   if (confirm != true) return;
-
-  //   setState(() => _isLoading = true);
-
-  //   try {
-  //     final supabase = Supabase.instance.client;
-  //     final user = supabase.auth.currentUser;
-
-  //     if (user == null) throw Exception('User not found');
-
-  //     debugPrint('🗑️ Deleting complete profile immediately: ${profile.email}');
-
-  //     // ✅ Use SessionManager to delete complete profile
-  //     final success = await SessionManager.deleteCompleteProfile(
-  //       email: profile.email,
-  //       userId: user.id,
-  //     );
-
-  //     if (!success) {
-  //       throw Exception('Failed to delete profile');
-  //     }
-
-  //     debugPrint('✅ Complete profile deleted successfully');
-
-  //     if (mounted) {
-  //       ScaffoldMessenger.of(context).showSnackBar(
-  //         const SnackBar(
-  //           content: Text('✅ Profile deleted permanently'),
-  //           backgroundColor: Colors.green,
-  //           duration: Duration(seconds: 3),
-  //         ),
-  //       );
-  //     }
-
-  //     // ✅ Check remaining profiles
-  //     final remainingProfiles = await SessionManager.getRemainingProfiles(
-  //       profile.email,
-  //     );
-
-  //     if (remainingProfiles.isEmpty) {
-  //       if (mounted) {
-  //         await supabase.auth.signOut();
-  //         await appState.refreshState();
-  //         if (!mounted) return;
-  //         context.go('/login');
-  //       }
-  //     } else {
-  //       await _loadProfiles();
-  //       await appState.refreshState();
-  //     }
-  //   } catch (e) {
-  //     debugPrint('❌ Error deleting profile: $e');
-  //     if (mounted) {
-  //       ScaffoldMessenger.of(context).showSnackBar(
-  //         SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-  //       );
-  //     }
-  //   } finally {
-  //     if (mounted) setState(() => _isLoading = false);
-  //   }
-  // }
 
   // ============================================================
   // 🔥 PROFILE ACTIONS
@@ -1376,6 +1186,9 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
                   ),
 
                 // ✅ Profile Level Actions (Only show if profile level exists)
+                // ✅ NOTE: "Delete All" removed - complete account
+                // deletion now lives exclusively in
+                // Settings → Delete Account.
                 if (isProfileLevel) ...[
                   // Deactivate Complete Profile
                   if (isActive && !isBlocked)
@@ -1394,31 +1207,22 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
                       color: Colors.green,
                       onPressed: () => _reactivateCompleteProfile(profile),
                     ),
-
-                  // Schedule Complete Profile Deletion
-                  if ((isActive || isInactive) && !isBlocked)
-                    _buildActionButton(
-                      icon: Icons.delete_forever,
-                      label: 'Delete All',
-                      color: Colors.red,
-                      isDestructive: true,
-                      onPressed: () =>
-                          _scheduleCompleteProfileDeletion(profile),
-                    ),
                 ],
-
-                // ✅ Immediate Delete (Hidden - Admin only)
-                // Uncomment if needed for admin
-                // if (!isBlocked)
-                //   _buildActionButton(
-                //     icon: Icons.delete_sweep,
-                //     label: 'Delete Permanently',
-                //     color: Colors.red.shade900,
-                //     isDestructive: true,
-                //     onPressed: () => _deleteCompleteProfileImmediate(profile),
-                //   ),
               ],
             ),
+
+            // ✅ Hint pointing to the single, canonical place to
+            // delete the whole account.
+            if (isProfileLevel && !isScheduledForDeletion) ...[
+              const SizedBox(height: 12),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: Text(
+                  'Want to delete your entire account? Go to Settings → Delete Account.',
+                  style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                ),
+              ),
+            ],
           ],
         ),
       ),

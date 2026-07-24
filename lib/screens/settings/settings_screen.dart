@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:flutter_application_1/main.dart';
 import 'package:flutter_application_1/services/auth_provider_service.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -13,6 +14,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final AuthProviderService _authService = AuthProviderService();
   bool _hasEmailPassword = false;
   bool _hasOAuth = false;
+  int _oauthCount = 0;
   bool _isLoading = true;
 
   @override
@@ -27,6 +29,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final providers = await _authService.getUserAuthProviders();
       _hasEmailPassword = providers.any((p) => p['is_email_password'] == true);
       _hasOAuth = providers.any((p) => p['is_oauth'] == true);
+      _oauthCount = providers.where((p) => p['is_oauth'] == true).length;
     } catch (e) {
       debugPrint('❌ Error checking auth providers: $e');
     } finally {
@@ -76,7 +79,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                   title: const Text('Manage Profiles'),
-                  subtitle: const Text('Switch, deactivate, or delete profiles'),
+                  subtitle: const Text('Switch between your owner, barber, or customer roles'),
                   trailing: const Icon(Icons.arrow_forward_ios, size: 16),
                   onTap: () {
                     context.push('/settings/profiles');
@@ -158,7 +161,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             ),
                           ),
                           child: Text(
-                            '${_getOAuthCount()}',
+                            '$_oauthCount',
                             style: TextStyle(
                               fontSize: 10,
                               color: Colors.green[700],
@@ -172,6 +175,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   onTap: () {
                     context.push('/settings/auth');
+                  },
+                ),
+
+                // ✅ DELETE ACCOUNT - Dedicated, clearly-labeled entry
+                // Required for Google Play & Apple App Store discoverability
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.red.withValues(alpha: 0.1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.delete_forever_outlined,
+                      color: Colors.red,
+                    ),
+                  ),
+                  title: const Text('Delete Account'),
+                  subtitle: const Text('Permanently delete your account and data'),
+                  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                  onTap: () {
+                    context.push('/settings/delete-account');
                   },
                 ),
 
@@ -195,8 +220,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   subtitle: const Text('Manage your notification preferences'),
                   trailing: const Icon(Icons.arrow_forward_ios, size: 16),
                   onTap: () {
-                    // Get current role for notifications
-                    final role = 'customer'; // You can get from SessionManager
+                    // ✅ FIXED: use actual current role instead of hardcoded 'customer'
+                    final role = appState.currentRole ?? 'customer';
                     context.push('/notifications?role=$role');
                   },
                 ),
@@ -280,12 +305,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ],
             ),
     );
-  }
-
-  int _getOAuthCount() {
-    // This would come from AuthProviderService
-    // For now, return a placeholder
-    return 0;
   }
 
   Widget _buildSectionHeader(String title) {

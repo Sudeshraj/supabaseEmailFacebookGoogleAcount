@@ -164,6 +164,9 @@ class SessionManager {
     }
   }
 
+  static const String _keySalonId = 'salon_id';
+  static const String _keySalonName = 'salon_name';
+
   // =====================================================
   // ✅ MAIN PROFILE FUNCTIONS
   // =====================================================
@@ -1977,8 +1980,34 @@ class SessionManager {
     }
   }
 
-  static Future<void> requestDataDeletion(String email) async {
+  /// ✅ FIXED: Now actually triggers the server-side deletion
+  /// schedule (via updateProfileLevelStatus, same RPC path used
+  /// by DeleteAccountScreen) instead of only flipping a local
+  /// flag.
+  ///
+  /// Previously this function set 'dataDeletionRequested' = true
+  /// locally but never told the database anything - the account
+  /// stayed fully active on the server despite the app claiming
+  /// deletion was "requested". That mismatch is a GDPR / App
+  /// Store compliance gap; this fix closes it.
+  static Future<bool> requestDataDeletion(String email) async {
     try {
+      debugPrint('📝 Requesting data deletion for: $email');
+
+      // ✅ Actually schedule deletion on the server (90-day grace
+      // period, same as the in-app "Delete Account" flow).
+      final success = await updateProfileLevelStatus(
+        email: email,
+        status: 'scheduled_for_deletion',
+        gracePeriodDays: 90,
+      );
+
+      if (!success) {
+        debugPrint('❌ Server-side deletion scheduling failed for: $email');
+        return false;
+      }
+
+      // ✅ Also record the request locally for reference/audit
       final profiles = await getProfiles();
       final index = profiles.indexWhere((p) => p['email'] == email);
 
@@ -1994,12 +2023,13 @@ class SessionManager {
           await _secureStorage.delete(key: '${userId}_refresh_token');
           await _secureStorage.delete(key: '${userId}_access_token');
         }
-
-        await clearUserRoles(email);
-        debugPrint('✅ Data deletion requested for: $email');
       }
+
+      debugPrint('✅ Data deletion requested and scheduled for: $email');
+      return true;
     } catch (e) {
       debugPrint('❌ Error requesting data deletion: $e');
+      return false;
     }
   }
 
@@ -2635,6 +2665,63 @@ class SessionManager {
       }
     } catch (e) {
       debugPrint('❌ Error in autoRestoreRoleOnLogin: $e');
+    }
+  }
+
+  // ============================================================
+  // 🔥 SALON MANAGEMENT - ✅ FIXED
+  // ============================================================
+
+  static Future<void> saveSalonId(String salonId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_keySalonId, salonId);
+      if (kDebugMode) debugPrint('✅ Salon ID saved: $salonId');
+    } catch (e) {
+      if (kDebugMode) debugPrint('❌ Error saving salon ID: $e');
+    }
+  }
+
+  // ✅ FIXED: Added async and await
+  static Future<String?> getSalonId() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString(_keySalonId);
+    } catch (e) {
+      if (kDebugMode) debugPrint('❌ Error getting salon ID: $e');
+      return null;
+    }
+  }
+
+  static Future<void> saveSalonName(String salonName) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_keySalonName, salonName);
+      if (kDebugMode) debugPrint('✅ Salon name saved: $salonName');
+    } catch (e) {
+      if (kDebugMode) debugPrint('❌ Error saving salon name: $e');
+    }
+  }
+
+  // ✅ FIXED: Added async and await
+  static Future<String?> getSalonName() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString(_keySalonName);
+    } catch (e) {
+      if (kDebugMode) debugPrint('❌ Error getting salon name: $e');
+      return null;
+    }
+  }
+
+  static Future<void> clearSalonData() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_keySalonId);
+      await prefs.remove(_keySalonName);
+      if (kDebugMode) debugPrint('✅ Salon data cleared');
+    } catch (e) {
+      if (kDebugMode) debugPrint('❌ Error clearing salon data: $e');
     }
   }
 }

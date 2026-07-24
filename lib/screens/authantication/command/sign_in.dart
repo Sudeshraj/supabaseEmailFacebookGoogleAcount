@@ -72,9 +72,6 @@ class _SignInScreenState extends State<SignInScreen>
   bool _loadingApple = false;
   bool _userChangedRememberMe = false;
 
-  // ✅ Reset first load flag
-  bool _isFirstLoad = true;
-
   // Animation
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
@@ -103,8 +100,6 @@ class _SignInScreenState extends State<SignInScreen>
   @override
   void initState() {
     super.initState();
-
-    _isFirstLoad = true;
 
     // Initialize GoogleSignInService with check to prevent multiple initializations
     _googleSignInService = GoogleSignInService();
@@ -562,7 +557,6 @@ class _SignInScreenState extends State<SignInScreen>
         refreshToken: session?.refreshToken,
       );
 
-      appState.refreshState();
       if (!mounted) return;
 
       await _handlePostLogin(user.id);
@@ -1129,188 +1123,6 @@ class _SignInScreenState extends State<SignInScreen>
     }
   }
 
-  /// ✅ Check if session is valid before RPC calls
-  bool _hasValidSession() {
-    try {
-      final session = supabase.auth.currentSession;
-      if (session == null) return false;
-
-      if (session.expiresAt != null) {
-        final expiryTime = DateTime.fromMillisecondsSinceEpoch(
-          session.expiresAt!,
-        );
-        return DateTime.now().isBefore(expiryTime);
-      }
-      return true;
-    } catch (e) {
-      return false;
-    }
-  }
-
-  // ============================================================
-  // ✅ CHECK AND RESTORE SCHEDULED PROFILES (COMPLETE)
-  // ============================================================
-  Future<void> _checkAndRestoreScheduledProfiles(
-    String userId,
-    String email,
-  ) async {
-    // ✅ Skip if not first load (prevents error on refresh)
-    if (!_isFirstLoad) {
-      debugPrint('⏭️ Skipping restore check on refresh');
-      return;
-    }
-
-    // ✅ Check if session is valid before RPC calls
-    if (!_hasValidSession()) {
-      debugPrint('⏭️ Skipping restore check (no valid session)');
-      _isFirstLoad = false;
-      return;
-    }
-    try {
-      debugPrint('🔍 Checking for scheduled profile deletions...');
-
-      // ✅ 1. Check role level scheduled deletions
-      final scheduledRoles = await supabase
-          .from('user_roles')
-          .select('''
-          role_id,
-          roles!inner (
-            id,
-            name,
-            description
-          ),
-          status,
-          created_at,
-          updated_at
-        ''')
-          .eq('user_id', userId)
-          .eq('status', 'scheduled_for_deletion');
-
-      // ✅ 2. Check profile level scheduled deletions
-      final profileCheck = await supabase
-          .from('profiles')
-          .select('''
-          id,
-          email,
-          full_name,
-          extra_data,
-          is_active,
-          is_blocked,
-          created_at,
-          updated_at
-        ''')
-          .eq('id', userId)
-          .maybeSingle();
-
-      // ✅ 3. Check if any scheduled deletions exist
-      bool hasScheduledDeletions = false;
-
-      // Check role level
-      if (scheduledRoles.isNotEmpty) {
-        hasScheduledDeletions = true;
-        debugPrint(
-          '🔄 Found ${scheduledRoles.length} scheduled role(s) to restore',
-        );
-
-        for (var roleEntry in scheduledRoles) {
-          final role = roleEntry['roles'] as Map?;
-          if (role != null && role['name'] != null) {
-            final roleName = role['name'].toString();
-            final roleId = roleEntry['role_id'];
-            final status =
-                roleEntry['status'] as String? ?? 'scheduled_for_deletion';
-
-            debugPrint(
-              '📋 Scheduled role: $roleName (ID: $roleId, Status: $status)',
-            );
-
-            // ✅ Auto-restore role
-            try {
-              await SessionManager.autoRestoreProfileOnLogin(
-                email: email,
-                role: roleName,
-              );
-              debugPrint('✅ Role auto-restored: $roleName');
-            } catch (e) {
-              debugPrint('⚠️ Failed to auto-restore role $roleName: $e');
-              // Continue with next role
-            }
-          }
-        }
-      }
-
-      // Check profile level
-      if (profileCheck != null) {
-        final extraData =
-            profileCheck['extra_data'] as Map<String, dynamic>? ?? {};
-        final profileStatus =
-            extraData['profile_status'] as Map<String, dynamic>?;
-
-        if (profileStatus != null &&
-            profileStatus['status'] == 'scheduled_for_deletion') {
-          hasScheduledDeletions = true;
-          final dueDate = profileStatus['deletion_due_date'] as String?;
-          final gracePeriodDays =
-              profileStatus['grace_period_days'] as int? ?? 90;
-
-          debugPrint(
-            '📋 Scheduled entire profile - Due: $dueDate, Grace: $gracePeriodDays days',
-          );
-
-          // ✅ Auto-restore entire profile
-          try {
-            await SessionManager.autoRestoreProfileLevelOnLogin(email: email);
-            debugPrint('✅ Entire profile auto-restored');
-          } catch (e) {
-            debugPrint('⚠️ Failed to auto-restore entire profile: $e');
-          }
-        }
-      }
-
-      // ✅ 4. If no scheduled deletions found
-      if (!hasScheduledDeletions) {
-        debugPrint('📭 No scheduled profiles to restore');
-      }
-
-      // ✅ 5. Update profile status in local storage if restored
-      if (hasScheduledDeletions) {
-        // Refresh available profiles
-        final availableProfiles = await SessionManager.getAvailableProfiles();
-        final updatedProfiles = availableProfiles.map((p) {
-          if (p['email'] == email) {
-            return {
-              ...p,
-              'status': 'active',
-              'is_active': true,
-              'is_scheduled_for_deletion': false,
-              'restored_at': DateTime.now().toIso8601String(),
-            };
-          }
-          return p;
-        }).toList();
-        await SessionManager.saveAvailableProfiles(updatedProfiles);
-        debugPrint('✅ Available profiles updated after restoration');
-
-        // Show success message if any profiles were restored
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('✅ Your profiles have been restored!'),
-              backgroundColor: Colors.green,
-              duration: Duration(seconds: 2),
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      debugPrint('❌ Error restoring scheduled profiles: $e');
-      // Don't throw - just log error
-    } finally {
-      // ✅ Mark as done after first run (prevents error on refresh)
-      _isFirstLoad = false;
-    }
-  }
-
   Future<void> _signInWithGoogle() async {
     if (_loadingGoogle) return;
 
@@ -1490,6 +1302,16 @@ class _SignInScreenState extends State<SignInScreen>
     }
   }
 
+  // ✅ SIMPLIFIED: no more manual role fetch / status checks / direct
+  // navigation here. Save the profile locally, then hand off entirely
+  // to _handlePostLogin() -> appState.refreshState() -> the central
+  // GoRouter redirect logic in main.dart, which owns:
+  //   - blocked/inactive/scheduled-for-deletion handling
+  //   - the restore/reactivate confirmation dialogs
+  //   - role-selector vs single-role vs no-active-roles routing
+  //   - the "recoverable roles" smart redirect
+  // Duplicating any of that logic here would let it get out of sync
+  // with main.dart and silently re-introduce the auto-restore bug.
   Future<void> _completeGoogleSignIn({
     required User user,
     required Session? session,
@@ -1517,21 +1339,7 @@ class _SignInScreenState extends State<SignInScreen>
       );
     }
 
-    // ✅ Check for scheduled deletions and auto-restore - HERE
-    await _checkAndRestoreScheduledProfiles(user.id, user.email!);
-
-    final userRolesResponse = await supabase
-        .from('user_roles')
-        .select('role_id')
-        .eq('user_id', user.id);
-
-    if (userRolesResponse.isEmpty) {
-      if (mounted) {
-        context.go('/reg');
-        return;
-      }
-    }
-
+    if (!mounted) return;
     await _handlePostLogin(user.id);
   }
 
@@ -1677,6 +1485,7 @@ class _SignInScreenState extends State<SignInScreen>
     );
   }
 
+  // ✅ SIMPLIFIED - see note on _completeGoogleSignIn above.
   Future<void> _completeFacebookSignIn({
     required User user,
     required Session? session,
@@ -1703,20 +1512,8 @@ class _SignInScreenState extends State<SignInScreen>
         consentedAt: DateTime.now(),
       );
     }
-    // ✅ Check for scheduled deletions and auto-restore - HERE
-    await _checkAndRestoreScheduledProfiles(user.id, user.email!);
-    final userRolesResponse = await supabase
-        .from('user_roles')
-        .select('role_id')
-        .eq('user_id', user.id);
 
-    if (userRolesResponse.isEmpty) {
-      if (mounted) {
-        context.go('/reg');
-        return;
-      }
-    }
-
+    if (!mounted) return;
     await _handlePostLogin(user.id);
   }
 
@@ -1800,6 +1597,26 @@ class _SignInScreenState extends State<SignInScreen>
             final session = response.session;
 
             if (user != null && mounted) {
+              // ✅ NEW: Capture and store Apple's one-time
+              // authorization code. This is the ONLY moment it's
+              // available - required later so DeleteAccountScreen
+              // can revoke the Apple credential (App Store
+              // Guideline 5.1.1(v)). Non-fatal if this fails; we
+              // still complete sign-in either way.
+              if (credential.authorizationCode.isNotEmpty) {
+                try {
+                  await supabase.functions.invoke(
+                    'save-apple-auth-code',
+                    body: {
+                      'authorizationCode': credential.authorizationCode,
+                    },
+                  );
+                  debugPrint('✅ Apple authorization code saved for revocation later');
+                } catch (e) {
+                  debugPrint('⚠️ Failed to save Apple authorization code: $e');
+                }
+              }
+
               await _completeAppleSignIn(
                 user: user,
                 session: session,
@@ -1878,6 +1695,7 @@ class _SignInScreenState extends State<SignInScreen>
     );
   }
 
+  // ✅ SIMPLIFIED - see note on _completeGoogleSignIn above.
   Future<void> _completeAppleSignIn({
     required User user,
     required Session? session,
@@ -1905,178 +1723,33 @@ class _SignInScreenState extends State<SignInScreen>
         consentedAt: DateTime.now(),
       );
     }
-    // ✅ Check for scheduled deletions and auto-restore - HERE
-    await _checkAndRestoreScheduledProfiles(user.id, user.email!);
-    final userRolesResponse = await supabase
-        .from('user_roles')
-        .select('role_id')
-        .eq('user_id', user.id);
 
-    if (userRolesResponse.isEmpty) {
-      if (mounted) {
-        context.go('/reg');
-        return;
-      }
-    }
-
+    if (!mounted) return;
     await _handlePostLogin(user.id);
   }
 
+  // ============================================================
+  // ✅ SIMPLIFIED: _handlePostLogin() no longer does manual
+  // is_active/is_blocked checks or role-based navigation. All of
+  // that now lives in ONE place - AppState._updateUserProfile()
+  // (blocked/inactive/scheduled-for-deletion handling, surfaced
+  // via pendingDeletionRestore/pendingReactivation) and the
+  // GoRouter redirect() in main.dart (dashboard/role-selector/
+  // registration/recoverable-roles routing). Duplicating that
+  // logic here previously caused the confirmation dialogs to be
+  // silently bypassed - this keeps a single source of truth.
+  // ============================================================
   Future<void> _handlePostLogin(String userId) async {
+    if (!mounted) return;
+
     try {
-      if (!mounted) return;
-
-      await Future.delayed(const Duration(seconds: 1));
-
-      final user = supabase.auth.currentUser;
-      if (user == null || user.email == null) {
-        if (mounted) context.go('/');
-        return;
-      }
-
-      final email = user.email!;
-
-      final profileCheck = await supabase
-          .from('profiles')
-          .select('is_blocked, is_active')
-          .eq('id', userId)
-          .maybeSingle();
-
-      if (profileCheck != null) {
-        if (profileCheck['is_blocked'] == true) {
-          await supabase.auth.signOut();
-          await SessionManager.removeProfile(email);
-          if (mounted) {
-            await showCustomAlert(
-              context: context,
-              title: "Account Blocked 🚫",
-              message: "Your account has been blocked. Please contact support.",
-              isError: true,
-            );
-            if (mounted) context.go('/login');
-          }
-          return;
-        }
-
-        if (profileCheck['is_active'] == false) {
-          await supabase.auth.signOut();
-          await SessionManager.removeProfile(email);
-          if (mounted) {
-            await showCustomAlert(
-              context: context,
-              title: "Account Inactive ⚠️",
-              message: "Your account is deactivated.",
-              isError: true,
-            );
-            if (mounted) context.go('/login');
-          }
-          return;
-        }
-      }
-
-      final userRolesResponse = await supabase
-          .from('user_roles')
-          .select('''
-      role_id,
-      roles!inner (
-        name
-      ),
-      status
-    ''')
-          .eq('user_id', userId)
-          .eq('status', 'active');
-
-      debugPrint('📋 Active user roles response: $userRolesResponse');
-
-      final List<String> roleNames = [];
-      for (var roleEntry in userRolesResponse) {
-        final role = roleEntry['roles'] as Map?;
-        if (role != null && role['name'] != null) {
-          roleNames.add(role['name'].toString());
-        }
-      }
-
-      debugPrint('📋 Extracted role names: $roleNames');
-
-      await SessionManager.saveUserRoles(email: email, roles: roleNames);
-
-      if (roleNames.isEmpty) {
-        debugPrint('⚠️ No roles found, redirecting to /reg');
-        if (mounted) context.go('/reg');
-        return;
-      }
-
-      if (roleNames.length == 1) {
-        final singleRole = roleNames.first;
-        debugPrint('✅ Single role: $singleRole, saving and redirecting');
-
-        await SessionManager.saveCurrentRole(singleRole);
-        await appState.refreshState();
-
-        if (!mounted) return;
-
-        switch (singleRole) {
-          case 'owner':
-            context.go('/owner');
-            break;
-          case 'barber':
-            context.go('/barber');
-            break;
-          case 'customer':
-            context.go('/customer');
-            break;
-          default:
-            context.go('/');
-            break;
-        }
-        return;
-      }
-
-      if (roleNames.length > 1) {
-        debugPrint('🔄 Multiple roles: $roleNames');
-
-        final savedRole = await SessionManager.getCurrentRole();
-        debugPrint('📋 Saved role from SessionManager: $savedRole');
-
-        if (savedRole != null && roleNames.contains(savedRole)) {
-          debugPrint('✅ Using saved role: $savedRole');
-          await SessionManager.saveCurrentRole(savedRole);
-          await appState.refreshState();
-
-          if (!mounted) return;
-
-          switch (savedRole) {
-            case 'owner':
-              context.go('/owner');
-              break;
-            case 'barber':
-              context.go('/barber');
-              break;
-            default:
-              context.go('/customer');
-              break;
-          }
-          return;
-        }
-
-        debugPrint('🔄 No saved role, going to role selector');
-        if (mounted) {
-          context.go(
-            '/role-selector',
-            extra: {'roles': roleNames, 'email': email, 'userId': userId},
-          );
-        }
-        return;
-      }
-
-      debugPrint('⚠️ Fallback - refreshing app state');
-      appState.refreshState();
-      if (mounted) context.go('/');
+      await appState.refreshState();
     } catch (e) {
-      debugPrint('❌ Post-login error: $e');
-      appState.refreshState();
-      if (mounted) context.go('/');
+      debugPrint('❌ Error refreshing app state after login: $e');
     }
+
+    if (!mounted) return;
+    context.go('/');
   }
 
   String _getOAuthErrorMessage(AuthException e, String provider) {
@@ -2262,7 +1935,7 @@ $provider OAuth Configuration Required:
                             ],
                           ),
                         ),
-                      
+
                       // Main content - scrollable
                       Expanded(
                         child: SingleChildScrollView(

@@ -21,8 +21,10 @@ import 'package:flutter_application_1/screens/customer/my_bookings_screen.dart';
 import 'package:flutter_application_1/screens/customer/offers_screen.dart';
 import 'package:flutter_application_1/screens/customer/salon_profile_screen.dart';
 import 'package:flutter_application_1/screens/customer/vip_booking_screen.dart';
+import 'package:flutter_application_1/screens/owner/customer_list_screen.dart';
 import 'package:flutter_application_1/screens/settings/auth_settings_screen.dart';
 import 'package:flutter_application_1/screens/settings/change_password_screen.dart';
+import 'package:flutter_application_1/screens/settings/delete_account_screen.dart';
 import 'package:flutter_application_1/screens/settings/notification_screen.dart';
 import 'package:flutter_application_1/screens/owner/add_barber_screen.dart';
 import 'package:flutter_application_1/screens/owner/add_barber_service_screen.dart';
@@ -87,9 +89,7 @@ StreamSubscription<Uri>? _linkSubscription;
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   // Background isolate එකක් නිසා Firebase වෙනම initialize කරන්න ඕන
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   debugPrint('📨 Background message received: ${message.messageId}');
   debugPrint('📨 Background message data: ${message.data}');
 }
@@ -283,6 +283,35 @@ void _navigateTo(String location, {Object? extra}) {
 // ====================
 // PLATFORM CONFIG
 // ====================
+// ====================
+// ROLE RECOVERY CHECK
+// ====================
+/// ✅ NEW: Used by the router redirect logic. When a user has
+/// zero *active* roles (appState.roles.isEmpty), this checks
+/// whether they actually have role(s) that are simply
+/// deactivated or scheduled for deletion, rather than having
+/// no roles at all. If so, they should be sent to
+/// Profile Management to reactivate/cancel instead of being
+/// funneled into the "new user" registration flow.
+Future<bool> _hasRecoverableRoles() async {
+  try {
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) return false;
+
+    final response = await Supabase.instance.client
+        .from('user_roles')
+        .select('id')
+        .eq('user_id', userId)
+        .inFilter('status', ['inactive', 'scheduled_for_deletion'])
+        .limit(1);
+
+    return response.isNotEmpty;
+  } catch (e) {
+    debugPrint('❌ Error checking recoverable roles: $e');
+    return false;
+  }
+}
+
 Future<void> _setupPlatformSpecificConfig() async {
   if (kIsWeb) {
     debugPrint('Configuring for Web');
@@ -382,6 +411,24 @@ GoRouter _createRouter() {
       }
 
       // ============================================
+      // 2B. PENDING DELETION-RESTORE / REACTIVATION - Park on a
+      // safe screen until the user explicitly confirms restore,
+      // reactivate, or logout (see the confirmation dialogs
+      // shown from MyApp). This prevents reaching any dashboard
+      // while their account is still technically
+      // scheduled-for-deletion OR self-deactivated.
+      // ============================================
+      if (appState.loggedIn &&
+          (appState.pendingDeletionRestore || appState.pendingReactivation) &&
+          path != '/account-restore-pending' &&
+          path != '/clear-data') {
+        debugPrint(
+          '⏸️ Pending restore/reactivation confirmation → /account-restore-pending',
+        );
+        return '/account-restore-pending';
+      }
+
+      // ============================================
       // 3. ALWAYS ACCESSIBLE ROUTES
       // ============================================
       if (path == '/clear-data') {
@@ -435,10 +482,32 @@ GoRouter _createRouter() {
               return '/verify-email';
             }
             if (!appState.profileCompleted) {
+              // ✅ FIX: Before assuming this is a brand-new/
+              // incomplete registration, check whether the user
+              // actually has role(s) that are simply deactivated
+              // or scheduled for deletion - if so, send them to
+              // Profile Management to reactivate/cancel instead
+              // of the registration flow.
+              if (appState.roles.isEmpty) {
+                final recoverable = await _hasRecoverableRoles();
+                if (recoverable) {
+                  debugPrint(
+                    '⏸️ No active roles but has recoverable roles → /settings/profiles',
+                  );
+                  return '/settings/profiles';
+                }
+              }
               debugPrint('📝 Profile not completed → /reg');
               return '/reg';
             }
             if (appState.roles.isEmpty) {
+              final recoverable = await _hasRecoverableRoles();
+              if (recoverable) {
+                debugPrint(
+                  '⏸️ No roles found but has recoverable roles → /settings/profiles',
+                );
+                return '/settings/profiles';
+              }
               debugPrint('⚠️ No roles found → /reg');
               return '/reg';
             }
@@ -513,7 +582,13 @@ GoRouter _createRouter() {
       }
 
       // Profile completion check
-      if (!appState.profileCompleted && path != '/reg') {
+      // ✅ FIX: '/settings/profiles' is exempted alongside '/reg'
+      // so a user redirected there for role recovery (see the
+      // splash screen logic above) isn't immediately bounced
+      // back to '/reg' by this later, more general check.
+      if (!appState.profileCompleted &&
+          path != '/reg' &&
+          path != '/settings/profiles') {
         debugPrint('❌ Profile not completed → /reg');
         return '/reg';
       }
@@ -719,6 +794,12 @@ GoRouter _createRouter() {
         builder: (_, _) => const VerifyInvalidScreen(),
       ),
       GoRoute(path: '/continue', builder: (_, _) => const ContinueScreen()),
+      // ✅ Parked here while the deletion-restore confirmation
+      // dialog (shown from MyApp) is awaiting the user's choice.
+      GoRoute(
+        path: '/account-restore-pending',
+        builder: (_, _) => const _PendingRestoreScreen(),
+      ),
       GoRoute(
         path: '/role-selector',
         name: 'roleSelector',
@@ -848,10 +929,22 @@ GoRouter _createRouter() {
         path: '/settings/change-password',
         builder: (context, state) => const ChangePasswordScreen(),
       ),
+      // GoRoute list එකට add කරන්න (settings routes ළඟට):
+      GoRoute(
+        path: '/settings/delete-account',
+        builder: (context, state) => const DeleteAccountScreen(),
+      ),
+
       // ============================================
       // OWNER ROUTES
       // ============================================
-
+      GoRoute(
+        path: '/owner/customers',
+        builder: (context, state) {
+          final salonId = state.uri.queryParameters['salonId'];
+          return CustomerListScreen(salonId: salonId, role: 'owner');
+        },
+      ),
       // Add Barber
       GoRoute(
         path: '/owner/add-barber',
@@ -1138,10 +1231,16 @@ class _MyAppState extends State<MyApp> {
   StreamSubscription<bool>? _networkSub;
   bool _offline = false;
 
+  // ✅ Guards against showing the restore-confirmation dialog
+  // more than once at a time (appState can notify listeners
+  // several times while pendingDeletionRestore stays true).
+  bool _restoreDialogShowing = false;
+
   @override
   void initState() {
     super.initState();
     _initNetworkMonitoring();
+    appState.addListener(_onAppStateChanged);
   }
 
   void _initNetworkMonitoring() {
@@ -1151,11 +1250,154 @@ class _MyAppState extends State<MyApp> {
     });
   }
 
+  void _onAppStateChanged() {
+    if (appState.pendingDeletionRestore && !_restoreDialogShowing) {
+      // Defer to after the current frame so the router has
+      // already navigated to /account-restore-pending.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _showRestoreDialog();
+      });
+    } else if (appState.pendingReactivation && !_restoreDialogShowing) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _showReactivateDialog();
+      });
+    }
+  }
+
+  Future<void> _showRestoreDialog() async {
+    final context = navigatorKey.currentContext;
+    if (context == null || _restoreDialogShowing) return;
+
+    _restoreDialogShowing = true;
+
+    final daysRemaining = appState.deletionRestoreDaysRemaining;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: const Row(
+            children: [
+              Icon(Icons.restore, color: Color(0xFFFF6B8B)),
+              SizedBox(width: 8),
+              Text('Restore Your Account?'),
+            ],
+          ),
+          content: Text(
+            daysRemaining != null
+                ? 'Your account is scheduled for deletion in $daysRemaining '
+                      'days. Would you like to restore it and continue using '
+                      'the app, or log out and let the deletion proceed?'
+                : 'Your account is scheduled for deletion. Would you like '
+                      'to restore it and continue using the app, or log out '
+                      'and let the deletion proceed?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () async {
+                Navigator.pop(dialogContext);
+                _restoreDialogShowing = false;
+                await appState.declineRestoreAndLogout();
+                if (navigatorKey.currentContext != null) {
+                  router.go('/login');
+                }
+              },
+              child: const Text('Log Out'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                Navigator.pop(dialogContext);
+                _restoreDialogShowing = false;
+                await appState.confirmRestoreScheduledProfile();
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFFF6B8B),
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Restore My Account'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    _restoreDialogShowing = false;
+  }
+
+  /// ✅ NEW: Symmetric with _showRestoreDialog, but for the
+  /// "Deactivate All" (self-deactivated) case rather than
+  /// scheduled-for-deletion. No due-date/grace-period wording
+  /// since a plain deactivation doesn't expire.
+  Future<void> _showReactivateDialog() async {
+    final context = navigatorKey.currentContext;
+    if (context == null || _restoreDialogShowing) return;
+
+    _restoreDialogShowing = true;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: const Row(
+            children: [
+              Icon(Icons.restore, color: Color(0xFFFF6B8B)),
+              SizedBox(width: 8),
+              Text('Reactivate Your Account?'),
+            ],
+          ),
+          content: const Text(
+            'Your account is currently deactivated. Would you like to '
+            'reactivate it and continue using the app, or log out and '
+            'keep it deactivated?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () async {
+                Navigator.pop(dialogContext);
+                _restoreDialogShowing = false;
+                await appState.declineReactivationAndLogout();
+                if (navigatorKey.currentContext != null) {
+                  router.go('/login');
+                }
+              },
+              child: const Text('Log Out'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                Navigator.pop(dialogContext);
+                _restoreDialogShowing = false;
+                await appState.confirmReactivateProfile();
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFFF6B8B),
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Reactivate My Account'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    _restoreDialogShowing = false;
+  }
+
   @override
   void dispose() {
     _networkSub?.cancel();
     _networkService.dispose();
     _linkSubscription?.cancel();
+    appState.removeListener(_onAppStateChanged);
     super.dispose();
   }
 
@@ -1200,6 +1442,23 @@ class _MyAppState extends State<MyApp> {
           ],
         );
       },
+    );
+  }
+}
+
+// ====================
+// PENDING RESTORE SCREEN
+// ====================
+// Neutral placeholder shown while the restore-confirmation
+// dialog (triggered from _MyAppState) is awaiting the user's
+// choice. The dialog itself carries the actual UI/decision.
+class _PendingRestoreScreen extends StatelessWidget {
+  const _PendingRestoreScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      body: Center(child: CircularProgressIndicator(color: Color(0xFFFF6B8B))),
     );
   }
 }

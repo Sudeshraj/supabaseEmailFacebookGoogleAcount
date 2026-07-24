@@ -104,6 +104,8 @@ class _ContinueScreenState extends State<ContinueScreen> {
   // 🔥 CHECK IF PROFILE HAS ACTIVE ROLES (SAFE VERSION)
   // ============================================================
   /// ✅ Check if profile has active roles - HYBRID VERSION
+  /// (informational filter for which profile cards to show in
+  /// this quick-access list - not an auth gate)
   Future<bool> _hasActiveRoles(String email, List<String> roles) async {
     try {
       if (roles.isEmpty) return false;
@@ -195,6 +197,10 @@ class _ContinueScreenState extends State<ContinueScreen> {
   // 🔥 GET PROFILE STATUS FROM DB (SAFE VERSION)
   // ============================================================
   /// ✅ Get profile status - HYBRID VERSION
+  /// (informational only - drives the "Inactive"/"Deleting" badge
+  /// on the card. The actual restore/reactivate decision and
+  /// blocking/dialog logic lives centrally in AppState + the
+  /// GoRouter redirect in main.dart, not here.)
   Future<Map<String, dynamic>?> _getProfileStatus(
     String email,
     String role,
@@ -581,294 +587,148 @@ class _ContinueScreenState extends State<ContinueScreen> {
   }
 
   // ============================================================
-  // 🔥 SHOW RESTORE DIALOG
+  // 🔥 HANDLE PROFILE LOGIN
+  // ✅ SIMPLIFIED: Removed the role-level "scheduled for deletion"
+  // restore dialog + cancelScheduledDeletion() call, and the
+  // "Profile Inactive - contact support" hard block. Those
+  // duplicated (and could conflict with / double-show alongside)
+  // the profile-level restore/reactivate confirmation dialogs now
+  // owned centrally by AppState + the GoRouter redirect in
+  // main.dart. This screen's job is just: authenticate, then hand
+  // off to the router. Status badges on the cards remain purely
+  // informational (see _buildProfileCard).
   // ============================================================
-  Future<bool?> _showRestoreDialog(String role, int? daysRemaining) async {
-    return await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1C1F26),
-        title: const Text(
-          "🔄 Profile Scheduled for Deletion",
-          style: TextStyle(color: Colors.orange),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              "Your $role profile is scheduled for deletion.",
-              style: const TextStyle(color: Colors.white70),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              "Login now to restore it within the grace period.",
-              style: TextStyle(
-                color: Colors.orange,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            if (daysRemaining != null) ...[
-              const SizedBox(height: 8),
-              Text(
-                "$daysRemaining days remaining",
-                style: TextStyle(
-                  color: Colors.orange.withValues(alpha: 0.7),
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text(
-              "Cancel",
-              style: TextStyle(color: Colors.white70),
-            ),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.orange,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text("Restore & Login"),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ============================================================
-  // 🔥 HANDLE PROFILE LOGIN (UPDATED)
-  // ============================================================
-Future<void> _handleProfileLogin(
-  Map<String, dynamic> profile,
-  String role,
-  String uniqueId,
-) async {
-  // ✅ FIX #1: Guard පළමුවෙන්ම දාන්න - status check/dialog await points වලට කලින්
-  // මේකෙන් double-tap එකෙන් OAuth flow එක දෙපාරක් trigger වෙන එක (PKCE code_verifier
-  // localStorage එකේ overwrite වෙන bug එක) වළක්වනවා
-  if (_profileLoadingStates[uniqueId] == true) {
-    debugPrint('⏭️ Already processing login for $uniqueId, ignoring tap');
-    return;
-  }
-
-  // ✅ FIX #2: Loading flag එක synchronous විදිහට, immediately set කරනවා
-  setState(() {
-    _profileLoadingStates[uniqueId] = true;
-  });
-
-  debugPrint('🔐 ===== _handleProfileLogin START =====');
-  debugPrint('🔐 Role: $role, UniqueId: $uniqueId');
-  debugPrint('📧 Email: ${profile['email']}');
-  debugPrint('🔑 Provider: ${profile['provider']}');
-
-  final email = profile['email'] as String?;
-  final provider = profile['provider'] as String?;
-  final status = profile['status'] as String? ?? 'active';
-
-  if (email == null) {
-    debugPrint('❌ No email found');
-    // ✅ FIX: early return - loading flag එක reset කරන්න
-    setState(() => _profileLoadingStates[uniqueId] = false);
-    return;
-  }
-
-  // ✅ Check status before login
-  if (status == 'inactive') {
-    if (mounted) {
-      await showCustomAlert(
-        context: context,
-        title: "Profile Inactive",
-        message: "This profile is inactive. Please contact support.",
-        isError: true,
-      );
-    }
-    // ✅ FIX: early return - loading flag එක reset කරන්න
-    if (mounted) {
-      setState(() => _profileLoadingStates[uniqueId] = false);
-    }
-    return;
-  }
-
-  if (status == 'deleted') {
-    if (mounted) {
-      await showCustomAlert(
-        context: context,
-        title: "Profile Deleted",
-        message: "This profile has been permanently deleted.",
-        isError: true,
-      );
-    }
-    // ✅ FIX: early return - loading flag එක reset කරන්න
-    if (mounted) {
-      setState(() => _profileLoadingStates[uniqueId] = false);
-    }
-    return;
-  }
-
-  // ✅ If scheduled for deletion, show restore dialog
-  if (status == 'scheduled_for_deletion') {
-    final daysRemaining = profile['days_remaining'] as int?;
-    final shouldRestore = await _showRestoreDialog(
-      _getRoleDisplayName(role),
-      daysRemaining,
-    );
-    if (shouldRestore != true) {
-      // ✅ FIX: early return (user cancelled restore) - loading flag එක reset කරන්න
-      if (mounted) {
-        setState(() => _profileLoadingStates[uniqueId] = false);
-      }
+  Future<void> _handleProfileLogin(
+    Map<String, dynamic> profile,
+    String role,
+    String uniqueId,
+  ) async {
+    // ✅ Guard first - before any await points - to prevent double-tap
+    // triggering the OAuth flow twice (PKCE code_verifier overwrite bug).
+    if (_profileLoadingStates[uniqueId] == true) {
+      debugPrint('⏭️ Already processing login for $uniqueId, ignoring tap');
       return;
     }
-    debugPrint('🔄 User confirmed restore on login');
-  }
 
-  // ✅ NOTE: loading state දැනටමත් true, selectedEmail විතරක් set කරනවා
-  setState(() {
-    _selectedEmail = email;
-  });
+    setState(() {
+      _profileLoadingStates[uniqueId] = true;
+    });
 
-  try {
-    bool loginSuccess = false;
+    debugPrint('🔐 ===== _handleProfileLogin START =====');
+    debugPrint('🔐 Role: $role, UniqueId: $uniqueId');
+    debugPrint('📧 Email: ${profile['email']}');
+    debugPrint('🔑 Provider: ${profile['provider']}');
 
-    debugPrint('🔄 Attempting auto login for: $email');
-    final autoSuccess = await SessionManager.tryAutoLogin(email);
+    final email = profile['email'] as String?;
+    final provider = profile['provider'] as String?;
 
-    if (autoSuccess) {
-      debugPrint('✅ Auto login successful!');
-      loginSuccess = true;
-
-      // ✅ If status was scheduled_for_deletion, cancel it
-      if (status == 'scheduled_for_deletion') {
-        await SessionManager.cancelScheduledDeletion(
-          email: email,
-          role: role,
-        );
-        debugPrint('✅ Deletion canceled on login');
-      }
-    } else if (provider == 'email') {
-      debugPrint('🔐 Email login flow started (auto-login failed)');
-      SessionManager.setLocationContinuesc(true);
-      final password = await _showPasswordDialog(email);
-      if (password != null) {
-        final response = await supabase.auth.signInWithPassword(
-          email: email,
-          password: password,
-        );
-        loginSuccess = response.user != null;
-        debugPrint('📊 Email login success: $loginSuccess');
-
-        if (loginSuccess && status == 'scheduled_for_deletion') {
-          await SessionManager.cancelScheduledDeletion(
-            email: email,
-            role: role,
-          );
-          debugPrint('✅ Deletion canceled on login');
-        }
-      }
-    } else {
-      debugPrint(
-        '🔐 OAuth login flow started for $provider (auto-login failed)',
-      );
-      loginSuccess = await _handleOAuthLoginForProfile(profile);
-      debugPrint('📊 OAuth login success: $loginSuccess');
-
-      if (loginSuccess && status == 'scheduled_for_deletion') {
-        await SessionManager.cancelScheduledDeletion(
-          email: email,
-          role: role,
-        );
-        debugPrint('✅ Deletion canceled on login');
-      }
+    if (email == null) {
+      debugPrint('❌ No email found');
+      setState(() => _profileLoadingStates[uniqueId] = false);
+      return;
     }
 
-    if (loginSuccess && mounted) {
-      debugPrint('✅ Login successful for role: $role');
+    setState(() {
+      _selectedEmail = email;
+    });
 
-      // ✅ FIX: correct email එක current user විදිහට set කරන්න role save කරන්න කලින්
-      // (getCurrentRole() එකේ stale email validation එකෙන් role clear වෙන bug එකට fix)
-      await SessionManager.setCurrentUser(email);
+    try {
+      bool loginSuccess = false;
 
-      await SessionManager.saveCurrentRole(role);
-      debugPrint('💾 Saved role: $role to SessionManager');
+      debugPrint('🔄 Attempting auto login for: $email');
+      final autoSuccess = await SessionManager.tryAutoLogin(email);
 
-      final savedRole = await SessionManager.getCurrentRole();
-      debugPrint('✅ Verified saved role: $savedRole');
-
-      final currentUser = supabase.auth.currentUser;
-      if (currentUser != null) {
-        await supabase.auth.updateUser(
-          UserAttributes(
-            data: {...currentUser.userMetadata ?? {}, 'current_role': role},
-          ),
+      if (autoSuccess) {
+        debugPrint('✅ Auto login successful!');
+        loginSuccess = true;
+      } else if (provider == 'email') {
+        debugPrint('🔐 Email login flow started (auto-login failed)');
+        SessionManager.setLocationContinuesc(true);
+        final password = await _showPasswordDialog(email);
+        if (password != null) {
+          final response = await supabase.auth.signInWithPassword(
+            email: email,
+            password: password,
+          );
+          loginSuccess = response.user != null;
+          debugPrint('📊 Email login success: $loginSuccess');
+        }
+      } else {
+        debugPrint(
+          '🔐 OAuth login flow started for $provider (auto-login failed)',
         );
-        debugPrint('📝 Updated user metadata with role: $role');
+        loginSuccess = await _handleOAuthLoginForProfile(profile);
+        debugPrint('📊 OAuth login success: $loginSuccess');
       }
 
-      await appState.refreshState();
-      await Future.delayed(const Duration(milliseconds: 300));
+      if (loginSuccess && mounted) {
+        debugPrint('✅ Login successful for role: $role');
 
-      String dashboardRoute;
-      switch (role) {
-        case 'owner':
-          dashboardRoute = '/owner';
-          break;
-        case 'barber':
-          dashboardRoute = '/barber';
-          break;
-        default:
-          dashboardRoute = '/customer';
+        // ✅ Correct email set as current user before saving role
+        // (fixes stale-email validation clearing the role in
+        // getCurrentRole()).
+        await SessionManager.setCurrentUser(email);
+        await SessionManager.saveCurrentRole(role);
+        debugPrint('💾 Saved role: $role to SessionManager');
+
+        final currentUser = supabase.auth.currentUser;
+        if (currentUser != null) {
+          await supabase.auth.updateUser(
+            UserAttributes(
+              data: {...currentUser.userMetadata ?? {}, 'current_role': role},
+            ),
+          );
+          debugPrint('📝 Updated user metadata with role: $role');
+        }
+
+        // ✅ SIMPLIFIED: hand off entirely to AppState + GoRouter.
+        // The redirect() logic in main.dart owns all of: blocked/
+        // inactive/scheduled-for-deletion handling, the restore/
+        // reactivate confirmation dialogs, role-selector vs single-
+        // role vs no-active-roles routing, and the "recoverable
+        // roles" smart redirect. No manual dashboard switch needed
+        // here - context.go('/') lets the router decide.
+        await appState.refreshState();
+        if (!mounted) return;
+        context.go('/');
+      } else {
+        debugPrint('❌ Login failed for role: $role');
+        if (mounted) {
+          await showCustomAlert(
+            context: context,
+            title: "Login Failed",
+            message: "Could not log in with this profile. Please try again.",
+            isError: true,
+          );
+        }
       }
-
-      debugPrint('📍 Redirecting to: $dashboardRoute');
-
-      if (mounted) {
-        context.go(dashboardRoute);
-      }
-    } else {
-      debugPrint('❌ Login failed for role: $role');
+    } catch (e) {
+      debugPrint('❌ Login error: $e');
       if (mounted) {
         await showCustomAlert(
           context: context,
           title: "Login Failed",
-          message: "Could not log in with this profile. Please try again.",
+          message: e.toString(),
           isError: true,
         );
       }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _profileLoadingStates[uniqueId] = false;
+          _selectedEmail = null;
+        });
+      }
+      debugPrint('🔐 ===== _handleProfileLogin END =====');
     }
-  } catch (e) {
-    debugPrint('❌ Login error: $e');
-    if (mounted) {
-      await showCustomAlert(
-        context: context,
-        title: "Login Failed",
-        message: e.toString(),
-        isError: true,
-      );
-    }
-  } finally {
-    if (mounted) {
-      setState(() {
-        _profileLoadingStates[uniqueId] = false;
-        _selectedEmail = null;
-      });
-    }
-    debugPrint('🔐 ===== _handleProfileLogin END =====');
   }
-}
 
   Future<bool> _handleOAuthLoginForProfile(Map<String, dynamic> profile) async {
     final email = profile['email'] as String?;
     final provider = profile['provider'] as String?;
     if (email == null || provider == null) return false;
-  final roles = profile['roles'] as List? ?? [];
-  final role = roles.isNotEmpty ? roles.first.toString() : 'customer';
+    final roles = profile['roles'] as List? ?? [];
+    final role = roles.isNotEmpty ? roles.first.toString() : 'customer';
     try {
       final currentUser = supabase.auth.currentUser;
       if (currentUser?.email == email) return true;
@@ -876,7 +736,7 @@ Future<void> _handleProfileLogin(
       final autoSuccess = await SessionManager.tryAutoLogin(email);
       if (autoSuccess) return true;
 
-  await SessionManager.setPendingRoleSelection(email: email, role: role);
+      await SessionManager.setPendingRoleSelection(email: email, role: role);
       switch (provider) {
         case 'google':
           await supabase.auth.signInWithOAuth(
@@ -1026,7 +886,7 @@ Future<void> _handleProfileLogin(
   }
 
   // ============================================================
-  // 🔥 PROFILE CARD (UPDATED WITH STATUS)
+  // 🔥 PROFILE CARD (Status badge remains informational-only)
   // ============================================================
   Widget _buildProfileCard(Map<String, dynamic> profile, int index) {
     final email = profile['email'] as String? ?? 'Unknown';
@@ -1047,7 +907,8 @@ Future<void> _handleProfileLogin(
     final roleDisplayName = _getRoleDisplayName(profileRole);
     final providerColor = _getProviderColor(provider);
 
-    // ✅ Get status
+    // ✅ Status badge is informational only - actual gating happens
+    // centrally after login (AppState + router), not here.
     final status = profile['status'] as String? ?? 'active';
     final isActive = status == 'active';
     final isScheduledForDeletion = status == 'scheduled_for_deletion';
@@ -1286,7 +1147,7 @@ Future<void> _handleProfileLogin(
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                        // ✅ Status Badge
+                        // Status Badge (informational only)
                         if (!isActive)
                           Container(
                             padding: const EdgeInsets.symmetric(
