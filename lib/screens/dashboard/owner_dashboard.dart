@@ -59,6 +59,11 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   String? _userEmail;
   String? _profileImageUrl;
 
+  // ═══════════════════════════════════════════════════════════
+  // ✅ NEW: Notification count variable
+  // ═══════════════════════════════════════════════════════════
+  int _unreadNotificationCount = 0;
+
   // Timezone
   String _currentTimezone = '';
   String _currentTimezoneFlag = '';
@@ -134,7 +139,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         debugPrint('✅ Owner role already active');
       }
 
-      // Also ensure barber and customer roles exist
       for (var roleId in [2, 3]) {
         final check = await supabase
             .from('user_roles')
@@ -188,6 +192,248 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     routeObserver.unsubscribe(this);
     _pulseCtrl.dispose();
     super.dispose();
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // ✅ NEW: Profile Image Builder (from Employee Dashboard)
+  // ═══════════════════════════════════════════════════════════
+  Widget _buildProfileImage() {
+    return GestureDetector(
+      onTap: () {
+        context.push('/profile');
+      },
+      child: Container(
+        margin: const EdgeInsets.only(right: 4),
+        child: CircleAvatar(
+          radius: 18,
+          backgroundColor: Colors.white.withValues(alpha: 0.2),
+          backgroundImage: _profileImageUrl != null && _profileImageUrl!.isNotEmpty
+              ? NetworkImage(_profileImageUrl!)
+              : null,
+          onBackgroundImageError: _profileImageUrl != null && _profileImageUrl!.isNotEmpty
+              ? (exception, stackTrace) {
+                  debugPrint('⚠️ Failed to load avatar image: $exception');
+                }
+              : null,
+          child: _profileImageUrl == null || _profileImageUrl!.isEmpty
+              ? Text(
+                  _userName.isNotEmpty
+                      ? _userName[0].toUpperCase()
+                      : '?',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                )
+              : null,
+        ),
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // ✅ NEW: Notification Count Loader
+  // ═══════════════════════════════════════════════════════════
+  Future<void> _loadNotificationCount() async {
+    try {
+      final userId = supabase.auth.currentUser?.id;
+      if (userId == null || userId.isEmpty) {
+        debugPrint('⚠️ No user ID for notification count');
+        return;
+      }
+
+      final count = await _notificationService.getUnreadCountWithRole(
+        userId: userId,
+        role: 'owner',
+      );
+      
+      if (mounted) {
+        setState(() {
+          _unreadNotificationCount = count;
+        });
+      }
+      debugPrint('✅ Unread notifications (owner): $count');
+    } catch (e) {
+      debugPrint('❌ Error loading notification count: $e');
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // ✅ NEW: Timezone Selector Builder (from Employee Dashboard)
+  // ═══════════════════════════════════════════════════════════
+  Widget _buildTimezoneSelector() {
+    final isDSTActive = TimezoneService.isDST();
+    final flag = TimezoneService.getCurrentFlag();
+    final displayName = TimezoneService.getTimezoneDisplayName();
+
+    return GestureDetector(
+      onTap: _changeTimezone,
+      child: Container(
+        margin: const EdgeInsets.only(right: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.2),
+          borderRadius: BorderRadius.circular(16),
+          border: isDSTActive
+              ? Border.all(color: Colors.amber, width: 1)
+              : null,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(flag, style: const TextStyle(fontSize: 12)),
+            const SizedBox(width: 4),
+            Text(
+              displayName,
+              style: const TextStyle(
+                fontSize: 10,
+                color: Colors.white,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            if (isDSTActive) ...[
+              const SizedBox(width: 4),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+                decoration: BoxDecoration(
+                  color: Colors.amber.shade100,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  'DST',
+                  style: TextStyle(
+                    fontSize: 7,
+                    color: Colors.amber.shade800,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+            const Icon(Icons.arrow_drop_down, size: 16, color: Colors.white),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // ✅ NEW: Salon Selector Chip (from Employee Dashboard)
+  // ═══════════════════════════════════════════════════════════
+  Widget _buildSalonSelectorChip() {
+    if (_ownerSalons.isEmpty) return const SizedBox.shrink();
+    
+    return GestureDetector(
+      onTap: _showSalonSelectorDialog,
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: 10,
+          vertical: 4,
+        ),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.2),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.store, size: 14, color: Colors.white),
+            const SizedBox(width: 4),
+            Flexible(
+              child: Text(
+                _selectedSalonName != null && _selectedSalonName!.isNotEmpty
+                    ? _selectedSalonName!
+                    : 'Salon',
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: Colors.white,
+                  fontWeight: FontWeight.w500,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            if (_ownerSalons.length > 1)
+              const Icon(
+                Icons.arrow_drop_down,
+                size: 16,
+                color: Colors.white,
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // ✅ NEW: Salon Selector Dialog
+  // ═══════════════════════════════════════════════════════════
+  Future<void> _showSalonSelectorDialog() async {
+    if (_ownerSalons.length <= 1) return;
+    
+    await showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Select Salon',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Choose a salon to view its data',
+              style: TextStyle(fontSize: 14, color: Colors.grey),
+            ),
+            const SizedBox(height: 16),
+            ..._ownerSalons.map((salon) {
+              final isSelected = salon['id'].toString() == _selectedSalonId;
+              return ListTile(
+                leading: CircleAvatar(
+                  radius: 20,
+                  backgroundColor: isSelected
+                      ? const Color(0xFFFF6B8B)
+                      : Colors.grey[200],
+                  backgroundImage: salon['logo_url'] != null
+                      ? NetworkImage(salon['logo_url'])
+                      : null,
+                  child: salon['logo_url'] == null
+                      ? Icon(
+                          Icons.store,
+                          color: isSelected ? Colors.white : Colors.grey[600],
+                          size: 20,
+                        )
+                      : null,
+                ),
+                title: Text(
+                  salon['name'] ?? 'Unknown Salon',
+                  style: TextStyle(
+                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                  ),
+                ),
+                subtitle: Text(
+                  salon['address'] ?? '',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                trailing: isSelected
+                    ? const Icon(Icons.check_circle, color: Color(0xFFFF6B8B))
+                    : null,
+                onTap: () {
+                  Navigator.pop(context);
+                  _switchSalon(salon['id'].toString());
+                },
+              );
+            }),
+          ],
+        ),
+      ),
+    );
   }
 
   // ============================================================
@@ -684,6 +930,14 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       return;
     }
     context.push('/owner/analytics?salonId=$_selectedSalonId');
+  }
+
+  void _viewNotifications() {
+    if (!_hasPermission) {
+      _showPermissionCardContext(action: 'notification');
+      if (_showPermissionCard) return;
+    }
+    context.push('/notifications?role=owner');
   }
 
   // ============================================================
@@ -1387,6 +1641,12 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         debugPrint('⚠️ Onboarding status error (non-critical): $e');
       }
 
+      // ═══════════════════════════════════════════════════════
+      // ✅ NEW: Load notification count
+      // ═══════════════════════════════════════════════════════
+      await _loadNotificationCount();
+      debugPrint('✅ Notification count loaded');
+
       _hasPermission = await _notificationService.hasPermission();
       debugPrint('✅ Has permission: $_hasPermission');
 
@@ -1774,6 +2034,8 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
     try {
       await Future.wait([_loadDashboardStats(), _checkOnboardingStatus()]);
+      // ✅ Reload notification count for new salon
+      await _loadNotificationCount();
     } catch (e) {
       debugPrint('Error switching salon: $e');
     } finally {
@@ -1788,18 +2050,25 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   void _setupNotificationListeners() {
     try {
       FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+        debugPrint('📨 New notification received: ${message.data}');
+        
         if (message.data['type'] == 'new_booking') {
           _showNewBookingAlert(message);
           setState(() {
             _pendingBookings++;
           });
+          // ✅ Refresh notification count
+          _loadNotificationCount();
+        } else if (message.data['type'] == 'new_booking_assigned') {
+          _showNewAssignmentAlert(message);
+          _loadNotificationCount();
         }
       });
       FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
         if (message.data['type'] == 'new_booking') _viewBookings();
       });
     } catch (e) {
-      debugPrint('Error: $e');
+      debugPrint('Error setting up notification listeners: $e');
     }
   }
 
@@ -1826,6 +2095,59 @@ class _OwnerDashboardState extends State<OwnerDashboard>
               backgroundColor: const Color(0xFFFF6B8B),
               foregroundColor: Colors.white,
               minimumSize: const Size(0, 36),
+            ),
+            child: const Text('View'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showNewAssignmentAlert(RemoteMessage message) {
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.blue.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.assignment_add, color: Colors.blue),
+            ),
+            const SizedBox(width: 12),
+            const Text('New Booking Assigned!'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(message.notification?.title ?? 'New Appointment'),
+            const SizedBox(height: 8),
+            Text(
+              message.notification?.body ?? 'You have a new booking assigned',
+              style: TextStyle(color: Colors.grey[600]),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Later'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _viewBookings();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFFF6B8B),
             ),
             child: const Text('View'),
           ),
@@ -1876,14 +2198,339 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     );
   }
 
-  Widget _buildSalonSelector() {
-    if (_ownerSalons.isEmpty) return const SizedBox.shrink();
+  // ═══════════════════════════════════════════════════════════
+  // ✅ UPDATED: Build Method with AppBar enhancements
+  // ═══════════════════════════════════════════════════════════
+
+  @override
+  Widget build(BuildContext context) {
+    final isWeb = MediaQuery.of(context).size.width > 800;
+
+    return Scaffold(
+      key: _scaffoldKey,
+      appBar: AppBar(
+        backgroundColor: const Color(0xFFFF6B8B),
+        foregroundColor: Colors.white,
+        elevation: 0,
+        centerTitle: isWeb,
+        leading: IconButton(
+          icon: const Icon(Icons.menu),
+          onPressed: _openDrawer,
+          tooltip: 'Menu',
+          iconSize: 28,
+        ),
+        // ✅ UPDATED: Title with salon name (like Employee Dashboard)
+        title: Row(
+          children: [
+            if (!isWeb)
+              Flexible(
+                child: Text(
+                  _selectedSalonName != null && _selectedSalonName!.isNotEmpty
+                      ? _selectedSalonName!
+                      : 'Dashboard',
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            const Spacer(),
+            // ✅ NEW: Salon selector chip (like Employee Dashboard)
+            if (_ownerSalons.length > 1) _buildSalonSelectorChip(),
+          ],
+        ),
+        actions: [
+          // ✅ NEW: Web salon selector (like Employee Dashboard)
+          if (isWeb && _selectedSalonName != null && _selectedSalonName!.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: GestureDetector(
+                onTap: _ownerSalons.length > 1
+                    ? _showSalonSelectorDialog
+                    : null,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.store, size: 14, color: Colors.white),
+                      const SizedBox(width: 6),
+                      Flexible(
+                        child: Text(
+                          _selectedSalonName!,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.white,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (_ownerSalons.length > 1)
+                        const Icon(
+                          Icons.arrow_drop_down,
+                          size: 16,
+                          color: Colors.white,
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          // ✅ NEW: Timezone selector (from Employee Dashboard)
+          _buildTimezoneSelector(),
+          // ✅ NEW: Notification icon with badge (like Employee Dashboard)
+          Stack(
+            clipBehavior: Clip.none,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.notifications_outlined, size: 22),
+                onPressed: _viewNotifications,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+              ),
+              if (_unreadNotificationCount > 0)
+                Positioned(
+                  right: 2,
+                  top: 2,
+                  child: Container(
+                    padding: const EdgeInsets.all(2),
+                    decoration: const BoxDecoration(
+                      color: Colors.red,
+                      shape: BoxShape.circle,
+                    ),
+                    constraints: const BoxConstraints(
+                      minWidth: 16,
+                      minHeight: 16,
+                    ),
+                    child: Text(
+                      _unreadNotificationCount > 99
+                          ? '99+'
+                          : '$_unreadNotificationCount',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 8,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          // ✅ NEW: Profile image (from Employee Dashboard)
+          _buildProfileImage(),
+        ],
+      ),
+      drawer: SideMenu(
+        userRole: 'owner',
+        userName: _userName,
+        userEmail: _userEmail,
+        profileImageUrl: _profileImageUrl,
+        selectedSalonId: _selectedSalonId,
+        onMenuItemSelected: () => _refreshAllData(),
+      ),
+      body: _isLoading
+          ? const Center(
+              child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+            )
+          : RefreshIndicator(
+              onRefresh: _refreshAllData,
+              color: const Color(0xFFFF6B8B),
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (_showPermissionCard && !_hasPermission)
+                      PermissionCard(
+                        onEnable: () => _enableNotifications(action: null),
+                        onNotNow: _handleNotNow,
+                        title: _permissionManager.getPermissionCardTitle(),
+                        message: _permissionManager.getPermissionCardMessage(),
+                        compact: true,
+                      ),
+                    _buildSimpleHeader(),
+                    
+                    if (_completedSteps < _totalSteps) _buildStepFlow(),
+                    
+                    // ✅ REMOVED: Duplicate salon selector (now in AppBar)
+                    // if (_ownerSalons.length > 1) _buildSalonSelector(),
+                    
+                    if (_ownerSalons.isEmpty)
+                      Container(
+                        margin: const EdgeInsets.all(16),
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          color: Colors.orange.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.warning,
+                              color: Colors.orange,
+                              size: 40,
+                            ),
+                            const SizedBox(height: 8),
+                            const Text(
+                              'No Salons Found',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.orange,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            const Text(
+                              'Create your first salon to get started',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            ElevatedButton.icon(
+                              onPressed: _navigateToCreateSalon,
+                              icon: const Icon(Icons.add_business, size: 18),
+                              label: const Text('Create Salon'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFFFF6B8B),
+                                foregroundColor: Colors.white,
+                                minimumSize: const Size(0, 40),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 8,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    
+                    if (_ownerSalons.isNotEmpty)
+                      _isSwitchingSalon
+                          ? const Padding(
+                              padding: EdgeInsets.all(32.0),
+                              child: Center(
+                                child: CircularProgressIndicator(
+                                  color: Color(0xFFFF6B8B),
+                                ),
+                              ),
+                            )
+                          : Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Expanded(
+                                        child: DashboardStatCard(
+                                          title: "Today's Appointments",
+                                          value: '$_todayAppointments',
+                                          icon: Icons.calendar_today,
+                                          color: Colors.blue,
+                                          subtitle: '$_completedToday completed',
+                                          onTap: _viewBookings,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: DashboardStatCard(
+                                          title: 'Pending',
+                                          value: '$_pendingBookings',
+                                          icon: Icons.pending_actions,
+                                          color: Colors.orange,
+                                          onTap: _viewBookings,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Expanded(
+                                        child: DashboardStatCard(
+                                          title: 'Customers',
+                                          value: '$_totalCustomers',
+                                          icon: Icons.people,
+                                          color: Colors.purple,
+                                          subtitle: 'Active followers',
+                                          onTap: _viewAllCustomers,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: DashboardStatCard(
+                                          title: 'Barbers',
+                                          value: '$_activeBarbers',
+                                          icon: Icons.content_cut,
+                                          color: Colors.green,
+                                          onTap: _navigateToBarberList,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                  ),
+                                  child: DashboardStatCard(
+                                    title: 'Revenue',
+                                    value: 'Rs. $_totalRevenue',
+                                    icon: Icons.currency_rupee,
+                                    color: Colors.green,
+                                    fullWidth: true,
+                                    onTap: _viewRevenue,
+                                  ),
+                                ),
+                              ],
+                            ),
+                    
+                    const SizedBox(height: 16),
+                    _buildManagementSection(),
+                    const SizedBox(height: 80),
+                  ],
+                ),
+              ),
+            ),
+    );
+  }
+
+  // ============================================================
+  // 🔥 MANAGEMENT SECTION (unchanged)
+  // ============================================================
+
+  Widget _buildManagementSection() {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
             color: Colors.grey.withValues(alpha: 0.1),
@@ -1892,61 +2539,434 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           ),
         ],
       ),
-      child: Row(
+      child: Column(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.store, size: 18, color: Color(0xFFFF6B8B)),
-          const SizedBox(width: 8),
-          const Text(
-            'Salon:',
-            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
-          ),
-          Expanded(
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: _ownerSalons.map((salon) {
-                  final isSelected = _selectedSalonId == salon['id'].toString();
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: FilterChip(
-                      label: Text(
-                        salon['name'] ?? 'Salon',
-                        style: const TextStyle(fontSize: 12),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      selected: isSelected,
-                      onSelected: (_) => _switchSalon(salon['id'].toString()),
-                      backgroundColor: Colors.grey[100],
-                      selectedColor: const Color(
-                        0xFFFF6B8B,
-                      ).withValues(alpha: 0.2),
-                      checkmarkColor: const Color(0xFFFF6B8B),
-                      labelStyle: TextStyle(
-                        fontSize: 12,
-                        color: isSelected
-                            ? const Color(0xFFFF6B8B)
-                            : Colors.grey[800],
-                      ),
-                    ),
-                  );
-                }).toList(),
+          const Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.settings, size: 20, color: Color(0xFFFF6B8B)),
+              SizedBox(width: 8),
+              Text(
+                'Management',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'Salon Management',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: Colors.grey,
             ),
           ),
-          IconButton(
-            icon: const Icon(Icons.edit, size: 18),
-            onPressed: _navigateToEditSalon,
-            tooltip: 'Edit Salon',
-            color: const Color(0xFFFF6B8B),
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Expanded(
+                child: _buildQuickAction(
+                  icon: Icons.add_business,
+                  label: 'Create Salon',
+                  color: const Color(0xFFFF6B8B),
+                  onTap: _navigateToCreateSalon,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _buildQuickAction(
+                  icon: Icons.edit,
+                  label: 'Edit Salon',
+                  color: Colors.blue,
+                  onTap: _navigateToEditSalon,
+                  enabled: _ownerSalons.isNotEmpty,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _buildQuickAction(
+                  icon: Icons.beach_access,
+                  label: 'Holidays',
+                  color: Colors.teal,
+                  onTap: _viewSalonHolidays,
+                  enabled: _ownerSalons.isNotEmpty,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'Service Management',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: Colors.grey,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Expanded(
+                child: _buildQuickAction(
+                  icon: Icons.build,
+                  label: 'Add Service',
+                  color: Colors.green,
+                  onTap: _navigateToAddService,
+                  enabled: _ownerSalons.isNotEmpty,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _buildQuickAction(
+                  icon: Icons.list,
+                  label: 'Service List',
+                  color: Colors.cyan,
+                  onTap: _navigateToServiceList,
+                  enabled: _ownerSalons.isNotEmpty,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'Barber Management',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: Colors.grey,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Expanded(
+                child: _buildQuickAction(
+                  icon: Icons.person_add,
+                  label: 'Add Barber',
+                  color: Colors.purple,
+                  onTap: _navigateToAddBarber,
+                  enabled: _ownerSalons.isNotEmpty,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _buildQuickAction(
+                  icon: Icons.calendar_month,
+                  label: 'Schedule',
+                  color: Colors.teal,
+                  onTap: _navigateToBarberSchedule,
+                  enabled: _ownerSalons.isNotEmpty,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _buildQuickAction(
+                  icon: Icons.beach_access,
+                  label: 'Leaves',
+                  color: Colors.orange,
+                  onTap: _navigateToBarberLeaves,
+                  enabled: _ownerSalons.isNotEmpty,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Expanded(
+                child: _buildQuickAction(
+                  icon: Icons.list,
+                  label: 'Barber List',
+                  color: Colors.indigo,
+                  onTap: _navigateToBarberList,
+                  enabled: _ownerSalons.isNotEmpty,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'Offers & Promotions',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: Colors.grey,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Expanded(
+                child: _buildQuickAction(
+                  icon: Icons.local_offer,
+                  label: 'Manage Offers',
+                  color: const Color(0xFFFF6B8B),
+                  onTap: _navigateToOffers,
+                  enabled: _ownerSalons.isNotEmpty,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'Reports',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: Colors.grey,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Expanded(
+                child: _buildQuickAction(
+                  icon: Icons.bar_chart,
+                  label: 'Reports',
+                  color: Colors.deepOrange,
+                  onTap: _viewReports,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _buildQuickAction(
+                  icon: Icons.analytics,
+                  label: 'Analytics',
+                  color: Colors.indigoAccent,
+                  onTap: _viewAnalytics,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _buildQuickAction(
+                  icon: Icons.settings,
+                  label: 'Settings',
+                  color: Colors.grey,
+                  onTap: _viewSettings,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+        ],
+      ),
+    );
+  }
+
+  // ============================================================
+  // 🔥 NAVIGATION HELPERS (unchanged)
+  // ============================================================
+
+  void _navigateToCreateSalon() async {
+    final result = await context.push('/owner/salon/create');
+    if (result == true) await _refreshAllData();
+  }
+
+  void _navigateToEditSalon() async {
+    if (_ownerSalons.isEmpty) {
+      _showCreateSalonFirstDialog();
+      return;
+    }
+    final result = await context.push(
+      '/owner/salon/edit?salonId=$_selectedSalonId',
+    );
+    if (result == true) await _refreshAllData();
+  }
+
+  void _showSalonSelectionDialogForServices() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Select Salon'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: _ownerSalons.length,
+            itemBuilder: (context, index) {
+              final salon = _ownerSalons[index];
+              return ListTile(
+                leading: const Icon(Icons.store, color: Color(0xFFFF6B8B)),
+                title: Text(
+                  salon['name'] ?? 'Salon',
+                  overflow: TextOverflow.ellipsis,
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  context.push(
+                    '/owner/services?salonId=${salon['id']}&salonName=${Uri.encodeComponent(salon['name'] ?? 'Salon')}',
+                  );
+                },
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
           ),
         ],
       ),
     );
   }
+
+  void _viewSettings() => context.push('/settings');
+
+  void _showCreateSalonFirstDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Create Salon First'),
+        content: const Text(
+          'You need to create a salon before managing barbers or services.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Later'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _navigateToCreateSalon();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFFF6B8B),
+              foregroundColor: Colors.white,
+              minimumSize: const Size(0, 36),
+            ),
+            child: const Text('Create Salon'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ============================================================
+  // 🔥 DRAWER & LOGOUT (unchanged)
+  // ============================================================
+
+  void _openDrawer() {
+    try {
+      if (_scaffoldKey.currentState != null) {
+        _scaffoldKey.currentState!.openDrawer();
+      } else {
+        Scaffold.of(context).openDrawer();
+      }
+    } catch (e) {
+      _showMenuDialog();
+    }
+  }
+
+  void _showMenuDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Menu'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.dashboard),
+                title: const Text('Dashboard'),
+                onTap: () => Navigator.pop(context),
+              ),
+              ListTile(
+                leading: const Icon(Icons.calendar_today),
+                title: const Text('Appointments'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _viewBookings();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.people),
+                title: const Text('Customers'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _viewAllCustomers();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.content_cut),
+                title: const Text('Barbers'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _navigateToBarberList();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.local_offer),
+                title: const Text('Offers'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _navigateToOffers();
+                },
+              ),
+              const Divider(),
+              ListTile(
+                leading: const Icon(Icons.logout, color: Colors.red),
+                title: const Text('Logout'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _logout(context);
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _logout(BuildContext context) async {
+    showLogoutConfirmation(
+      context,
+      onLogoutConfirmed: () async {
+        if (!mounted) return;
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => const Center(
+            child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+          ),
+        );
+        try {
+          await SessionManager.logoutForContinue();
+          await appState.refreshState();
+          if (context.mounted) {
+            Navigator.pop(context);
+            context.go('/');
+          }
+        } catch (e) {
+          if (context.mounted) {
+            Navigator.pop(context);
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Logout failed: $e'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+        }
+      },
+    );
+  }
+
+  // ============================================================
+  // 🔥 SIMPLE HEADER (unchanged)
+  // ============================================================
 
   Widget _buildSimpleHeader() {
     final isWeb = MediaQuery.of(context).size.width > 800;
@@ -2139,7 +3159,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   }
 
   // ============================================================
-  // 🔥 SALON SETUP STEP FLOW
+  // 🔥 STEP FLOW (unchanged)
   // ============================================================
 
   Widget _buildStepFlow() {
@@ -2578,662 +3598,4 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       ),
     ),
   );
-
-  // ============================================================
-  // 🔥 MANAGEMENT SECTION
-  // ============================================================
-
-  Widget _buildManagementSection() {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withValues(alpha: 0.1),
-            blurRadius: 8.0,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.settings, size: 20, color: Color(0xFFFF6B8B)),
-              SizedBox(width: 8),
-              Text(
-                'Management',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          const Text(
-            'Salon Management',
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: Colors.grey,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Expanded(
-                child: _buildQuickAction(
-                  icon: Icons.add_business,
-                  label: 'Create Salon',
-                  color: const Color(0xFFFF6B8B),
-                  onTap: _navigateToCreateSalon,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _buildQuickAction(
-                  icon: Icons.edit,
-                  label: 'Edit Salon',
-                  color: Colors.blue,
-                  onTap: _navigateToEditSalon,
-                  enabled: _ownerSalons.isNotEmpty,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _buildQuickAction(
-                  icon: Icons.beach_access,
-                  label: 'Holidays',
-                  color: Colors.teal,
-                  onTap: _viewSalonHolidays,
-                  enabled: _ownerSalons.isNotEmpty,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          const Text(
-            'Service Management',
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: Colors.grey,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Expanded(
-                child: _buildQuickAction(
-                  icon: Icons.build,
-                  label: 'Add Service',
-                  color: Colors.green,
-                  onTap: _navigateToAddService,
-                  enabled: _ownerSalons.isNotEmpty,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _buildQuickAction(
-                  icon: Icons.list,
-                  label: 'Service List',
-                  color: Colors.cyan,
-                  onTap: _navigateToServiceList,
-                  enabled: _ownerSalons.isNotEmpty,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          const Text(
-            'Barber Management',
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: Colors.grey,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Expanded(
-                child: _buildQuickAction(
-                  icon: Icons.person_add,
-                  label: 'Add Barber',
-                  color: Colors.purple,
-                  onTap: _navigateToAddBarber,
-                  enabled: _ownerSalons.isNotEmpty,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _buildQuickAction(
-                  icon: Icons.calendar_month,
-                  label: 'Schedule',
-                  color: Colors.teal,
-                  onTap: _navigateToBarberSchedule,
-                  enabled: _ownerSalons.isNotEmpty,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _buildQuickAction(
-                  icon: Icons.beach_access,
-                  label: 'Leaves',
-                  color: Colors.orange,
-                  onTap: _navigateToBarberLeaves,
-                  enabled: _ownerSalons.isNotEmpty,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Expanded(
-                child: _buildQuickAction(
-                  icon: Icons.list,
-                  label: 'Barber List',
-                  color: Colors.indigo,
-                  onTap: _navigateToBarberList,
-                  enabled: _ownerSalons.isNotEmpty,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          const Text(
-            'Offers & Promotions',
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: Colors.grey,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Expanded(
-                child: _buildQuickAction(
-                  icon: Icons.local_offer,
-                  label: 'Manage Offers',
-                  color: const Color(0xFFFF6B8B),
-                  onTap: _navigateToOffers,
-                  enabled: _ownerSalons.isNotEmpty,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          const Text(
-            'Reports',
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: Colors.grey,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Expanded(
-                child: _buildQuickAction(
-                  icon: Icons.bar_chart,
-                  label: 'Reports',
-                  color: Colors.deepOrange,
-                  onTap: _viewReports,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _buildQuickAction(
-                  icon: Icons.analytics,
-                  label: 'Analytics',
-                  color: Colors.indigoAccent,
-                  onTap: _viewAnalytics,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _buildQuickAction(
-                  icon: Icons.settings,
-                  label: 'Settings',
-                  color: Colors.grey,
-                  onTap: _viewSettings,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-        ],
-      ),
-    );
-  }
-
-  // ============================================================
-  // 🔥 NAVIGATION HELPERS
-  // ============================================================
-
-  void _navigateToCreateSalon() async {
-    final result = await context.push('/owner/salon/create');
-    if (result == true) await _refreshAllData();
-  }
-
-  void _navigateToEditSalon() async {
-    if (_ownerSalons.isEmpty) {
-      _showCreateSalonFirstDialog();
-      return;
-    }
-    final result = await context.push(
-      '/owner/salon/edit?salonId=$_selectedSalonId',
-    );
-    if (result == true) await _refreshAllData();
-  }
-
-  void _showSalonSelectionDialogForServices() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Select Salon'),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: ListView.builder(
-            shrinkWrap: true,
-            itemCount: _ownerSalons.length,
-            itemBuilder: (context, index) {
-              final salon = _ownerSalons[index];
-              return ListTile(
-                leading: const Icon(Icons.store, color: Color(0xFFFF6B8B)),
-                title: Text(
-                  salon['name'] ?? 'Salon',
-                  overflow: TextOverflow.ellipsis,
-                ),
-                onTap: () {
-                  Navigator.pop(context);
-                  context.push(
-                    '/owner/services?salonId=${salon['id']}&salonName=${Uri.encodeComponent(salon['name'] ?? 'Salon')}',
-                  );
-                },
-              );
-            },
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _viewSettings() => context.push('/settings');
-
-  void _showCreateSalonFirstDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Create Salon First'),
-        content: const Text(
-          'You need to create a salon before managing barbers or services.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Later'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _navigateToCreateSalon();
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFFF6B8B),
-              foregroundColor: Colors.white,
-              minimumSize: const Size(0, 36),
-            ),
-            child: const Text('Create Salon'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ============================================================
-  // 🔥 DRAWER & LOGOUT
-  // ============================================================
-
-  void _openDrawer() {
-    try {
-      if (_scaffoldKey.currentState != null) {
-        _scaffoldKey.currentState!.openDrawer();
-      } else {
-        Scaffold.of(context).openDrawer();
-      }
-    } catch (e) {
-      _showMenuDialog();
-    }
-  }
-
-  void _showMenuDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Menu'),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: ListView(
-            shrinkWrap: true,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.dashboard),
-                title: const Text('Dashboard'),
-                onTap: () => Navigator.pop(context),
-              ),
-              ListTile(
-                leading: const Icon(Icons.calendar_today),
-                title: const Text('Appointments'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _viewBookings();
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.people),
-                title: const Text('Customers'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _viewAllCustomers();
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.content_cut),
-                title: const Text('Barbers'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _navigateToBarberList();
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.local_offer),
-                title: const Text('Offers'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _navigateToOffers();
-                },
-              ),
-              const Divider(),
-              ListTile(
-                leading: const Icon(Icons.logout, color: Colors.red),
-                title: const Text('Logout'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _logout(context);
-                },
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Future<void> _logout(BuildContext context) async {
-    showLogoutConfirmation(
-      context,
-      onLogoutConfirmed: () async {
-        if (!mounted) return;
-        showDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (context) => const Center(
-            child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
-          ),
-        );
-        try {
-          await SessionManager.logoutForContinue();
-          await appState.refreshState();
-          if (context.mounted) {
-            Navigator.pop(context);
-            context.go('/');
-          }
-        } catch (e) {
-          if (context.mounted) {
-            Navigator.pop(context);
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Logout failed: $e'),
-                backgroundColor: Colors.red,
-              ),
-            );
-          }
-        }
-      },
-    );
-  }
-
-  // ============================================================
-  // 🔥 BUILD
-  // ============================================================
-
-  @override
-  Widget build(BuildContext context) {
-    final isWeb = MediaQuery.of(context).size.width > 800;
-
-    return Scaffold(
-      key: _scaffoldKey,
-      appBar: AppBar(
-        title: Text(
-          isWeb ? 'Owner Dashboard' : 'Dashboard',
-          style: const TextStyle(fontWeight: FontWeight.w600),
-        ),
-        backgroundColor: const Color(0xFFFF6B8B),
-        foregroundColor: Colors.white,
-        elevation: 0,
-        centerTitle: isWeb,
-        leading: IconButton(
-          icon: const Icon(Icons.menu),
-          onPressed: _openDrawer,
-          tooltip: 'Menu',
-        ),
-      ),
-      drawer: SideMenu(
-        userRole: 'owner',
-        userName: _userName,
-        userEmail: _userEmail,
-        profileImageUrl: _profileImageUrl,
-        selectedSalonId: _selectedSalonId,
-        onMenuItemSelected: () => _refreshAllData(),
-      ),
-      body: _isLoading
-          ? const Center(
-              child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
-            )
-          : RefreshIndicator(
-              onRefresh: _refreshAllData,
-              color: const Color(0xFFFF6B8B),
-              child: SingleChildScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (_showPermissionCard && !_hasPermission)
-                      PermissionCard(
-                        onEnable: () => _enableNotifications(action: null),
-                        onNotNow: _handleNotNow,
-                        title: _permissionManager.getPermissionCardTitle(),
-                        message: _permissionManager.getPermissionCardMessage(),
-                        compact: true,
-                      ),
-                    _buildSimpleHeader(),
-                    
-                    if (_completedSteps < _totalSteps) _buildStepFlow(),
-                    
-                    if (_ownerSalons.length > 1) _buildSalonSelector(),
-                    
-                    if (_ownerSalons.isEmpty)
-                      Container(
-                        margin: const EdgeInsets.all(16),
-                        padding: const EdgeInsets.all(20),
-                        decoration: BoxDecoration(
-                          color: Colors.orange.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(
-                              Icons.warning,
-                              color: Colors.orange,
-                              size: 40,
-                            ),
-                            const SizedBox(height: 8),
-                            const Text(
-                              'No Salons Found',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.orange,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            const Text(
-                              'Create your first salon to get started',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey,
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            ElevatedButton.icon(
-                              onPressed: _navigateToCreateSalon,
-                              icon: const Icon(Icons.add_business, size: 18),
-                              label: const Text('Create Salon'),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFFFF6B8B),
-                                foregroundColor: Colors.white,
-                                minimumSize: const Size(0, 40),
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                  vertical: 8,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    
-                    if (_ownerSalons.isNotEmpty)
-                      _isSwitchingSalon
-                          ? const Padding(
-                              padding: EdgeInsets.all(32.0),
-                              child: Center(
-                                child: CircularProgressIndicator(
-                                  color: Color(0xFFFF6B8B),
-                                ),
-                              ),
-                            )
-                          : Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 16,
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Expanded(
-                                        child: DashboardStatCard(
-                                          title: "Today's Appointments",
-                                          value: '$_todayAppointments',
-                                          icon: Icons.calendar_today,
-                                          color: Colors.blue,
-                                          subtitle: '$_completedToday completed',
-                                          onTap: _viewBookings,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Expanded(
-                                        child: DashboardStatCard(
-                                          title: 'Pending',
-                                          value: '$_pendingBookings',
-                                          icon: Icons.pending_actions,
-                                          color: Colors.orange,
-                                          onTap: _viewBookings,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                
-                                Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 16,
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Expanded(
-                                        child: DashboardStatCard(
-                                          title: 'Customers',
-                                          value: '$_totalCustomers',
-                                          icon: Icons.people,
-                                          color: Colors.purple,
-                                          subtitle: 'Active followers',
-                                          onTap: _viewAllCustomers,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Expanded(
-                                        child: DashboardStatCard(
-                                          title: 'Barbers',
-                                          value: '$_activeBarbers',
-                                          icon: Icons.content_cut,
-                                          color: Colors.green,
-                                          onTap: _navigateToBarberList,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                
-                                Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 16,
-                                  ),
-                                  child: DashboardStatCard(
-                                    title: 'Revenue',
-                                    value: 'Rs. $_totalRevenue',
-                                    icon: Icons.currency_rupee,
-                                    color: Colors.green,
-                                    fullWidth: true,
-                                    onTap: _viewRevenue,
-                                  ),
-                                ),
-                              ],
-                            ),
-                    
-                    const SizedBox(height: 16),
-                    _buildManagementSection(),
-                    const SizedBox(height: 80),
-                  ],
-                ),
-              ),
-            ),
-    );
-  }
 }
