@@ -1819,23 +1819,23 @@ class _SideMenuState extends State<SideMenu> {
       },
       {
         'icon': Icons.pending_actions_outlined,
-        'title': 'Pending Jobs',
+        'title': 'My Appointments',
         // ✅ Add salon ID to route
         'route': _selectedSalonId != null
-            ? '/barber/pending?salonId=$_selectedSalonId'
-            : '/barber/pending',
+            ? '/barber/appointments?salonId==$_selectedSalonId'
+            : '/barber/appointments',
         'color': Colors.orange,
         'badge': _pendingBookingsCount > 0 ? _pendingBookingsCount : null,
       },
-      {
-        'icon': Icons.history_outlined,
-        'title': 'Completed',
-        // ✅ Add salon ID to route
-        'route': _selectedSalonId != null
-            ? '/barber/completed?salonId=$_selectedSalonId'
-            : '/barber/completed',
-        'color': Colors.purple,
-      },
+      // {
+      //   'icon': Icons.history_outlined,
+      //   'title': 'Completed',
+      //   // ✅ Add salon ID to route
+      //   'route': _selectedSalonId != null
+      //       ? '/barber/completed?salonId=$_selectedSalonId'
+      //       : '/barber/completed',
+      //   'color': Colors.purple,
+      // },
       {
         'icon': Icons.star_outline,
         'title': 'My Reviews',

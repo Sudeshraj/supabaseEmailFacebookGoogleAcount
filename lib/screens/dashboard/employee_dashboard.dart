@@ -52,7 +52,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
   String _employeeEmail = '';
   String _employeeAvatar = '';
 
-  // ✅ Salon information - FIXED: String? instead of int?
+  // ✅ Multi-salon support - String? type
   List<Map<String, dynamic>> _assignedSalons = [];
   String? _selectedSalonId;
   String _selectedSalonName = '';
@@ -225,7 +225,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
       screen: 'employee_dashboard',
       action: action,
     );
-    
+
     if (mounted) {
       setState(() {
         _showPermissionCard = shouldShow;
@@ -1125,6 +1125,13 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
           backgroundImage: _employeeAvatar.isNotEmpty
               ? NetworkImage(_employeeAvatar)
               : null,
+          // ✅ ADDED: swallow image load errors (e.g. Google 429 rate limit)
+          // so it doesn't spam the console with uncaught exceptions.
+          onBackgroundImageError: _employeeAvatar.isNotEmpty
+              ? (exception, stackTrace) {
+                  debugPrint('⚠️ Failed to load avatar image: $exception');
+                }
+              : null,
           child: _employeeAvatar.isEmpty
               ? Text(
                   _employeeName.isNotEmpty
@@ -1210,7 +1217,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
             ),
           );
 
-          // Redirect to login after showing message
           Future.delayed(const Duration(seconds: 2), () {
             if (mounted) {
               context.go('/');
@@ -1226,7 +1232,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         if (profile != null) {
           final roles = profile['roles'] as List? ?? [];
           if (roles.contains('barber')) {
-            // Role exists in session but maybe not in DB - try to reactivate
             isActiveBarber = true;
             debugPrint(
               '✅ Found barber role in SessionManager, but DB check failed',
@@ -1392,10 +1397,18 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
           // First active salon becomes selected
           if (_selectedSalonId == null && salonData['is_active'] == true) {
-            _selectedSalonId = salonData['id'].toString(); // ✅ Convert to String
+            _selectedSalonId = salonData['id'].toString();
             _selectedSalonName = salonData['name'] ?? '';
           }
         }
+      }
+
+      // Save selected salon to SessionManager
+      if (_selectedSalonId != null) {
+        await SessionManager.saveSalonId(_selectedSalonId!);
+      }
+      if (_selectedSalonName.isNotEmpty) {
+        await SessionManager.saveSalonName(_selectedSalonName);
       }
 
       setState(() {
@@ -1412,7 +1425,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         }
       });
 
-      debugPrint('✅ Selected salon: $_selectedSalonName (ID: $_selectedSalonId)');
+      debugPrint(
+        '✅ Selected salon: $_selectedSalonName (ID: $_selectedSalonId)',
+      );
       debugPrint('✅ Total assigned salons: ${_assignedSalons.length}');
     } catch (e) {
       debugPrint('❌ Error loading assigned salons: $e');
@@ -1431,6 +1446,13 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
       );
       _selectedSalonName = selected['name'] ?? '';
     });
+
+    // Save to SessionManager
+    SessionManager.saveSalonId(_selectedSalonId!);
+    if (_selectedSalonName.isNotEmpty) {
+      SessionManager.saveSalonName(_selectedSalonName);
+    }
+
     _loadDataForSelectedSalon();
   }
 
@@ -1896,12 +1918,14 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         return;
       }
       if (!mounted) return;
-      
+
       await _permissionService.requestPermissionAtAction(
         context: context,
         action: 'employee_dashboard',
         customTitle: _permissionManager.getPermissionCardTitle(action: null),
-        customMessage: _permissionManager.getPermissionCardMessage(action: null),
+        customMessage: _permissionManager.getPermissionCardMessage(
+          action: null,
+        ),
         onGranted: () async {
           await _permissionManager.markPermissionGranted();
           setState(() {
@@ -1911,9 +1935,11 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text(isWeb 
-                    ? '✅ Notifications enabled in browser!' 
-                    : '✅ Notifications enabled!'),
+                content: Text(
+                  isWeb
+                      ? '✅ Notifications enabled in browser!'
+                      : '✅ Notifications enabled!',
+                ),
                 backgroundColor: Colors.green,
               ),
             );
@@ -1924,9 +1950,11 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text(isWeb
-                    ? 'You can enable notifications later from browser settings'
-                    : 'You can enable later from settings'),
+                content: Text(
+                  isWeb
+                      ? 'You can enable notifications later from browser settings'
+                      : 'You can enable later from settings',
+                ),
                 backgroundColor: Colors.orange,
               ),
             );
@@ -1971,7 +1999,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
     await _permissionManager.markPermissionShown('employee_dashboard');
   }
 
-  // ==================== CONTEXTUAL NAVIGATION ====================
+  // ==================== CONTEXTUAL NAVIGATION - WITH SALON ID ====================
 
   void _viewMySchedule() {
     if (!_hasPermission) {
@@ -1980,7 +2008,12 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         return;
       }
     }
-    context.push('/barber/appointments');
+    // ✅ Add salon ID to route
+    if (_selectedSalonId != null) {
+      context.push('/barber/appointments?salonId=$_selectedSalonId');
+    } else {
+      context.push('/barber/appointments');
+    }
   }
 
   void _viewMyCustomers() {
@@ -1990,7 +2023,12 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         return;
       }
     }
-    context.push('/employee/customers');
+    // ✅ Add salon ID to route
+    if (_selectedSalonId != null) {
+      context.push('/barber/customers?salonId=$_selectedSalonId');
+    } else {
+      context.push('/barber/customers');
+    }
   }
 
   void _viewTodayEarnings() {
@@ -2000,7 +2038,12 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         return;
       }
     }
-    context.push('/employee/earnings');
+    // ✅ Add salon ID to route
+    if (_selectedSalonId != null) {
+      context.push('/barber/revenue?salonId=$_selectedSalonId');
+    } else {
+      context.push('/barber/revenue');
+    }
   }
 
   void _viewUpcomingAppointments() {
@@ -2010,7 +2053,12 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         return;
       }
     }
-    context.push('/employee/appointments');
+    // ✅ Add salon ID to route
+    if (_selectedSalonId != null) {
+      context.push('/barber/appointments?salonId=$_selectedSalonId');
+    } else {
+      context.push('/barber/appointments');
+    }
   }
 
   void _viewNotifications() {
@@ -2181,6 +2229,78 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
     );
   }
 
+  // ==================== SALON SELECTOR DIALOG ====================
+
+  // ✅ FIXED: Use String salon ID
+  Future<void> _showSalonSelectorDialog() async {
+    await showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Select Salon',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Choose a salon to view its data',
+              style: TextStyle(fontSize: 14, color: Colors.grey),
+            ),
+            const SizedBox(height: 16),
+            ..._assignedSalons.map((salon) {
+              final isSelected = salon['id'] == _selectedSalonId;
+              return ListTile(
+                leading: CircleAvatar(
+                  radius: 20,
+                  backgroundColor: isSelected
+                      ? const Color(0xFFFF6B8B)
+                      : Colors.grey[200],
+                  backgroundImage: salon['logo_url'] != null
+                      ? NetworkImage(salon['logo_url'])
+                      : null,
+                  child: salon['logo_url'] == null
+                      ? Icon(
+                          Icons.store,
+                          color: isSelected ? Colors.white : Colors.grey[600],
+                          size: 20,
+                        )
+                      : null,
+                ),
+                title: Text(
+                  salon['name'] ?? 'Unknown Salon',
+                  style: TextStyle(
+                    fontWeight: isSelected
+                        ? FontWeight.bold
+                        : FontWeight.normal,
+                  ),
+                ),
+                subtitle: Text(
+                  salon['address'] ?? '',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                trailing: isSelected
+                    ? const Icon(Icons.check_circle, color: Color(0xFFFF6B8B))
+                    : null,
+                onTap: () {
+                  Navigator.pop(context);
+                  _selectSalon(salon['id'] as String);
+                },
+              );
+            }),
+          ],
+        ),
+      ),
+    );
+  }
+
   // ==================== UI BUILDERS ====================
 
   Widget _buildQuickAction({
@@ -2239,78 +2359,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
     );
   }
 
-  // ==================== SALON SELECTOR DIALOG ====================
-
-  // ✅ FIXED: Use String salon ID
-  Future<void> _showSalonSelectorDialog() async {
-    await showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => Container(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Select Salon',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Choose a salon to view its data',
-              style: TextStyle(fontSize: 14, color: Colors.grey),
-            ),
-            const SizedBox(height: 16),
-            ..._assignedSalons.map((salon) {
-              final isSelected = salon['id'] == _selectedSalonId;
-              return ListTile(
-                leading: CircleAvatar(
-                  radius: 20,
-                  backgroundColor: isSelected
-                      ? const Color(0xFFFF6B8B)
-                      : Colors.grey[200],
-                  backgroundImage: salon['logo_url'] != null
-                      ? NetworkImage(salon['logo_url'])
-                      : null,
-                  child: salon['logo_url'] == null
-                      ? Icon(
-                          Icons.store,
-                          color: isSelected ? Colors.white : Colors.grey[600],
-                          size: 20,
-                        )
-                      : null,
-                ),
-                title: Text(
-                  salon['name'] ?? 'Unknown Salon',
-                  style: TextStyle(
-                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                  ),
-                ),
-                subtitle: Text(
-                  salon['address'] ?? '',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                trailing: isSelected
-                    ? const Icon(Icons.check_circle, color: Color(0xFFFF6B8B))
-                    : null,
-                onTap: () {
-                  Navigator.pop(context);
-                  _selectSalon(salon['id'] as String);
-                },
-              );
-            }),
-          ],
-        ),
-      ),
-    );
-  }
-
   // =====================================================
-  // ✅ BUILD METHOD
+  // ✅ BUILD METHOD - Full with Salon Selector
   // =====================================================
   @override
   Widget build(BuildContext context) {
@@ -2352,7 +2402,110 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
           tooltip: 'Menu',
           iconSize: 28,
         ),
+        // ✅ Title with salon name
+        title: Row(
+          children: [
+            if (!isWeb)
+              Flexible(
+                child: Text(
+                  _selectedSalonName.isNotEmpty
+                      ? _selectedSalonName
+                      : 'Dashboard',
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            const Spacer(),
+            // ✅ Salon selector chip (only if multiple salons)
+            if (_assignedSalons.length > 1)
+              GestureDetector(
+                onTap: _showSalonSelectorDialog,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.store, size: 14, color: Colors.white),
+                      const SizedBox(width: 4),
+                      Flexible(
+                        child: Text(
+                          _selectedSalonName.isNotEmpty
+                              ? _selectedSalonName
+                              : 'Salon',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: Colors.white,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const Icon(
+                        Icons.arrow_drop_down,
+                        size: 16,
+                        color: Colors.white,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
         actions: [
+          // ✅ Web salon selector
+          if (isWeb && _selectedSalonName.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: GestureDetector(
+                onTap: _assignedSalons.length > 1
+                    ? _showSalonSelectorDialog
+                    : null,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.store, size: 14, color: Colors.white),
+                      const SizedBox(width: 6),
+                      Flexible(
+                        child: Text(
+                          _selectedSalonName,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.white,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (_assignedSalons.length > 1)
+                        const Icon(
+                          Icons.arrow_drop_down,
+                          size: 16,
+                          color: Colors.white,
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           _buildTimezoneSelector(),
           Stack(
             clipBehavior: Clip.none,
@@ -2400,7 +2553,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         userName: _employeeName,
         userEmail: _employeeEmail,
         profileImageUrl: _employeeAvatar.isNotEmpty ? _employeeAvatar : null,
-        selectedSalonId: _selectedSalonId, // ✅ Now String? type
+        selectedSalonId: _selectedSalonId,
         onMenuItemSelected: () => _loadData(),
       ),
       body: _isLoading
@@ -2499,16 +2652,18 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                                             color: Colors.blue[700],
                                           ),
                                           const SizedBox(width: 2),
-                                          Text(
-                                            _selectedSalonName.isNotEmpty
-                                                ? _selectedSalonName
-                                                : 'No Salon',
-                                            style: TextStyle(
-                                              fontSize: 10,
-                                              color: Colors.blue[700],
-                                              fontWeight: FontWeight.w500,
+                                          Flexible(
+                                            child: Text(
+                                              _selectedSalonName.isNotEmpty
+                                                  ? _selectedSalonName
+                                                  : 'No Salon',
+                                              style: TextStyle(
+                                                fontSize: 10,
+                                                color: Colors.blue[700],
+                                                fontWeight: FontWeight.w500,
+                                              ),
+                                              overflow: TextOverflow.ellipsis,
                                             ),
-                                            overflow: TextOverflow.ellipsis,
                                           ),
                                           if (_assignedSalons.length > 1)
                                             const Icon(
@@ -2675,7 +2830,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                         children: [
                           Expanded(
                             child: DashboardStatCard(
-                              title: 'Today\'s Appointments',
+                              title: "Today's Appointments",
                               value: '$_todaysAppointments',
                               icon: Icons.calendar_today,
                               color: Colors.blue,
@@ -2706,7 +2861,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                         children: [
                           Expanded(
                             child: DashboardStatCard(
-                              title: 'Today\'s Earnings',
+                              title: "Today's Earnings",
                               value: 'Rs. $_todayEarnings',
                               icon: Icons.currency_rupee,
                               color: Colors.green,
@@ -2793,7 +2948,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
                     // Today's Schedule
                     const SectionHeader(
-                      title: 'Today\'s Schedule',
+                      title: "Today's Schedule",
                       actionText: 'View All',
                     ),
                     const SizedBox(height: 8),
@@ -2871,7 +3026,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           const Text(
-                            'Today\'s Performance',
+                            "Today's Performance",
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.bold,

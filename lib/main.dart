@@ -16,6 +16,8 @@ import 'package:flutter_application_1/screens/authantication/command/reset_passw
 import 'package:flutter_application_1/screens/authantication/command/reset_password_request.dart';
 import 'package:flutter_application_1/screens/authantication/command/role_selector_screen.dart';
 import 'package:flutter_application_1/screens/baber/barber_appointments_screen.dart';
+import 'package:flutter_application_1/screens/baber/barber_reviews_screen.dart';
+import 'package:flutter_application_1/screens/baber/barber_schedule_screen.dart';
 import 'package:flutter_application_1/screens/customer/booking_flow_screen.dart';
 import 'package:flutter_application_1/screens/customer/customer_history_screen.dart';
 import 'package:flutter_application_1/screens/customer/followed_salons_screen.dart';
@@ -1276,6 +1278,24 @@ GoRouter _createRouter() {
         builder: (context, state) {
           final salonId = state.uri.queryParameters['salonId'];
           return AnalyticsScreen(salonId: salonId, role: 'barber');
+        },
+      ),
+      GoRoute(
+        path: '/barber/schedule',
+        name: 'barber-schedule',
+        builder: (context, state) {
+          final salonId = state.uri.queryParameters['salonId'];
+          return BarberScheduleViewScreen(salonId: salonId);
+        },
+      ),
+      GoRoute(
+        path: '/barber/reviews',
+        builder: (context, state) {
+          final salonId = state.uri.queryParameters['salonId'];
+          return BarberReviewsScreen(
+            salonId: salonId,
+            barberId: null, // Will use current user
+          );
         },
       ),
     ],
