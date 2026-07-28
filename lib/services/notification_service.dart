@@ -46,7 +46,7 @@ class NotificationService {
   // ===============================================================
   // 🔥 MAIN INITIALIZATION - FINAL FIX
   // ===============================================================
-  
+
   /// Initialize with optional permission request
   /// For Web: Pass requestPermission: false to avoid auto-prompt
   Future<void> init({bool requestPermission = true}) async {
@@ -61,9 +61,11 @@ class NotificationService {
     if (!isWeb) {
       await _getTokenAndSave();
     } else {
-      debugPrint('🌐 Web: Skipping token get (web token handled by JavaScript)');
+      debugPrint(
+        '🌐 Web: Skipping token get (web token handled by JavaScript)',
+      );
     }
-    
+
     _setupMessageListeners();
   }
 
@@ -76,7 +78,7 @@ class NotificationService {
   // ===============================================================
   // 🔥 WEB INIT - COMPLETE FIX
   // ===============================================================
-  
+
   Future<void> _initWebNotifications({bool requestPermission = true}) async {
     try {
       if (requestPermission) {
@@ -87,10 +89,10 @@ class NotificationService {
       } else {
         // ✅ Permission ඉල්ලන්නේ නැතුව Firebase initialize කරන්න
         debugPrint('🌐 Web: Initializing WITHOUT permission request');
-        
+
         // Setup message listeners without requesting permission
         _setupWebMessageListeners();
-        
+
         // ✅ DO NOT call getToken() here - it triggers permission request
         // Token will be obtained via JavaScript when user grants permission
       }
@@ -101,7 +103,6 @@ class NotificationService {
           _saveTokenToSupabase(newToken);
         }
       });
-
     } catch (e) {
       debugPrint('❌ Web notification init error: $e');
     }
@@ -110,7 +111,7 @@ class NotificationService {
   // ===============================================================
   // 🔥 MOBILE INIT - SAME
   // ===============================================================
-  
+
   Future<void> _initMobileNotifications() async {
     await _initLocalNotifications();
   }
@@ -118,7 +119,7 @@ class NotificationService {
   // ===============================================================
   // 🔥 WEB MESSAGE LISTENERS
   // ===============================================================
-  
+
   void _setupWebMessageListeners() {
     // ✅ Web messages handle කරන්න - permission නැතුව වුණත් වැඩ කරයි
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
@@ -153,7 +154,7 @@ class NotificationService {
   // ===============================================================
   // 🔥 LOCAL NOTIFICATIONS (Mobile)
   // ===============================================================
-  
+
   Future<void> _initLocalNotifications() async {
     if (isWeb) return;
 
@@ -221,31 +222,34 @@ class NotificationService {
   // ===============================================================
   // 🔥 PERMISSION METHODS
   // ===============================================================
-  
+
   /// Request Web Permission - Call from user action only
   Future<bool> requestWebPermission() async {
     try {
       debugPrint('🌐 Requesting web permission (user action)');
-      
+
       final settings = await _firebaseMessaging.requestPermission(
         alert: true,
         badge: true,
         sound: true,
       );
-      
-      final granted = settings.authorizationStatus == AuthorizationStatus.authorized;
-      
+
+      final granted =
+          settings.authorizationStatus == AuthorizationStatus.authorized;
+
       if (granted) {
         debugPrint('✅ Web permission granted');
         // Token එක get කරන්න
-        String? token = await _firebaseMessaging.getToken(vapidKey: _webVapidKey);
+        String? token = await _firebaseMessaging.getToken(
+          vapidKey: _webVapidKey,
+        );
         if (token != null) {
           await _saveTokenToSupabase(token);
         }
       } else {
         debugPrint('❌ Web permission denied');
       }
-      
+
       return granted;
     } catch (e) {
       debugPrint('❌ Web permission error: $e');
@@ -256,10 +260,10 @@ class NotificationService {
   /// Get Web Permission Status
   Future<String> getWebPermissionStatus() async {
     if (!isWeb) return 'not_applicable';
-    
+
     try {
       final settings = await _firebaseMessaging.getNotificationSettings();
-      
+
       if (settings.authorizationStatus == AuthorizationStatus.authorized) {
         return 'granted';
       } else if (settings.authorizationStatus == AuthorizationStatus.denied) {
@@ -323,7 +327,7 @@ class NotificationService {
   // ===============================================================
   // 🔥 TOKEN MANAGEMENT
   // ===============================================================
-  
+
   Future<String?> getToken() async {
     try {
       if (isWeb) {
@@ -343,7 +347,7 @@ class NotificationService {
       debugPrint('🌐 Web: Use requestWebPermission() to get token');
       return;
     }
-    
+
     String? token = await getToken();
     if (token != null) {
       await _saveTokenToSupabase(token);
@@ -358,7 +362,7 @@ class NotificationService {
       debugPrint('🌐 Web: _getTokenAndSave should not be called on web');
       return;
     }
-    
+
     String? token = await getToken();
     if (token != null) {
       await _saveTokenToSupabase(token);
@@ -516,7 +520,7 @@ class NotificationService {
     try {
       final userRoles = await supabase
           .from('user_roles')
-          .select('status')
+          .select('status, roles!inner(name)')
           .eq('user_id', userId)
           .eq('roles.name', role)
           .eq('status', 'active')
@@ -591,14 +595,16 @@ class NotificationService {
     try {
       final userRoles = await supabase
           .from('user_roles')
-          .select('status')
+          .select('status, roles!inner(name)')
           .eq('user_id', userId)
           .eq('roles.name', role)
           .eq('status', 'active')
           .maybeSingle();
 
       if (userRoles == null) {
-        debugPrint('⚠️ User $userId does not have active $role role. Skipping notification.');
+        debugPrint(
+          '⚠️ User $userId does not have active $role role. Skipping notification.',
+        );
         return;
       }
 
@@ -693,7 +699,7 @@ class NotificationService {
     try {
       var query = supabase
           .from('user_roles')
-          .select('user_id, profiles!inner (id, fcm_token)')
+          .select('user_id, roles!inner(name), profiles!inner (id, fcm_token)')
           .eq('roles.name', role)
           .eq('status', 'active');
 
@@ -703,7 +709,9 @@ class NotificationService {
 
       final users = await query;
 
-      debugPrint('📤 Sending notification to ${users.length} active $role users');
+      debugPrint(
+        '📤 Sending notification to ${users.length} active $role users',
+      );
 
       for (var user in users) {
         final userId = user['user_id'] as String;
@@ -733,15 +741,18 @@ class NotificationService {
       var query = supabase
           .from('user_roles')
           .select('''
-            user_id,
-            profiles!inner (
-              id,
-              full_name,
-              email,
-              fcm_token,
-              is_active
-            )
-          ''')
+      user_id,
+      roles!inner (
+        name
+      ),
+      profiles!inner (
+        id,
+        full_name,
+        email,
+        fcm_token,
+        is_active
+      )
+    ''')
           .eq('roles.name', role)
           .eq('status', 'active');
 
@@ -780,7 +791,7 @@ class NotificationService {
     try {
       final result = await supabase
           .from('user_roles')
-          .select('status')
+          .select('status, roles!inner(name)')
           .eq('user_id', userId)
           .eq('roles.name', role)
           .eq('status', 'active')
