@@ -2669,7 +2669,7 @@ class SessionManager {
   }
 
   // ============================================================
-  // 🔥 SALON MANAGEMENT - ✅ FIXED
+  // 🔥 SALON MANAGEMENT -  FIXED
   // ============================================================
 
   static Future<void> saveSalonId(String salonId) async {
@@ -2682,7 +2682,7 @@ class SessionManager {
     }
   }
 
-  // ✅ FIXED: Added async and await
+  // FIXED: Added async and await
   static Future<String?> getSalonId() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -2703,7 +2703,7 @@ class SessionManager {
     }
   }
 
-  // ✅ FIXED: Added async and await
+  // FIXED: Added async and await
   static Future<String?> getSalonName() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -2722,6 +2722,112 @@ class SessionManager {
       if (kDebugMode) debugPrint('✅ Salon data cleared');
     } catch (e) {
       if (kDebugMode) debugPrint('❌ Error clearing salon data: $e');
+    }
+  }
+
+  // ============================================================
+  /// Update profile in local storage (for profile image sync)
+  // ============================================================
+  static Future<void> updateProfileInStorage({
+    required String email,
+    String? name,
+    String? photo,
+    String? phone,
+    String? bio,
+    String? address,
+    String? city,
+  }) async {
+    try {
+     
+      final profiles = await getProfiles();
+      final index = profiles.indexWhere((p) => p['email'] == email);
+
+      if (index == -1) {
+        debugPrint('⚠️ Profile not found for: $email');
+        return;
+      }
+
+      // Update fields
+      if (name != null) profiles[index]['name'] = name;
+      if (photo != null) profiles[index]['photo'] = photo;
+      if (phone != null) profiles[index]['phone'] = phone;
+      if (bio != null) profiles[index]['bio'] = bio;
+      if (address != null) profiles[index]['address'] = address;
+      if (city != null) profiles[index]['city'] = city;
+
+      profiles[index]['updatedAt'] = DateTime.now().toIso8601String();
+
+      // Save to SharedPreferences
+      await _prefs.setString(_keyProfiles, jsonEncode(profiles));
+    
+    } catch (e) {
+      debugPrint('❌ Error updating profile in storage: $e');
+    }
+  }
+
+  ///  Force update available profiles with latest photos from saved_profiles
+  static Future<void> forceSyncAvailableProfiles() async {
+    try {     
+
+      // Get saved profiles with latest data
+      final savedProfiles = await getProfiles();    
+
+      // Get current available profiles
+      final availableProfiles = await getAvailableProfiles();     
+
+      // Create a map of (email + role) -> photo from saved_profiles
+      final Map<String, String> photoMap = {};
+      for (var profile in savedProfiles) {
+        final email = profile['email'] as String?;
+        final photo = profile['photo'] as String?;
+        final roles = profile['roles'] as List? ?? [];
+
+        if (email != null && photo != null && photo.isNotEmpty) {
+          // For each role, map email+role to photo
+          for (var role in roles) {
+            final key = '$email-$role';
+            photoMap[key] = photo;           
+          }
+          // Also map just email for fallback
+          photoMap[email] = photo;
+        }
+      }
+
+      // Update available profiles
+      final updatedProfiles = availableProfiles.map((p) {
+        final email = p['email'] as String?;
+        final role = p['role'] as String?;
+
+        String? newPhoto;
+
+        // Try exact match (email + role)
+        if (email != null && role != null) {
+          final key = '$email-$role';
+          if (photoMap.containsKey(key)) {
+            newPhoto = photoMap[key];
+          }
+        }
+
+        // Fallback: just email
+        if (newPhoto == null && email != null && photoMap.containsKey(email)) {
+          newPhoto = photoMap[email];
+        }
+
+        if (newPhoto != null && newPhoto.isNotEmpty) {        
+          return {
+            ...p,
+            'photo': newPhoto,
+            'updated_at': DateTime.now().toIso8601String(),
+          };
+        }
+        return p;
+      }).toList();
+
+      // Save updated available profiles
+      await saveAvailableProfiles(updatedProfiles);
+        
+    } catch (e) {
+      debugPrint('❌ Error force syncing available profiles: $e');
     }
   }
 }

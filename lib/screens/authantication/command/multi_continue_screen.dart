@@ -319,8 +319,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
           }
         }
       }
-
-      // ✅ Final fallback
+      // Final fallback
       return {'status': 'active', 'source': 'fallback'};
     } catch (e) {
       debugPrint('⚠️ Error getting profile status: $e');
@@ -335,12 +334,50 @@ class _ContinueScreenState extends State<ContinueScreen> {
     try {
       setState(() => _loading = true);
 
-      // ✅ Check if session is valid
-      final bool hasValidSession = _hasValidSession();
-      debugPrint('📊 Has valid session: $hasValidSession');
+      // FORCE SYNC: Update available profiles from saved_profiles
+      await SessionManager.forceSyncAvailableProfiles();
 
+      // Check if session is valid
+      final bool hasValidSession = _hasValidSession();
+     
+      // Get ALL profiles from SessionManager
       final allProfiles = await SessionManager.getProfiles();
-      debugPrint('📥 All profiles loaded: ${allProfiles.length}');
+     
+
+      //  Get available profiles (now synced)
+      final availableProfiles = await SessionManager.getAvailableProfiles();
+    
+     
+      // Create photo map from available profiles
+      final Map<String, String> photoMap = {};
+      for (var profile in availableProfiles) {
+        final email = profile['email'] as String?;
+        final role = profile['role'] as String?;
+        final photo = profile['photo'] as String?;
+        if (email != null &&
+            role != null &&
+            photo != null &&
+            photo.isNotEmpty) {
+          final key = '$email-$role';
+          photoMap[key] = photo;
+          debugPrint('📸 Photo map: $key -> $photo');
+        }
+        // Also map just email for fallback
+        if (email != null && photo != null && photo.isNotEmpty) {
+          photoMap[email] = photo;
+        }
+      }
+
+      // Also get photo from saved profiles
+      final Map<String, String> savedPhotoMap = {};
+      for (var profile in allProfiles) {
+        final email = profile['email'] as String?;
+        final photo = profile['photo'] as String?;
+        if (email != null && photo != null && photo.isNotEmpty) {
+          savedPhotoMap[email] = photo;
+          debugPrint('📸 Saved photo map: $email -> $photo');
+        }
+      }
 
       if (allProfiles.isEmpty) {
         debugPrint('⚠️ No profiles found');
@@ -364,24 +401,21 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
         final displayName = _getDisplayName(profile);
         profile['display_name'] = displayName;
-
-        debugPrint(
-          '📋 Processing profile: $email, name: $displayName, roles: $roles',
-        );
+       
 
         if (roles.isEmpty) {
           debugPrint('  → Skipping profile with no roles: $email');
           continue;
         }
 
-        // ✅ Only call _hasActiveRoles if session is valid
+        // Only call _hasActiveRoles if session is valid
         bool hasActiveRoles = true;
         if (hasValidSession) {
           try {
             hasActiveRoles = await _hasActiveRoles(email, roles);
           } catch (e) {
             debugPrint('⚠️ _hasActiveRoles error for $email: $e');
-            hasActiveRoles = true; // Safe fallback
+            hasActiveRoles = true;
           }
         } else {
           debugPrint(
@@ -402,7 +436,21 @@ class _ContinueScreenState extends State<ContinueScreen> {
           newProfile['display_name'] = displayName;
           newProfile['roles'] = [roles.first];
 
-          // ✅ Only call _getProfileStatus if session is valid
+          // SYNC PHOTO: Use photo from available profiles if available
+          String? syncedPhoto = photoMap[email];
+          if (syncedPhoto == null || syncedPhoto.isEmpty) {
+            syncedPhoto = savedPhotoMap[email];
+          }
+          if (syncedPhoto == null || syncedPhoto.isEmpty) {
+            syncedPhoto = newProfile['photo'] as String?;
+          }
+
+          if (syncedPhoto != null && syncedPhoto.isNotEmpty) {
+            newProfile['photo'] = syncedPhoto;
+            debugPrint('📸 Using photo: $syncedPhoto for $email');
+          }
+
+          // Only call _getProfileStatus if session is valid
           Map<String, dynamic>? statusInfo;
           if (hasValidSession) {
             try {
@@ -428,7 +476,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
           expandedProfiles.add(newProfile);
           debugPrint(
-            '  → Added profile with single role: ${roles.first}, name: $displayName, status: ${newProfile['status']}',
+            '  → Added profile with single role: ${roles.first}, name: $displayName, status: ${newProfile['status']}, photo: ${newProfile['photo']}',
           );
         } else {
           debugPrint('  → Splitting into ${roles.length} profiles');
@@ -439,7 +487,21 @@ class _ContinueScreenState extends State<ContinueScreen> {
             roleProfile['lastLogin'] = profileLastLogin;
             roleProfile['display_name'] = displayName;
 
-            // ✅ Only call _getProfileStatus if session is valid
+            // SYNC PHOTO: Use photo from available profiles if available
+            String? syncedPhoto = photoMap[email];
+            if (syncedPhoto == null || syncedPhoto.isEmpty) {
+              syncedPhoto = savedPhotoMap[email];
+            }
+            if (syncedPhoto == null || syncedPhoto.isEmpty) {
+              syncedPhoto = roleProfile['photo'] as String?;
+            }
+
+            if (syncedPhoto != null && syncedPhoto.isNotEmpty) {
+              roleProfile['photo'] = syncedPhoto;
+              debugPrint('📸 Using photo: $syncedPhoto for $email - $role');
+            }
+
+            // Only call _getProfileStatus if session is valid
             Map<String, dynamic>? statusInfo;
             if (hasValidSession) {
               try {
@@ -449,9 +511,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                 statusInfo = {'status': 'active'};
               }
             } else {
-              debugPrint(
-                '⏭️ Skipping _getProfileStatus (no valid session) for $email - $role',
-              );
+              
               statusInfo = {'status': 'active'};
             }
 
@@ -465,14 +525,12 @@ class _ContinueScreenState extends State<ContinueScreen> {
             }
 
             expandedProfiles.add(roleProfile);
-            debugPrint(
-              '    → Created profile for role: $role, name: $displayName, status: ${roleProfile['status']}',
-            );
+           
           }
         }
       }
 
-      // Sort profiles (OAuth first)
+      // Sort profiles
       expandedProfiles.sort((a, b) {
         final aProvider = a['provider'] as String? ?? 'email';
         final bProvider = b['provider'] as String? ?? 'email';
@@ -489,13 +547,8 @@ class _ContinueScreenState extends State<ContinueScreen> {
       if (!mounted) return;
       setState(() {
         profiles = expandedProfiles;
-        _loading = false;
-        debugPrint('✅ Final profiles count: ${expandedProfiles.length}');
-        for (var i = 0; i < expandedProfiles.length; i++) {
-          debugPrint(
-            '  Profile $i: ${expandedProfiles[i]['email']} - Name: ${expandedProfiles[i]['display_name']} - Role: ${expandedProfiles[i]['roles']?.first} - Status: ${expandedProfiles[i]['status']}',
-          );
-        }
+        _loading = false;       
+        
       });
     } catch (e) {
       debugPrint('❌ Error loading profiles: $e');
