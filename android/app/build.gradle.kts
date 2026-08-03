@@ -36,6 +36,7 @@ android {
         applicationId = "com.example.flutter_application_1"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
+        // minSdk = flutter.minSdkVersion
         minSdk = flutter.minSdkVersion
         //targetSdk = flutter.targetSdkVersion
         targetSdk = 36
@@ -74,8 +75,8 @@ dependencies {
   // Import the Firebase BoM
   implementation(platform("com.google.firebase:firebase-bom:34.3.0"))
 
-  //notification-firbase
-  implementation("com.google.firebase:firebase-messaging:23.1.2")
+  // Notification Firebase (Version number එක අයින් කරලා තියෙන්නේ)
+  implementation("com.google.firebase:firebase-messaging")
 
   // TODO: Add the dependencies for Firebase products you want to use
   // When using the BoM, don't specify versions in Firebase dependencies
