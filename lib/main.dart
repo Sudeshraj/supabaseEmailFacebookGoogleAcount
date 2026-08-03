@@ -1514,16 +1514,24 @@ class _MyAppState extends State<MyApp> {
       builder: (context, child) {
         return Stack(
           children: [
-            AbsorbPointer(
-              absorbing: _offline,
-              child: child ?? const SizedBox(),
+            // 💡 1. හැම screen එකක්ම automatic SafeArea එකක් ඇතුලට දාලා Android 16 system bars වලින් බේරගන්නවා
+            SafeArea(
+              bottom: false, // 👈 Bottom sheet/navigation bars ලස්සනට පේන්න bottom එක false කරන්න
+              child: AbsorbPointer(
+                absorbing: _offline,
+                child: child ?? const SizedBox(),
+              ),
             ),
             if (_offline)
               Positioned(
                 bottom: 0,
                 left: 0,
                 right: 0,
-                child: SafeArea(child: NetworkBanner(offline: _offline)),
+                // 💡 2. NetworkBanner එක Android 15/16 වල gesture bar එක උඩට නොවී ආරක්ෂා වෙනවා
+                child: SafeArea(
+                  top: false, // උඩ පැත්ත ඕන නැති නිසා top false කරන්න
+                  child: NetworkBanner(offline: _offline),
+                ),
               ),
           ],
         );
