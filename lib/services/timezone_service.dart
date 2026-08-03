@@ -374,7 +374,7 @@ class TimezoneService {
         return;
       }
 
-      final String deviceTimezone = await FlutterTimezone.getLocalTimezone();
+    final String deviceTimezone = (await FlutterTimezone.getLocalTimezone()).identifier;
       debugPrint('📱 Device timezone detected: $deviceTimezone');
 
       if (_isValidTimezone(deviceTimezone)) {

@@ -48,7 +48,7 @@ dependencies:
   # 🔥 ENVIRONMENT
   # ================================================================
   flutter_dotenv: ^6.0.0
-  url_strategy: ^0.3.0
+  # url_strategy: ^0.3.0 discontinued den use venne na
 
   # ================================================================
   # 🔥 ICONS & IMAGES
@@ -70,7 +70,7 @@ dependencies:
   # ================================================================
   # 🔥 SETTINGS & IMAGES
   # ================================================================
-  app_settings: ^7.0.0
+  app_settings: ^8.0.3
   image_picker: ^1.2.1
   intl: ^0.20.2
   path: ^1.9.1
@@ -81,7 +81,7 @@ dependencies:
   # ================================================================
   timezone: ^0.11.1
   # flutter_native_timezone: ^2.0.0
-  flutter_timezone: ^4.1.1
+  flutter_timezone: ^5.1.0
   google_fonts: ^8.1.0
   # Deep linking configuration for Android and iOS can be added here if needed.
   app_links: ^7.2.1
