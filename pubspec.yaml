@@ -85,6 +85,7 @@ dependencies:
   google_fonts: ^8.1.0
   # Deep linking configuration for Android and iOS can be added here if needed.
   app_links: ^7.2.1
+  workmanager: ^0.10.5
    
 
 dev_dependencies:

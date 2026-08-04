@@ -129,6 +129,18 @@
     <key>NSLocationWhenInUseUsageDescription</key>
     <string>We need your location to detect timezone</string>
 
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>fetch</string>
+        <string>processing</string>
+        <string>remote-notification</string>
+    </array>
+    <key>BGTaskSchedulerPermittedIdentifiers</key>
+    <array>
+        <!-- mai.dart eke දී ඔයා දාපු Task ID එකම මෙතනට දෙන්න -->
+        <string>com.example.mysalon.supabaseDataSyncTask</string>
+    </array>
+
 
 </dict>
 </plist>

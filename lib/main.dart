@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -54,6 +55,7 @@ import 'package:flutter_application_1/services/timezone_service.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:workmanager/workmanager.dart';
 
 import 'config/environment_manager.dart';
 
@@ -91,16 +93,48 @@ String? pendingDeepLink;
 final AppLinks _appLinks = AppLinks();
 StreamSubscription<Uri>? _linkSubscription;
 
-// ====================
-// FIREBASE BACKGROUND MESSAGE HANDLER
-// ====================
+// ==========================================
+// FIREBASE BACKGROUND MESSAGE HANDLER | BACKGROUND TOOLCHAIN (TOP-LEVEL FUNCTIONS)
+// ==========================================
+
+// 1. ⚙️ Firebase Background Handler (Android 16 Safe)
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  // Background isolate එකක් නිසා Firebase වෙනම initialize කරන්න ඕන
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-  debugPrint('📨 Background message received: ${message.messageId}');
-  debugPrint('📨 Background message data: ${message.data}');
+  
+  if (message.data['sync_required'] == 'true') {
+    if (Platform.isAndroid) {
+      Workmanager().registerOneOffTask(
+        "sync_task_${DateTime.now().millisecondsSinceEpoch}",
+        "supabaseDataSyncTask",
+      );
+    } 
+    else if (Platform.isIOS) {
+      // 🍏 iOS වල BGTaskScheduler එක අවදි කිරීමට මේ ක්‍රමය පාවිච්චි කරන්න
+      Workmanager().registerOneOffTask(
+        "com.example.mysalon.supabaseDataSyncTask", // ⚠️ ඔයාගේ iOS Task Bundle ID එක (පියවර 2 බලන්න)
+        "supabaseDataSyncTask",
+        initialDelay: const Duration(seconds: 10), // Apple නීති අනුව පොඩි ඩිලේ එකක් දීම සුදුසුයි
+      );
+    }
+  }
 }
+
+// 2. 💼 Workmanager Task Dispatcher
+@pragma('vm:entry-point')
+void callbackDispatcher() {
+  Workmanager().executeTask((task, inputData) async {
+    debugPrint("⚙️ Workmanager background task started: $task");
+
+    if (task == "supabaseDataSyncTask") {
+      // 🔌 Supabase valin data fetch/sync karana logic eka methana liyanna
+      debugPrint("📥 Syncing data with Supabase...");
+    }
+
+    return Future.value(true);
+  });
+}
+
 
 // ====================
 // ERROR HANDLER
@@ -186,6 +220,11 @@ Future<void> main() async {
     // ✅ Background message handler register කිරීම - app closed
     // state එකේදී notifications reliably ලැබෙන්න මේක අනිවාර්යයි
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+
+    // 3. NEW PHASE: WORKMANAGER INITIALIZATION (Android 16 Safe)
+    // Android 16 wala background restrictions walin berenna workmanager initialize kireema
+    await Workmanager().initialize(callbackDispatcher);
+    debugPrint('💼 Workmanager initialized successfully');
 
     // ========== PHASE 4: NOTIFICATION SERVICE ==========
     // await NotificationService().init();
@@ -1516,7 +1555,8 @@ class _MyAppState extends State<MyApp> {
           children: [
             // 💡 1. හැම screen එකක්ම automatic SafeArea එකක් ඇතුලට දාලා Android 16 system bars වලින් බේරගන්නවා
             SafeArea(
-              bottom: false, // 👈 Bottom sheet/navigation bars ලස්සනට පේන්න bottom එක false කරන්න
+              bottom:
+                  false, // 👈 Bottom sheet/navigation bars ලස්සනට පේන්න bottom එක false කරන්න
               child: AbsorbPointer(
                 absorbing: _offline,
                 child: child ?? const SizedBox(),
