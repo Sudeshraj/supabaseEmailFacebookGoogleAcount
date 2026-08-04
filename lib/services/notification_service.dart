@@ -1788,11 +1788,11 @@ class NotificationService {
         _firebaseMessagingBackgroundHandler,
       );
     }
-
+// අවස්ථාව B: ඇප් එක පසුබිමේ (Background/Minimized state) තියෙද්දී click කරලා open කරොත්
     FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
       _handleMessage(message);
     });
-
+// අවස්ථාව A: ඇප් එක සම්පූර්ණයෙන්ම වහලා (Terminated state) තියෙද්දී click කරලා open කරොත්
     FirebaseMessaging.instance.getInitialMessage().then((
       RemoteMessage? message,
     ) {
