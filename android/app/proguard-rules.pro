@@ -10,6 +10,18 @@
 -keep class com.google.firebase.** { *; }
 -keep class com.google.android.gms.** { *; }
 
+# WorkManager
+-keep class androidx.work.** { *; }
+-keep class * extends androidx.work.Worker
+
+# Keep our background handlers
+-keep class * { @com.google.firebase.messaging.FirebaseMessagingService *; }
+
+# Keep entry points
+-keepclasseswithmembers class * {
+    @androidx.annotation.Keep <methods>;
+}
+
 # Firebase Messaging
 -keep class com.google.firebase.messaging.** { *; }
 -keep class com.google.firebase.iid.** { *; }

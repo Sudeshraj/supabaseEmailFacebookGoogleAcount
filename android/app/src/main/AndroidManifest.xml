@@ -10,6 +10,9 @@
 
     <!-- Notifications - Android 13+ (API 33+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Required for Android 16 background notifications -->   
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
     <!-- Vibration for notifications -->
     <uses-permission android:name="android.permission.VIBRATE" />
@@ -96,6 +99,30 @@
                 <data android:scheme="@string/fb_login_protocol_scheme" />
             </intent-filter>
         </activity>
+
+        <!-- ================================================================ -->
+        <!-- ANDROID 16 (API 36) FOREGROUND SERVICE DECLARATION           -->
+        <!-- ================================================================ -->
+        
+        <!-- ✅ WorkManager Background Sync Service -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            android:exported="false" />
+
+        <!-- ✅ Optional: If you need a custom foreground service -->
+        <!-- <service
+            android:name=".services.BackgroundSyncService"
+            android:foregroundServiceType="dataSync"
+            android:exported="false" /> -->
+
+        <!-- ================================================================ -->
+        <!-- 🔥 FIREBASE MESSAGING SERVICE                                    -->
+        <!-- ================================================================ -->
+        
+        <service
+            android:name="com.google.firebase.messaging.MessageForwardingService"
+            android:exported="false" />
 
         <!-- ================================================================ -->
         <!-- 🔥 MAIN ACTIVITY -->

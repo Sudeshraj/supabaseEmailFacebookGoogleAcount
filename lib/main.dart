@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -97,38 +96,114 @@ StreamSubscription<Uri>? _linkSubscription;
 // FIREBASE BACKGROUND MESSAGE HANDLER | BACKGROUND TOOLCHAIN (TOP-LEVEL FUNCTIONS)
 // ==========================================
 
-// 1. ⚙️ Firebase Background Handler (Android 16 Safe)
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  // ✅ Initialize Firebase for background isolate
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   
-  if (message.data['sync_required'] == 'true') {
-    if (Platform.isAndroid) {
-      Workmanager().registerOneOffTask(
-        "sync_task_${DateTime.now().millisecondsSinceEpoch}",
-        "supabaseDataSyncTask",
-      );
-    } 
-    else if (Platform.isIOS) {
-      // 🍏 iOS වල BGTaskScheduler එක අවදි කිරීමට මේ ක්‍රමය පාවිච්චි කරන්න
-      Workmanager().registerOneOffTask(
-        "com.example.mysalon.supabaseDataSyncTask", // ⚠️ ඔයාගේ iOS Task Bundle ID එක (පියවර 2 බලන්න)
-        "supabaseDataSyncTask",
-        initialDelay: const Duration(seconds: 10), // Apple නීති අනුව පොඩි ඩිලේ එකක් දීම සුදුසුයි
-      );
+  final notificationService = NotificationService();
+
+  // ✅ Show notification in background
+  if (!notificationService.isWeb) {
+    await notificationService.showMobileNotification(message);
+
+    // ✅ Save notification to database
+    final userId = message.data['userId'];
+    if (userId != null && userId.isNotEmpty) {
+      try {
+        final supabase = Supabase.instance.client;
+        await supabase.from('notifications').insert({
+          'user_id': userId,
+          'title': message.notification?.title ?? 'Notification',
+          'body': message.notification?.body ?? '',
+          'type': message.data['type'] ?? 'general',
+          'data': message.data,
+          'is_read': false,
+          'created_at': DateTime.now().toIso8601String(),
+        });
+      } catch (e) {
+        debugPrint('❌ Background notification save error: $e');
+      }
     }
   }
+
+  // ✅ Android 16 (API 36) - Schedule background sync if needed
+  if (message.data['sync_required'] == 'true') {
+    await Workmanager().registerOneOffTask(
+      "sync_${DateTime.now().millisecondsSinceEpoch}",
+      "supabaseDataSyncTask",
+      initialDelay: const Duration(seconds: 5),
+      constraints: Constraints(
+        networkType: NetworkType.connected,
+        requiresBatteryNotLow: true,
+      ),
+      inputData: message.data,
+      existingWorkPolicy: ExistingWorkPolicy.keep,
+    );
+  }
+
+  debugPrint('📨 Background message processed: ${message.messageId}');
 }
 
-// 2. 💼 Workmanager Task Dispatcher
+// ==========================================
+// 🔥 WORKMANAGER CALLBACK DISPATCHER
+// ==========================================
+
 @pragma('vm:entry-point')
 void callbackDispatcher() {
   Workmanager().executeTask((task, inputData) async {
     debugPrint("⚙️ Workmanager background task started: $task");
 
     if (task == "supabaseDataSyncTask") {
-      // 🔌 Supabase valin data fetch/sync karana logic eka methana liyanna
-      debugPrint("📥 Syncing data with Supabase...");
+      try {
+        // ✅ Initialize Firebase for background
+        await Firebase.initializeApp(
+          options: DefaultFirebaseOptions.currentPlatform,
+        );
+        
+        // ✅ Initialize Supabase
+        await Supabase.initialize(
+          url: environment.supabaseUrl,
+          publishableKey: environment.supabaseAnonKey,
+        );
+        
+        debugPrint("📥 Syncing data with Supabase...");
+        
+        // 🔌 YOUR SYNC LOGIC HERE
+        // Example:
+        // final supabase = Supabase.instance.client;
+        // 
+        // // 1. Get pending sync items
+        // final pendingItems = await supabase
+        //     .from('pending_sync')
+        //     .select()
+        //     .eq('synced', false);
+        // 
+        // // 2. Process each item
+        // for (var item in pendingItems) {
+        //   // Sync logic
+        //   await supabase
+        //       .from('pending_sync')
+        //       .update({'synced': true})
+        //       .eq('id', item['id']);
+        // }
+        // 
+        // // 3. Update local storage
+        // final prefs = await SharedPreferences.getInstance();
+        // await prefs.setString('last_sync', DateTime.now().toIso8601String());
+        
+        return Future.value(true);
+      } catch (e) {
+        debugPrint("❌ Sync error: $e");
+        return Future.value(false);
+      }
+    }
+
+    // ✅ Other task types
+    if (task == "periodic_sync") {
+      debugPrint("📅 Periodic sync task executed");
+      // Periodic sync logic
+      return Future.value(true);
     }
 
     return Future.value(true);
