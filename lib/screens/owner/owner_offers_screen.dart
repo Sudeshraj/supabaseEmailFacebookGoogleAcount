@@ -420,77 +420,126 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
     }
   }
 
-  Future<void> _sendOfferNotificationsToFollowers(
-    Map<String, dynamic> offer,
-  ) async {
-    final salonId = _currentSalonId;
-    if (salonId == null) return;
+Future<void> _sendOfferNotificationsToFollowers(
+  Map<String, dynamic> offer,
+) async {
+  final salonId = _currentSalonId;
+  if (salonId == null) return;
 
-    try {
-      // ✅ Get followers with active customer role
-      final followers = await supabase
-          .from('salon_followers')
-          .select('''
-          customer_id,
-          profiles!inner (
-            user_roles!inner (
-              status
-            )
-          )
-        ''')
-          .eq('salon_id', salonId)
-          .eq('profiles.user_roles.role_id', 3) // customer role
-          .eq('profiles.user_roles.status', 'active'); // ✅ Added status check
+  setState(() => _isLoading = true);
 
-      if (followers.isEmpty) {
-        debugPrint('No active followers to notify');
-        return;
-      }
+  try {
+    // ✅ Step 1: Get active followers with FCM tokens
+    final followers = await supabase.rpc(
+      'get_active_customer_followers',
+      params: {'p_salon_id': salonId},
+    );
 
-      String discountText = '';
-      if (offer['discount_type'] == 'percentage') {
-        discountText = '${offer['discount_value']}% OFF';
-      } else if (offer['discount_type'] == 'fixed') {
-        discountText = '₹${offer['discount_value']} OFF';
-      } else {
-        discountText = 'FREE SERVICE';
-      }
-
-      int sentCount = 0;
-      for (var follower in followers) {
-        try {
-          await _notificationService.sendSpecialOffer(
-            customerId: follower['customer_id'],
-            offerTitle: offer['title'],
-            offerDescription: offer['description'] ?? '',
-            discountText: discountText,
-            offerId: offer['id'],
-            salonName: _currentSalonName ?? 'Salon',
-          );
-          sentCount++;
-        } catch (e) {
-          debugPrint(
-            'Error sending notification to ${follower['customer_id']}: $e',
-          );
-        }
-      }
-
+    if (followers == null || followers.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              '📢 Notifications sent to $sentCount active followers',
-            ),
-            backgroundColor: Colors.blue,
+          const SnackBar(
+            content: Text('⚠️ No active followers to notify'),
+            backgroundColor: Colors.orange,
             behavior: SnackBarBehavior.floating,
-            duration: const Duration(seconds: 2),
           ),
         );
       }
-    } catch (e) {
-      debugPrint('Error sending notifications: $e');
+      return;
     }
+
+    debugPrint('📊 Found ${followers.length} active followers');
+
+    // Generate discount text
+    String discountText = '';
+    if (offer['discount_type'] == 'percentage') {
+      discountText = '${offer['discount_value']}% OFF';
+    } else if (offer['discount_type'] == 'fixed') {
+      discountText = '₹${offer['discount_value']} OFF';
+    } else {
+      discountText = 'FREE SERVICE';
+    }
+
+    int sentCount = 0;
+    int failedCount = 0;
+
+    // ✅ Step 2: Send notification to each follower
+    for (var follower in followers) {
+      try {
+        final customerId = follower['customer_id'] as String;
+        final customerName = follower['full_name'] ?? 'Customer';
+
+        // ✅ Save to database AND send push using NotificationService
+        await _notificationService.sendSpecialOffer(
+          customerId: customerId,
+          offerTitle: offer['title'] ?? 'Special Offer',
+          offerDescription: offer['description'] ?? '',
+          discountText: discountText,
+          offerId: offer['id'] ?? 0,
+          salonName: _currentSalonName ?? 'Salon',
+        );
+
+        sentCount++;
+        debugPrint('✅ Notification sent to $customerName ($customerId)');
+        
+      } catch (e) {
+        debugPrint('❌ Failed to send to ${follower['customer_id']}: $e');
+        failedCount++;
+      }
+    }
+
+    debugPrint('📊 Notifications sent: $sentCount, Failed: $failedCount');
+
+    // ✅ Step 3: Show result
+    if (mounted) {
+      String message;
+      if (sentCount > 0 && failedCount == 0) {
+        message = '📢 Notifications sent to $sentCount followers successfully!';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(message),
+            backgroundColor: Colors.green,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      } else if (sentCount > 0 && failedCount > 0) {
+        message = '📢 $sentCount sent, $failedCount failed';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(message),
+            backgroundColor: Colors.orange,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      } else {
+        message = '⚠️ No notifications sent. $failedCount followers failed.';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(message),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
+    }
+  } catch (e) {
+    debugPrint('❌ Error sending notifications: $e');
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('❌ Failed: ${e.toString().substring(0, 100)}'),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  } finally {
+    if (mounted) setState(() => _isLoading = false);
   }
+}
 
   Future<void> _updateOffer(int offerId, Map<String, dynamic> offerData) async {
     setState(() => _isLoading = true);

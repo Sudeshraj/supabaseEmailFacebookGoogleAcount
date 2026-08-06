@@ -685,30 +685,56 @@ class NotificationService {
   // 🔥 SEND NOTIFICATION WITH ROLE - COMPLETE
   // ===============================================================
 
-  Future<void> sendNotificationWithRole({
-    required String userId,
-    required String title,
-    required String body,
-    String type = 'general',
-    Map<String, dynamic>? data,
-    required String role,
-  }) async {
+Future<void> sendNotificationWithRole({
+  required String userId,
+  required String title,
+  required String body,
+  String type = 'general',
+  Map<String, dynamic>? data,
+  required String role,
+}) async {
+  try {
+    // Check if user has active role
+    final userRoles = await supabase
+        .from('user_roles')
+        .select('status, roles!inner(name)')
+        .eq('user_id', userId)
+        .eq('roles.name', role)
+        .eq('status', 'active')
+        .maybeSingle();
+
+    if (userRoles == null) {
+      debugPrint('⚠️ User $userId does not have active $role role.');
+      return;
+    }
+
+    // ✅ Use RPC (bypasses RLS)
+    final result = await supabase.rpc(
+      'send_notification',
+      params: {
+        'p_user_id': userId,
+        'p_title': title,
+        'p_body': body,
+        'p_type': type,
+        'p_data': {...?data, 'role': role},
+      },
+    );
+
+    debugPrint('✅ Notification saved via RPC: $result');
+
+    // Send push notification
+    await _sendPushNotificationWithToken(
+      userId: userId,
+      title: title,
+      body: body,
+      data: data,
+      role: role,
+    );
+  } catch (e) {
+    debugPrint('❌ Error sending notification: $e');
+    
+    // ✅ Fallback: Direct insert
     try {
-      final userRoles = await supabase
-          .from('user_roles')
-          .select('status, roles!inner(name)')
-          .eq('user_id', userId)
-          .eq('roles.name', role)
-          .eq('status', 'active')
-          .maybeSingle();
-
-      if (userRoles == null) {
-        debugPrint(
-          '⚠️ User $userId does not have active $role role. Skipping notification.',
-        );
-        return;
-      }
-
       await supabase.from('notifications').insert({
         'user_id': userId,
         'title': title,
@@ -718,20 +744,12 @@ class NotificationService {
         'is_read': false,
         'created_at': DateTime.now().toUtc().toIso8601String(),
       });
-
-      debugPrint('✅ Notification saved for $userId (role: $role)');
-
-      await _sendPushNotificationWithToken(
-        userId: userId,
-        title: title,
-        body: body,
-        data: data,
-        role: role,
-      );
-    } catch (e) {
-      debugPrint('❌ Error sending notification: $e');
+      debugPrint('✅ Notification saved via fallback');
+    } catch (fallbackError) {
+      debugPrint('❌ Fallback failed: $fallbackError');
     }
   }
+}
 
   Future<void> _sendPushNotificationWithToken({
     required String userId,
