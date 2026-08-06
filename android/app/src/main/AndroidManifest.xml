@@ -10,9 +10,15 @@
 
     <!-- Notifications - Android 13+ (API 33+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    
     <!-- Required for Android 16 background notifications -->   
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
+    <!-- ✅ Android 16 (API 36) Battery optimizations -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
 
     <!-- Vibration for notifications -->
     <uses-permission android:name="android.permission.VIBRATE" />
@@ -34,7 +40,6 @@
     <!-- ================================================================ -->
     <!-- 🔥 OPTIONAL HARDWARE FEATURES -->
     <!-- ================================================================ -->
-    <!-- required="false" so devices without a camera can still install the app -->
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
 
@@ -53,28 +58,75 @@
         tools:targetApi="33">
 
         <!-- ================================================================ -->
-        <!-- 🔥 NOTIFICATION CHANNEL -->
+        <!-- 🔥 NOTIFICATION CHANNEL CONFIGURATION (FIXED)                   -->
         <!-- ================================================================ -->
 
+        <!-- ✅ Default notification icon -->
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_icon"
             android:resource="@mipmap/ic_launcher" />
 
+        <!-- ✅ Default notification color -->
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_color"
             android:resource="@color/notification_color" />
 
+        <!-- ✅ Default notification channel ID -->
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
             android:value="salon_channel" />
 
+        <!-- ✅ Notification channel name (Android 8+ settings) -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_name"
+            android:value="Salon Booking Notifications" />
+
+        <!-- ✅ Notification channel description -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_description"
+            android:value="Notifications for salon booking updates, offers, and reminders" />
+
         <!-- ================================================================ -->
-        <!-- 🔥 FACEBOOK LOGIN (flutter_facebook_auth) -->
+        <!-- 🔥 FIREBASE MESSAGING SERVICES (FIXED)                          -->
         <!-- ================================================================ -->
-        <!-- ⚠️ IMPORTANT: facebook_app_id, facebook_client_token, and         -->
-        <!-- fb_login_protocol_scheme must be defined in                      -->
-        <!-- android/app/src/main/res/values/strings.xml                      -->
-        <!-- Get these values from https://developers.facebook.com/apps       -->
+
+        <!-- ✅ Main FCM Service for receiving messages -->
+        <service
+            android:name="com.google.firebase.messaging.FirebaseMessagingService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
+        <!-- ✅ Required for FCM message forwarding (Android 12+) -->
+        <service
+            android:name="com.google.firebase.messaging.MessageForwardingService"
+            android:exported="false" />
+
+        <!-- ✅ Required for FCM GCM fallback -->
+        <service
+            android:name="com.google.firebase.messaging.FirebaseMessagingRegistrar"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.INSTANCE_ID_EVENT" />
+            </intent-filter>
+        </service>
+
+        <!-- ================================================================ -->
+        <!-- 🔥 ANDROID 16 (API 36) FOREGROUND SERVICE                        -->
+        <!-- ================================================================ -->
+        
+        <!-- ✅ WorkManager Background Sync Service -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            android:exported="false" />
+
+        <!-- ================================================================ -->
+        <!-- 🔥 FACEBOOK LOGIN                                               -->
+        <!-- ================================================================ -->
 
         <meta-data
             android:name="com.facebook.sdk.ApplicationId"
@@ -99,30 +151,6 @@
                 <data android:scheme="@string/fb_login_protocol_scheme" />
             </intent-filter>
         </activity>
-
-        <!-- ================================================================ -->
-        <!-- ANDROID 16 (API 36) FOREGROUND SERVICE DECLARATION           -->
-        <!-- ================================================================ -->
-        
-        <!-- ✅ WorkManager Background Sync Service -->
-        <service
-            android:name="androidx.work.impl.foreground.SystemForegroundService"
-            android:foregroundServiceType="dataSync"
-            android:exported="false" />
-
-        <!-- ✅ Optional: If you need a custom foreground service -->
-        <!-- <service
-            android:name=".services.BackgroundSyncService"
-            android:foregroundServiceType="dataSync"
-            android:exported="false" /> -->
-
-        <!-- ================================================================ -->
-        <!-- 🔥 FIREBASE MESSAGING SERVICE                                    -->
-        <!-- ================================================================ -->
-        
-        <service
-            android:name="com.google.firebase.messaging.MessageForwardingService"
-            android:exported="false" />
 
         <!-- ================================================================ -->
         <!-- 🔥 MAIN ACTIVITY -->
@@ -164,10 +192,8 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
 
-                <!-- Scheme-based deep link -->
                 <data android:scheme="myapp" />
 
-                <!-- Supabase callback URL -->
                 <data
                     android:scheme="https"
                     android:host="ifhenrgfpahandumdwmt.supabase.co"
@@ -232,9 +258,6 @@
         <!-- ================================================================ -->
         <!-- 🔥 IMAGE CROPPING (UCrop) -->
         <!-- ================================================================ -->
-        <!-- ⚠️ NOTE: image_cropper v6+ registers this provider automatically. -->
-        <!-- If the build fails with a "duplicate provider authority" /       -->
-        <!-- manifest merger conflict error, remove this <provider> block.    -->
 
         <provider
             android:name="com.yalantis.ucrop.UCropFileProvider"
@@ -249,10 +272,8 @@
     </application>
 
     <!-- ================================================================ -->
-    <!-- 🔥 TEXT PROCESSING & URL LAUNCHER (QUERIES) -->
+    <!-- 🔥 TEXT PROCESSING & URL LAUNCHER (QUERIES)                     -->
     <!-- ================================================================ -->
-    <!-- Android 11+ (API 30+) requires explicit package visibility        -->
-    <!-- declarations, otherwise url_launcher's canLaunchUrl() may fail.    -->
 
     <queries>
         <intent>
@@ -260,7 +281,6 @@
             <data android:mimeType="text/plain" />
         </intent>
 
-        <!-- Web links (https/http) -->
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="https" />
@@ -270,7 +290,6 @@
             <data android:scheme="http" />
         </intent>
 
-        <!-- Phone calls -->
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="tel" />
@@ -280,13 +299,11 @@
             <data android:scheme="tel" />
         </intent>
 
-        <!-- Email -->
         <intent>
             <action android:name="android.intent.action.SENDTO" />
             <data android:scheme="mailto" />
         </intent>
 
-        <!-- SMS -->
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="sms" />

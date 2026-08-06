@@ -8,6 +8,15 @@ import 'package:universal_platform/universal_platform.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 
+import 'dart:js_interop';
+
+@JS('Notification')
+extension type _JSNotification._(JSObject _) implements JSObject {
+  external _JSNotification(JSString title, JSAny options);
+  @JS('permission')
+  external static JSString get permission;
+}
+
 class NotificationService {
   static final NotificationService _instance = NotificationService._internal();
   factory NotificationService() => _instance;
@@ -531,45 +540,100 @@ class NotificationService {
   // 🔥 WEB BROWSER NOTIFICATION
   // ===============================================================
 
-  void _showWebBrowserNotification(
-    RemoteNotification notification,
-    Map<String, dynamic> data,
-  ) {
-    try {
-      // ✅ Web browser notification using JavaScript
-      debugPrint('🌐 Web notification shown: ${notification.title}');
-    } catch (e) {
-      debugPrint('⚠️ Web notification error: $e');
+void _showWebBrowserNotification(
+  RemoteNotification notification,
+  Map<String, dynamic> data,
+) {
+  try {
+    if (_JSNotification.permission.toDart == 'granted') {
+      final options = {
+        'body': notification.body ?? '',
+        'icon': '/icons/Icon-192.png',
+      }.jsify();
+
+      _JSNotification(
+        (notification.title ?? 'Notification').toJS,
+        options!,
+      );
+      debugPrint('🌐 Web notification actually shown now');
+    } else {
+      debugPrint('⚠️ Web notification permission not granted');
     }
+  } catch (e) {
+    debugPrint('⚠️ Web notification error: $e');
   }
+}
 
   // ===============================================================
   // 🔥 DATABASE OPERATIONS USING RPC - COMPLETE
   // ===============================================================
 
-  Future<void> _saveNotificationToDatabase({
-    required String title,
-    required String body,
-    required String type,
-    Map<String, dynamic>? data,
-  }) async {
+Future<void> _saveNotificationToDatabase({
+  required String title,
+  required String body,
+  required String type,
+  Map<String, dynamic>? data,
+}) async {
+  try {
+    final user = supabase.auth.currentUser;
+    if (user == null) return;
+
+    // ✅ Convert data values to strings
+    final Map<String, String> stringData = {};
+    if (data != null) {
+      data.forEach((key, value) {
+        if (value != null) {
+          stringData[key] = value.toString();
+        }
+      });
+    }
+
+    // ✅ Use RPC
+    final result = await supabase.rpc(
+      'send_notification',
+      params: {
+        'p_user_id': user.id,
+        'p_title': title,
+        'p_body': body,
+        'p_type': type,
+        'p_data': stringData,
+      },
+    );
+    
+    debugPrint('✅ Notification saved via RPC: $result');
+  } catch (e) {
+    debugPrint('❌ RPC error: $e');
+    
+    // ✅ Fallback: Get user again
     try {
       final user = supabase.auth.currentUser;
       if (user == null) return;
-
+      
+      // Convert data values to strings
+      final Map<String, dynamic> dbData = {};
+      if (data != null) {
+        data.forEach((key, value) {
+          if (value != null) {
+            dbData[key] = value;
+          }
+        });
+      }
+      
       await supabase.from('notifications').insert({
         'user_id': user.id,
         'title': title,
         'body': body,
         'type': type,
-        'data': data ?? {},
+        'data': dbData,
         'is_read': false,
         'created_at': DateTime.now().toIso8601String(),
       });
-    } catch (e) {
-      debugPrint('❌ Error saving notification to database: $e');
+      debugPrint('✅ Notification saved via fallback');
+    } catch (fallbackError) {
+      debugPrint('❌ Fallback failed: $fallbackError');
     }
   }
+}
 
   Future<int> getUnreadCount(String userId) async {
     try {
@@ -694,7 +758,7 @@ Future<void> sendNotificationWithRole({
   required String role,
 }) async {
   try {
-    // Check if user has active role
+    // ✅ Check if user has active role
     final userRoles = await supabase
         .from('user_roles')
         .select('status, roles!inner(name)')
@@ -708,7 +772,18 @@ Future<void> sendNotificationWithRole({
       return;
     }
 
-    // ✅ Use RPC (bypasses RLS)
+    // ✅ Convert all data values to strings for FCM
+    final Map<String, String> stringData = {};
+    if (data != null) {
+      data.forEach((key, value) {
+        if (value != null) {
+          stringData[key] = value.toString();
+        }
+      });
+    }
+    stringData['role'] = role;
+
+    // ✅ Save notification to database using RPC
     final result = await supabase.rpc(
       'send_notification',
       params: {
@@ -716,18 +791,18 @@ Future<void> sendNotificationWithRole({
         'p_title': title,
         'p_body': body,
         'p_type': type,
-        'p_data': {...?data, 'role': role},
+        'p_data': {...stringData, 'role': role},
       },
     );
 
     debugPrint('✅ Notification saved via RPC: $result');
 
-    // Send push notification
+    // ✅ Send push notification
     await _sendPushNotificationWithToken(
       userId: userId,
       title: title,
       body: body,
-      data: data,
+      data: data, // Original data (will be converted to strings in the method)
       role: role,
     );
   } catch (e) {
@@ -735,12 +810,23 @@ Future<void> sendNotificationWithRole({
     
     // ✅ Fallback: Direct insert
     try {
+      // Convert data to strings for database
+      final Map<String, dynamic> dbData = {};
+      if (data != null) {
+        data.forEach((key, value) {
+          if (value != null) {
+            dbData[key] = value;
+          }
+        });
+      }
+      dbData['role'] = role;
+
       await supabase.from('notifications').insert({
         'user_id': userId,
         'title': title,
         'body': body,
         'type': type,
-        'data': {...?data, 'role': role},
+        'data': dbData,
         'is_read': false,
         'created_at': DateTime.now().toUtc().toIso8601String(),
       });
@@ -751,57 +837,101 @@ Future<void> sendNotificationWithRole({
   }
 }
 
-  Future<void> _sendPushNotificationWithToken({
-    required String userId,
-    required String title,
-    required String body,
-    Map<String, dynamic>? data,
-    required String role,
-  }) async {
-    try {
-      final userProfile = await supabase
-          .from('profiles')
-          .select('fcm_token')
-          .eq('id', userId)
-          .maybeSingle();
+Future<void> _sendPushNotificationWithToken({
+  required String userId,
+  required String title,
+  required String body,
+  Map<String, dynamic>? data,
+  required String role,
+}) async {
+  try {
+    // ✅ Step 1: Get user profile from database
+    final userProfile = await supabase
+        .from('profiles')
+        .select('fcm_token, full_name, email')
+        .eq('id', userId)
+        .maybeSingle();
 
-      final fcmToken = userProfile?['fcm_token'];
+    if (userProfile == null) {
+      debugPrint('⚠️ User profile not found for userId: $userId');
+      return;
+    }
 
-      if (fcmToken == null || fcmToken.toString().isEmpty) {
-        debugPrint('⚠️ No FCM token for user $userId');
-        return;
-      }
+    final fcmToken = userProfile['fcm_token'] as String?;
 
-      final result = await supabase.functions.invoke(
-        'send-notification',
-        body: {
-          'userId': userId,
-          'title': title,
-          'body': body,
-          'role': role,
-          'screen': data?['screen'] ?? 'home',
-          'bookingId': data?['bookingId']?.toString() ?? '',
-          'extraData': data ?? {},
-          'fcmToken': fcmToken,
-        },
-      );
+    // ✅ Step 2: Check if FCM token exists
+    if (fcmToken == null || fcmToken.isEmpty) {
+      debugPrint('⚠️ No FCM token for user $userId');
+      return;
+    }
 
-      if (result.status == 200) {
-        final responseData = result.data as Map<String, dynamic>?;
-        if (responseData?['success'] == true) {
-          debugPrint('✅ Push notification sent successfully to $userId');
+    debugPrint('📤 Sending push notification to user: $userId');
+    debugPrint('📤 FCM Token: ${fcmToken.substring(0, 10)}...');
+
+    // ✅ Step 3: Convert all data values to strings (FCM requirement)
+    final Map<String, String> stringData = {};
+    
+    // Add basic fields
+    stringData['screen'] = data?['screen']?.toString() ?? 'home';
+    stringData['bookingId'] = data?['bookingId']?.toString() ?? '';
+    stringData['role'] = role;
+    
+    // Add all extra data as strings
+    if (data != null) {
+      data.forEach((key, value) {
+        if (value != null && key != 'screen' && key != 'bookingId') {
+          stringData[key] = value.toString();
+        }
+      });
+    }
+
+    // ✅ Step 4: Prepare payload
+    final Map<String, dynamic> payload = {
+      'userId': userId,
+      'title': title,
+      'body': body,
+      'role': role,
+      'screen': data?['screen']?.toString() ?? 'home',
+      'bookingId': data?['bookingId']?.toString() ?? '',
+      'extraData': stringData,
+      'fcmToken': fcmToken,
+    };
+
+    debugPrint('📤 Payload: ${payload.keys}');
+
+    // ✅ Step 5: Call Supabase Edge Function
+    final result = await supabase.functions.invoke(
+      'send-notification',
+      body: payload,
+    );
+
+    // ✅ Step 6: Handle response
+    if (result.status == 200) {
+      final responseData = result.data as Map<String, dynamic>?;
+      
+      if (responseData?['success'] == true) {
+        if (responseData?['pushFailed'] == true) {
+          debugPrint('⚠️ Push notification failed but notification saved in database: ${responseData?['message']}');
+          debugPrint('⚠️ FCM Error: ${responseData?['error']}');
         } else {
-          debugPrint(
-            '⚠️ Push notification failed: ${responseData?['message']}',
-          );
+          debugPrint('✅ Push notification sent successfully to $userId');
+          debugPrint('✅ FCM Message ID: ${responseData?['result']?['name']}');
         }
       } else {
-        debugPrint('⚠️ Edge Function returned status: ${result.status}');
+        debugPrint('⚠️ Push notification failed: ${responseData?['message']}');
+        if (responseData?['error'] != null) {
+          debugPrint('⚠️ Error details: ${responseData?['error']}');
+        }
       }
-    } catch (e) {
-      debugPrint('❌ Error sending push notification: $e');
+    } else {
+      debugPrint('⚠️ Edge Function returned status: ${result.status}');
+      debugPrint('⚠️ Response: ${result.data}');
     }
+  } catch (e) {
+    debugPrint('❌ Error sending push notification: $e');
+    debugPrint('❌ Stack trace: ${StackTrace.current}');
   }
+}
 
   // ===============================================================
   // 🔥 BULK NOTIFICATION METHODS - COMPLETE
@@ -1329,32 +1459,33 @@ Future<void> sendNotificationWithRole({
     );
   }
 
-  Future<void> sendSpecialOffer({
-    required String customerId,
-    required String offerTitle,
-    required String offerDescription,
-    required String discountText,
-    required int offerId,
-    required String salonName,
-  }) async {
-    final title = '🎁 Special Offer!';
-    final body = '$offerTitle: $discountText at $salonName. $offerDescription';
+Future<void> sendSpecialOffer({
+  required String customerId,
+  required String offerTitle,
+  required String offerDescription,
+  required String discountText,
+  required int offerId,
+  required String salonName,
+}) async {
+  final title = '🎁 Special Offer!';
+  final body = '$offerTitle: $discountText at $salonName. $offerDescription';
 
-    await sendNotificationWithRole(
-      userId: customerId,
-      title: title,
-      body: body,
-      type: 'special_offer',
-      role: 'customer',
-      data: {
-        'offerTitle': offerTitle,
-        'discountText': discountText,
-        'salonName': salonName,
-        'offerId': offerId,
-        'screen': 'offers',
-      },
-    );
-  }
+  await sendNotificationWithRole(
+    userId: customerId,
+    title: title,
+    body: body,
+    type: 'special_offer',
+    role: 'customer',
+    data: {
+      'offerTitle': offerTitle,
+      'discountText': discountText,
+      'salonName': salonName,
+      'offerId': offerId.toString(), // ✅ Convert to string
+      'screen': 'offers',
+      'role': 'customer',
+    },
+  );
+}
 
   Future<void> sendWaitingListAvailable({
     required String customerId,
