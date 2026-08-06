@@ -349,10 +349,20 @@
   </script>
   
   <!-- ==================== SERVICE WORKER REGISTRATION ==================== -->
+  <!--
+    ⚠️ FIX: Flutter 3.34+ (flutter_bootstrap.js) auto-registers its own
+    service worker internally. Manually registering
+    'flutter_service_worker.js' here a second time at the same scope ('/')
+    conflicts with that auto-registration and can cause the browser to be
+    unsure which SW should own push/notification events - which is why
+    web notifications were silently failing.
+
+    Only the Firebase messaging service worker is registered manually here.
+    Do NOT add a manual flutter_service_worker.js registration back in.
+  -->
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {
-        // Register Firebase messaging service worker
         navigator.serviceWorker.register('/firebase-messaging-sw.js')
           .then((registration) => {
             console.log('✅ Firebase SW registered:', registration.scope);
@@ -360,19 +370,6 @@
           .catch((error) => {
             console.log('❌ Firebase SW registration failed:', error);
           });
-        
-        // Register Flutter service worker
-        var scripts = document.getElementsByTagName('script');
-        for (var i = 0; i < scripts.length; i++) {
-          if (scripts[i].src && scripts[i].src.includes('flutter_bootstrap')) {
-            var url = new URL(scripts[i].src);
-            var version = url.searchParams.get('v') || Date.now();
-            navigator.serviceWorker.register('flutter_service_worker.js?v=' + version)
-              .then(reg => console.log('✅ Flutter SW registered'))
-              .catch(err => console.log('❌ Flutter SW registration failed:', err));
-            break;
-          }
-        }
       });
     }
   </script>
