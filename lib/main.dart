@@ -100,7 +100,7 @@ StreamSubscription<Uri>? _linkSubscription;
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   // ✅ Initialize Firebase for background isolate
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-  
+
   final notificationService = NotificationService();
 
   // ✅ Show notification in background
@@ -160,25 +160,25 @@ void callbackDispatcher() {
         await Firebase.initializeApp(
           options: DefaultFirebaseOptions.currentPlatform,
         );
-        
+
         // ✅ Initialize Supabase
         await Supabase.initialize(
           url: environment.supabaseUrl,
           publishableKey: environment.supabaseAnonKey,
         );
-        
+
         debugPrint("📥 Syncing data with Supabase...");
-        
+
         // 🔌 YOUR SYNC LOGIC HERE
         // Example:
         // final supabase = Supabase.instance.client;
-        // 
+        //
         // // 1. Get pending sync items
         // final pendingItems = await supabase
         //     .from('pending_sync')
         //     .select()
         //     .eq('synced', false);
-        // 
+        //
         // // 2. Process each item
         // for (var item in pendingItems) {
         //   // Sync logic
@@ -187,11 +187,11 @@ void callbackDispatcher() {
         //       .update({'synced': true})
         //       .eq('id', item['id']);
         // }
-        // 
+        //
         // // 3. Update local storage
         // final prefs = await SharedPreferences.getInstance();
         // await prefs.setString('last_sync', DateTime.now().toIso8601String());
-        
+
         return Future.value(true);
       } catch (e) {
         debugPrint("❌ Sync error: $e");
@@ -209,7 +209,6 @@ void callbackDispatcher() {
     return Future.value(true);
   });
 }
-
 
 // ====================
 // ERROR HANDLER
@@ -292,14 +291,31 @@ Future<void> main() async {
       options: DefaultFirebaseOptions.currentPlatform,
     );
 
-    // ✅ Background message handler register කිරීම - app closed
-    // state එකේදී notifications reliably ලැබෙන්න මේක අනිවාර්යයි
-    FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+    // ✅ Web vs Mobile separation
+    if (!kIsWeb) {
+      // ✅ Background message handler - Android/iOS only
+      FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
-    // 3. NEW PHASE: WORKMANAGER INITIALIZATION (Android 16 Safe)
-    // Android 16 wala background restrictions walin berenna workmanager initialize kireema
-    await Workmanager().initialize(callbackDispatcher);
-    debugPrint('💼 Workmanager initialized successfully');
+      // 3. NEW PHASE: WORKMANAGER INITIALIZATION (Android 16 Safe)
+      // Android 16 wala background restrictions walin berenna workmanager initialize kireema
+      await Workmanager().initialize(callbackDispatcher);
+      debugPrint('💼 Workmanager initialized successfully');
+
+      // ✅ Periodic task - Android/iOS only
+      await Workmanager().registerPeriodicTask(
+        "periodic_sync",
+        "supabaseDataSyncTask",
+        frequency: const Duration(hours: 6),
+        constraints: Constraints(
+          networkType: NetworkType.connected,
+          requiresBatteryNotLow: true,
+          requiresStorageNotLow: true,
+        ),
+      );
+      debugPrint('📅 Periodic sync task registered');
+    } else {
+      debugPrint('🌐 Web: Skipping Workmanager and background handler');
+    }
 
     // ========== PHASE 4: NOTIFICATION SERVICE ==========
     // await NotificationService().init();
