@@ -45,6 +45,7 @@
 
 # UCrop
 -keep class com.yalantis.ucrop.** { *; }
+-keep class com.yalantis.ucrop.UCropFileProvider { *; }
 -dontwarn com.yalantis.ucrop.**
 -keep class com.bumptech.glide.** { *; }
 -dontwarn com.bumptech.glide.**

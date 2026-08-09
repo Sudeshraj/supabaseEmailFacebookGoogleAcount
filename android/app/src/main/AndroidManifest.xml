@@ -182,8 +182,7 @@
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="myapp" />
+                <category android:name="android.intent.category.BROWSABLE" />               
             </intent-filter>
 
             <!-- Android App Links -->
@@ -191,8 +190,6 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-
-                <data android:scheme="myapp" />
 
                 <data
                     android:scheme="https"
@@ -255,19 +252,6 @@
             android:name="flutterEmbedding"
             android:value="2" />
 
-        <!-- ================================================================ -->
-        <!-- 🔥 IMAGE CROPPING (UCrop) -->
-        <!-- ================================================================ -->
-
-        <provider
-            android:name="com.yalantis.ucrop.UCropFileProvider"
-            android:authorities="${applicationId}.ucrop"
-            android:exported="false"
-            android:grantUriPermissions="true">
-            <meta-data
-                android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/ucrop_paths" />
-        </provider>
 
     </application>
 
