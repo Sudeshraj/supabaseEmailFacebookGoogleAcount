@@ -1070,10 +1070,14 @@ class _SignInScreenState extends State<SignInScreen>
   Widget _getProviderIcon(String provider, {double size = 18}) {
     switch (provider.toLowerCase()) {
       case 'google':
-        return SvgPicture.asset('icons/google.svg', width: size, height: size);
+        return SvgPicture.asset(
+          'assets/icons/google.svg',
+          width: size,
+          height: size,
+        );
       case 'facebook':
         return SvgPicture.asset(
-          'icons/facebook.svg',
+          'assets/icons/facebook.svg',
           width: size,
           height: size,
         );
@@ -1248,6 +1252,17 @@ class _SignInScreenState extends State<SignInScreen>
             }
           } catch (e) {
             debugPrint('Supabase sign-in failed: $e');
+            // ✅ Fallback යන්නවත් තියලා, user ට error එකක් පෙන්නලා stop කරන්න
+            if (mounted) {
+              await showCustomAlert(
+                context: context,
+                title: "Sign In Failed",
+                message:
+                    "Google sign-in couldn't be completed. Please try again.",
+                isError: true,
+              );
+            }
+            return;
           }
         } else {
           debugPrint('Google authentication failed');
@@ -1607,11 +1622,11 @@ class _SignInScreenState extends State<SignInScreen>
                 try {
                   await supabase.functions.invoke(
                     'save-apple-auth-code',
-                    body: {
-                      'authorizationCode': credential.authorizationCode,
-                    },
+                    body: {'authorizationCode': credential.authorizationCode},
                   );
-                  debugPrint('✅ Apple authorization code saved for revocation later');
+                  debugPrint(
+                    '✅ Apple authorization code saved for revocation later',
+                  );
                 } catch (e) {
                   debugPrint('⚠️ Failed to save Apple authorization code: $e');
                 }
@@ -1981,7 +1996,7 @@ $provider OAuth Configuration Required:
                                     child: ClipRRect(
                                       borderRadius: BorderRadius.circular(20),
                                       child: Image.asset(
-                                        'logo.png',
+                                        'assets/images/logo.png',
                                         fit: BoxFit.cover,
                                         errorBuilder:
                                             (context, error, stackTrace) {
@@ -2411,11 +2426,23 @@ class _SocialLoginButton extends StatelessWidget {
   Widget _getIcon() {
     switch (provider) {
       case 'google':
-        return SvgPicture.asset('icons/google.svg', width: 18, height: 18);
+        return SvgPicture.asset(
+          'assets/icons/google.svg',
+          width: 18,
+          height: 18,
+        );
       case 'facebook':
-        return SvgPicture.asset('icons/facebook.svg', width: 18, height: 18);
+        return SvgPicture.asset(
+          'assets/icons/facebook.svg',
+          width: 18,
+          height: 18,
+        );
       case 'apple':
-        return SvgPicture.asset('icons/apple.svg', width: 20, height: 20);
+        return SvgPicture.asset(
+          'assets/icons/apple.svg',
+          width: 20,
+          height: 20,
+        );
       case 'password':
         return Icon(
           Icons.person_add_alt_1_rounded,

@@ -1,14 +1,18 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/config/environment_manager.dart';
 import 'package:flutter_application_1/main.dart';
 import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
+import 'package:flutter_application_1/services/google_sign_in_service.dart';
 import 'package:flutter_application_1/services/session_manager.dart';
 import 'package:flutter_svg/svg.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:go_router/go_router.dart';
 
 final supabase = Supabase.instance.client;
+final GoogleSignInService _googleSignInService =
+    GoogleSignInService(); // ✅ field එක තියෙනවා
 
 class ContinueScreen extends StatefulWidget {
   const ContinueScreen({super.key});
@@ -339,15 +343,13 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
       // Check if session is valid
       final bool hasValidSession = _hasValidSession();
-     
+
       // Get ALL profiles from SessionManager
       final allProfiles = await SessionManager.getProfiles();
-     
 
       //  Get available profiles (now synced)
       final availableProfiles = await SessionManager.getAvailableProfiles();
-    
-     
+
       // Create photo map from available profiles
       final Map<String, String> photoMap = {};
       for (var profile in availableProfiles) {
@@ -401,7 +403,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
         final displayName = _getDisplayName(profile);
         profile['display_name'] = displayName;
-       
 
         if (roles.isEmpty) {
           debugPrint('  → Skipping profile with no roles: $email');
@@ -511,7 +512,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
                 statusInfo = {'status': 'active'};
               }
             } else {
-              
               statusInfo = {'status': 'active'};
             }
 
@@ -525,7 +525,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
             }
 
             expandedProfiles.add(roleProfile);
-           
           }
         }
       }
@@ -547,8 +546,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
       if (!mounted) return;
       setState(() {
         profiles = expandedProfiles;
-        _loading = false;       
-        
+        _loading = false;
       });
     } catch (e) {
       debugPrint('❌ Error loading profiles: $e');
@@ -776,12 +774,26 @@ class _ContinueScreenState extends State<ContinueScreen> {
     }
   }
 
+  // ============================================================
+  // FIXED: _handleOAuthLoginForProfile() in ContinueScreen
+  // Add these imports at the top of continue_screen.dart:
+  //
+  // import 'package:flutter/foundation.dart'
+  //     show defaultTargetPlatform, TargetPlatform;
+  // import 'package:flutter_application_1/services/google_sign_in_service.dart';
+  //
+  // Add this field inside _ContinueScreenState:
+  //
+  // final GoogleSignInService _googleSignInService = GoogleSignInService();
+  // ============================================================
+
   Future<bool> _handleOAuthLoginForProfile(Map<String, dynamic> profile) async {
     final email = profile['email'] as String?;
     final provider = profile['provider'] as String?;
     if (email == null || provider == null) return false;
     final roles = profile['roles'] as List? ?? [];
     final role = roles.isNotEmpty ? roles.first.toString() : 'customer';
+
     try {
       final currentUser = supabase.auth.currentUser;
       if (currentUser?.email == email) return true;
@@ -790,8 +802,44 @@ class _ContinueScreenState extends State<ContinueScreen> {
       if (autoSuccess) return true;
 
       await SessionManager.setPendingRoleSelection(email: email, role: role);
+
       switch (provider) {
         case 'google':
+          // ✅ Mobile - try native Google Sign-In first (matches sign_in.dart)
+          if (defaultTargetPlatform == TargetPlatform.android ||
+              defaultTargetPlatform == TargetPlatform.iOS) {
+            debugPrint('🔐 Continue screen - using native Google Sign-In');
+
+            final authData = await _googleSignInService
+                .authenticateAndGetDetails();
+
+            if (authData != null && authData['idToken'] != null) {
+              try {
+                final response = await supabase.auth.signInWithIdToken(
+                  provider: OAuthProvider.google,
+                  idToken: authData['idToken']!,
+                  accessToken: authData['accessToken'],
+                );
+
+                if (response.user != null) {
+                  debugPrint(
+                    '✅ Native Google sign-in successful (Continue screen)',
+                  );
+                  return true; // ✅ Native success - no browser round-trip needed
+                }
+              } catch (e) {
+                debugPrint(
+                  '❌ Native Google sign-in failed (Continue screen): $e',
+                );
+                return false; // ✅ Do NOT fall through to browser - avoid double popup
+              }
+            }
+
+            debugPrint('❌ Native Google authentication cancelled or failed');
+            return false; // ✅ User cancelled - stop here, no browser fallback
+          }
+
+          // Web or other platforms - use browser OAuth
           await supabase.auth.signInWithOAuth(
             OAuthProvider.google,
             redirectTo: _env.getRedirectUrl(),
@@ -799,6 +847,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
           );
           SessionManager.setLocationContinuesc(true);
           break;
+
         case 'facebook':
           await supabase.auth.signInWithOAuth(
             OAuthProvider.facebook,
@@ -807,6 +856,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
           );
           SessionManager.setLocationContinuesc(true);
           break;
+
         case 'apple':
           await supabase.auth.signInWithOAuth(
             OAuthProvider.apple,
@@ -815,11 +865,15 @@ class _ContinueScreenState extends State<ContinueScreen> {
           );
           SessionManager.setLocationContinuesc(true);
           break;
+
         default:
           return false;
       }
 
-      for (int i = 0; i < 10; i++) {
+      // ✅ FIX: Increased from 10x500ms (5s) to 60x500ms (30s) - browser
+      // OAuth round-trip (Google login page load / account pick / deep
+      // link back to app) routinely takes longer than 5 seconds.
+      for (int i = 0; i < 60; i++) {
         await Future.delayed(const Duration(milliseconds: 500));
         final user = supabase.auth.currentUser;
         if (user?.email == email) {
@@ -907,11 +961,23 @@ class _ContinueScreenState extends State<ContinueScreen> {
   Widget _buildProviderIcon(String provider) {
     switch (provider.toLowerCase()) {
       case 'google':
-        return SvgPicture.asset('icons/google.svg', width: 18, height: 18);
+        return SvgPicture.asset(
+          'assets/icons/google.svg',
+          width: 18,
+          height: 18,
+        );
       case 'facebook':
-        return SvgPicture.asset('icons/facebook.svg', width: 18, height: 18);
+        return SvgPicture.asset(
+          'assets/icons/facebook.svg',
+          width: 18,
+          height: 18,
+        );
       case 'apple':
-        return SvgPicture.asset('icons/apple.svg', width: 20, height: 20);
+        return SvgPicture.asset(
+          'assets/icons/apple.svg',
+          width: 20,
+          height: 20,
+        );
       case 'email':
         return Icon(
           Icons.email_rounded,
@@ -1616,7 +1682,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                             child: ClipRRect(
                               borderRadius: BorderRadius.circular(40),
                               child: Image.asset(
-                                'logo.png',
+                                'assets/images/logo.png',
                                 fit: BoxFit.cover,
                                 errorBuilder: (context, error, stackTrace) {
                                   return Center(

@@ -26,14 +26,35 @@ class GoogleSignInService {
       // Get platform-specific client ID from EnvironmentManager
       final String? clientId = _getPlatformClientId();
 
+      // ✅ FIX: serverClientId is REQUIRED to get a valid idToken back
+      // on Android/iOS. Without it, the idToken's audience won't match
+      // what Supabase expects, causing signInWithIdToken() to fail
+      // silently and fall back to browser OAuth (double popup bug).
+      // This must ALWAYS be the Web Client ID (OAuth "Web application"
+      // type), regardless of platform.
+      final String webClientId = _env.googleWebClientId;
+
       // Validate if Google OAuth is enabled
       if (!_env.enableGoogleOAuth) {
         return false;
       }
 
-      await _googleSignIn.initialize(clientId: clientId);
+      if (webClientId.isEmpty) {
+        debugPrint(
+          '❌ GoogleSignIn initialize error: googleWebClientId is empty. '
+          'serverClientId is required for idToken to work correctly.',
+        );
+        return false;
+      }
+
+      await _googleSignIn.initialize(
+        clientId: clientId,
+        serverClientId: webClientId, // ✅ THE FIX
+      );
 
       _isInitialized = true;
+
+      debugPrint('✅ GoogleSignIn initialized with serverClientId set');
 
       return true;
     } catch (e) {
@@ -140,9 +161,25 @@ class GoogleSignInService {
       if (account == null) return null;
 
       final auth = account.authentication;
-      if (auth.idToken == null) return null;
+
+      // ✅ Extra diagnostic logging - helps confirm whether the fix
+      // worked. If idToken is still null after adding serverClientId,
+      // the issue is Android OAuth Client / SHA-1 registration, not
+      // this file.
+      if (auth.idToken == null) {
+        debugPrint(
+          '❌ authenticateAndGetDetails: idToken is null even after '
+          'serverClientId fix. Check that the Android OAuth Client '
+          '(matching this app\'s SHA-1 + package name) exists in '
+          'Google Cloud Console, and that a fresh google-services.json '
+          'has been pulled if using Firebase for anything else.',
+        );
+        return null;
+      }
 
       final accessToken = await getAccessToken(account);
+
+      debugPrint('✅ Got idToken successfully (native Google sign-in)');
 
       return {
         'idToken': auth.idToken,
