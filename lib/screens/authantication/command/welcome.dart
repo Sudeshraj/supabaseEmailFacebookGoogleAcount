@@ -7,7 +7,11 @@ import '../../../services/session_manager.dart';
 class WelcomeScreen extends StatefulWidget {
   final void Function(String) onNext;
 
-  const WelcomeScreen({super.key, required this.onNext, required void Function() onBack});
+  const WelcomeScreen({
+    super.key,
+    required this.onNext,
+    required void Function() onBack,
+  });
 
   @override
   State<WelcomeScreen> createState() => _WelcomeScreenState();
@@ -55,96 +59,87 @@ class _WelcomeScreenState extends State<WelcomeScreen>
   }
 
   /// Logout function
-Future<void> _handleLogout() async {
-  debugPrint('📍 Logout button pressed');
-  
-  if (!mounted) return;
+  Future<void> _handleLogout() async {
+    debugPrint('📍 Logout button pressed');
 
-  // Show confirmation dialog
-  final shouldLogout = await showDialog<bool>(
-    context: context,
-    builder: (dialogContext) => AlertDialog(
-      backgroundColor: const Color(0xFF1C1F26),
-      title: const Text(
-        'Logout',
-        style: TextStyle(color: Colors.white),
-      ),
-      content: const Text(
-        'Are you sure you want to logout?',
-        style: TextStyle(color: Colors.white70),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(dialogContext, false),
-          child: const Text(
-            'Cancel',
-            style: TextStyle(color: Colors.white70),
-          ),
+    if (!mounted) return;
+
+    // Show confirmation dialog
+    final shouldLogout = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: const Color(0xFF1C1F26),
+        title: const Text('Logout', style: TextStyle(color: Colors.white)),
+        content: const Text(
+          'Are you sure you want to logout?',
+          style: TextStyle(color: Colors.white70),
         ),
-        TextButton(
-          onPressed: () => Navigator.pop(dialogContext, true),
-          style: TextButton.styleFrom(foregroundColor: Colors.red),
-          child: const Text(
-            'Logout',
-            style: TextStyle(color: Colors.red),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(color: Colors.white70),
+            ),
           ),
-        ),
-      ],
-    ),
-  );
-
-  if (shouldLogout != true) {
-    debugPrint('❌ Logout cancelled');
-    return;
-  }
-
-  debugPrint('✅ Logout confirmed');
-
-  if (!mounted) return;
-
-  // Show loading indicator
-  showDialog(
-    context: context,
-    barrierDismissible: false,
-    builder: (dialogContext) => const Dialog(
-      backgroundColor: Colors.transparent,
-      insetPadding: EdgeInsets.all(0),
-      child: Center(
-        child: CircularProgressIndicator(color: Colors.white),
-      ),
-    ),
-  );
-
-  try {
-    // Perform logout
-    await SessionManager.logoutForContinue();
-
-    if (!mounted) return;
-
-    // Navigate directly to login - DON'T use pop
-    debugPrint('📍 Navigating to /login');
-    context.go('/'); // Use go() instead of pushReplacement
-
-  } catch (e) {
-    debugPrint('❌ Logout error: $e');
-
-    if (!mounted) return;
-
-    // Close loading dialog using Navigator.of(context, rootNavigator: true)
-    Navigator.of(context, rootNavigator: true).pop();
-
-    if (!mounted) return;
-
-    // Show error
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Logout failed: ${e.toString()}'),
-        backgroundColor: Colors.red,
-        duration: const Duration(seconds: 3),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Logout', style: TextStyle(color: Colors.red)),
+          ),
+        ],
       ),
     );
+
+    if (shouldLogout != true) {
+      debugPrint('❌ Logout cancelled');
+      return;
+    }
+
+    debugPrint('✅ Logout confirmed');
+
+    if (!mounted) return;
+
+    // Show loading indicator
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => const Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: EdgeInsets.all(0),
+        child: Center(child: CircularProgressIndicator(color: Colors.white)),
+      ),
+    );
+
+    try {
+      // Perform logout
+      await SessionManager.logoutForContinue();
+
+      if (!mounted) return;
+
+      // Navigate directly to login - DON'T use pop
+      debugPrint('📍 Navigating to /login');
+      context.go('/'); // Use go() instead of pushReplacement
+    } catch (e) {
+      debugPrint('❌ Logout error: $e');
+
+      if (!mounted) return;
+
+      // Close loading dialog using Navigator.of(context, rootNavigator: true)
+      Navigator.of(context, rootNavigator: true).pop();
+
+      if (!mounted) return;
+
+      // Show error
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Logout failed: ${e.toString()}'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
   }
-}
 
   /// Optimized role card with better image handling
   Widget _roleCard({
@@ -364,7 +359,7 @@ Future<void> _handleLogout() async {
                                     child: ClipRRect(
                                       borderRadius: BorderRadius.circular(20),
                                       child: Image.asset(
-                                        'logo.png',
+                                        'assets/images/logo.png',
                                         fit: BoxFit.cover,
                                         errorBuilder:
                                             (context, error, stackTrace) {
