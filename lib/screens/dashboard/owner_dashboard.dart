@@ -92,7 +92,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       begin: 1.0,
       end: 1.06,
     ).animate(CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut));
-    
+
     _initializeAndLoad();
     _setupNotificationListeners();
   }
@@ -124,14 +124,17 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         await supabase.from('user_roles').insert({
           'user_id': userId,
           'role_id': 1,
-          'status': 'active'
+          'status': 'active',
         });
         debugPrint('✅ Owner role created');
       } else if (ownerCheck['status'] != 'active') {
         debugPrint('🔄 Updating owner role to active...');
         await supabase
             .from('user_roles')
-            .update({'status': 'active', 'updated_at': DateTime.now().toIso8601String()})
+            .update({
+              'status': 'active',
+              'updated_at': DateTime.now().toIso8601String(),
+            })
             .eq('user_id', userId)
             .eq('role_id', 1);
         debugPrint('✅ Owner role activated');
@@ -151,13 +154,16 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           await supabase.from('user_roles').insert({
             'user_id': userId,
             'role_id': roleId,
-            'status': 'active'
+            'status': 'active',
           });
           debugPrint('✅ Role $roleId created');
         } else if (check['status'] != 'active') {
           await supabase
               .from('user_roles')
-              .update({'status': 'active', 'updated_at': DateTime.now().toIso8601String()})
+              .update({
+                'status': 'active',
+                'updated_at': DateTime.now().toIso8601String(),
+              })
               .eq('user_id', userId)
               .eq('role_id', roleId);
           debugPrint('✅ Role $roleId activated');
@@ -166,7 +172,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
       await supabase.auth.refreshSession();
       debugPrint('✅ Session refreshed');
-
     } catch (e) {
       debugPrint('❌ Error ensuring owner role: $e');
     }
@@ -207,19 +212,19 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         child: CircleAvatar(
           radius: 18,
           backgroundColor: Colors.white.withValues(alpha: 0.2),
-          backgroundImage: _profileImageUrl != null && _profileImageUrl!.isNotEmpty
+          backgroundImage:
+              _profileImageUrl != null && _profileImageUrl!.isNotEmpty
               ? NetworkImage(_profileImageUrl!)
               : null,
-          onBackgroundImageError: _profileImageUrl != null && _profileImageUrl!.isNotEmpty
+          onBackgroundImageError:
+              _profileImageUrl != null && _profileImageUrl!.isNotEmpty
               ? (exception, stackTrace) {
                   debugPrint('⚠️ Failed to load avatar image: $exception');
                 }
               : null,
           child: _profileImageUrl == null || _profileImageUrl!.isEmpty
               ? Text(
-                  _userName.isNotEmpty
-                      ? _userName[0].toUpperCase()
-                      : '?',
+                  _userName.isNotEmpty ? _userName[0].toUpperCase() : '?',
                   style: const TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.bold,
@@ -247,7 +252,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         userId: userId,
         role: 'owner',
       );
-      
+
       if (mounted) {
         setState(() {
           _unreadNotificationCount = count;
@@ -322,14 +327,11 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   // ═══════════════════════════════════════════════════════════
   Widget _buildSalonSelectorChip() {
     if (_ownerSalons.isEmpty) return const SizedBox.shrink();
-    
+
     return GestureDetector(
       onTap: _showSalonSelectorDialog,
       child: Container(
-        padding: const EdgeInsets.symmetric(
-          horizontal: 10,
-          vertical: 4,
-        ),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(
           color: Colors.white.withValues(alpha: 0.2),
           borderRadius: BorderRadius.circular(20),
@@ -353,11 +355,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
               ),
             ),
             if (_ownerSalons.length > 1)
-              const Icon(
-                Icons.arrow_drop_down,
-                size: 16,
-                color: Colors.white,
-              ),
+              const Icon(Icons.arrow_drop_down, size: 16, color: Colors.white),
           ],
         ),
       ),
@@ -369,7 +367,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   // ═══════════════════════════════════════════════════════════
   Future<void> _showSalonSelectorDialog() async {
     if (_ownerSalons.length <= 1) return;
-    
+
     await showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
@@ -413,7 +411,9 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                 title: Text(
                   salon['name'] ?? 'Unknown Salon',
                   style: TextStyle(
-                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                    fontWeight: isSelected
+                        ? FontWeight.bold
+                        : FontWeight.normal,
                   ),
                 ),
                 subtitle: Text(
@@ -534,10 +534,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       debugPrint('❌ Error enabling notifications: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: $e'),
-            backgroundColor: Colors.red,
-          ),
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
         );
       }
     }
@@ -655,12 +652,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           ),
         ),
         const SizedBox(width: 12),
-        Flexible(
-          child: Text(
-            text,
-            style: const TextStyle(fontSize: 14),
-          ),
-        ),
+        Flexible(child: Text(text, style: const TextStyle(fontSize: 14))),
       ],
     );
   }
@@ -946,6 +938,15 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
   void _updateCurrentDate() {
     final now = DateTime.now();
+    const weekdays = [
+      'Sunday',
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+    ];
     const months = [
       'Jan',
       'Feb',
@@ -960,17 +961,12 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       'Nov',
       'Dec',
     ];
-    final weekdays = [
-      'Sunday',
-      'Monday',
-      'Tuesday',
-      'Wednesday',
-      'Thursday',
-      'Friday',
-      'Saturday',
-    ];
+
+    // weekday: 1=Mon ... 7=Sun → map to your 0=Sun ... 6=Sat array
+    final weekdayIndex = now.weekday % 7; // Sunday(7) → 0, Monday(1) → 1, etc.
+
     _currentDate =
-        '${weekdays[now.weekday]}, ${months[now.month - 1]} ${now.day}, ${now.year}';
+        '${weekdays[weekdayIndex]}, ${months[now.month - 1]} ${now.day}, ${now.year}';
   }
 
   Future<void> _loadTimezone() async {
@@ -1609,16 +1605,16 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     setState(() => _isLoading = true);
     try {
       debugPrint('🔄 _loadAllData() started');
-      
+
       await _loadTimezone();
       debugPrint('✅ Timezone loaded');
-      
+
       await _loadUserProfile();
       debugPrint('✅ User profile loaded');
-      
+
       await _loadOwnerSalons();
       debugPrint('✅ Owner salons loaded: ${_ownerSalons.length}');
-      
+
       try {
         await _loadDashboardStats();
         debugPrint('✅ Dashboard stats loaded');
@@ -1633,7 +1629,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           _completedToday = 0;
         });
       }
-      
+
       try {
         await _checkOnboardingStatus();
         debugPrint('✅ Onboarding status checked');
@@ -1673,7 +1669,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         setState(() => _isLoading = false);
         debugPrint('✅ _loadAllData() completed');
       }
-      
     } catch (e) {
       debugPrint('❌ Error loading data: $e');
       if (mounted) {
@@ -1758,7 +1753,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     try {
       final userId = supabase.auth.currentUser?.id;
       debugPrint('🔍 Current User ID: $userId');
-      
+
       if (userId == null) {
         debugPrint('❌ No user logged in');
         if (mounted) {
@@ -1771,10 +1766,12 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       }
 
       debugPrint('🔍 Loading salons for owner: $userId');
-      
+
       final response = await supabase
           .from('salons')
-          .select('id, name, address, phone, email, description, is_active, created_at, updated_at, logo_url, cover_url, open_time, close_time, timezone')
+          .select(
+            'id, name, address, phone, email, description, is_active, created_at, updated_at, logo_url, cover_url, open_time, close_time, timezone',
+          )
           .eq('owner_id', userId)
           .eq('is_active', true)
           .order('created_at', ascending: false);
@@ -1789,7 +1786,9 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             if (_selectedSalonId == null) {
               _selectedSalonId = _ownerSalons.first['id'].toString();
               _selectedSalonName = _ownerSalons.first['name']?.toString();
-              debugPrint('✅ Selected first salon: $_selectedSalonName (ID: $_selectedSalonId)');
+              debugPrint(
+                '✅ Selected first salon: $_selectedSalonName (ID: $_selectedSalonId)',
+              );
             } else {
               final selected = _ownerSalons.firstWhere(
                 (s) => s['id'].toString() == _selectedSalonId,
@@ -1821,7 +1820,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     debugPrint('📊 _loadDashboardStats() called');
     debugPrint('📊 _selectedSalonId: $_selectedSalonId');
     debugPrint('📊 _ownerSalons.length: ${_ownerSalons.length}');
-    
+
     if (_selectedSalonId == null || _ownerSalons.isEmpty) {
       debugPrint('⚠️ No salon selected or no salons found');
       setState(() {
@@ -1834,11 +1833,11 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       });
       return;
     }
-    
+
     try {
       final today = DateTime.now().toIso8601String().split('T')[0];
       final salonIdInt = int.parse(_selectedSalonId!);
-      
+
       debugPrint('📊 Today: $today, Salon ID: $salonIdInt');
 
       final results = await Future.wait([
@@ -1847,20 +1846,20 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             .select('id, status, price')
             .eq('salon_id', salonIdInt)
             .eq('appointment_date', today),
-        
+
         supabase
             .from('appointments')
             .select('id')
             .eq('salon_id', salonIdInt)
             .eq('appointment_date', today)
             .eq('status', 'pending'),
-        
+
         supabase
             .from('salon_barbers')
             .select('barber_id')
             .eq('salon_id', salonIdInt)
             .eq('status', 'active'),
-        
+
         supabase
             .from('salon_followers')
             .select('id')
@@ -1874,19 +1873,23 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
       debugPrint('📊 Today appointments count: ${todayAppointments.length}');
       debugPrint('📊 Pending bookings count: ${pendingBookings.length}');
-      debugPrint('📊 Active barbers from salon_barbers: ${activeBarbers.length}');
-      
+      debugPrint(
+        '📊 Active barbers from salon_barbers: ${activeBarbers.length}',
+      );
+
       int activeBarberCount = 0;
       if (activeBarbers.isNotEmpty) {
-        final barberIds = activeBarbers.map((b) => b['barber_id'] as String).toList();
-        
+        final barberIds = activeBarbers
+            .map((b) => b['barber_id'] as String)
+            .toList();
+
         final validBarbers = await supabase
             .from('user_roles')
             .select('user_id')
             .inFilter('user_id', barberIds)
             .eq('role_id', 2)
             .eq('status', 'active');
-        
+
         activeBarberCount = validBarbers.length;
         debugPrint('📊 Active barbers with valid roles: $activeBarberCount');
       }
@@ -1913,9 +1916,10 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           _totalRevenue = revenue;
           _completedToday = completedToday;
         });
-        debugPrint('📊 Stats updated: Today: $_todayAppointments, Pending: $_pendingBookings, Customers(Followers): $_totalCustomers, Barbers: $_activeBarbers, Revenue: $_totalRevenue');
+        debugPrint(
+          '📊 Stats updated: Today: $_todayAppointments, Pending: $_pendingBookings, Customers(Followers): $_totalCustomers, Barbers: $_activeBarbers, Revenue: $_totalRevenue',
+        );
       }
-      
     } catch (e) {
       debugPrint('❌ Dashboard stats error: $e');
       if (mounted) {
@@ -1963,11 +1967,11 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           .select('barber_id')
           .eq('salon_id', salonId)
           .eq('status', 'active');
-      
+
       bool hasActiveBarbers = false;
       if (barbers.isNotEmpty) {
         final barberIds = barbers.map((b) => b['barber_id'] as String).toList();
-        
+
         final validBarbers = await supabase
             .from('user_roles')
             .select('user_id')
@@ -1975,7 +1979,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             .eq('role_id', 2)
             .eq('status', 'active')
             .limit(1);
-        
+
         hasActiveBarbers = validBarbers.isNotEmpty;
       }
       _hasBarbers = hasActiveBarbers;
@@ -2009,9 +2013,10 @@ class _OwnerDashboardState extends State<OwnerDashboard>
               (_hasHolidays ? 1 : 0);
         });
       }
-      
-      debugPrint('📊 Onboarding: Salon: $_hasSalon, Services: $_hasServices, Barbers: $_hasBarbers, Steps: $_completedSteps');
-      
+
+      debugPrint(
+        '📊 Onboarding: Salon: $_hasSalon, Services: $_hasServices, Barbers: $_hasBarbers, Steps: $_completedSteps',
+      );
     } catch (e) {
       debugPrint('❌ Onboarding error: $e');
     }
@@ -2051,7 +2056,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     try {
       FirebaseMessaging.onMessage.listen((RemoteMessage message) {
         debugPrint('📨 New notification received: ${message.data}');
-        
+
         if (message.data['type'] == 'new_booking') {
           _showNewBookingAlert(message);
           setState(() {
@@ -2242,7 +2247,9 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         ),
         actions: [
           // ✅ NEW: Web salon selector (like Employee Dashboard)
-          if (isWeb && _selectedSalonName != null && _selectedSalonName!.isNotEmpty)
+          if (isWeb &&
+              _selectedSalonName != null &&
+              _selectedSalonName!.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(right: 8),
               child: GestureDetector(
@@ -2359,12 +2366,11 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                         compact: true,
                       ),
                     _buildSimpleHeader(),
-                    
+
                     if (_completedSteps < _totalSteps) _buildStepFlow(),
-                    
+
                     // ✅ REMOVED: Duplicate salon selector (now in AppBar)
                     // if (_ownerSalons.length > 1) _buildSalonSelector(),
-                    
                     if (_ownerSalons.isEmpty)
                       Container(
                         margin: const EdgeInsets.all(16),
@@ -2416,7 +2422,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                           ],
                         ),
                       ),
-                    
+
                     if (_ownerSalons.isNotEmpty)
                       _isSwitchingSalon
                           ? const Padding(
@@ -2443,7 +2449,8 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                                           value: '$_todayAppointments',
                                           icon: Icons.calendar_today,
                                           color: Colors.blue,
-                                          subtitle: '$_completedToday completed',
+                                          subtitle:
+                                              '$_completedToday completed',
                                           onTap: _viewBookings,
                                         ),
                                       ),
@@ -2461,7 +2468,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                                   ),
                                 ),
                                 const SizedBox(height: 12),
-                                
+
                                 Padding(
                                   padding: const EdgeInsets.symmetric(
                                     horizontal: 16,
@@ -2493,7 +2500,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                                   ),
                                 ),
                                 const SizedBox(height: 12),
-                                
+
                                 Padding(
                                   padding: const EdgeInsets.symmetric(
                                     horizontal: 16,
@@ -2509,7 +2516,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                                 ),
                               ],
                             ),
-                    
+
                     const SizedBox(height: 16),
                     _buildManagementSection(),
                     const SizedBox(height: 80),
