@@ -77,6 +77,10 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   bool _showSearchResults = false;
   OverlayEntry? _searchOverlay;
 
+  // ✅ Android 16: Track screen size for responsive layout
+  bool _isLargeScreen = false;
+  bool _isTablet = false;
+
   @override
   void initState() {
     super.initState();
@@ -93,6 +97,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _checkScreenSize();
     _checkForUpdates();
     _checkTimezoneChange();
   }
@@ -105,6 +110,20 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       _loadUnreadCount();
       _loadDashboardData();
       _checkCustomerStatus();
+    }
+  }
+
+  // ✅ Android 16: Check screen size for responsive layout
+  void _checkScreenSize() {
+    final size = MediaQuery.of(context).size;
+    final isLarge = size.width > 800 || size.height > 800;
+    final isTablet = size.shortestSide >= 600;
+
+    if (_isLargeScreen != isLarge || _isTablet != isTablet) {
+      setState(() {
+        _isLargeScreen = isLarge;
+        _isTablet = isTablet;
+      });
     }
   }
 
@@ -215,7 +234,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       screen: 'customer_dashboard',
       action: action,
     );
-    
+
     if (mounted) {
       setState(() {
         _showPermissionCard = shouldShow;
@@ -259,7 +278,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         context: context,
         action: action ?? 'customer_dashboard',
         customTitle: _permissionManager.getPermissionCardTitle(action: action),
-        customMessage: _permissionManager.getPermissionCardMessage(action: action),
+        customMessage: _permissionManager.getPermissionCardMessage(
+          action: action,
+        ),
         onGranted: () async {
           debugPrint('✅ Permission granted callback');
           await _permissionManager.markPermissionGranted();
@@ -319,18 +340,16 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   // ============================================================
 
   void _bookAppointment() {
-    // ✅ Show permission card before booking
     if (!_hasPermission) {
       _showPermissionCardContext(action: 'booking');
       if (_showPermissionCard) {
-        return; // Show card first, don't navigate
+        return;
       }
     }
     context.push('/customer/booking-flow');
   }
 
   void _createVipBooking() {
-    // ✅ Show permission card before VIP booking
     if (!_hasPermission) {
       _showPermissionCardContext(action: 'vip');
       if (_showPermissionCard) {
@@ -341,7 +360,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   void _viewAllOffers() {
-    // ✅ Show permission card before offers
     if (!_hasPermission) {
       _showPermissionCardContext(action: 'offer');
       if (_showPermissionCard) {
@@ -352,14 +370,13 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   Future<void> _viewNotifications() async {
-    // ✅ Show permission card before notifications
     if (!_hasPermission) {
       _showPermissionCardContext(action: 'notification');
       if (_showPermissionCard) {
         return;
       }
     }
-    
+
     final result = await context.push('/notifications?role=customer');
     await _refreshUnreadCount();
     if (result == true) {
@@ -373,6 +390,10 @@ class _CustomerDashboardState extends State<CustomerDashboard>
 
   void _viewFavoriteBarbers() {
     context.push('/customer/favorites');
+  }
+
+  void _navigateToProfile() {
+    context.push('/profile');
   }
 
   // ============================================================
@@ -560,7 +581,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // LOAD DASHBOARD DATA - UPDATED
+  // LOAD DASHBOARD DATA
   // ============================================================
 
   Future<void> _loadDashboardData() async {
@@ -670,16 +691,14 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         });
       }
 
-      // ✅ Check permission with PermissionManager - No action (initial load)
       _hasPermission = await _notificationService.hasPermission();
 
       if (!_hasPermission) {
         _showPermissionCard = await _permissionManager.shouldShowPermissionCard(
           screen: 'customer_dashboard',
-          action: null, // No action - normal check
+          action: null,
         );
 
-        // ✅ Web: Check if permission is denied in browser
         if (UniversalPlatform.isWeb && _showPermissionCard) {
           final status = await _notificationService.getWebPermissionStatus();
           if (status == 'denied') {
@@ -1526,7 +1545,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // TIMEZONE PICKER METHODS
+  // TIMEZONE PICKER METHODS (සමානයි)
   // ============================================================
 
   String _extractCountryCode(String timezone) {
@@ -2137,7 +2156,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // SEARCH METHODS
+  // SEARCH METHODS (සමානයි)
   // ============================================================
 
   void _onSearchTextChanged() {
@@ -2398,7 +2417,182 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // WIDGET BUILDERS - UI COMPONENTS
+  // ✅ Android 16: Responsive Layout Widgets
+  // ============================================================
+
+  Widget _buildResponsiveBookButton() {
+    return Expanded(
+      child: ElevatedButton.icon(
+        onPressed: _bookAppointment,
+        icon: const Icon(Icons.calendar_today, size: 18, color: Colors.white),
+        label: const Text(
+          'Book Now',
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: Colors.white,
+          ),
+        ),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: const Color(0xFFFF6B8B),
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          elevation: 0,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildResponsiveVipButton() {
+    return Expanded(
+      child: OutlinedButton.icon(
+        onPressed: _createVipBooking,
+        icon: const Icon(Icons.star, size: 18, color: Colors.amber),
+        label: const Text(
+          'VIP Booking',
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: Colors.amber,
+          ),
+        ),
+        style: OutlinedButton.styleFrom(
+          side: const BorderSide(color: Colors.amber, width: 1.5),
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ✅ Android 16: Responsive Stat Cards Grid
+  Widget _buildResponsiveStatCards() {
+    // For tablets and large screens - show all 4 stats in a grid
+    if (_isTablet) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: GridView.count(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          crossAxisCount: _isLargeScreen ? 4 : 2,
+          crossAxisSpacing: 12,
+          mainAxisSpacing: 12,
+          childAspectRatio: 1.2,
+          children: [
+            _buildStatCard(
+              'Upcoming',
+              '$_upcomingBookings',
+              Icons.calendar_today,
+              Colors.blue,
+              _viewMyBookings,
+            ),
+            _buildStatCard(
+              'VIP',
+              '$_vipBookings',
+              Icons.star,
+              Colors.amber,
+              _viewVipBookings,
+            ),
+            _buildStatCard(
+              'Points',
+              '$_loyaltyPoints',
+              Icons.card_giftcard,
+              Colors.green,
+              _viewLoyaltyProgram,
+            ),
+            _buildStatCard(
+              'Completed',
+              '$_completedBookings',
+              Icons.check_circle,
+              Colors.purple,
+              _viewMyBookings,
+            ),
+          ],
+        ),
+      );
+    }
+
+    // For phones - show 3 stats in a row
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        children: [
+          _buildStatCard(
+            'Upcoming',
+            '$_upcomingBookings',
+            Icons.calendar_today,
+            Colors.blue,
+            _viewMyBookings,
+          ),
+          const SizedBox(width: 12),
+          _buildStatCard(
+            'VIP',
+            '$_vipBookings',
+            Icons.star,
+            Colors.amber,
+            _viewVipBookings,
+          ),
+          const SizedBox(width: 12),
+          _buildStatCard(
+            'Points',
+            '$_loyaltyPoints',
+            Icons.card_giftcard,
+            Colors.green,
+            _viewLoyaltyProgram,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatCard(
+    String title,
+    String value,
+    IconData icon,
+    Color color,
+    VoidCallback onTap,
+  ) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: color.withValues(alpha: 0.2)),
+          ),
+          child: Column(
+            children: [
+              Icon(icon, color: color, size: 24),
+              const SizedBox(height: 4),
+              Text(
+                value,
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: color,
+                ),
+              ),
+              Text(
+                title,
+                style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ============================================================
+  // OTHER UI COMPONENTS (පෙර තිබූ ඒවා)
   // ============================================================
 
   Widget _buildHorizontalSalonCard(Map<String, dynamic> salon) {
@@ -2408,7 +2602,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     return GestureDetector(
       onTap: () => _navigateToSalonProfile(salon),
       child: Container(
-        width: 160,
+        width: _isTablet ? 200 : 160,
         margin: const EdgeInsets.only(right: 12),
         decoration: BoxDecoration(
           color: Colors.white,
@@ -2435,12 +2629,12 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                   child: hasLogo
                       ? Image.network(
                           salon['logo_url'],
-                          height: 100,
+                          height: _isTablet ? 130 : 100,
                           width: double.infinity,
                           fit: BoxFit.cover,
                           errorBuilder: (context, error, stackTrace) =>
                               Container(
-                                height: 100,
+                                height: _isTablet ? 130 : 100,
                                 color: const Color(
                                   0xFFFF6B8B,
                                 ).withValues(alpha: 0.1),
@@ -2457,7 +2651,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                               ),
                         )
                       : Container(
-                          height: 100,
+                          height: _isTablet ? 130 : 100,
                           color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
                           child: Center(
                             child: Text(
@@ -2513,8 +2707,8 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                       children: [
                         Text(
                           salon['name'],
-                          style: const TextStyle(
-                            fontSize: 14,
+                          style: TextStyle(
+                            fontSize: _isTablet ? 16 : 14,
                             fontWeight: FontWeight.bold,
                           ),
                           maxLines: 1,
@@ -2533,7 +2727,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                               child: Text(
                                 salon['address'],
                                 style: TextStyle(
-                                  fontSize: 10,
+                                  fontSize: _isTablet ? 11 : 10,
                                   color: Colors.grey[500],
                                 ),
                                 maxLines: 1,
@@ -2568,7 +2762,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                               Text(
                                 '${salon['booking_count']}',
                                 style: TextStyle(
-                                  fontSize: 9,
+                                  fontSize: _isTablet ? 11 : 9,
                                   color: Colors.green[700],
                                 ),
                               ),
@@ -2604,7 +2798,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   Widget _buildFollowedSalonsSection() {
     if (_isLoadingSalons) {
       return Container(
-        height: 210,
+        height: _isTablet ? 250 : 210,
         padding: const EdgeInsets.all(24),
         child: const Center(
           child: SizedBox(
@@ -2647,7 +2841,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
             Text(
               'No Followed Salons',
               style: TextStyle(
-                fontSize: 18,
+                fontSize: _isTablet ? 20 : 18,
                 fontWeight: FontWeight.bold,
                 color: Colors.grey[700],
               ),
@@ -2655,7 +2849,10 @@ class _CustomerDashboardState extends State<CustomerDashboard>
             const SizedBox(height: 8),
             Text(
               'Follow your favorite salons to see them here',
-              style: TextStyle(fontSize: 14, color: Colors.grey[500]),
+              style: TextStyle(
+                fontSize: _isTablet ? 16 : 14,
+                color: Colors.grey[500],
+              ),
               textAlign: TextAlign.center,
             ),
           ],
@@ -2681,16 +2878,19 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                 ),
               ),
               const SizedBox(width: 8),
-              const Text(
+              Text(
                 'My Salons',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  fontSize: _isTablet ? 20 : 18,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ],
           ),
         ),
         const SizedBox(height: 12),
         SizedBox(
-          height: 210,
+          height: _isTablet ? 250 : 210,
           child: ListView.builder(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -2701,56 +2901,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
           ),
         ),
       ],
-    );
-  }
-
-  Widget _buildResponsiveBookButton() {
-    return Expanded(
-      child: ElevatedButton.icon(
-        onPressed: _bookAppointment,
-        icon: const Icon(Icons.calendar_today, size: 18, color: Colors.white),
-        label: const Text(
-          'Book Now',
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-            color: Colors.white,
-          ),
-        ),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFFFF6B8B),
-          foregroundColor: Colors.white,
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          elevation: 0,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildResponsiveVipButton() {
-    return Expanded(
-      child: OutlinedButton.icon(
-        onPressed: _createVipBooking,
-        icon: const Icon(Icons.star, size: 18, color: Colors.amber),
-        label: const Text(
-          'VIP Booking',
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-            color: Colors.amber,
-          ),
-        ),
-        style: OutlinedButton.styleFrom(
-          side: const BorderSide(color: Colors.amber, width: 1.5),
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-        ),
-      ),
     );
   }
 
@@ -2814,7 +2964,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     final hasImage = _customerImage != null && _customerImage!.isNotEmpty;
 
     return GestureDetector(
-      onTap: _openDrawer,
+      onTap: _navigateToProfile,
       child: Container(
         margin: const EdgeInsets.only(right: 8),
         child: CircleAvatar(
@@ -2888,65 +3038,108 @@ class _CustomerDashboardState extends State<CustomerDashboard>
             ],
           ),
           const SizedBox(height: 20),
-          Row(
-            children: [
-              Expanded(
-                child: _buildActivityItem(
-                  icon: Icons.check_circle,
-                  label: 'Completed',
-                  value: '$_completedBookings',
-                  color: Colors.green,
-                ),
+          // ✅ Option 1: Using Expanded with Flexible
+          if (_isTablet)
+            Expanded(
+              child: GridView.count(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                crossAxisCount: _isLargeScreen ? 4 : 2,
+                crossAxisSpacing: 12,
+                mainAxisSpacing: 12,
+                childAspectRatio: 1.5,
+                children: [
+                  _buildActivityItem(
+                    icon: Icons.check_circle,
+                    label: 'Completed',
+                    value: '$_completedBookings',
+                    color: Colors.green,
+                  ),
+                  _buildActivityItem(
+                    icon: Icons.cancel,
+                    label: 'Cancelled',
+                    value: '$_cancelledBookings',
+                    color: Colors.red,
+                  ),
+                  _buildActivityItem(
+                    icon: Icons.star,
+                    label: 'VIP',
+                    value: '$_vipBookings',
+                    color: Colors.amber,
+                  ),
+                  _buildActivityItem(
+                    icon: Icons.calendar_today,
+                    label: 'Upcoming',
+                    value: '$_upcomingBookings',
+                    color: Colors.orange,
+                  ),
+                ],
               ),
-              Expanded(
-                child: _buildActivityItem(
-                  icon: Icons.cancel,
-                  label: 'Cancelled',
-                  value: '$_cancelledBookings',
-                  color: Colors.red,
+            )
+          else
+            Column(
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: _buildActivityItem(
+                        icon: Icons.check_circle,
+                        label: 'Completed',
+                        value: '$_completedBookings',
+                        color: Colors.green,
+                      ),
+                    ),
+                    Expanded(
+                      child: _buildActivityItem(
+                        icon: Icons.cancel,
+                        label: 'Cancelled',
+                        value: '$_cancelledBookings',
+                        color: Colors.red,
+                      ),
+                    ),
+                    Expanded(
+                      child: _buildActivityItem(
+                        icon: Icons.star,
+                        label: 'VIP',
+                        value: '$_vipBookings',
+                        color: Colors.amber,
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-              Expanded(
-                child: _buildActivityItem(
-                  icon: Icons.star,
-                  label: 'VIP',
-                  value: '$_vipBookings',
-                  color: Colors.amber,
+                const SizedBox(height: 16),
+                Divider(color: Colors.grey[200], height: 1),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _buildActivityItem(
+                        icon: Icons.currency_rupee,
+                        label: 'Total Spent',
+                        value: 'Rs. $_totalSpent',
+                        color: Colors.purple,
+                      ),
+                    ),
+                    Expanded(
+                      child: _buildActivityItem(
+                        icon: Icons.card_giftcard,
+                        label: 'Points',
+                        value: '$_loyaltyPoints',
+                        color: Colors.blue,
+                      ),
+                    ),
+                    Expanded(
+                      child: _buildActivityItem(
+                        icon: Icons.calendar_today,
+                        label: 'Upcoming',
+                        value: '$_upcomingBookings',
+                        color: Colors.orange,
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Divider(color: Colors.grey[200], height: 1),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: _buildActivityItem(
-                  icon: Icons.currency_rupee,
-                  label: 'Total Spent',
-                  value: 'Rs. $_totalSpent',
-                  color: Colors.purple,
-                ),
-              ),
-              Expanded(
-                child: _buildActivityItem(
-                  icon: Icons.card_giftcard,
-                  label: 'Points',
-                  value: '$_loyaltyPoints',
-                  color: Colors.blue,
-                ),
-              ),
-              Expanded(
-                child: _buildActivityItem(
-                  icon: Icons.calendar_today,
-                  label: 'Upcoming',
-                  value: '$_upcomingBookings',
-                  color: Colors.orange,
-                ),
-              ),
-            ],
-          ),
+              ],
+            ),
         ],
       ),
     );
@@ -2960,19 +3153,22 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }) {
     return Column(
       children: [
-        Icon(icon, color: color, size: 22),
+        Icon(icon, color: color, size: _isTablet ? 28 : 22),
         const SizedBox(height: 6),
         Text(
           value,
           style: TextStyle(
-            fontSize: 18,
+            fontSize: _isTablet ? 22 : 18,
             fontWeight: FontWeight.bold,
             color: color,
           ),
         ),
         Text(
           label,
-          style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+          style: TextStyle(
+            fontSize: _isTablet ? 12 : 11,
+            color: Colors.grey[500],
+          ),
           textAlign: TextAlign.center,
         ),
       ],
@@ -3176,55 +3372,17 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     );
   }
 
-  Widget _buildStatCard(
-    String title,
-    String value,
-    IconData icon,
-    Color color,
-    VoidCallback onTap,
-  ) {
-    return Expanded(
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.1),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: color.withValues(alpha: 0.2)),
-          ),
-          child: Column(
-            children: [
-              Icon(icon, color: color, size: 24),
-              const SizedBox(height: 4),
-              Text(
-                value,
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: color,
-                ),
-              ),
-              Text(
-                title,
-                style: TextStyle(fontSize: 11, color: Colors.grey[600]),
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   // ============================================================
-  // MAIN BUILD METHOD
+  // ✅ Android 16: MAIN BUILD METHOD
   // ============================================================
 
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
     final bool isWeb = screenWidth > 800;
+
+    // ✅ Check screen size on every build
+    _checkScreenSize();
 
     if (!_isTimezoneLoaded) {
       return Scaffold(
@@ -3312,6 +3470,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       );
     }
 
+    // ✅ Main Scaffold with SafeArea
     return Scaffold(
       key: _scaffoldKey,
       appBar: AppBar(
@@ -3380,342 +3539,367 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         profileImageUrl: _customerImage,
         onMenuItemSelected: () => _loadDashboardData(),
       ),
-      body: GestureDetector(
-        onTap: () {
-          _searchFocusNode.unfocus();
-          _hideSearchResults();
-        },
-        child: _isLoading
-            ? const Center(
-                child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
-              )
-            : RefreshIndicator(
-                onRefresh: _loadDashboardData,
-                color: const Color(0xFFFF6B8B),
-                child: SingleChildScrollView(
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  child: Column(
-                    children: [
-                      // ✅ PERMISSION CARD - Contextual Support
-                      if (_showPermissionCard && !_hasPermission)
-                        PermissionCard(
-                          onEnable: () => _enableNotifications(action: null),
-                          onNotNow: _handleNotNow,
-                          title: _permissionManager.getPermissionCardTitle(),
-                          message: _permissionManager.getPermissionCardMessage(),
-                          compact: false,
-                        ),
-                      const SizedBox(height: 8),
-                      _buildFollowedSalonsSection(),
-                      const SizedBox(height: 20),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: Row(
-                          children: [
-                            _buildResponsiveBookButton(),
-                            const SizedBox(width: 12),
-                            _buildResponsiveVipButton(),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 20),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: Row(
-                          children: [
-                            _buildStatCard(
-                              'Upcoming',
-                              '$_upcomingBookings',
-                              Icons.calendar_today,
-                              Colors.blue,
-                              _viewMyBookings,
-                            ),
-                            const SizedBox(width: 12),
-                            _buildStatCard(
-                              'VIP',
-                              '$_vipBookings',
-                              Icons.star,
-                              Colors.amber,
-                              _viewVipBookings,
-                            ),
-                            const SizedBox(width: 12),
-                            _buildStatCard(
-                              'Points',
-                              '$_loyaltyPoints',
-                              Icons.card_giftcard,
-                              Colors.green,
-                              _viewLoyaltyProgram,
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 20),
-                      if (_pendingVipBookings > 0)
-                        Container(
-                          margin: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 8,
+      // ✅ SafeArea with responsive body
+      body: SafeArea(
+        child: GestureDetector(
+          onTap: () {
+            _searchFocusNode.unfocus();
+            _hideSearchResults();
+          },
+          child: _isLoading
+              ? const Center(
+                  child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+                )
+              : RefreshIndicator(
+                  onRefresh: _loadDashboardData,
+                  color: const Color(0xFFFF6B8B),
+                  child: SingleChildScrollView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    child: Column(
+                      children: [
+                        if (_showPermissionCard && !_hasPermission)
+                          PermissionCard(
+                            onEnable: () => _enableNotifications(action: null),
+                            onNotNow: _handleNotNow,
+                            title: _permissionManager.getPermissionCardTitle(),
+                            message: _permissionManager
+                                .getPermissionCardMessage(),
+                            compact: false,
                           ),
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [
-                                Colors.amber.shade300,
-                                Colors.amber.shade600,
-                              ],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                            ),
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: Row(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.all(12),
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withValues(alpha: 0.2),
-                                  shape: BoxShape.circle,
-                                ),
-                                child: const Icon(
-                                  Icons.star,
-                                  color: Colors.white,
-                                  size: 28,
-                                ),
-                              ),
-                              const SizedBox(width: 16),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Text(
-                                      'VIP Request Pending',
-                                      style: TextStyle(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.white,
-                                      ),
-                                    ),
-                                    Text(
-                                      '$_pendingVipBookings VIP booking${_pendingVipBookings != 1 ? 's' : ''} waiting for approval',
-                                      style: TextStyle(
-                                        fontSize: 14,
-                                        color: Colors.white.withValues(
-                                          alpha: 0.9,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              ElevatedButton(
-                                onPressed: _viewVipBookings,
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.white,
-                                  foregroundColor: Colors.amber.shade700,
-                                ),
-                                child: const Text('View'),
-                              ),
-                            ],
-                          ),
-                        ),
-                      const SizedBox(height: 20),
-                      _buildActivitySummaryCard(),
-                      const SizedBox(height: 20),
-                      if (_offers.isNotEmpty) ...[
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          child: Row(
-                            children: [
-                              Container(
-                                width: 4,
-                                height: 20,
-                                decoration: const BoxDecoration(
-                                  color: Color(0xFFFF6B8B),
-                                  borderRadius: BorderRadius.horizontal(
-                                    right: Radius.circular(4),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              const Text(
-                                'Latest Offers',
-                                style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              const Spacer(),
-                              TextButton(
-                                onPressed: _viewAllOffers,
-                                child: const Text('View All >'),
-                              ),
-                            ],
-                          ),
-                        ),
                         const SizedBox(height: 8),
-                        ..._offers.map(
-                          (offer) => _buildFacebookStyleOfferPost(
-                            offer,
-                            _offers.indexOf(offer),
-                          ),
-                        ),
-                      ],
-                      if (_favoriteBarbers.isNotEmpty) ...[
+                        _buildFollowedSalonsSection(),
                         const SizedBox(height: 20),
+                        // ✅ Responsive action buttons
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 16),
-                          child: Row(
-                            children: [
-                              Container(
-                                width: 4,
-                                height: 20,
-                                decoration: const BoxDecoration(
-                                  color: Color(0xFFFF6B8B),
-                                  borderRadius: BorderRadius.horizontal(
-                                    right: Radius.circular(4),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              const Text(
-                                'Favorite Barbers',
-                                style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              const Spacer(),
-                              TextButton(
-                                onPressed: _viewFavoriteBarbers,
-                                child: const Text('View All >'),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        SizedBox(
-                          height: 200,
-                          child: ListView.builder(
-                            scrollDirection: Axis.horizontal,
-                            padding: const EdgeInsets.symmetric(horizontal: 16),
-                            itemCount: _favoriteBarbers.length,
-                            itemBuilder: (context, index) {
-                              final barber = _favoriteBarbers[index];
-                              return Container(
-                                width: 160,
-                                margin: const EdgeInsets.only(right: 12),
-                                padding: const EdgeInsets.all(12),
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(
-                                    color: Colors.grey.shade200,
-                                  ),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.grey.withValues(alpha: 0.1),
-                                      blurRadius: 4,
-                                    ),
-                                  ],
-                                ),
-                                child: Column(
+                          child: _isTablet
+                              ? Row(
                                   children: [
-                                    CircleAvatar(
-                                      radius: 35,
-                                      backgroundColor: const Color(
-                                        0xFFFF6B8B,
-                                      ).withValues(alpha: 0.1),
-                                      backgroundImage: barber['avatar'] != null
-                                          ? NetworkImage(barber['avatar'])
-                                          : null,
-                                      child: barber['avatar'] == null
-                                          ? Text(
-                                              barber['name'][0].toUpperCase(),
-                                              style: const TextStyle(
-                                                fontSize: 28,
-                                                fontWeight: FontWeight.bold,
-                                                color: Color(0xFFFF6B8B),
-                                              ),
-                                            )
-                                          : null,
+                                    Expanded(
+                                      child: _buildResponsiveBookButton(),
                                     ),
-                                    const SizedBox(height: 8),
-                                    Text(
-                                      barber['name'],
-                                      style: const TextStyle(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: _buildResponsiveVipButton(),
                                     ),
-                                    const SizedBox(height: 4),
-                                    Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.center,
-                                      children: [
-                                        const Icon(
-                                          Icons.star,
-                                          color: Colors.amber,
-                                          size: 14,
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: ElevatedButton.icon(
+                                        onPressed: _viewAllOffers,
+                                        icon: const Icon(
+                                          Icons.local_offer,
+                                          size: 18,
+                                          color: Colors.white,
                                         ),
-                                        const SizedBox(width: 2),
-                                        Text(
-                                          barber['rating'].toStringAsFixed(1),
-                                          style: const TextStyle(
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 4),
-                                        Text(
-                                          '(${barber['count']} cuts)',
+                                        label: const Text(
+                                          'Offers',
                                           style: TextStyle(
-                                            fontSize: 10,
-                                            color: Colors.grey[500],
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w600,
+                                            color: Colors.white,
                                           ),
                                         ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 8),
-                                    SizedBox(
-                                      width: double.infinity,
-                                      child: OutlinedButton(
-                                        onPressed: _bookAppointment,
-                                        style: OutlinedButton.styleFrom(
-                                          foregroundColor: const Color(
-                                            0xFFFF6B8B,
-                                          ),
-                                          side: const BorderSide(
-                                            color: Color(0xFFFF6B8B),
-                                          ),
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: Colors.orange,
+                                          foregroundColor: Colors.white,
                                           padding: const EdgeInsets.symmetric(
-                                            vertical: 6,
+                                            vertical: 14,
                                           ),
                                           shape: RoundedRectangleBorder(
                                             borderRadius: BorderRadius.circular(
-                                              8,
+                                              12,
                                             ),
                                           ),
-                                        ),
-                                        child: const Text(
-                                          'Book',
-                                          style: TextStyle(fontSize: 12),
+                                          elevation: 0,
                                         ),
                                       ),
                                     ),
                                   ],
+                                )
+                              : Row(
+                                  children: [
+                                    _buildResponsiveBookButton(),
+                                    const SizedBox(width: 12),
+                                    _buildResponsiveVipButton(),
+                                  ],
                                 ),
-                              );
-                            },
-                          ),
                         ),
+                        const SizedBox(height: 20),
+                        // ✅ Responsive stat cards
+                        _buildResponsiveStatCards(),
+                        const SizedBox(height: 20),
+                        if (_pendingVipBookings > 0)
+                          Container(
+                            margin: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 8,
+                            ),
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                colors: [
+                                  Colors.amber.shade300,
+                                  Colors.amber.shade600,
+                                ],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              ),
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withValues(alpha: 0.2),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(
+                                    Icons.star,
+                                    color: Colors.white,
+                                    size: 28,
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      const Text(
+                                        'VIP Request Pending',
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                      Text(
+                                        '$_pendingVipBookings VIP booking${_pendingVipBookings != 1 ? 's' : ''} waiting for approval',
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          color: Colors.white.withValues(
+                                            alpha: 0.9,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                ElevatedButton(
+                                  onPressed: _viewVipBookings,
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.white,
+                                    foregroundColor: Colors.amber.shade700,
+                                  ),
+                                  child: const Text('View'),
+                                ),
+                              ],
+                            ),
+                          ),
+                        const SizedBox(height: 20),
+                        _buildActivitySummaryCard(),
+                        const SizedBox(height: 20),
+                        if (_offers.isNotEmpty) ...[
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 4,
+                                  height: 20,
+                                  decoration: const BoxDecoration(
+                                    color: Color(0xFFFF6B8B),
+                                    borderRadius: BorderRadius.horizontal(
+                                      right: Radius.circular(4),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'Latest Offers',
+                                  style: TextStyle(
+                                    fontSize: _isTablet ? 20 : 18,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                const Spacer(),
+                                TextButton(
+                                  onPressed: _viewAllOffers,
+                                  child: const Text('View All >'),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          ..._offers.map(
+                            (offer) => _buildFacebookStyleOfferPost(
+                              offer,
+                              _offers.indexOf(offer),
+                            ),
+                          ),
+                        ],
+                        if (_favoriteBarbers.isNotEmpty) ...[
+                          const SizedBox(height: 20),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 4,
+                                  height: 20,
+                                  decoration: const BoxDecoration(
+                                    color: Color(0xFFFF6B8B),
+                                    borderRadius: BorderRadius.horizontal(
+                                      right: Radius.circular(4),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'Favorite Barbers',
+                                  style: TextStyle(
+                                    fontSize: _isTablet ? 20 : 18,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                const Spacer(),
+                                TextButton(
+                                  onPressed: _viewFavoriteBarbers,
+                                  child: const Text('View All >'),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          SizedBox(
+                            height: _isTablet ? 250 : 200,
+                            child: ListView.builder(
+                              scrollDirection: Axis.horizontal,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                              ),
+                              itemCount: _favoriteBarbers.length,
+                              itemBuilder: (context, index) {
+                                final barber = _favoriteBarbers[index];
+                                return Container(
+                                  width: _isTablet ? 200 : 160,
+                                  margin: const EdgeInsets.only(right: 12),
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                      color: Colors.grey.shade200,
+                                    ),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.grey.withValues(
+                                          alpha: 0.1,
+                                        ),
+                                        blurRadius: 4,
+                                      ),
+                                    ],
+                                  ),
+                                  child: Column(
+                                    children: [
+                                      CircleAvatar(
+                                        radius: _isTablet ? 40 : 35,
+                                        backgroundColor: const Color(
+                                          0xFFFF6B8B,
+                                        ).withValues(alpha: 0.1),
+                                        backgroundImage:
+                                            barber['avatar'] != null
+                                            ? NetworkImage(barber['avatar'])
+                                            : null,
+                                        child: barber['avatar'] == null
+                                            ? Text(
+                                                barber['name'][0].toUpperCase(),
+                                                style: TextStyle(
+                                                  fontSize: _isTablet ? 32 : 28,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Color(0xFFFF6B8B),
+                                                ),
+                                              )
+                                            : null,
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        barber['name'],
+                                        style: TextStyle(
+                                          fontSize: _isTablet ? 18 : 16,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        children: [
+                                          const Icon(
+                                            Icons.star,
+                                            color: Colors.amber,
+                                            size: 14,
+                                          ),
+                                          const SizedBox(width: 2),
+                                          Text(
+                                            barber['rating'].toStringAsFixed(1),
+                                            style: const TextStyle(
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            '(${barber['count']} cuts)',
+                                            style: TextStyle(
+                                              fontSize: 10,
+                                              color: Colors.grey[500],
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 8),
+                                      SizedBox(
+                                        width: double.infinity,
+                                        child: OutlinedButton(
+                                          onPressed: _bookAppointment,
+                                          style: OutlinedButton.styleFrom(
+                                            foregroundColor: const Color(
+                                              0xFFFF6B8B,
+                                            ),
+                                            side: const BorderSide(
+                                              color: Color(0xFFFF6B8B),
+                                            ),
+                                            padding: const EdgeInsets.symmetric(
+                                              vertical: 6,
+                                            ),
+                                            shape: RoundedRectangleBorder(
+                                              borderRadius:
+                                                  BorderRadius.circular(8),
+                                            ),
+                                          ),
+                                          child: const Text(
+                                            'Book',
+                                            style: TextStyle(fontSize: 12),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 20),
                       ],
-                      const SizedBox(height: 20),
-                    ],
+                    ),
                   ),
                 ),
-              ),
+        ),
       ),
     );
   }
