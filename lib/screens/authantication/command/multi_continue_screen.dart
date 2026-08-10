@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart'show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/config/environment_manager.dart';
 import 'package:flutter_application_1/main.dart';
@@ -39,6 +39,13 @@ class _ContinueScreenState extends State<ContinueScreen> {
     _profileLoadingStates.clear();
     _loadProfiles();
     _checkCompliance();
+    // FIX: Initialize Google Sign-In SDK here too. ContinueScreen
+    // can trigger native Google auth without the user ever visiting
+    // SignInScreen (where this was previously initialized), so
+    // GoogleSignIn.instance.initialize() must be guaranteed here as
+    // well - otherwise authenticate() throws LateInitializationError
+    // and the whole login silently fails after account picker.
+    _googleSignInService.initialize();
   }
 
   // ============================================================
