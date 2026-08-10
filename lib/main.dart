@@ -364,21 +364,23 @@ Future<void> main() async {
 void _setupAuthStateListener() {
   final supabase = Supabase.instance.client;
 
-  supabase.auth.onAuthStateChange.listen((data) {
+  supabase.auth.onAuthStateChange.listen((data) async {
     final event = data.event;
 
-    debugPrint('🔐 Auth State Change: $event');
+    if (event == AuthChangeEvent.signedIn) {
+      debugPrint('🔄 Refreshing app state...');
+      appState.refreshState();
 
-    // Always refresh app state on auth changes
-    if (event == AuthChangeEvent.signedIn ||
-        event == AuthChangeEvent.signedOut ||
+      // ✅ Login වුනාම locally save වෙච්ච FCM token එක Supabase එකට sync කරන්න
+      await NotificationService().syncPendingToken();
+    }
+
+    if (event == AuthChangeEvent.signedOut ||
         event == AuthChangeEvent.userUpdated ||
         event == AuthChangeEvent.tokenRefreshed) {
-      debugPrint('🔄 Refreshing app state...');
       appState.refreshState();
     }
 
-    // Handle password recovery
     if (event == AuthChangeEvent.passwordRecovery) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _navigateTo('/reset-password-form');
