@@ -52,7 +52,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
   String _employeeEmail = '';
   String _employeeAvatar = '';
 
-  // ✅ Multi-salon support - String? type
+  // ✅ Multi-salon support
   List<Map<String, dynamic>> _assignedSalons = [];
   String? _selectedSalonId;
   String _selectedSalonName = '';
@@ -66,10 +66,17 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
   // Notification count
   int _unreadNotificationCount = 0;
 
+  // ✅ Android 16: Responsive screen variables
+  bool _isLargeScreen = false;
+  bool _isTablet = false;
+
   // ==================== TIMEZONE VARIABLES ====================
   String _userTimezone = '';
   String _lastTimezone = '';
   bool _isTimezoneLoaded = false;
+
+  // ✅ Web Scroll Controller
+  final ScrollController _scrollController = ScrollController();
 
   @override
   void initState() {
@@ -92,12 +99,28 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
     if (route is PageRoute) {
       routeObserver.subscribe(this, route);
     }
+    _checkScreenSize();
     _checkTimezoneChange();
+  }
+
+  // ✅ Android 16: Check screen size for responsive layout
+  void _checkScreenSize() {
+    final size = MediaQuery.of(context).size;
+    final isLarge = size.width > 800 || size.height > 800;
+    final isTablet = size.shortestSide >= 600;
+
+    if (_isLargeScreen != isLarge || _isTablet != isTablet) {
+      setState(() {
+        _isLargeScreen = isLarge;
+        _isTablet = isTablet;
+      });
+    }
   }
 
   @override
   void dispose() {
     routeObserver.unsubscribe(this);
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -1113,6 +1136,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
   // ==================== PROFILE IMAGE ====================
 
   Widget _buildProfileImage() {
+    final hasImage = _employeeAvatar.isNotEmpty;
+
     return GestureDetector(
       onTap: () {
         context.push('/profile');
@@ -1122,17 +1147,14 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         child: CircleAvatar(
           radius: 18,
           backgroundColor: Colors.white.withValues(alpha: 0.2),
-          backgroundImage: _employeeAvatar.isNotEmpty
-              ? NetworkImage(_employeeAvatar)
-              : null,
-          // ✅ ADDED: swallow image load errors (e.g. Google 429 rate limit)
-          // so it doesn't spam the console with uncaught exceptions.
-          onBackgroundImageError: _employeeAvatar.isNotEmpty
+          backgroundImage: hasImage ? NetworkImage(_employeeAvatar) : null,
+          // ✅ 429 Error Fix: swallow image load errors
+          onBackgroundImageError: hasImage
               ? (exception, stackTrace) {
                   debugPrint('⚠️ Failed to load avatar image: $exception');
                 }
               : null,
-          child: _employeeAvatar.isEmpty
+          child: !hasImage
               ? Text(
                   _employeeName.isNotEmpty
                       ? _employeeName[0].toUpperCase()
@@ -1436,7 +1458,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
   // ==================== SALON SELECTION ====================
 
-  // ✅ FIXED: Accept String parameter
   void _selectSalon(String salonId) {
     setState(() {
       _selectedSalonId = salonId;
@@ -2008,7 +2029,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         return;
       }
     }
-    // ✅ Add salon ID to route
     if (_selectedSalonId != null) {
       context.push('/barber/appointments?salonId=$_selectedSalonId');
     } else {
@@ -2023,7 +2043,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         return;
       }
     }
-    // ✅ Add salon ID to route
     if (_selectedSalonId != null) {
       context.push('/barber/customers?salonId=$_selectedSalonId');
     } else {
@@ -2038,7 +2057,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         return;
       }
     }
-    // ✅ Add salon ID to route
     if (_selectedSalonId != null) {
       context.push('/barber/revenue?salonId=$_selectedSalonId');
     } else {
@@ -2053,7 +2071,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         return;
       }
     }
-    // ✅ Add salon ID to route
     if (_selectedSalonId != null) {
       context.push('/barber/appointments?salonId=$_selectedSalonId');
     } else {
@@ -2231,7 +2248,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
   // ==================== SALON SELECTOR DIALOG ====================
 
-  // ✅ FIXED: Use String salon ID
   Future<void> _showSalonSelectorDialog() async {
     await showModalBottomSheet(
       context: context,
@@ -2360,12 +2376,15 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
   }
 
   // =====================================================
-  // ✅ BUILD METHOD - Full with Salon Selector
+  // ✅ BUILD METHOD - Web Scrollbar + Edge-to-Edge
   // =====================================================
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
     final isWeb = screenWidth > 800;
+
+    // ✅ Check screen size on every build
+    _checkScreenSize();
 
     if (!_isTimezoneLoaded) {
       return Scaffold(
@@ -2402,7 +2421,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
           tooltip: 'Menu',
           iconSize: 28,
         ),
-        // ✅ Title with salon name
         title: Row(
           children: [
             if (!isWeb)
@@ -2419,7 +2437,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                 ),
               ),
             const Spacer(),
-            // ✅ Salon selector chip (only if multiple salons)
             if (_assignedSalons.length > 1)
               GestureDetector(
                 onTap: _showSalonSelectorDialog,
@@ -2462,7 +2479,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
           ],
         ),
         actions: [
-          // ✅ Web salon selector
           if (isWeb && _selectedSalonName.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(right: 8),
@@ -2556,519 +2572,606 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         selectedSalonId: _selectedSalonId,
         onMenuItemSelected: () => _loadData(),
       ),
-      body: _isLoading
-          ? const Center(
-              child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
-            )
-          : RefreshIndicator(
-              onRefresh: _loadData,
-              color: const Color(0xFFFF6B8B),
-              child: SingleChildScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.only(bottom: 20),
-                child: Column(
-                  children: [
-                    // ✅ PERMISSION CARD
-                    if (_showPermissionCard && !_hasPermission)
-                      PermissionCard(
-                        onEnable: _enableNotifications,
-                        onNotNow: _handleNotNow,
-                        title: _permissionManager.getPermissionCardTitle(),
-                        message: _permissionManager.getPermissionCardMessage(),
-                        compact: false,
-                      ),
-
-                    // Welcome Section
-                    Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Row(
-                        children: [
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Text(
-                                    'Welcome, ',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      color: Colors.grey[600],
-                                    ),
-                                  ),
-                                  Text(
-                                    _employeeName,
-                                    style: const TextStyle(
-                                      fontSize: 20,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 2),
-                              Row(
-                                children: [
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 8,
-                                      vertical: 2,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: Colors.purple.withValues(
-                                        alpha: 0.1,
-                                      ),
-                                      borderRadius: BorderRadius.circular(10),
-                                    ),
-                                    child: Text(
-                                      'Barber',
-                                      style: TextStyle(
-                                        fontSize: 10,
-                                        color: Colors.purple[700],
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  GestureDetector(
-                                    onTap: _assignedSalons.length > 1
-                                        ? _showSalonSelectorDialog
-                                        : null,
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 8,
-                                        vertical: 2,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: Colors.blue.withValues(
-                                          alpha: 0.1,
-                                        ),
-                                        borderRadius: BorderRadius.circular(10),
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Icon(
-                                            Icons.store,
-                                            size: 10,
-                                            color: Colors.blue[700],
-                                          ),
-                                          const SizedBox(width: 2),
-                                          Flexible(
-                                            child: Text(
-                                              _selectedSalonName.isNotEmpty
-                                                  ? _selectedSalonName
-                                                  : 'No Salon',
-                                              style: TextStyle(
-                                                fontSize: 10,
-                                                color: Colors.blue[700],
-                                                fontWeight: FontWeight.w500,
-                                              ),
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                          ),
-                                          if (_assignedSalons.length > 1)
-                                            const Icon(
-                                              Icons.arrow_drop_down,
-                                              size: 14,
-                                              color: Colors.blue,
-                                            ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                  // Status indicator
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 6,
-                                      vertical: 2,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: _isOnBreak
-                                          ? Colors.orange.withValues(alpha: 0.1)
-                                          : Colors.green.withValues(alpha: 0.1),
-                                      borderRadius: BorderRadius.circular(10),
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Container(
-                                          width: 6,
-                                          height: 6,
-                                          decoration: BoxDecoration(
-                                            color: _isOnBreak
-                                                ? Colors.orange
-                                                : Colors.green,
-                                            shape: BoxShape.circle,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 2),
-                                        Text(
-                                          _isOnBreak ? 'Break' : 'Working',
-                                          style: TextStyle(
-                                            fontSize: 8,
-                                            color: _isOnBreak
-                                                ? Colors.orange
-                                                : Colors.green,
-                                            fontWeight: FontWeight.w500,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
+      // ✅ EDGE-TO-EDGE: SafeArea with Web Scrollbar
+      body: SafeArea(
+        child: _isLoading
+            ? const Center(
+                child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+              )
+            : Center(
+                child: Container(
+                  constraints: BoxConstraints(
+                    maxWidth: isWeb ? 1200 : double.infinity,
+                  ),
+                  child: isWeb
+                      ? Scrollbar(
+                          controller: _scrollController,
+                          thumbVisibility: true,
+                          trackVisibility: true,
+                          thickness: 8.0,
+                          radius: const Radius.circular(10),
+                          scrollbarOrientation: ScrollbarOrientation.right,
+                          child: SingleChildScrollView(
+                            controller: _scrollController,
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            padding: const EdgeInsets.all(24),
+                            child: _buildDashboardContent(),
                           ),
-                          const Spacer(),
-                        ],
-                      ),
-                    ),
-
-                    // Rating Card
-                    Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 16),
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [
-                            Colors.amber.withValues(alpha: 0.1),
-                            Colors.orange.withValues(alpha: 0.1),
-                          ],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
+                        )
+                      : SingleChildScrollView(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          padding: EdgeInsets.zero,
+                          child: _buildDashboardContent(),
                         ),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                          color: Colors.amber.withValues(alpha: 0.3),
+                ),
+              ),
+      ),
+    );
+  }
+
+  // =====================================================
+  // ✅ DASHBOARD CONTENT
+  // =====================================================
+  Widget _buildDashboardContent() {
+
+    return Column(
+      children: [
+        // ✅ PERMISSION CARD
+        if (_showPermissionCard && !_hasPermission)
+          PermissionCard(
+            onEnable: _enableNotifications,
+            onNotNow: _handleNotNow,
+            title: _permissionManager.getPermissionCardTitle(),
+            message: _permissionManager.getPermissionCardMessage(),
+            compact: false,
+          ),
+
+        // Welcome Section
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        'Welcome, ',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.grey[600],
                         ),
                       ),
-                      child: Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(10),
-                            decoration: BoxDecoration(
-                              color: Colors.amber.withValues(alpha: 0.2),
-                              shape: BoxShape.circle,
-                            ),
-                            child: const Icon(
-                              Icons.star,
-                              color: Colors.amber,
-                              size: 28,
-                            ),
+                      Text(
+                        _employeeName,
+                        style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.purple.withValues(
+                            alpha: 0.1,
                           ),
-                          const SizedBox(width: 16),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(
+                          'Barber',
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: Colors.purple[700],
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      GestureDetector(
+                        onTap: _assignedSalons.length > 1
+                            ? _showSalonSelectorDialog
+                            : null,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.blue.withValues(
+                              alpha: 0.1,
+                            ),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
                             children: [
-                              const Text(
-                                'Your Rating',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  color: Colors.grey,
-                                ),
+                              Icon(
+                                Icons.store,
+                                size: 10,
+                                color: Colors.blue[700],
                               ),
-                              Row(
-                                children: [
-                                  Text(
-                                    _rating > 0
-                                        ? _rating.toStringAsFixed(1)
-                                        : '0.0',
-                                    style: const TextStyle(
-                                      fontSize: 28,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.amber,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 4),
-                                  const Text(
-                                    '/ 5.0',
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      color: Colors.grey,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                          const Spacer(),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 6,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.green.withValues(alpha: 0.1),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: const Row(
-                              children: [
-                                Icon(
-                                  Icons.arrow_upward,
-                                  color: Colors.green,
-                                  size: 16,
-                                ),
-                                SizedBox(width: 4),
-                                Text(
-                                  '12%',
+                              const SizedBox(width: 2),
+                              Flexible(
+                                child: Text(
+                                  _selectedSalonName.isNotEmpty
+                                      ? _selectedSalonName
+                                      : 'No Salon',
                                   style: TextStyle(
-                                    color: Colors.green,
+                                    fontSize: 10,
+                                    color: Colors.blue[700],
                                     fontWeight: FontWeight.w500,
                                   ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-
-                    // Stats Cards - Row 1
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: DashboardStatCard(
-                              title: "Today's Appointments",
-                              value: '$_todaysAppointments',
-                              icon: Icons.calendar_today,
-                              color: Colors.blue,
-                              subtitle: '$_completedToday completed',
-                              onTap: _viewMySchedule,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: DashboardStatCard(
-                              title: 'Pending',
-                              value: '$_pendingAppointments',
-                              icon: Icons.pending_actions,
-                              color: Colors.orange,
-                              subtitle: 'Awaiting service',
-                              onTap: _viewUpcomingAppointments,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-
-                    // Stats Cards - Row 2
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: DashboardStatCard(
-                              title: "Today's Earnings",
-                              value: 'Rs. $_todayEarnings',
-                              icon: Icons.currency_rupee,
-                              color: Colors.green,
-                              onTap: _viewTodayEarnings,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: DashboardStatCard(
-                              title: 'Monthly Earnings',
-                              value: 'Rs. $_monthlyEarnings',
-                              icon: Icons.trending_up,
-                              color: Colors.purple,
-                              subtitle:
-                                  '${_getMonthName()} ${DateTime.now().year}',
-                              onTap: _viewTodayEarnings,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-
-                    // Stats Cards - Row 3
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: DashboardStatCard(
-                        title: 'Total Customers Served',
-                        value: '$_totalCustomers',
-                        icon: Icons.people,
-                        color: Colors.teal,
-                        fullWidth: true,
-                        subtitle: 'All time',
-                        onTap: _viewMyCustomers,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-
-                    // Quick Actions
-                    const SectionHeader(title: 'Quick Actions', actionText: ''),
-                    const SizedBox(height: 8),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: _buildQuickAction(
-                              icon: Icons.check_circle_outline,
-                              label: 'Complete',
-                              color: Colors.green,
-                              onTap: _markAppointmentComplete,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: _buildQuickAction(
-                              icon: Icons.schedule_outlined,
-                              label: 'My Schedule',
-                              color: Colors.blue,
-                              onTap: _viewMySchedule,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: _buildQuickAction(
-                              icon: Icons.message_outlined,
-                              label: 'Notify Customer',
-                              color: Colors.purple,
-                              onTap: () =>
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text(
-                                        '📱 Customer notification sent',
-                                      ),
-                                      backgroundColor: Colors.purple,
-                                    ),
-                                  ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-
-                    // Today's Schedule
-                    const SectionHeader(
-                      title: "Today's Schedule",
-                      actionText: 'View All',
-                    ),
-                    const SizedBox(height: 8),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child:
-                          _todaysAppointmentsList
-                              .where((a) => a['is_today'] == true)
-                              .isEmpty
-                          ? Container(
-                              padding: const EdgeInsets.all(32),
-                              decoration: BoxDecoration(
-                                color: Colors.grey[50],
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: const Center(
-                                child: Text(
-                                  'No appointments today',
-                                  style: TextStyle(color: Colors.grey),
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ),
-                            )
-                          : Column(
-                              children: _todaysAppointmentsList
-                                  .where((a) => a['is_today'] == true)
-                                  .map((apt) {
-                                    Color statusColor;
-                                    switch (apt['status']) {
-                                      case 'completed':
-                                        statusColor = Colors.green;
-                                        break;
-                                      case 'confirmed':
-                                        statusColor = Colors.blue;
-                                        break;
-                                      case 'cancelled':
-                                        statusColor = Colors.red;
-                                        break;
-                                      default:
-                                        statusColor = Colors.orange;
-                                    }
-                                    return BookingTile(
-                                      customerName: apt['customer_name'],
-                                      serviceName: apt['service_name'],
-                                      time: apt['start_time'],
-                                      status: apt['status'],
-                                      statusColor: statusColor,
-                                      barberName: 'You',
-                                      price: apt['price'],
-                                      salonName: apt['salon_name'],
-                                      isVip: apt['is_vip'] ?? false,
-                                      queueNumber: apt['queue_number'],
-                                      queueToken: apt['queue_token'],
-                                      showActions: apt['status'] != 'completed',
-                                      onTap: () => _viewBookingDetails(
-                                        apt['customer_name'],
-                                      ),
-                                      onComplete: _markAppointmentComplete,
-                                    );
-                                  })
-                                  .toList(),
-                            ),
-                    ),
-                    const SizedBox(height: 16),
-
-                    // Performance Card
-                    Container(
-                      margin: const EdgeInsets.all(16),
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.grey[50],
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: Colors.grey[200]!),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            "Today's Performance",
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: _buildPerformanceItem(
-                                  label: 'Completed',
-                                  value: '$_completedToday',
-                                  icon: Icons.check_circle,
-                                  color: Colors.green,
-                                ),
-                              ),
-                              Expanded(
-                                child: _buildPerformanceItem(
-                                  label: 'No-show',
-                                  value: '0',
-                                  icon: Icons.cancel,
-                                  color: Colors.red,
-                                ),
-                              ),
-                              Expanded(
-                                child: _buildPerformanceItem(
-                                  label: 'On Time',
-                                  value: '100%',
-                                  icon: Icons.timer,
+                              if (_assignedSalons.length > 1)
+                                const Icon(
+                                  Icons.arrow_drop_down,
+                                  size: 14,
                                   color: Colors.blue,
                                 ),
-                              ),
                             ],
                           ),
-                        ],
+                        ),
+                      ),
+                      // Status indicator
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: _isOnBreak
+                              ? Colors.orange.withValues(alpha: 0.1)
+                              : Colors.green.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 6,
+                              height: 6,
+                              decoration: BoxDecoration(
+                                color: _isOnBreak
+                                    ? Colors.orange
+                                    : Colors.green,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const SizedBox(width: 2),
+                            Text(
+                              _isOnBreak ? 'Break' : 'Working',
+                              style: TextStyle(
+                                fontSize: 8,
+                                color: _isOnBreak
+                                    ? Colors.orange
+                                    : Colors.green,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              const Spacer(),
+            ],
+          ),
+        ),
+
+        // Rating Card
+        Container(
+          margin: const EdgeInsets.symmetric(horizontal: 16),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [
+                Colors.amber.withValues(alpha: 0.1),
+                Colors.orange.withValues(alpha: 0.1),
+              ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: Colors.amber.withValues(alpha: 0.3),
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.amber.withValues(alpha: 0.2),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.star,
+                  color: Colors.amber,
+                  size: 28,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Your Rating',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.grey,
+                    ),
+                  ),
+                  Row(
+                    children: [
+                      Text(
+                        _rating > 0
+                            ? _rating.toStringAsFixed(1)
+                            : '0.0',
+                        style: const TextStyle(
+                          fontSize: 28,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.amber,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      const Text(
+                        '/ 5.0',
+                        style: TextStyle(
+                          fontSize: 16,
+                          color: Colors.grey,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.green.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(
+                      Icons.arrow_upward,
+                      color: Colors.green,
+                      size: 16,
+                    ),
+                    SizedBox(width: 4),
+                    Text(
+                      '12%',
+                      style: TextStyle(
+                        color: Colors.green,
+                        fontWeight: FontWeight.w500,
                       ),
                     ),
-                    const SizedBox(height: 20),
                   ],
                 ),
               ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // Stats Cards - Responsive Grid for Tablet
+        if (_isTablet)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: GridView.count(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              crossAxisCount: _isLargeScreen ? 4 : 2,
+              crossAxisSpacing: 12,
+              mainAxisSpacing: 12,
+              childAspectRatio: 1.2,
+              children: [
+                DashboardStatCard(
+                  title: "Today's",
+                  value: '$_todaysAppointments',
+                  icon: Icons.calendar_today,
+                  color: Colors.blue,
+                  subtitle: '$_completedToday completed',
+                  onTap: _viewMySchedule,
+                ),
+                DashboardStatCard(
+                  title: 'Pending',
+                  value: '$_pendingAppointments',
+                  icon: Icons.pending_actions,
+                  color: Colors.orange,
+                  subtitle: 'Awaiting service',
+                  onTap: _viewUpcomingAppointments,
+                ),
+                DashboardStatCard(
+                  title: "Today's Earnings",
+                  value: 'Rs. $_todayEarnings',
+                  icon: Icons.currency_rupee,
+                  color: Colors.green,
+                  onTap: _viewTodayEarnings,
+                ),
+                DashboardStatCard(
+                  title: 'Monthly Earnings',
+                  value: 'Rs. $_monthlyEarnings',
+                  icon: Icons.trending_up,
+                  color: Colors.purple,
+                  subtitle: '${_getMonthName()} ${DateTime.now().year}',
+                  onTap: _viewTodayEarnings,
+                ),
+                DashboardStatCard(
+                  title: 'Total Customers',
+                  value: '$_totalCustomers',
+                  icon: Icons.people,
+                  color: Colors.teal,
+                  subtitle: 'All time',
+                  onTap: _viewMyCustomers,
+                ),
+              ],
             ),
+          )
+        else
+          Column(
+            children: [
+              // Stats Cards - Row 1
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: DashboardStatCard(
+                        title: "Today's Appointments",
+                        value: '$_todaysAppointments',
+                        icon: Icons.calendar_today,
+                        color: Colors.blue,
+                        subtitle: '$_completedToday completed',
+                        onTap: _viewMySchedule,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: DashboardStatCard(
+                        title: 'Pending',
+                        value: '$_pendingAppointments',
+                        icon: Icons.pending_actions,
+                        color: Colors.orange,
+                        subtitle: 'Awaiting service',
+                        onTap: _viewUpcomingAppointments,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              // Stats Cards - Row 2
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: DashboardStatCard(
+                        title: "Today's Earnings",
+                        value: 'Rs. $_todayEarnings',
+                        icon: Icons.currency_rupee,
+                        color: Colors.green,
+                        onTap: _viewTodayEarnings,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: DashboardStatCard(
+                        title: 'Monthly Earnings',
+                        value: 'Rs. $_monthlyEarnings',
+                        icon: Icons.trending_up,
+                        color: Colors.purple,
+                        subtitle: '${_getMonthName()} ${DateTime.now().year}',
+                        onTap: _viewTodayEarnings,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              // Stats Cards - Row 3
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: DashboardStatCard(
+                  title: 'Total Customers Served',
+                  value: '$_totalCustomers',
+                  icon: Icons.people,
+                  color: Colors.teal,
+                  fullWidth: true,
+                  subtitle: 'All time',
+                  onTap: _viewMyCustomers,
+                ),
+              ),
+            ],
+          ),
+        const SizedBox(height: 16),
+
+        // Quick Actions
+        const SectionHeader(title: 'Quick Actions', actionText: ''),
+        const SizedBox(height: 8),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            children: [
+              Expanded(
+                child: _buildQuickAction(
+                  icon: Icons.check_circle_outline,
+                  label: 'Complete',
+                  color: Colors.green,
+                  onTap: _markAppointmentComplete,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildQuickAction(
+                  icon: Icons.schedule_outlined,
+                  label: 'My Schedule',
+                  color: Colors.blue,
+                  onTap: _viewMySchedule,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildQuickAction(
+                  icon: Icons.message_outlined,
+                  label: 'Notify Customer',
+                  color: Colors.purple,
+                  onTap: () =>
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            '📱 Customer notification sent',
+                          ),
+                          backgroundColor: Colors.purple,
+                        ),
+                      ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // Today's Schedule
+        const SectionHeader(
+          title: "Today's Schedule",
+          actionText: 'View All',
+        ),
+        const SizedBox(height: 8),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child:
+              _todaysAppointmentsList
+                  .where((a) => a['is_today'] == true)
+                  .isEmpty
+              ? Container(
+                  padding: const EdgeInsets.all(32),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[50],
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Center(
+                    child: Text(
+                      'No appointments today',
+                      style: TextStyle(color: Colors.grey),
+                    ),
+                  ),
+                )
+              : Column(
+                  children: _todaysAppointmentsList
+                      .where((a) => a['is_today'] == true)
+                      .map((apt) {
+                        Color statusColor;
+                        switch (apt['status']) {
+                          case 'completed':
+                            statusColor = Colors.green;
+                            break;
+                          case 'confirmed':
+                            statusColor = Colors.blue;
+                            break;
+                          case 'cancelled':
+                            statusColor = Colors.red;
+                            break;
+                          default:
+                            statusColor = Colors.orange;
+                        }
+                        return BookingTile(
+                          customerName: apt['customer_name'],
+                          serviceName: apt['service_name'],
+                          time: apt['start_time'],
+                          status: apt['status'],
+                          statusColor: statusColor,
+                          barberName: 'You',
+                          price: apt['price'],
+                          salonName: apt['salon_name'],
+                          isVip: apt['is_vip'] ?? false,
+                          queueNumber: apt['queue_number'],
+                          queueToken: apt['queue_token'],
+                          showActions: apt['status'] != 'completed',
+                          onTap: () => _viewBookingDetails(
+                            apt['customer_name'],
+                          ),
+                          onComplete: _markAppointmentComplete,
+                        );
+                      })
+                      .toList(),
+                ),
+        ),
+        const SizedBox(height: 16),
+
+        // Performance Card
+        Container(
+          margin: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.grey[50],
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.grey[200]!),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                "Today's Performance",
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: _buildPerformanceItem(
+                      label: 'Completed',
+                      value: '$_completedToday',
+                      icon: Icons.check_circle,
+                      color: Colors.green,
+                    ),
+                  ),
+                  Expanded(
+                    child: _buildPerformanceItem(
+                      label: 'No-show',
+                      value: '0',
+                      icon: Icons.cancel,
+                      color: Colors.red,
+                    ),
+                  ),
+                  Expanded(
+                    child: _buildPerformanceItem(
+                      label: 'On Time',
+                      value: '100%',
+                      icon: Icons.timer,
+                      color: Colors.blue,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+      ],
     );
   }
 }

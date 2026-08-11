@@ -77,9 +77,13 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   bool _showSearchResults = false;
   OverlayEntry? _searchOverlay;
 
-  // ✅ Android 16: Track screen size for responsive layout
+  // ✅ Responsive variables
   bool _isLargeScreen = false;
   bool _isTablet = false;
+  bool _isWeb = false;
+
+  // ✅ Scroll Controller for web
+  final ScrollController _scrollController = ScrollController();
 
   @override
   void initState() {
@@ -113,16 +117,28 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     }
   }
 
-  // ✅ Android 16: Check screen size for responsive layout
+  @override
+  void dispose() {
+    _searchController.dispose();
+    _searchFocusNode.dispose();
+    _scrollController.dispose();
+    _removeSearchOverlay();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  // ✅ Check screen size for responsive layout
   void _checkScreenSize() {
     final size = MediaQuery.of(context).size;
     final isLarge = size.width > 800 || size.height > 800;
     final isTablet = size.shortestSide >= 600;
+    final isWeb = size.width > 800;
 
-    if (_isLargeScreen != isLarge || _isTablet != isTablet) {
+    if (_isLargeScreen != isLarge || _isTablet != isTablet || _isWeb != isWeb) {
       setState(() {
         _isLargeScreen = isLarge;
         _isTablet = isTablet;
+        _isWeb = isWeb;
       });
     }
   }
@@ -133,15 +149,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         _loadDashboardData();
       }
     });
-  }
-
-  @override
-  void dispose() {
-    _searchController.dispose();
-    _searchFocusNode.dispose();
-    _removeSearchOverlay();
-    WidgetsBinding.instance.removeObserver(this);
-    super.dispose();
   }
 
   // ============================================================
@@ -226,7 +233,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // 🔥 SHOW PERMISSION CARD - WITH CONTEXT
+  // 🔥 SHOW PERMISSION CARD
   // ============================================================
 
   Future<void> _showPermissionCardContext({String? action}) async {
@@ -243,7 +250,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // 🔥 ENABLE NOTIFICATIONS - UPDATED FOR WEB + CONTEXT
+  // 🔥 ENABLE NOTIFICATIONS
   // ============================================================
 
   Future<void> _enableNotifications({String? action}) async {
@@ -252,7 +259,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     try {
       final bool isWeb = UniversalPlatform.isWeb;
 
-      // Web - Check if already denied in browser
       if (isWeb) {
         final status = await _notificationService.getWebPermissionStatus();
         if (status == 'denied') {
@@ -273,7 +279,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
 
       if (!mounted) return;
 
-      // ✅ Use PermissionManager with context
       await _permissionService.requestPermissionAtAction(
         context: context,
         action: action ?? 'customer_dashboard',
@@ -336,7 +341,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // 🔥 CONTEXTUAL ACTIONS - UPDATED
+  // 🔥 CONTEXTUAL ACTIONS
   // ============================================================
 
   void _bookAppointment() {
@@ -581,7 +586,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // LOAD DASHBOARD DATA
+  // LOAD DASHBOARD DATA (කෙටි කරපු - පෙර තිබූ දේමයි)
   // ============================================================
 
   Future<void> _loadDashboardData() async {
@@ -1059,7 +1064,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // APPLY OFFER METHOD
+  // APPLY OFFER METHOD (කෙටි කරපු)
   // ============================================================
 
   void _showSnackBar(String message, Color color) {
@@ -1507,45 +1512,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // WIDGET BUILDERS
-  // ============================================================
-
-  Widget _buildTimezoneSelector() {
-    return GestureDetector(
-      onTap: _showAdvancedTimezonePicker,
-      child: Container(
-        margin: const EdgeInsets.only(right: 8),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.2),
-          borderRadius: BorderRadius.circular(25),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              TimezoneService.getCurrentFlag(),
-              style: const TextStyle(fontSize: 16),
-            ),
-            const SizedBox(width: 6),
-            Text(
-              TimezoneService.getTimezoneDisplayName(),
-              style: const TextStyle(
-                fontSize: 13,
-                color: Colors.white,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            const SizedBox(width: 4),
-            const Icon(Icons.arrow_drop_down, size: 20, color: Colors.white),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ============================================================
-  // TIMEZONE PICKER METHODS (සමානයි)
+  // TIMEZONE PICKER METHODS (කෙටි කරපු)
   // ============================================================
 
   String _extractCountryCode(String timezone) {
@@ -2156,7 +2123,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // SEARCH METHODS (සමානයි)
+  // SEARCH METHODS
   // ============================================================
 
   void _onSearchTextChanged() {
@@ -2417,7 +2384,64 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // ✅ Android 16: Responsive Layout Widgets
+  // ✅ TIMEZONE SELECTOR
+  // ============================================================
+
+  Widget _buildTimezoneSelector() {
+    final isDSTActive = TimezoneService.isDST();
+    final flag = TimezoneService.getCurrentFlag();
+    final displayName = TimezoneService.getTimezoneDisplayName();
+
+    return GestureDetector(
+      onTap: _showAdvancedTimezonePicker,
+      child: Container(
+        margin: const EdgeInsets.only(right: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.2),
+          borderRadius: BorderRadius.circular(16),
+          border: isDSTActive ? Border.all(color: Colors.amber, width: 1) : null,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(flag, style: const TextStyle(fontSize: 12)),
+            const SizedBox(width: 4),
+            Text(
+              displayName,
+              style: const TextStyle(
+                fontSize: 10,
+                color: Colors.white,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            if (isDSTActive) ...[
+              const SizedBox(width: 4),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+                decoration: BoxDecoration(
+                  color: Colors.amber.shade100,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  'DST',
+                  style: TextStyle(
+                    fontSize: 7,
+                    color: Colors.amber.shade800,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+            const Icon(Icons.arrow_drop_down, size: 16, color: Colors.white),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ============================================================
+  // ✅ UI WIDGETS
   // ============================================================
 
   Widget _buildResponsiveBookButton() {
@@ -2470,9 +2494,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     );
   }
 
-  // ✅ Android 16: Responsive Stat Cards Grid
   Widget _buildResponsiveStatCards() {
-    // For tablets and large screens - show all 4 stats in a grid
     if (_isTablet) {
       return Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -2517,7 +2539,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       );
     }
 
-    // For phones - show 3 stats in a row
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(
@@ -2590,10 +2611,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       ),
     );
   }
-
-  // ============================================================
-  // OTHER UI COMPONENTS (පෙර තිබූ ඒවා)
-  // ============================================================
 
   Widget _buildHorizontalSalonCard(Map<String, dynamic> salon) {
     final hasLogo =
@@ -2971,6 +2988,11 @@ class _CustomerDashboardState extends State<CustomerDashboard>
           radius: 20,
           backgroundColor: Colors.white.withValues(alpha: 0.2),
           backgroundImage: hasImage ? NetworkImage(_customerImage!) : null,
+          onBackgroundImageError: hasImage
+              ? (exception, stackTrace) {
+                  debugPrint('⚠️ Failed to load avatar image: $exception');
+                }
+              : null,
           child: !hasImage
               ? Text(
                   _customerName.isNotEmpty
@@ -3038,43 +3060,40 @@ class _CustomerDashboardState extends State<CustomerDashboard>
             ],
           ),
           const SizedBox(height: 20),
-          // ✅ Option 1: Using Expanded with Flexible
           if (_isTablet)
-            Expanded(
-              child: GridView.count(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                crossAxisCount: _isLargeScreen ? 4 : 2,
-                crossAxisSpacing: 12,
-                mainAxisSpacing: 12,
-                childAspectRatio: 1.5,
-                children: [
-                  _buildActivityItem(
-                    icon: Icons.check_circle,
-                    label: 'Completed',
-                    value: '$_completedBookings',
-                    color: Colors.green,
-                  ),
-                  _buildActivityItem(
-                    icon: Icons.cancel,
-                    label: 'Cancelled',
-                    value: '$_cancelledBookings',
-                    color: Colors.red,
-                  ),
-                  _buildActivityItem(
-                    icon: Icons.star,
-                    label: 'VIP',
-                    value: '$_vipBookings',
-                    color: Colors.amber,
-                  ),
-                  _buildActivityItem(
-                    icon: Icons.calendar_today,
-                    label: 'Upcoming',
-                    value: '$_upcomingBookings',
-                    color: Colors.orange,
-                  ),
-                ],
-              ),
+            GridView.count(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              crossAxisCount: _isLargeScreen ? 4 : 2,
+              crossAxisSpacing: 12,
+              mainAxisSpacing: 12,
+              childAspectRatio: 1.5,
+              children: [
+                _buildActivityItem(
+                  icon: Icons.check_circle,
+                  label: 'Completed',
+                  value: '$_completedBookings',
+                  color: Colors.green,
+                ),
+                _buildActivityItem(
+                  icon: Icons.cancel,
+                  label: 'Cancelled',
+                  value: '$_cancelledBookings',
+                  color: Colors.red,
+                ),
+                _buildActivityItem(
+                  icon: Icons.star,
+                  label: 'VIP',
+                  value: '$_vipBookings',
+                  color: Colors.amber,
+                ),
+                _buildActivityItem(
+                  icon: Icons.calendar_today,
+                  label: 'Upcoming',
+                  value: '$_upcomingBookings',
+                  color: Colors.orange,
+                ),
+              ],
             )
           else
             Column(
@@ -3174,10 +3193,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       ],
     );
   }
-
-  // ============================================================
-  // FACEBOOK STYLE OFFER POST
-  // ============================================================
 
   Widget _buildFacebookStyleOfferPost(Map<String, dynamic> offer, int index) {
     final salonData = offer['salons'];
@@ -3373,7 +3388,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // ✅ Android 16: MAIN BUILD METHOD
+  // ✅ MAIN BUILD METHOD - WEB + MOBILE FIXED
   // ============================================================
 
   @override
@@ -3381,7 +3396,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     final screenWidth = MediaQuery.of(context).size.width;
     final bool isWeb = screenWidth > 800;
 
-    // ✅ Check screen size on every build
     _checkScreenSize();
 
     if (!_isTimezoneLoaded) {
@@ -3397,6 +3411,13 @@ class _CustomerDashboardState extends State<CustomerDashboard>
             onPressed: _openDrawer,
             tooltip: 'Menu',
             iconSize: 28,
+          ),
+          title: Text(
+            'Dashboard',
+            style: TextStyle(
+              fontSize: isWeb ? 20 : 16,
+              fontWeight: FontWeight.w600,
+            ),
           ),
           actions: [_buildProfilePhoto()],
         ),
@@ -3425,6 +3446,13 @@ class _CustomerDashboardState extends State<CustomerDashboard>
             onPressed: _openDrawer,
             tooltip: 'Menu',
             iconSize: 28,
+          ),
+          title: Text(
+            'Dashboard',
+            style: TextStyle(
+              fontSize: isWeb ? 20 : 16,
+              fontWeight: FontWeight.w600,
+            ),
           ),
           actions: [_buildProfilePhoto()],
         ),
@@ -3470,7 +3498,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       );
     }
 
-    // ✅ Main Scaffold with SafeArea
+    // ✅ Main Scaffold - Search Bar: Web = inside content, Mobile = below AppBar
     return Scaffold(
       key: _scaffoldKey,
       appBar: AppBar(
@@ -3484,53 +3512,19 @@ class _CustomerDashboardState extends State<CustomerDashboard>
           tooltip: 'Menu',
           iconSize: 28,
         ),
+        title: Text(
+          'Dashboard',
+          style: TextStyle(
+            fontSize: isWeb ? 20 : 16,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
         actions: [
           _buildTimezoneSelector(),
           _buildOffersButton(),
           _buildNotificationIcon(),
           _buildProfilePhoto(),
         ],
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(65),
-          child: Container(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(30),
-              ),
-              child: TextField(
-                controller: _searchController,
-                focusNode: _searchFocusNode,
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(
-                  hintText: '🔍 Search for salons...',
-                  hintStyle: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.7),
-                  ),
-                  prefixIcon: const Icon(Icons.search, color: Colors.white),
-                  suffixIcon: _searchController.text.isNotEmpty
-                      ? GestureDetector(
-                          onTap: () {
-                            _searchController.clear();
-                            _hideSearchResults();
-                          },
-                          child: const Icon(Icons.close, color: Colors.white),
-                        )
-                      : null,
-                  border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(vertical: 12),
-                ),
-                onTap: () {
-                  if (_searchController.text.isNotEmpty &&
-                      _searchResults.isNotEmpty) {
-                    _showSearchOverlay();
-                  }
-                },
-              ),
-            ),
-          ),
-        ),
       ),
       drawer: SideMenu(
         userRole: 'customer',
@@ -3539,368 +3533,468 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         profileImageUrl: _customerImage,
         onMenuItemSelected: () => _loadDashboardData(),
       ),
-      // ✅ SafeArea with responsive body
       body: SafeArea(
-        child: GestureDetector(
-          onTap: () {
-            _searchFocusNode.unfocus();
-            _hideSearchResults();
-          },
-          child: _isLoading
-              ? const Center(
-                  child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
-                )
-              : RefreshIndicator(
-                  onRefresh: _loadDashboardData,
-                  color: const Color(0xFFFF6B8B),
-                  child: SingleChildScrollView(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    child: Column(
-                      children: [
-                        if (_showPermissionCard && !_hasPermission)
-                          PermissionCard(
-                            onEnable: () => _enableNotifications(action: null),
-                            onNotNow: _handleNotNow,
-                            title: _permissionManager.getPermissionCardTitle(),
-                            message: _permissionManager
-                                .getPermissionCardMessage(),
-                            compact: false,
-                          ),
-                        const SizedBox(height: 8),
-                        _buildFollowedSalonsSection(),
-                        const SizedBox(height: 20),
-                        // ✅ Responsive action buttons
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          child: _isTablet
-                              ? Row(
-                                  children: [
-                                    Expanded(
-                                      child: _buildResponsiveBookButton(),
-                                    ),
-                                    const SizedBox(width: 12),
-                                    Expanded(
-                                      child: _buildResponsiveVipButton(),
-                                    ),
-                                    const SizedBox(width: 12),
-                                    Expanded(
-                                      child: ElevatedButton.icon(
-                                        onPressed: _viewAllOffers,
-                                        icon: const Icon(
-                                          Icons.local_offer,
-                                          size: 18,
-                                          color: Colors.white,
-                                        ),
-                                        label: const Text(
-                                          'Offers',
-                                          style: TextStyle(
-                                            fontSize: 14,
-                                            fontWeight: FontWeight.w600,
-                                            color: Colors.white,
-                                          ),
-                                        ),
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: Colors.orange,
-                                          foregroundColor: Colors.white,
-                                          padding: const EdgeInsets.symmetric(
-                                            vertical: 14,
-                                          ),
-                                          shape: RoundedRectangleBorder(
-                                            borderRadius: BorderRadius.circular(
-                                              12,
-                                            ),
-                                          ),
-                                          elevation: 0,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                )
-                              : Row(
-                                  children: [
-                                    _buildResponsiveBookButton(),
-                                    const SizedBox(width: 12),
-                                    _buildResponsiveVipButton(),
-                                  ],
-                                ),
+        child: isWeb
+            ? _buildWebLayout()
+            : _buildMobileLayout(),
+      ),
+    );
+  }
+
+  // ✅ WEB LAYOUT - Search Bar inside content
+  Widget _buildWebLayout() {
+    return Center(
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 1200),
+        child: Scrollbar(
+          controller: _scrollController,
+          thumbVisibility: true,
+          trackVisibility: true,
+          thickness: 8.0,
+          radius: const Radius.circular(10),
+          scrollbarOrientation: ScrollbarOrientation.right,
+          child: RefreshIndicator(
+            onRefresh: _loadDashboardData,
+            color: const Color(0xFFFF6B8B),
+            child: SingleChildScrollView(
+              controller: _scrollController,
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                children: [
+                  // ✅ Search Bar inside content (Web)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 20),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(30),
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                    child: TextField(
+                      controller: _searchController,
+                      focusNode: _searchFocusNode,
+                      style: const TextStyle(color: Colors.black87),
+                      decoration: InputDecoration(
+                        hintText: '🔍 Search for salons...',
+                        hintStyle: TextStyle(color: Colors.grey.shade500),
+                        prefixIcon: Icon(Icons.search, color: Colors.grey.shade600),
+                        suffixIcon: _searchController.text.isNotEmpty
+                            ? GestureDetector(
+                                onTap: () {
+                                  _searchController.clear();
+                                  _hideSearchResults();
+                                },
+                                child: Icon(Icons.close, color: Colors.grey.shade600),
+                              )
+                            : null,
+                        border: InputBorder.none,
+                        contentPadding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+                      ),
+                      onTap: () {
+                        if (_searchController.text.isNotEmpty &&
+                            _searchResults.isNotEmpty) {
+                          _showSearchOverlay();
+                        }
+                      },
+                    ),
+                  ),
+                  _buildDashboardContent(),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ✅ MOBILE LAYOUT - Search Bar below AppBar
+  Widget _buildMobileLayout() {
+    return Column(
+      children: [
+        // ✅ Search Bar below AppBar (Mobile)
+        Container(
+          color: Colors.white,
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.grey.shade100,
+              borderRadius: BorderRadius.circular(30),
+              border: Border.all(color: Colors.grey.shade300),
+            ),
+            child: TextField(
+              controller: _searchController,
+              focusNode: _searchFocusNode,
+              style: const TextStyle(color: Colors.black87),
+              decoration: InputDecoration(
+                hintText: '🔍 Search for salons...',
+                hintStyle: TextStyle(color: Colors.grey.shade500),
+                prefixIcon: Icon(Icons.search, color: Colors.grey.shade600),
+                suffixIcon: _searchController.text.isNotEmpty
+                    ? GestureDetector(
+                        onTap: () {
+                          _searchController.clear();
+                          _hideSearchResults();
+                        },
+                        child: Icon(Icons.close, color: Colors.grey.shade600),
+                      )
+                    : null,
+                border: InputBorder.none,
+                contentPadding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+              onTap: () {
+                if (_searchController.text.isNotEmpty &&
+                    _searchResults.isNotEmpty) {
+                  _showSearchOverlay();
+                }
+              },
+            ),
+          ),
+        ),
+        // ✅ Content
+        Expanded(
+          child: GestureDetector(
+            onTap: () {
+              _searchFocusNode.unfocus();
+              _hideSearchResults();
+            },
+            child: _isLoading
+                ? const Center(
+                    child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+                  )
+                : RefreshIndicator(
+                    onRefresh: _loadDashboardData,
+                    color: const Color(0xFFFF6B8B),
+                    child: SingleChildScrollView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: EdgeInsets.zero,
+                      child: _buildDashboardContent(),
+                    ),
+                  ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ============================================================
+  // ✅ DASHBOARD CONTENT
+  // ============================================================
+
+  Widget _buildDashboardContent() {
+    return Column(
+      children: [
+        if (_showPermissionCard && !_hasPermission)
+          PermissionCard(
+            onEnable: () => _enableNotifications(action: null),
+            onNotNow: _handleNotNow,
+            title: _permissionManager.getPermissionCardTitle(),
+            message: _permissionManager.getPermissionCardMessage(),
+            compact: false,
+          ),
+        const SizedBox(height: 8),
+        _buildFollowedSalonsSection(),
+        const SizedBox(height: 20),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: _isTablet
+              ? Row(
+                  children: [
+                    Expanded(
+                      child: _buildResponsiveBookButton(),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _buildResponsiveVipButton(),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: _viewAllOffers,
+                        icon: const Icon(
+                          Icons.local_offer,
+                          size: 18,
+                          color: Colors.white,
                         ),
-                        const SizedBox(height: 20),
-                        // ✅ Responsive stat cards
-                        _buildResponsiveStatCards(),
-                        const SizedBox(height: 20),
-                        if (_pendingVipBookings > 0)
-                          Container(
-                            margin: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 8,
-                            ),
-                            padding: const EdgeInsets.all(16),
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                colors: [
-                                  Colors.amber.shade300,
-                                  Colors.amber.shade600,
-                                ],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                              ),
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                            child: Row(
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.all(12),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white.withValues(alpha: 0.2),
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: const Icon(
-                                    Icons.star,
-                                    color: Colors.white,
-                                    size: 28,
-                                  ),
-                                ),
-                                const SizedBox(width: 16),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      const Text(
-                                        'VIP Request Pending',
-                                        style: TextStyle(
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.white,
-                                        ),
-                                      ),
-                                      Text(
-                                        '$_pendingVipBookings VIP booking${_pendingVipBookings != 1 ? 's' : ''} waiting for approval',
-                                        style: TextStyle(
-                                          fontSize: 14,
-                                          color: Colors.white.withValues(
-                                            alpha: 0.9,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                ElevatedButton(
-                                  onPressed: _viewVipBookings,
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.white,
-                                    foregroundColor: Colors.amber.shade700,
-                                  ),
-                                  child: const Text('View'),
-                                ),
-                              ],
-                            ),
+                        label: const Text(
+                          'Offers',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
                           ),
-                        const SizedBox(height: 20),
-                        _buildActivitySummaryCard(),
-                        const SizedBox(height: 20),
-                        if (_offers.isNotEmpty) ...[
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 16),
-                            child: Row(
-                              children: [
-                                Container(
-                                  width: 4,
-                                  height: 20,
-                                  decoration: const BoxDecoration(
-                                    color: Color(0xFFFF6B8B),
-                                    borderRadius: BorderRadius.horizontal(
-                                      right: Radius.circular(4),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Text(
-                                  'Latest Offers',
-                                  style: TextStyle(
-                                    fontSize: _isTablet ? 20 : 18,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                const Spacer(),
-                                TextButton(
-                                  onPressed: _viewAllOffers,
-                                  child: const Text('View All >'),
-                                ),
-                              ],
-                            ),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.orange,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
                           ),
-                          const SizedBox(height: 8),
-                          ..._offers.map(
-                            (offer) => _buildFacebookStyleOfferPost(
-                              offer,
-                              _offers.indexOf(offer),
-                            ),
-                          ),
-                        ],
-                        if (_favoriteBarbers.isNotEmpty) ...[
-                          const SizedBox(height: 20),
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 16),
-                            child: Row(
-                              children: [
-                                Container(
-                                  width: 4,
-                                  height: 20,
-                                  decoration: const BoxDecoration(
-                                    color: Color(0xFFFF6B8B),
-                                    borderRadius: BorderRadius.horizontal(
-                                      right: Radius.circular(4),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Text(
-                                  'Favorite Barbers',
-                                  style: TextStyle(
-                                    fontSize: _isTablet ? 20 : 18,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                const Spacer(),
-                                TextButton(
-                                  onPressed: _viewFavoriteBarbers,
-                                  child: const Text('View All >'),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          SizedBox(
-                            height: _isTablet ? 250 : 200,
-                            child: ListView.builder(
-                              scrollDirection: Axis.horizontal,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                              ),
-                              itemCount: _favoriteBarbers.length,
-                              itemBuilder: (context, index) {
-                                final barber = _favoriteBarbers[index];
-                                return Container(
-                                  width: _isTablet ? 200 : 160,
-                                  margin: const EdgeInsets.only(right: 12),
-                                  padding: const EdgeInsets.all(12),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white,
-                                    borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(
-                                      color: Colors.grey.shade200,
-                                    ),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: Colors.grey.withValues(
-                                          alpha: 0.1,
-                                        ),
-                                        blurRadius: 4,
-                                      ),
-                                    ],
-                                  ),
-                                  child: Column(
-                                    children: [
-                                      CircleAvatar(
-                                        radius: _isTablet ? 40 : 35,
-                                        backgroundColor: const Color(
-                                          0xFFFF6B8B,
-                                        ).withValues(alpha: 0.1),
-                                        backgroundImage:
-                                            barber['avatar'] != null
-                                            ? NetworkImage(barber['avatar'])
-                                            : null,
-                                        child: barber['avatar'] == null
-                                            ? Text(
-                                                barber['name'][0].toUpperCase(),
-                                                style: TextStyle(
-                                                  fontSize: _isTablet ? 32 : 28,
-                                                  fontWeight: FontWeight.bold,
-                                                  color: Color(0xFFFF6B8B),
-                                                ),
-                                              )
-                                            : null,
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Text(
-                                        barber['name'],
-                                        style: TextStyle(
-                                          fontSize: _isTablet ? 18 : 16,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.center,
-                                        children: [
-                                          const Icon(
-                                            Icons.star,
-                                            color: Colors.amber,
-                                            size: 14,
-                                          ),
-                                          const SizedBox(width: 2),
-                                          Text(
-                                            barber['rating'].toStringAsFixed(1),
-                                            style: const TextStyle(
-                                              fontSize: 12,
-                                              fontWeight: FontWeight.w600,
-                                            ),
-                                          ),
-                                          const SizedBox(width: 4),
-                                          Text(
-                                            '(${barber['count']} cuts)',
-                                            style: TextStyle(
-                                              fontSize: 10,
-                                              color: Colors.grey[500],
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 8),
-                                      SizedBox(
-                                        width: double.infinity,
-                                        child: OutlinedButton(
-                                          onPressed: _bookAppointment,
-                                          style: OutlinedButton.styleFrom(
-                                            foregroundColor: const Color(
-                                              0xFFFF6B8B,
-                                            ),
-                                            side: const BorderSide(
-                                              color: Color(0xFFFF6B8B),
-                                            ),
-                                            padding: const EdgeInsets.symmetric(
-                                              vertical: 6,
-                                            ),
-                                            shape: RoundedRectangleBorder(
-                                              borderRadius:
-                                                  BorderRadius.circular(8),
-                                            ),
-                                          ),
-                                          child: const Text(
-                                            'Book',
-                                            style: TextStyle(fontSize: 12),
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                              },
-                            ),
-                          ),
-                        ],
-                        const SizedBox(height: 20),
-                      ],
+                          elevation: 0,
+                        ),
+                      ),
+                    ),
+                  ],
+                )
+              : Row(
+                  children: [
+                    _buildResponsiveBookButton(),
+                    const SizedBox(width: 12),
+                    _buildResponsiveVipButton(),
+                  ],
+                ),
+        ),
+        const SizedBox(height: 20),
+        _buildResponsiveStatCards(),
+        const SizedBox(height: 20),
+        if (_pendingVipBookings > 0)
+          Container(
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  Colors.amber.shade300,
+                  Colors.amber.shade600,
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.2),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.star,
+                    color: Colors.white,
+                    size: 28,
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'VIP Request Pending',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                      Text(
+                        '$_pendingVipBookings VIP booking${_pendingVipBookings != 1 ? 's' : ''} waiting for approval',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.white.withValues(alpha: 0.9),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                ElevatedButton(
+                  onPressed: _viewVipBookings,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: Colors.amber.shade700,
+                  ),
+                  child: const Text('View'),
+                ),
+              ],
+            ),
+          ),
+        const SizedBox(height: 20),
+        _buildActivitySummaryCard(),
+        const SizedBox(height: 20),
+        if (_offers.isNotEmpty) ...[
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                Container(
+                  width: 4,
+                  height: 20,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFFF6B8B),
+                    borderRadius: BorderRadius.horizontal(
+                      right: Radius.circular(4),
                     ),
                   ),
                 ),
-        ),
-      ),
+                const SizedBox(width: 8),
+                Text(
+                  'Latest Offers',
+                  style: TextStyle(
+                    fontSize: _isTablet ? 20 : 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const Spacer(),
+                TextButton(
+                  onPressed: _viewAllOffers,
+                  child: const Text('View All >'),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          ..._offers.map(
+            (offer) => _buildFacebookStyleOfferPost(
+              offer,
+              _offers.indexOf(offer),
+            ),
+          ),
+        ],
+        if (_favoriteBarbers.isNotEmpty) ...[
+          const SizedBox(height: 20),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                Container(
+                  width: 4,
+                  height: 20,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFFF6B8B),
+                    borderRadius: BorderRadius.horizontal(
+                      right: Radius.circular(4),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Favorite Barbers',
+                  style: TextStyle(
+                    fontSize: _isTablet ? 20 : 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const Spacer(),
+                TextButton(
+                  onPressed: _viewFavoriteBarbers,
+                  child: const Text('View All >'),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: _isTablet ? 250 : 200,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              itemCount: _favoriteBarbers.length,
+              itemBuilder: (context, index) {
+                final barber = _favoriteBarbers[index];
+                return Container(
+                  width: _isTablet ? 200 : 160,
+                  margin: const EdgeInsets.only(right: 12),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.grey.shade200),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.grey.withValues(alpha: 0.1),
+                        blurRadius: 4,
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    children: [
+                      CircleAvatar(
+                        radius: _isTablet ? 40 : 35,
+                        backgroundColor: const Color(0xFFFF6B8B).withValues(
+                          alpha: 0.1,
+                        ),
+                        backgroundImage: barber['avatar'] != null
+                            ? NetworkImage(barber['avatar'])
+                            : null,
+                        child: barber['avatar'] == null
+                            ? Text(
+                                barber['name'][0].toUpperCase(),
+                                style: TextStyle(
+                                  fontSize: _isTablet ? 32 : 28,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFFFF6B8B),
+                                ),
+                              )
+                            : null,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        barber['name'],
+                        style: TextStyle(
+                          fontSize: _isTablet ? 18 : 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(
+                            Icons.star,
+                            color: Colors.amber,
+                            size: 14,
+                          ),
+                          const SizedBox(width: 2),
+                          Text(
+                            barber['rating'].toStringAsFixed(1),
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            '(${barber['count']} cuts)',
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: Colors.grey[500],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton(
+                          onPressed: _bookAppointment,
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFFFF6B8B),
+                            side: const BorderSide(color: Color(0xFFFF6B8B)),
+                            padding: const EdgeInsets.symmetric(vertical: 6),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                          child: const Text(
+                            'Book',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+        const SizedBox(height: 20),
+      ],
     );
   }
 }
