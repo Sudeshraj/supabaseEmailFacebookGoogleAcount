@@ -177,7 +177,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
           )
         ''')
           .eq('salon_id', salonIdInt)
-          .eq('salon_barbers.status', 'active')
+          .eq('status', 'active')  
           .eq('profiles.user_roles.role_id', 2) // barber role
           .eq('profiles.user_roles.status', 'active'); // ✅ Added status check
 

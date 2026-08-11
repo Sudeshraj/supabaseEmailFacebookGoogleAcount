@@ -222,7 +222,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
             )
         ''')
           .eq('salon_id', int.parse(widget.salonId!))
-          .eq('salon_barbers.status', 'active')
+          .eq('status', 'active')  
           .eq('profiles.user_roles.role_id', 2) // barber role
           .eq('profiles.user_roles.status', 'active'); // ✅ Added
 
