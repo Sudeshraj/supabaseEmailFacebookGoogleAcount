@@ -22,8 +22,6 @@ import 'package:flutter_application_1/services/google_sign_in_service.dart';
 import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 
-// Global flag to prevent multiple Google SDK initializations
-bool _googleSdkInitialized = false;
 
 // Class for returning user check
 class _ReturningUserCheck {
@@ -101,17 +99,15 @@ class _SignInScreenState extends State<SignInScreen>
   void initState() {
     super.initState();
 
-    // Initialize GoogleSignInService with check to prevent multiple initializations
-    _googleSignInService = GoogleSignInService();
+    // Initialize GoogleSignInService
+  _googleSignInService = GoogleSignInService();
 
-    // Only initialize if not already initialized globally
-    if (!_googleSdkInitialized) {
-      _googleSignInService.initialize();
-      _googleSdkInitialized = true;
-      debugPrint('✅ Google Sign-In SDK initialized once');
-    } else {
-      debugPrint('ℹ Google Sign-In SDK already initialized, skipping');
-    }
+  // ✅ SIMPLE: unconditionally call - service එකම duplicate
+  // calls/race conditions handle කරගන්නවා internally.
+  _googleSignInService.initialize();
+  debugPrint('✅ Google Sign-In SDK initialize() called from SignInScreen');
+
+   
 
     // Initialize controllers
     _emailController = TextEditingController(text: widget.prefilledEmail ?? '');

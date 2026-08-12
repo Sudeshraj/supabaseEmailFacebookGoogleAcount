@@ -12,29 +12,47 @@ class GoogleSignInService {
   static final GoogleSignIn _googleSignIn = GoogleSignIn.instance;
   static bool _isInitialized = false;
 
-  // EnvironmentManager instance
+  // ✅ FIX: in-flight initialize() call එක cache කරගන්නවා.
+  // Second caller එකක් await කරන කොටම එනවා නම්, ආයෙත් JS
+  // initialize() fire කරන්නේ නැතුව, දැනටමත් running Future එකම
+  // await කරනවා. මේකෙන් "initialize() is called multiple times"
+  // GIS console warning එක නවතිනවා.
+  static Future<bool>? _initializingFuture;
+
   final EnvironmentManager _env = EnvironmentManager();
 
-  // Required scopes
   static const List<String> _requiredScopes = ['email', 'profile', 'openid'];
 
-  // Initialize with clientId from EnvironmentManager
   Future<bool> initialize() async {
+    // දැනටමත් සම්පූර්ණයෙන් init වෙලා තියෙනවනම්, කෙලින්ම return
     if (_isInitialized) return true;
 
-    try {
-      // Get platform-specific client ID from EnvironmentManager
-      final String? clientId = _getPlatformClientId();
+    // දැනටමත් initialize() call එකක් in-flight (running) නම්,
+    // අලුත් JS call එකක් fire කරන්නේ නැතුව, ඒම Future එකම await කරනවා
+    if (_initializingFuture != null) {
+      debugPrint('ℹ️ GoogleSignIn initialize already in progress, awaiting it');
+      return await _initializingFuture!;
+    }
 
-      // ✅ FIX: serverClientId is REQUIRED to get a valid idToken back
-      // on Android/iOS. Without it, the idToken's audience won't match
-      // what Supabase expects, causing signInWithIdToken() to fail
-      // silently and fall back to browser OAuth (double popup bug).
-      // This must ALWAYS be the Web Client ID (OAuth "Web application"
-      // type), regardless of platform.
+    // Actual init logic එක වෙනම function එකකට extract කරලා,
+    // Future එක cache කරගන්නවා
+    _initializingFuture = _doInitialize();
+
+    try {
+      final result = await _initializingFuture!;
+      return result;
+    } finally {
+      // සම්පූර්ණ උනාට පස්සේ (success හෝ fail) clear කරන්න,
+      // fail උනොත් ඊළඟ try එකකට ආයෙත් attempt කරන්න පුළුවන් වෙන්න
+      _initializingFuture = null;
+    }
+  }
+
+  Future<bool> _doInitialize() async {
+    try {
+      final String? clientId = _getPlatformClientId();
       final String webClientId = _env.googleWebClientId;
 
-      // Validate if Google OAuth is enabled
       if (!_env.enableGoogleOAuth) {
         return false;
       }
@@ -47,15 +65,20 @@ class GoogleSignInService {
         return false;
       }
 
-      await _googleSignIn.initialize(
-        clientId: clientId,
-        serverClientId: webClientId, // ✅ THE FIX
-      );
+      if (kIsWeb) {
+        await _googleSignIn.initialize(clientId: webClientId);
+        debugPrint('✅ GoogleSignIn initialized for Web (clientId only)');
+      } else {
+        await _googleSignIn.initialize(
+          clientId: clientId,
+          serverClientId: webClientId,
+        );
+        debugPrint(
+          '✅ GoogleSignIn initialized for Mobile with serverClientId set',
+        );
+      }
 
       _isInitialized = true;
-
-      debugPrint('✅ GoogleSignIn initialized with serverClientId set');
-
       return true;
     } catch (e) {
       debugPrint('❌ GoogleSignIn initialize error: $e');
