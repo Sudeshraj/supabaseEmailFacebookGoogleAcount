@@ -277,7 +277,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   String _getChildNameForBooking() =>
       _isSameAsCustomer ? '' : (_selectedChildName?.trim() ?? '');
 
-
   bool _isDST() {
     final timezone = _userTimezone;
     if (!timezone.contains('America/') && !timezone.contains('Europe/')) {
@@ -2545,7 +2544,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       List<Map<String, dynamic>> barberList = List<Map<String, dynamic>>.from(
         result,
       );
-
+      for (var i = 0; i < barberList.length; i++) {
+        barberList[i]['id'] = barberList[i]['barber_id'];
+      }
       // Check full availability for each barber
       final dateToCheck = _selectedDate ?? DateTime.now();
 
@@ -2775,7 +2776,8 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   // ✅ UPDATED: Build barber card with correct ID
   Widget _buildBarberCard(Map<String, dynamic> barber) {
     final barberId = barber['barber_id'] ?? barber['id']; // ✅ Use barber_id
-    final isSelected = (_selectedBarber?['barber_id'] ?? _selectedBarber?['id']) == barberId;
+    final isSelected =
+        (_selectedBarber?['barber_id'] ?? _selectedBarber?['id']) == barberId;
     final availability = _barberAvailability[barberId];
     final isAvailable = availability?['is_available'] ?? true;
     final hasSpecialSchedule = availability?['has_special_schedule'] ?? false;

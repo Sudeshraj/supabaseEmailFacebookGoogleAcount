@@ -263,7 +263,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   String _getChildNameForBooking() =>
       _isSameAsCustomer ? '' : (_selectedChildName?.trim() ?? '');
 
-
   bool _isDST() {
     final timezone = _userTimezone;
     if (!timezone.contains('America/') && !timezone.contains('Europe/')) {
@@ -2923,6 +2922,12 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         result,
       );
 
+      // ✅ FIX: RPC eken enne 'barber_id' widihata, ehema 'id' kiyala
+      // consistent karanna map ekata add karanna
+      for (var i = 0; i < barberList.length; i++) {
+        barberList[i]['id'] = barberList[i]['barber_id'];
+      }
+
       // Check full availability for each barber
       final dateToCheck = _selectedDate ?? DateTime.now();
 
@@ -4220,7 +4225,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(16),
             child: Column(
-              children: [               
+              children: [
                 _buildConfirmationTile(
                   Icons.store,
                   'Salon',
