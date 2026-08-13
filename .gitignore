@@ -113,10 +113,9 @@ google-services.json
 GoogleService-Info.plist
 
 # Env files - මේක ඉතා වැදගත්!
-.env
-.env.local
 .env.*.local
 .env.production
+.env.staging
 .env.development
 .env.test
 

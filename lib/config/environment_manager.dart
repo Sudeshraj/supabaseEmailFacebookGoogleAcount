@@ -23,7 +23,7 @@ class EnvironmentManager {
         envFile = '.env.test';
         break;
       default:
-        envFile = '.env';
+        envFile = '.env.development';
     }
 
 // 'flutter run'	= 'development' -->	.env
