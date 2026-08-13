@@ -26,6 +26,11 @@ class EnvironmentManager {
         envFile = '.env';
     }
 
+// 'flutter run'	= 'development' -->	.env
+// 'flutter run --dart-define=flavor=test' =	'test' --> 	.env.test
+// 'flutter run --profile' =	'staging'	--> .env.staging
+// 'flutter run --release' =	'production' -->	.env.production
+
     try {
       await dotenv.load(
         fileName: envFile,

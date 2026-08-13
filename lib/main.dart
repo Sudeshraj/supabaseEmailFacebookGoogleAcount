@@ -93,6 +93,9 @@ String? pendingDeepLink;
 final AppLinks _appLinks = AppLinks();
 StreamSubscription<Uri>? _linkSubscription;
 
+//command eken flavor eka ganima
+const String cmdFlavor = String.fromEnvironment('flavor', defaultValue: '');
+
 // ==========================================
 // FIREBASE BACKGROUND MESSAGE HANDLER | BACKGROUND TOOLCHAIN (TOP-LEVEL FUNCTIONS)
 // ==========================================
@@ -267,6 +270,26 @@ Future<void> _validateSessionOnResume() async {
 }
 
 // ====================
+// flover / build mode set kirima
+// ====================
+
+String getFlavor() {
+  // 1. Command එකෙන් එකක් ආවොත්
+  if (cmdFlavor.isNotEmpty) {
+    return cmdFlavor;
+  }
+  
+  // 2. නැත්නම් mode එක අනුව(main mode 3i)
+  if (kDebugMode) {
+    return 'development';//development
+  } else if (kProfileMode) {
+    return 'staging';//profile
+  } else {
+    return 'production';//release
+  }
+}
+
+// ====================
 // MAIN METHOD
 // ====================
 Future<void> main() async {
@@ -278,8 +301,9 @@ Future<void> main() async {
   try {
     // ========== PHASE 1: ENVIRONMENT ==========
     environment = EnvironmentManager();
-    await environment.init(flavor: kDebugMode ? 'development' : 'production');
-
+    final flavor = getFlavor();
+    await environment.init(flavor: flavor);
+   
     // ========== PHASE 2: SUPABASE ==========
     await Supabase.initialize(
       url: environment.supabaseUrl,
