@@ -2,6 +2,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter_application_1/utils/app_version.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -1304,7 +1305,7 @@ class _AppInfo extends StatelessWidget {
                 ),
               ),
               Text(
-                '${getString('version')} 1.0.0',
+                '${getString('version')} ${AppVersion.version}',
                 style: TextStyle(
                   color: Colors.white.withValues(alpha: 0.5),
                   fontSize: 12,

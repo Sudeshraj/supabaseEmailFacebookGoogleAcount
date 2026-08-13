@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_application_1/alertBox/show_logout_conf.dart';
 import 'package:flutter_application_1/main.dart';
 import 'package:flutter_application_1/services/session_manager.dart';
+import 'package:flutter_application_1/utils/app_version.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -11,7 +12,7 @@ class SideMenu extends StatefulWidget {
   final String userName;
   final String? userEmail;
   final String? profileImageUrl;
-  final String? selectedSalonId; // ✅ From Dashboard
+  final String? selectedSalonId;
   final VoidCallback? onMenuItemSelected;
 
   const SideMenu({
@@ -43,16 +44,20 @@ class _SideMenuState extends State<SideMenu> {
   String? _selectedSalonId;
   String? _selectedSalonName;
 
+  // ✅ Android 16: Screen size tracking
+  bool _isTablet = false;
+  bool _isLargeScreen = false;
+
   final supabase = Supabase.instance.client;
 
   @override
   void initState() {
     super.initState();
-    // ✅ Initialize with widget's selectedSalonId
     _selectedSalonId = widget.selectedSalonId;
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
+        _checkScreenSize();
         _loadUserRolesFromDatabase();
         _loadNotificationCounts();
         if (widget.userRole == 'owner') {
@@ -60,16 +65,20 @@ class _SideMenuState extends State<SideMenu> {
         } else if (widget.userRole == 'barber') {
           _loadBarberSalon();
         }
-        // Customer doesn't need to load salon
       }
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _checkScreenSize();
   }
 
   @override
   void didUpdateWidget(SideMenu oldWidget) {
     super.didUpdateWidget(oldWidget);
 
-    // ✅ Update salon ID when widget updates
     if (widget.selectedSalonId != oldWidget.selectedSalonId) {
       setState(() {
         _selectedSalonId = widget.selectedSalonId;
@@ -92,20 +101,30 @@ class _SideMenuState extends State<SideMenu> {
     }
   }
 
+  // ✅ Android 16: Check screen size
+  void _checkScreenSize() {
+    final size = MediaQuery.of(context).size;
+    final isTablet = size.shortestSide >= 600;
+    final isLarge = size.width > 800 || size.height > 800;
+
+    if (_isTablet != isTablet || _isLargeScreen != isLarge) {
+      setState(() {
+        _isTablet = isTablet;
+        _isLargeScreen = isLarge;
+      });
+    }
+  }
+
   // ============================================================
   // 🔥 LOAD BARBER'S SALON
   // ============================================================
   Future<void> _loadBarberSalon() async {
     if (widget.userRole != 'barber') return;
 
-
     try {
       final currentUser = supabase.auth.currentUser;
-      if (currentUser == null) {
-        return;
-      }
+      if (currentUser == null) return;
 
-      // ✅ Get barber's salon
       final salonBarberResponse = await supabase
           .from('salon_barbers')
           .select('''
@@ -129,7 +148,6 @@ class _SideMenuState extends State<SideMenu> {
           setState(() {
             _selectedSalonId = salon['id'].toString();
             _selectedSalonName = salon['name']?.toString();
-            // ✅ Store in ownerSalons list for consistency (only one salon)
             _ownerSalons = [
               {
                 'id': salon['id'],
@@ -138,11 +156,10 @@ class _SideMenuState extends State<SideMenu> {
                 'address': salon['address'],
                 'open_time': salon['open_time'],
                 'close_time': salon['close_time'],
-              }
+              },
             ];
           });
 
-          // Save to SessionManager
           if (_selectedSalonId != null) {
             await SessionManager.saveSalonId(_selectedSalonId!);
           }
@@ -152,13 +169,11 @@ class _SideMenuState extends State<SideMenu> {
         }
       }
 
-      debugPrint('✅ Barber salon loaded: $_selectedSalonName (ID: $_selectedSalonId)');
-
+      debugPrint(
+        '✅ Barber salon loaded: $_selectedSalonName (ID: $_selectedSalonId)',
+      );
     } catch (e) {
       debugPrint('❌ Error loading barber salon: $e');
-    } finally {
-      if (mounted) {
-      }
     }
   }
 
@@ -168,12 +183,9 @@ class _SideMenuState extends State<SideMenu> {
   Future<void> _loadOwnerSalons() async {
     if (widget.userRole != 'owner') return;
 
-
     try {
       final currentUser = supabase.auth.currentUser;
-      if (currentUser == null) {
-        return;
-      }
+      if (currentUser == null) return;
 
       final response = await supabase
           .from('salons')
@@ -187,28 +199,30 @@ class _SideMenuState extends State<SideMenu> {
           _ownerSalons = List<Map<String, dynamic>>.from(response);
         });
 
-        // ✅ Use the passed salon ID first
         if (widget.selectedSalonId != null &&
-            _ownerSalons.any((s) => s['id'].toString() == widget.selectedSalonId)) {
+            _ownerSalons.any(
+              (s) => s['id'].toString() == widget.selectedSalonId,
+            )) {
           _selectedSalonId = widget.selectedSalonId;
-          _selectedSalonName = _ownerSalons.firstWhere(
-            (s) => s['id'].toString() == widget.selectedSalonId,
-          )['name']?.toString();
+          _selectedSalonName = _ownerSalons
+              .firstWhere(
+                (s) => s['id'].toString() == widget.selectedSalonId,
+              )['name']
+              ?.toString();
         } else {
-          // ✅ Use await with getSalonId()
           final savedId = await SessionManager.getSalonId();
-          if (savedId != null && _ownerSalons.any((s) => s['id'].toString() == savedId)) {
+          if (savedId != null &&
+              _ownerSalons.any((s) => s['id'].toString() == savedId)) {
             _selectedSalonId = savedId;
-            _selectedSalonName = _ownerSalons.firstWhere(
-              (s) => s['id'].toString() == savedId,
-            )['name']?.toString();
+            _selectedSalonName = _ownerSalons
+                .firstWhere((s) => s['id'].toString() == savedId)['name']
+                ?.toString();
           } else {
             _selectedSalonId = _ownerSalons.first['id'].toString();
             _selectedSalonName = _ownerSalons.first['name']?.toString();
           }
         }
 
-        // Save to SessionManager
         if (_selectedSalonId != null) {
           await SessionManager.saveSalonId(_selectedSalonId!);
         }
@@ -218,14 +232,11 @@ class _SideMenuState extends State<SideMenu> {
       }
     } catch (e) {
       debugPrint('❌ Error loading owner salons: $e');
-    } finally {
-      if (mounted) {
-      }
     }
   }
 
   // ============================================================
-  // 🔥 ON SALON CHANGED (Only for Owner)
+  // 🔥 ON SALON CHANGED
   // ============================================================
   void _onSalonChanged(String? newSalonId) async {
     if (widget.userRole != 'owner') return;
@@ -240,21 +251,17 @@ class _SideMenuState extends State<SideMenu> {
       _selectedSalonName = selectedSalon['name']?.toString();
     });
 
-    // Save to SessionManager
     await SessionManager.saveSalonId(_selectedSalonId!);
     if (_selectedSalonName != null) {
       await SessionManager.saveSalonName(_selectedSalonName!);
     }
 
-    // ✅ Refresh notification counts with new salon
     await _loadNotificationCounts();
 
-    // ✅ Notify parent widget about salon change
     if (widget.onMenuItemSelected != null) {
       widget.onMenuItemSelected!();
     }
 
-    // Close drawer
     if (mounted) {
       Navigator.pop(context);
     }
@@ -268,7 +275,6 @@ class _SideMenuState extends State<SideMenu> {
       final currentUser = supabase.auth.currentUser;
       if (currentUser == null) return;
 
-      // ✅ Get unread notification count
       final notificationResponse = await supabase
           .from('notifications')
           .select('id')
@@ -276,8 +282,6 @@ class _SideMenuState extends State<SideMenu> {
           .eq('is_read', false);
 
       final unreadCount = notificationResponse.length;
-
-      // ✅ Get pending bookings count based on role and selected salon
       int pendingBookings = 0;
 
       if (widget.userRole == 'customer') {
@@ -288,7 +292,6 @@ class _SideMenuState extends State<SideMenu> {
             .inFilter('status', ['pending', 'confirmed']);
         pendingBookings = bookingsResponse.length;
       } else if (widget.userRole == 'barber') {
-        // ✅ Barber: Get pending bookings for this barber
         final bookingsResponse = await supabase
             .from('appointments')
             .select('id')
@@ -296,7 +299,6 @@ class _SideMenuState extends State<SideMenu> {
             .inFilter('status', ['pending', 'confirmed']);
         pendingBookings = bookingsResponse.length;
       } else if (widget.userRole == 'owner') {
-        // ✅ Use selected salon ID if available
         if (_selectedSalonId != null) {
           final bookingsResponse = await supabase
               .from('appointments')
@@ -305,7 +307,6 @@ class _SideMenuState extends State<SideMenu> {
               .inFilter('status', ['pending', 'confirmed']);
           pendingBookings = bookingsResponse.length;
         } else {
-          // If no salon selected, get all salons
           final salonsResponse = await supabase
               .from('salons')
               .select('id')
@@ -319,7 +320,10 @@ class _SideMenuState extends State<SideMenu> {
             final bookingsResponse = await supabase
                 .from('appointments')
                 .select('id')
-                .inFilter('salon_id', salonIds.map((e) => e.toString()).toList())
+                .inFilter(
+                  'salon_id',
+                  salonIds.map((e) => e.toString()).toList(),
+                )
                 .inFilter('status', ['pending', 'confirmed']);
             pendingBookings = bookingsResponse.length;
           }
@@ -1021,7 +1025,7 @@ class _SideMenuState extends State<SideMenu> {
   }
 
   // ============================================================
-  // 🔥 PROFILE HEADER
+  // ✅ Android 16: Responsive Profile Header
   // ============================================================
   Widget _buildProfileHeader() {
     final hasMultipleProfiles = _availableProfiles.length > 1;
@@ -1029,6 +1033,11 @@ class _SideMenuState extends State<SideMenu> {
         .where((p) => p['is_current'] != true && p['is_active'] == true)
         .length;
     final canCreateNewProfile = _allUserRoles.length < 3;
+
+    // ✅ Responsive sizes
+    final avatarSize = _isTablet ? 80.0 : 70.0;
+    final fontSize = _isTablet ? 20.0 : 18.0;
+    final padding = _isTablet ? 24.0 : 20.0;
 
     return Container(
       decoration: const BoxDecoration(
@@ -1041,7 +1050,7 @@ class _SideMenuState extends State<SideMenu> {
       child: SafeArea(
         bottom: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+          padding: EdgeInsets.fromLTRB(padding, padding, padding, 16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1061,8 +1070,8 @@ class _SideMenuState extends State<SideMenu> {
                     child: Stack(
                       children: [
                         Container(
-                          width: 70,
-                          height: 70,
+                          width: avatarSize,
+                          height: avatarSize,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             border: Border.all(color: Colors.white, width: 3),
@@ -1076,10 +1085,10 @@ class _SideMenuState extends State<SideMenu> {
                                     widget.userName.isNotEmpty
                                         ? widget.userName[0].toUpperCase()
                                         : 'U',
-                                    style: const TextStyle(
-                                      fontSize: 28,
+                                    style: TextStyle(
+                                      fontSize: _isTablet ? 32 : 28,
                                       fontWeight: FontWeight.bold,
-                                      color: Color(0xFFFF6B8B),
+                                      color: const Color(0xFFFF6B8B),
                                     ),
                                   ),
                                 )
@@ -1087,8 +1096,8 @@ class _SideMenuState extends State<SideMenu> {
                                   child: CachedNetworkImage(
                                     imageUrl: widget.profileImageUrl!,
                                     fit: BoxFit.cover,
-                                    width: 70,
-                                    height: 70,
+                                    width: avatarSize,
+                                    height: avatarSize,
                                     placeholder: (context, url) =>
                                         const CircleAvatar(
                                           backgroundColor: Colors.white,
@@ -1109,10 +1118,10 @@ class _SideMenuState extends State<SideMenu> {
                                                 ? widget.userName[0]
                                                       .toUpperCase()
                                                 : 'U',
-                                            style: const TextStyle(
-                                              fontSize: 28,
+                                            style: TextStyle(
+                                              fontSize: _isTablet ? 32 : 28,
                                               fontWeight: FontWeight.bold,
-                                              color: Color(0xFFFF6B8B),
+                                              color: const Color(0xFFFF6B8B),
                                             ),
                                           ),
                                         ),
@@ -1156,8 +1165,8 @@ class _SideMenuState extends State<SideMenu> {
                             Expanded(
                               child: Text(
                                 widget.userName,
-                                style: const TextStyle(
-                                  fontSize: 18,
+                                style: TextStyle(
+                                  fontSize: fontSize,
                                   fontWeight: FontWeight.bold,
                                   color: Colors.white,
                                 ),
@@ -1223,7 +1232,7 @@ class _SideMenuState extends State<SideMenu> {
                           Text(
                             widget.userEmail!,
                             style: TextStyle(
-                              fontSize: 13,
+                              fontSize: _isTablet ? 14 : 13,
                               color: Colors.white.withValues(alpha: 0.9),
                             ),
                             maxLines: 1,
@@ -1265,7 +1274,7 @@ class _SideMenuState extends State<SideMenu> {
   }
 
   // ============================================================
-  // 🔥 PROFILE SWITCHER SECTION
+  // ✅ Android 16: Responsive Profile Switcher
   // ============================================================
   Widget _buildProfileSwitcherSection() {
     final otherProfiles = _availableProfiles
@@ -1303,12 +1312,14 @@ class _SideMenuState extends State<SideMenu> {
   }
 
   // ============================================================
-  // 🔥 PROFILE SWITCHER ITEM
+  // ✅ Android 16: Responsive Profile Switcher Item
   // ============================================================
   Widget _buildProfileSwitcherItem(Map<String, dynamic> profile) {
     final bool isActive =
         profile['is_active'] == true && profile['is_blocked'] == false;
     final Color roleColor = _getRoleColor(profile['role']);
+    final avatarSize = _isTablet ? 56.0 : 50.0;
+    final fontSize = _isTablet ? 16.0 : 15.0;
 
     return Material(
       color: Colors.transparent,
@@ -1323,8 +1334,8 @@ class _SideMenuState extends State<SideMenu> {
           child: Row(
             children: [
               Container(
-                width: 50,
-                height: 50,
+                width: avatarSize,
+                height: avatarSize,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   color: roleColor.withValues(alpha: 0.1),
@@ -1336,8 +1347,8 @@ class _SideMenuState extends State<SideMenu> {
                         child: CachedNetworkImage(
                           imageUrl: profile['photo'],
                           fit: BoxFit.cover,
-                          width: 50,
-                          height: 50,
+                          width: avatarSize,
+                          height: avatarSize,
                           placeholder: (context, url) => Center(
                             child: SizedBox(
                               width: 20,
@@ -1352,7 +1363,7 @@ class _SideMenuState extends State<SideMenu> {
                             child: Text(
                               profile['name'][0].toUpperCase(),
                               style: TextStyle(
-                                fontSize: 20,
+                                fontSize: _isTablet ? 22 : 20,
                                 fontWeight: FontWeight.bold,
                                 color: roleColor,
                               ),
@@ -1364,7 +1375,7 @@ class _SideMenuState extends State<SideMenu> {
                         child: Text(
                           profile['name'][0].toUpperCase(),
                           style: TextStyle(
-                            fontSize: 20,
+                            fontSize: _isTablet ? 22 : 20,
                             fontWeight: FontWeight.bold,
                             color: roleColor,
                           ),
@@ -1383,10 +1394,10 @@ class _SideMenuState extends State<SideMenu> {
                       children: [
                         Text(
                           profile['name'],
-                          style: const TextStyle(
-                            fontSize: 15,
+                          style: TextStyle(
+                            fontSize: fontSize,
                             fontWeight: FontWeight.w600,
-                            color: Color(0xFF1A1A1A),
+                            color: const Color(0xFF1A1A1A),
                           ),
                         ),
                         Container(
@@ -1452,7 +1463,10 @@ class _SideMenuState extends State<SideMenu> {
                     const SizedBox(height: 4),
                     Text(
                       profile['email'] ?? '',
-                      style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                      style: TextStyle(
+                        fontSize: _isTablet ? 13 : 12,
+                        color: Colors.grey[500],
+                      ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -1480,64 +1494,13 @@ class _SideMenuState extends State<SideMenu> {
   }
 
   // ============================================================
-  // 🔥 CREATE NEW PROFILE ITEM
-  // ============================================================
-  Widget _buildCreateNewProfileItem() {
-    return Material(
-      color: Colors.transparent,
-      borderRadius: BorderRadius.circular(12),
-      child: InkWell(
-        onTap: () {
-          setState(() {
-            _showProfileSwitcher = false;
-          });
-          _createNewProfile();
-        },
-        borderRadius: BorderRadius.circular(12),
-        splashColor: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
-        highlightColor: const Color(0xFFFF6B8B).withValues(alpha: 0.05),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.add,
-                  size: 18,
-                  color: Color(0xFFFF6B8B),
-                ),
-              ),
-              const SizedBox(width: 10),
-              const Text(
-                'Create New Profile',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
-                  color: Color(0xFFFF6B8B),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  // ============================================================
-  // 🔥 BUILD SALON SELECTOR ITEM (Only for Owner)
+  // 🔥 BUILD SALON SELECTOR ITEM
   // ============================================================
   Widget _buildSalonSelectorItem(Map<String, dynamic> item) {
     final salons = item['salons'] as List<Map<String, dynamic>>;
     final selectedId = item['selectedSalonId'] as String?;
     final onChanged = item['onSalonChanged'] as Function(String?)?;
 
-    // Only show for owner
     if (widget.userRole != 'owner') return const SizedBox.shrink();
 
     return Container(
@@ -1553,16 +1516,12 @@ class _SideMenuState extends State<SideMenu> {
         children: [
           Row(
             children: [
-              Icon(
-                Icons.store_outlined,
-                color: Colors.grey[600],
-                size: 18,
-              ),
+              Icon(Icons.store_outlined, color: Colors.grey[600], size: 18),
               const SizedBox(width: 10),
               Text(
                 'Select Salon',
                 style: TextStyle(
-                  fontSize: 13,
+                  fontSize: _isTablet ? 14 : 13,
                   color: Colors.grey[600],
                   fontWeight: FontWeight.w500,
                 ),
@@ -1577,16 +1536,20 @@ class _SideMenuState extends State<SideMenu> {
             return ListTile(
               contentPadding: EdgeInsets.zero,
               leading: Icon(
-                isSelected ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                isSelected
+                    ? Icons.radio_button_checked
+                    : Icons.radio_button_unchecked,
                 color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[400],
                 size: 18,
               ),
               title: Text(
                 salonName,
                 style: TextStyle(
-                  fontSize: 14,
+                  fontSize: _isTablet ? 15 : 14,
                   fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                  color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[800],
+                  color: isSelected
+                      ? const Color(0xFFFF6B8B)
+                      : Colors.grey[800],
                 ),
                 overflow: TextOverflow.ellipsis,
               ),
@@ -1624,12 +1587,12 @@ class _SideMenuState extends State<SideMenu> {
   }
 
   // ============================================================
-  // 🔥 BUILD SALON INFO ITEM (For Barber)
+  // 🔥 BUILD SALON INFO ITEM
   // ============================================================
   Widget _buildSalonInfoItem(Map<String, dynamic> item) {
     final salonId = item['salonId'] as String?;
     final subtitle = item['subtitle'] as String? ?? 'No salon assigned';
-    
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: Column(
@@ -1658,10 +1621,10 @@ class _SideMenuState extends State<SideMenu> {
                   children: [
                     Text(
                       item['title'] as String? ?? 'Salon',
-                      style: const TextStyle(
-                        fontSize: 13,
+                      style: TextStyle(
+                        fontSize: _isTablet ? 14 : 13,
                         fontWeight: FontWeight.w600,
-                        color: Color(0xFF1A1A1A),
+                        color: const Color(0xFF1A1A1A),
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -1671,12 +1634,12 @@ class _SideMenuState extends State<SideMenu> {
                           child: Text(
                             subtitle,
                             style: TextStyle(
-                              fontSize: 12,
-                              color: salonId != null 
-                                  ? const Color(0xFFFF6B8B) 
+                              fontSize: _isTablet ? 13 : 12,
+                              color: salonId != null
+                                  ? const Color(0xFFFF6B8B)
                                   : Colors.grey[500],
-                              fontWeight: salonId != null 
-                                  ? FontWeight.w500 
+                              fontWeight: salonId != null
+                                  ? FontWeight.w500
                                   : FontWeight.normal,
                             ),
                             overflow: TextOverflow.ellipsis,
@@ -1715,7 +1678,7 @@ class _SideMenuState extends State<SideMenu> {
   }
 
   // ============================================================
-  // 🔥 GET OWNER MENU ITEMS
+  // 🔥 GET MENU ITEMS
   // ============================================================
   List<Map<String, dynamic>> _getOwnerMenuItems() {
     return [
@@ -1725,7 +1688,6 @@ class _SideMenuState extends State<SideMenu> {
         'route': '/owner',
         'color': Colors.blue,
       },
-      // ✅ Salon selector (only if multiple salons)
       if (_ownerSalons.length > 1)
         {
           'icon': Icons.swap_horiz,
@@ -1788,9 +1750,6 @@ class _SideMenuState extends State<SideMenu> {
     ];
   }
 
-  // ============================================================
-  // 🔥 GET BARBER MENU ITEMS - WITH SALON ID IN ROUTES
-  // ============================================================
   List<Map<String, dynamic>> _getBarberMenuItems() {
     return [
       {
@@ -1799,7 +1758,6 @@ class _SideMenuState extends State<SideMenu> {
         'route': '/barber',
         'color': Colors.blue,
       },
-      // ✅ Show salon info for barber
       {
         'icon': Icons.store_outlined,
         'title': 'My Salon',
@@ -1811,7 +1769,6 @@ class _SideMenuState extends State<SideMenu> {
       {
         'icon': Icons.calendar_month_outlined,
         'title': 'My Schedule',
-        // ✅ Add salon ID to route
         'route': _selectedSalonId != null
             ? '/barber/schedule?salonId=$_selectedSalonId'
             : '/barber/schedule',
@@ -1820,26 +1777,15 @@ class _SideMenuState extends State<SideMenu> {
       {
         'icon': Icons.pending_actions_outlined,
         'title': 'My Appointments',
-        // ✅ Add salon ID to route
         'route': _selectedSalonId != null
-            ? '/barber/appointments?salonId==$_selectedSalonId'
+            ? '/barber/appointments?salonId=$_selectedSalonId'
             : '/barber/appointments',
         'color': Colors.orange,
         'badge': _pendingBookingsCount > 0 ? _pendingBookingsCount : null,
       },
-      // {
-      //   'icon': Icons.history_outlined,
-      //   'title': 'Completed',
-      //   // ✅ Add salon ID to route
-      //   'route': _selectedSalonId != null
-      //       ? '/barber/completed?salonId=$_selectedSalonId'
-      //       : '/barber/completed',
-      //   'color': Colors.purple,
-      // },
       {
         'icon': Icons.star_outline,
         'title': 'My Reviews',
-        // ✅ Add salon ID to route
         'route': _selectedSalonId != null
             ? '/barber/reviews?salonId=$_selectedSalonId'
             : '/barber/reviews',
@@ -1856,9 +1802,6 @@ class _SideMenuState extends State<SideMenu> {
     ];
   }
 
-  // ============================================================
-  // 🔥 GET CUSTOMER MENU ITEMS - NO CHANGES
-  // ============================================================
   List<Map<String, dynamic>> _getCustomerMenuItems() {
     return [
       {
@@ -1880,12 +1823,6 @@ class _SideMenuState extends State<SideMenu> {
         'route': '/customer/history',
         'color': Colors.orange,
       },
-      // {
-      //   'icon': Icons.favorite_outline,
-      //   'title': 'Favorite Barbers',
-      //   'route': '/customer/favorites',
-      //   'color': Colors.red,
-      // },
       {
         'icon': Icons.notifications_outlined,
         'title': 'Notifications',
@@ -1894,6 +1831,35 @@ class _SideMenuState extends State<SideMenu> {
         'badge': _unreadNotificationCount > 0 ? _unreadNotificationCount : null,
       },
       {'divider': true},
+    ];
+  }
+
+  List<Map<String, dynamic>> _getCommonMenuItems() {
+    return [
+      {
+        'icon': Icons.info_outline,
+        'title': 'About Us',
+        'route': '/about',
+        'color': Colors.blueGrey,
+      },
+      {
+        'icon': Icons.help_outline,
+        'title': 'Help & Support',
+        'route': '/help',
+        'color': Colors.grey,
+      },
+      {
+        'icon': Icons.privacy_tip_outlined,
+        'title': 'Privacy Policy',
+        'route': '/privacy',
+        'color': Colors.grey,
+      },
+      {
+        'icon': Icons.description_outlined,
+        'title': 'Terms & Conditions',
+        'route': '/terms',
+        'color': Colors.grey,
+      },
     ];
   }
 
@@ -1910,7 +1876,6 @@ class _SideMenuState extends State<SideMenu> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Settings
           Material(
             color: Colors.transparent,
             borderRadius: BorderRadius.circular(8),
@@ -1942,9 +1907,12 @@ class _SideMenuState extends State<SideMenu> {
                       ),
                     ),
                     const SizedBox(width: 16),
-                    const Text(
+                    Text(
                       'Settings',
-                      style: TextStyle(fontSize: 15, color: Color(0xFF333333)),
+                      style: TextStyle(
+                        fontSize: _isTablet ? 16 : 15,
+                        color: const Color(0xFF333333),
+                      ),
                     ),
                     const Spacer(),
                     Icon(
@@ -1958,7 +1926,6 @@ class _SideMenuState extends State<SideMenu> {
             ),
           ),
 
-          // Logout
           Material(
             color: Colors.transparent,
             borderRadius: BorderRadius.circular(8),
@@ -1987,9 +1954,12 @@ class _SideMenuState extends State<SideMenu> {
                       ),
                     ),
                     const SizedBox(width: 16),
-                    const Text(
+                    Text(
                       'Logout',
-                      style: TextStyle(fontSize: 15, color: Colors.red),
+                      style: TextStyle(
+                        fontSize: _isTablet ? 16 : 15,
+                        color: Colors.red,
+                      ),
                     ),
                     const Spacer(),
                     Icon(
@@ -2008,42 +1978,13 @@ class _SideMenuState extends State<SideMenu> {
           Padding(
             padding: const EdgeInsets.all(16),
             child: Text(
-              'Version 1.0.0',
+              'Version ${AppVersion.version}', // ✅ Auto detect
               style: TextStyle(fontSize: 12, color: Colors.grey[400]),
             ),
           ),
           const SizedBox(height: 8),
         ],
       ),
-    );
-  }
-
-  // ============================================================
-  // 🔥 BUILD METHOD
-  // ============================================================
-  @override
-  Widget build(BuildContext context) {
-    return Drawer(
-      child: _isLoading
-          ? const Center(
-              child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
-            )
-          : Container(
-              color: Colors.white,
-              child: Column(
-                children: [
-                  _buildProfileHeader(),
-                  Expanded(
-                    child: ListView(
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      physics: const BouncingScrollPhysics(),
-                      children: _buildMenuItems(),
-                    ),
-                  ),
-                  _buildBottomSection(),
-                ],
-              ),
-            ),
     );
   }
 
@@ -2068,12 +2009,10 @@ class _SideMenuState extends State<SideMenu> {
     items.addAll(_getCommonMenuItems());
 
     return items.map((item) {
-      // ✅ Handle salon selector (only for owner)
       if (item['isSalonSelector'] == true && widget.userRole == 'owner') {
         return _buildSalonSelectorItem(item);
       }
 
-      // ✅ Handle salon info (for barber)
       if (item['isSalonInfo'] == true) {
         return _buildSalonInfoItem(item);
       }
@@ -2103,14 +2042,14 @@ class _SideMenuState extends State<SideMenu> {
             child: Icon(
               item['icon'] as IconData? ?? Icons.error,
               color: itemColor,
-              size: 22,
+              size: _isTablet ? 24 : 22,
             ),
           ),
           title: Text(
             item['title'] as String? ?? 'Unknown',
-            style: const TextStyle(
-              fontSize: 15,
-              color: Color(0xFF333333),
+            style: TextStyle(
+              fontSize: _isTablet ? 16 : 15,
+              color: const Color(0xFF333333),
               fontWeight: FontWeight.w500,
             ),
           ),
@@ -2160,35 +2099,9 @@ class _SideMenuState extends State<SideMenu> {
     }).toList();
   }
 
-  List<Map<String, dynamic>> _getCommonMenuItems() {
-    return [
-      {
-        'icon': Icons.info_outline,
-        'title': 'About Us',
-        'route': '/about',
-        'color': Colors.blueGrey,
-      },
-      {
-        'icon': Icons.help_outline,
-        'title': 'Help & Support',
-        'route': '/help',
-        'color': Colors.grey,
-      },
-      {
-        'icon': Icons.privacy_tip_outlined,
-        'title': 'Privacy Policy',
-        'route': '/privacy',
-        'color': Colors.grey,
-      },
-      {
-        'icon': Icons.description_outlined,
-        'title': 'Terms & Conditions',
-        'route': '/terms',
-        'color': Colors.grey,
-      },
-    ];
-  }
-
+  // ============================================================
+  // 🔥 NAVIGATION METHODS
+  // ============================================================
   void _navigateToScreen(BuildContext context, String route) {
     try {
       context.push(route);
@@ -2205,6 +2118,9 @@ class _SideMenuState extends State<SideMenu> {
     }
   }
 
+  // ============================================================
+  // 🔥 LOGOUT
+  // ============================================================
   Future<void> _logout(BuildContext context) async {
     showLogoutConfirmation(
       context,
@@ -2257,6 +2173,88 @@ class _SideMenuState extends State<SideMenu> {
           }
         }
       },
+    );
+  }
+
+  // ============================================================
+  // ✅ Android 16: CREATE NEW PROFILE ITEM
+  // ============================================================
+  Widget _buildCreateNewProfileItem() {
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: () {
+          setState(() {
+            _showProfileSwitcher = false;
+          });
+          _createNewProfile();
+        },
+        borderRadius: BorderRadius.circular(12),
+        splashColor: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+        highlightColor: const Color(0xFFFF6B8B).withValues(alpha: 0.05),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.add,
+                  size: 18,
+                  color: Color(0xFFFF6B8B),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                'Create New Profile',
+                style: TextStyle(
+                  fontSize: _isTablet ? 15 : 14,
+                  fontWeight: FontWeight.w500,
+                  color: const Color(0xFFFF6B8B),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ============================================================
+  // ✅ Android 16: MAIN BUILD METHOD
+  // ============================================================
+  @override
+  Widget build(BuildContext context) {
+    // ✅ Check screen size on every build
+    _checkScreenSize();
+
+    return Drawer(
+      child: _isLoading
+          ? const Center(
+              child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+            )
+          : Container(
+              color: Colors.white,
+              child: Column(
+                children: [
+                  _buildProfileHeader(),
+                  Expanded(
+                    child: ListView(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      physics: const BouncingScrollPhysics(),
+                      children: _buildMenuItems(),
+                    ),
+                  ),
+                  _buildBottomSection(),
+                ],
+              ),
+            ),
     );
   }
 }

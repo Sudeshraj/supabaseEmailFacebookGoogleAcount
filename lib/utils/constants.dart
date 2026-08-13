@@ -3,10 +3,12 @@
 // APP CONSTANTS - NO ENVIRONMENT VARIABLES
 // ===========================================
 
+import 'package:flutter_application_1/utils/app_version.dart';
+
 class AppConstants {
   // ========== 📱 APP INFORMATION ==========
   static const String appName = 'AutoLogin App';
-  static const String appVersion = '1.0.0';
+  static final String appVersion = AppVersion.version;
   static const String appBuildNumber = '1';
   
   // ========== 🗺️ APP ROUTES ==========

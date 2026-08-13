@@ -51,6 +51,7 @@ import 'package:flutter_application_1/screens/settings/profile_screen.dart';
 import 'package:flutter_application_1/screens/settings/settings_screen.dart';
 import 'package:flutter_application_1/services/notification_service.dart';
 import 'package:flutter_application_1/services/timezone_service.dart';
+import 'package:flutter_application_1/utils/app_version.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -348,6 +349,9 @@ Future<void> main() async {
 
     // ========== PHASE 10: LIFECYCLE ==========
     WidgetsBinding.instance.addObserver(AppLifecycleObserver());
+
+    // ========== PHASE 11: APP VERSION ==========
+    await AppVersion.init();
 
     debugPrint('${DateTime.now()}: Initialization complete');
     runApp(MyApp());
