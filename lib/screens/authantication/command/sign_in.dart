@@ -10,10 +10,10 @@ import 'package:flutter/foundation.dart'
 import 'package:flutter_application_1/config/environment_manager.dart';
 import 'package:flutter_application_1/main.dart';
 import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
+import 'package:flutter_application_1/utils/app_version.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_application_1/services/session_manager.dart';
-import 'package:package_info_plus/package_info_plus.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import '../../../utils/simple_toast.dart';
 
@@ -21,7 +21,6 @@ import '../../../utils/simple_toast.dart';
 import 'package:flutter_application_1/services/google_sign_in_service.dart';
 import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
-
 
 // Class for returning user check
 class _ReturningUserCheck {
@@ -84,8 +83,7 @@ class _SignInScreenState extends State<SignInScreen>
 
   // Services
   final supabase = Supabase.instance.client;
-  final EnvironmentManager _env = EnvironmentManager();
-  late PackageInfo packageInfo;
+  final EnvironmentManager _env = EnvironmentManager();  
   DateTime? _termsAcceptedAt;
   DateTime? _privacyAcceptedAt;
 
@@ -100,20 +98,17 @@ class _SignInScreenState extends State<SignInScreen>
     super.initState();
 
     // Initialize GoogleSignInService
-  _googleSignInService = GoogleSignInService();
+    _googleSignInService = GoogleSignInService();
 
-  // ✅ SIMPLE: unconditionally call - service එකම duplicate
-  // calls/race conditions handle කරගන්නවා internally.
-  _googleSignInService.initialize();
-  debugPrint('✅ Google Sign-In SDK initialize() called from SignInScreen');
-
-   
+    // ✅ SIMPLE: unconditionally call - service එකම duplicate
+    // calls/race conditions handle කරගන්නවා internally.
+    _googleSignInService.initialize();
+    debugPrint('✅ Google Sign-In SDK initialize() called from SignInScreen');
 
     // Initialize controllers
     _emailController = TextEditingController(text: widget.prefilledEmail ?? '');
 
     // Load data
-    _initPackageInfo();
     _loadConsentStatus();
     _checkSavedProfile();
     _loadRememberMeSetting();
@@ -247,20 +242,6 @@ class _SignInScreenState extends State<SignInScreen>
     SimpleToast.info(context, message);
   }
 
-  Future<void> _initPackageInfo() async {
-    try {
-      packageInfo = await PackageInfo.fromPlatform();
-    } catch (e) {
-      debugPrint(' Error getting package info: $e');
-      packageInfo = PackageInfo(
-        appName: 'MySalon',
-        packageName: 'com.example.mysalon',
-        version: '1.0.0',
-        buildNumber: '1',
-        buildSignature: '',
-      );
-    }
-  }
 
   Future<void> _loadConsentStatus() async {
     try {
@@ -1024,7 +1005,7 @@ class _SignInScreenState extends State<SignInScreen>
                   // App version
                   Center(
                     child: Text(
-                      "App v${packageInfo.version} (${packageInfo.buildNumber})",
+                      "App v${AppVersion.version}",
                       style: const TextStyle(fontSize: 10, color: Colors.grey),
                     ),
                   ),
@@ -1223,6 +1204,12 @@ class _SignInScreenState extends State<SignInScreen>
 
         final authData = await _googleSignInService.authenticateAndGetDetails();
 
+        // ═══════════════════════════════════════════════════════════
+        // 🔥 FIX: authData null වීම (user native account picker එකෙන්
+        // Cancel කිරීම ඇතුළුව) කියන්නේ browser fallback එකට යන්න
+        // ඕන කියන එක නෙවෙයි. Cancel කළොත් ඒක respect කරන්න ඕන -
+        // කෙළින්ම browser popup එකක් force කරන්න එපා.
+        // ═══════════════════════════════════════════════════════════
         if (authData != null && authData['idToken'] != null) {
           debugPrint('Got auth data from Google');
 
@@ -1244,7 +1231,6 @@ class _SignInScreenState extends State<SignInScreen>
                 marketingConsent: marketingConsent,
                 existingRoles: returningUserCheck.existingRoles,
               );
-              return;
             }
           } catch (e) {
             debugPrint('Supabase sign-in failed: $e');
@@ -1258,14 +1244,25 @@ class _SignInScreenState extends State<SignInScreen>
                 isError: true,
               );
             }
-            return;
           }
-        } else {
-          debugPrint('Google authentication failed');
+          // ✅ authData තිබ්බොත් (Google auth එකෙන් ID token එකක්
+          // ලැබුනොත්), success උනත් fail උනත් - browser fallback
+          // එකට කිසිසේත් යන්නේ නෑ. මේ path එකෙන්ම return.
+          return;
         }
+
+        // ✅ authData null - user Cancel කළා හෝ native sign-in fail
+        // උනා. Browser popup එකක් force කරන්නේ නෑ - silently stop
+        // කරනවා, user ට යළිත් try කරන්න ඉඩ දෙනවා.
+        debugPrint(
+          'Google authentication cancelled or failed - stopping (no browser fallback)',
+        );
+        return;
       }
 
-      debugPrint('Falling back to Supabase OAuth');
+      // මෙතනට එන්නේ platform එක Android/iOS/Web නොවන විටයි (e.g.
+      // desktop) - එතනදී විතරයි browser-based OAuth එකට යන්නේ.
+      debugPrint('Non-mobile/web platform - using Supabase OAuth');
       _authSubscription?.cancel();
 
       _authSubscription = supabase.auth.onAuthStateChange.listen((data) async {
@@ -1414,6 +1411,13 @@ class _SignInScreenState extends State<SignInScreen>
             permissions: ['email', 'public_profile'],
           );
 
+          // ═══════════════════════════════════════════════════════════
+          // 🔥 FIX: LoginResult.status එකේ possible values 4ක් තියෙනවා
+          // - success, cancelled, failed, operationInProgress.
+          // Cancel කළොත් ඒක browser fallback එකකට යන්න හේතුවක්
+          // නෙවෙයි - user කැමැත්තෙන්ම නවත්තුවා. Failed/other cases
+          // වලට විතරයි web fallback එකට යන්නේ.
+          // ═══════════════════════════════════════════════════════════
           if (fbResult.status == LoginStatus.success) {
             final AccessToken accessToken = fbResult.accessToken!;
             final response = await supabase.auth.signInWithIdToken(
@@ -1432,11 +1436,23 @@ class _SignInScreenState extends State<SignInScreen>
                 marketingConsent: marketingConsent,
                 existingRoles: returningUserCheck.existingRoles,
               );
-              return;
             }
+            return;
+          } else if (fbResult.status == LoginStatus.cancelled) {
+            // ✅ User native dialog එකෙන් Cancel කළා - silently
+            // stop කරනවා, browser popup එකක් force කරන්නේ නෑ.
+            debugPrint('User cancelled Facebook native login');
+            return;
           }
+
+          // status == failed හෝ operationInProgress - genuine
+          // failure එකක් නිසා විතරයි web fallback එකට යන්නේ.
+          debugPrint(
+            'Native Facebook login failed (status: ${fbResult.status}), falling back to web',
+          );
         } catch (e) {
-          debugPrint('Native Facebook login failed: $e');
+          debugPrint('Native Facebook login threw exception: $e');
+          // Exception එකක් - genuine error, web fallback එකට යනවා
         }
       }
 
@@ -1588,6 +1604,14 @@ class _SignInScreenState extends State<SignInScreen>
 
       if (defaultTargetPlatform == TargetPlatform.iOS) {
         debugPrint('iOS platform - trying native Apple Sign-In');
+
+        // ═══════════════════════════════════════════════════════════
+        // 🔥 FIX: SignInWithApple.getAppleIDCredential() user Cancel
+        // කළොත් SignInWithAppleAuthorizationException (code:
+        // AuthorizationErrorCode.canceled) එකක් throw කරනවා. මේක
+        // catch කරලා, cancel නම් silently stop කරනවා - genuine
+        // errors වලට විතරයි web fallback එකට යන්නේ.
+        // ═══════════════════════════════════════════════════════════
         try {
           final credential = await SignInWithApple.getAppleIDCredential(
             scopes: [
@@ -1608,12 +1632,12 @@ class _SignInScreenState extends State<SignInScreen>
             final session = response.session;
 
             if (user != null && mounted) {
-              // ✅ NEW: Capture and store Apple's one-time
-              // authorization code. This is the ONLY moment it's
-              // available - required later so DeleteAccountScreen
-              // can revoke the Apple credential (App Store
-              // Guideline 5.1.1(v)). Non-fatal if this fails; we
-              // still complete sign-in either way.
+              // ✅ Capture and store Apple's one-time authorization
+              // code. This is the ONLY moment it's available -
+              // required later so DeleteAccountScreen can revoke
+              // the Apple credential (App Store Guideline 5.1.1(v)).
+              // Non-fatal if this fails; we still complete sign-in
+              // either way.
               if (credential.authorizationCode.isNotEmpty) {
                 try {
                   await supabase.functions.invoke(
@@ -1635,10 +1659,28 @@ class _SignInScreenState extends State<SignInScreen>
                 marketingConsent: marketingConsent,
                 existingRoles: returningUserCheck.existingRoles,
               );
-              return;
             }
           }
+          // credential.identityToken null උනත් (edge case), මේ
+          // path එකෙන්ම stop කරනවා - web fallback එකට යන්නේ නෑ.
+          return;
+        } on SignInWithAppleAuthorizationException catch (e) {
+          if (e.code == AuthorizationErrorCode.canceled) {
+            // ✅ User native Apple dialog එකෙන් Cancel කළා -
+            // silently stop කරනවා, browser popup එකක් force
+            // කරන්නේ නෑ.
+            debugPrint('User cancelled native Apple Sign-In');
+            return;
+          }
+          // වෙනත් authorization error එකක් (e.g. unknown, failed,
+          // invalidResponse) - genuine failure නිසා web fallback
+          // එකට යනවා.
+          debugPrint(
+            'Native Apple Sign-In authorization error: ${e.code} - ${e.message}',
+          );
         } catch (e) {
+          // Unexpected error (e.g. platform not supported) -
+          // web fallback එකට යනවා.
           debugPrint('Native Apple Sign-In failed: $e');
         }
       }

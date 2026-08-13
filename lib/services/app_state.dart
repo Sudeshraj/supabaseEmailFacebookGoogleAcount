@@ -512,7 +512,6 @@ class AppState extends ChangeNotifier {
       }
 
       final email = recentProfile['email'] as String?;
-      final provider = recentProfile['provider'] as String?;
 
       if (email == null || email.isEmpty) {
         debugPrint('AppState: No email in recent profile');
@@ -527,21 +526,15 @@ class AppState extends ChangeNotifier {
         return;
       }
 
-      debugPrint(
-        'AppState: Attempting auto-login for $email (provider: $provider)',
-      );
+      debugPrint('AppState: Attempting auto-login for $email');
 
-      if (provider != null &&
-          provider != 'email' &&
-          provider != 'email_password') {
-        debugPrint(
-          'AppState: OAuth provider ($provider) requires manual login',
-        );
-        _setContinueScreen(true);
-        return;
-      }
-
-      final refreshToken = recentProfile['refresh_token'] as String?;
+      // ═══════════════════════════════════════════════════════════
+      // 🔥 FIX: refresh token තියෙන්නේ SECURE STORAGE එකේ (userId
+      // keyed), profile map එකේ 'refresh_token' field එකක් නෙවෙයි -
+      // ඒ field එකම කවදාවත් set වුනේ නෑ, ඒ නිසා මේක හැම වෙලාවෙම
+      // null වෙලා function එක මුලින්ම return වුනා.
+      // ═══════════════════════════════════════════════════════════
+      final refreshToken = await SessionManager.getRefreshToken(email);
       if (refreshToken == null || refreshToken.isEmpty) {
         debugPrint('AppState: No refresh token available');
         return;
@@ -551,7 +544,7 @@ class AppState extends ChangeNotifier {
 
       for (int attempt = 1; attempt <= 3; attempt++) {
         debugPrint('   - Attempt $attempt of 3');
-        success = await _tryAutoLoginWithToken(refreshToken);
+        success = await _tryAutoLoginWithToken(refreshToken, email);
 
         if (success) {
           debugPrint('AppState: Auto-login successful for $email');
@@ -730,8 +723,7 @@ class AppState extends ChangeNotifier {
 
               DateTime? dueDate;
               int? daysRemaining;
-              final dueDateStr =
-                  profileStatus['deletion_due_date'] as String?;
+              final dueDateStr = profileStatus['deletion_due_date'] as String?;
               if (dueDateStr != null) {
                 dueDate = DateTime.tryParse(dueDateStr);
                 if (dueDate != null) {
@@ -876,7 +868,7 @@ class AppState extends ChangeNotifier {
   }
 
   /// Try to auto-login using refresh token
-  Future<bool> _tryAutoLoginWithToken(String refreshToken) async {
+  Future<bool> _tryAutoLoginWithToken(String refreshToken, String email) async {
     try {
       final supabase = Supabase.instance.client;
 
@@ -887,16 +879,56 @@ class AppState extends ChangeNotifier {
         return true;
       }
 
-      // Try to refresh session
+      // ═══════════════════════════════════════════════════════════
+      // 🔥 Attempt 1: refreshSession(token) - token එක explicit
+      // pass කරනවා. Web + Mobile දෙකටම වැඩ කරනවා.
+      // ═══════════════════════════════════════════════════════════
       try {
-        final response = await supabase.auth.refreshSession();
+        debugPrint('AppState: Attempt 1 - refreshSession(with token)...');
+        final response = await supabase.auth.refreshSession(refreshToken);
 
         if (response.session != null && response.user != null) {
-          debugPrint('Session refreshed successfully');
+          debugPrint('AppState: Session refreshed successfully');
+          // ✅ Refresh token rotation policy එක නිසා අලුත් token
+          // එක securely save කරන්න ඕන, නැත්නම් ඊළඟ attempt එක
+          // "already used token" කියලා fail වෙනවා
+          await SessionManager.saveRefreshToken(
+            email,
+            response.session!.refreshToken,
+          );
           return true;
         }
       } catch (e) {
-        debugPrint('Failed to refresh session: $e');
+        debugPrint('AppState: refreshSession failed: $e');
+      }
+
+      // ═══════════════════════════════════════════════════════════
+      // 🔥 ENHANCEMENT: Attempt 2 - setSession(token) fallback.
+      // session_manager.dart එකේ tryAutoLogin() / restoreSessionDirectly()
+      // දෙකේම මේ fallback එකම තියෙනවා - refreshSession() එක edge
+      // case එකකදී (e.g. transient network/server issue) fail
+      // උනත්, setSession() එකෙන් තාම token එකම valid නම් session
+      // එකක් establish කරගන්න පුළුවන්. දෙකම fail උනොත් විතරයි
+      // caller එකේ 3-attempt retry loop එකට යන්නේ.
+      // ═══════════════════════════════════════════════════════════
+      try {
+        debugPrint('AppState: Attempt 2 - setSession(with token)...');
+        await supabase.auth.setSession(refreshToken);
+        await Future.delayed(const Duration(milliseconds: 500));
+
+        final restoredSession = supabase.auth.currentSession;
+        final restoredUser = supabase.auth.currentUser;
+
+        if (restoredSession != null && restoredUser != null) {
+          debugPrint('AppState: Session restored via setSession');
+          await SessionManager.saveRefreshToken(
+            email,
+            restoredSession.refreshToken,
+          );
+          return true;
+        }
+      } catch (e) {
+        debugPrint('AppState: setSession fallback failed: $e');
       }
 
       return false;

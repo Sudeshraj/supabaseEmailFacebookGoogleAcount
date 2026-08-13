@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter_application_1/main.dart';
+import 'package:flutter_application_1/utils/app_version.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -306,7 +307,7 @@ class SessionManager {
         'marketingConsentAt': marketingConsent == true
             ? (marketingConsentAt ?? now).toIso8601String()
             : '',
-        'appVersion': appVersion ?? '1.0.0',
+        'appVersion': AppVersion.version,
       };
 
       if (kDebugMode) {
@@ -978,115 +979,114 @@ class SessionManager {
   // =====================================================
   // ✅ AUTO-LOGIN & SESSION MANAGEMENT
   // =====================================================
+static Future<bool> tryAutoLogin(String email) async {
+  try {
+    debugPrint('===== ATTEMPTING AUTO-LOGIN =====');
+    debugPrint('Target email: $email');
 
-  static Future<bool> tryAutoLogin(String email) async {
-    try {
-      debugPrint('===== ATTEMPTING AUTO-LOGIN =====');
-      debugPrint('Target email: $email');
-
-      final profile = await getProfileByEmail(email);
-      if (profile == null || profile.isEmpty) {
-        debugPrint('❌ Auto-login failed: No profile found');
-        return false;
-      }
-
-      final supabase = Supabase.instance.client;
-      final currentUser = supabase.auth.currentUser;
-      final currentSession = supabase.auth.currentSession;
-
-      if (currentUser?.email == email && currentSession != null) {
-        if (isSessionValid(currentSession)) {
-          debugPrint('✅ AUTO-LOGIN SUCCESS: Already logged in');
-
-          await updateLastLogin(email);
-
-          final roles = await getUserRoles(email);
-          if (roles.isNotEmpty && await getCurrentRole() == null) {
-            final primaryRole = await getPrimaryRole(email);
-            if (primaryRole != null) {
-              await saveCurrentRole(primaryRole);
-            }
-          }
-
-          return true;
-        } else {
-          debugPrint('⏰ Session expired, attempting refresh...');
-        }
-      }
-
-      final userId = profile['userId'] as String?;
-      if (userId == null) {
-        debugPrint('❌ Auto-login failed: No user ID found');
-        return false;
-      }
-
-      final refreshToken = await _secureStorage.read(
-        key: '${userId}_refresh_token',
-      );
-
-      if (refreshToken == null || refreshToken.isEmpty) {
-        debugPrint('❌ Auto-login failed: No secure refresh token found');
-        return false;
-      }
-
-      try {
-        debugPrint('🔄 Attempting to restore session with secure token...');
-
-        final response = await supabase.auth.refreshSession();
-
-        if (response.session != null && response.user?.email == email) {
-          debugPrint('✅ AUTO-LOGIN SUCCESS: Session refreshed');
-
-          await updateLastLogin(email);
-          await _updateSecureTokens(userId, response.session!);
-
-          final roles = await getUserRoles(email);
-          if (roles.isNotEmpty && await getCurrentRole() == null) {
-            final primaryRole = await getPrimaryRole(email);
-            if (primaryRole != null) {
-              await saveCurrentRole(primaryRole);
-            }
-          }
-
-          return true;
-        }
-
-        debugPrint('🔄 Refresh failed, attempting setSession...');
-        await supabase.auth.setSession(refreshToken);
-        await Future.delayed(const Duration(milliseconds: 500));
-
-        final restoredUser = supabase.auth.currentUser;
-        final restoredSession = supabase.auth.currentSession;
-
-        if (restoredUser?.email == email && restoredSession != null) {
-          debugPrint('✅ AUTO-LOGIN SUCCESS: Session restored securely');
-
-          await updateLastLogin(email);
-          await _updateSecureTokens(userId, restoredSession);
-
-          final roles = await getUserRoles(email);
-          if (roles.isNotEmpty && await getCurrentRole() == null) {
-            final primaryRole = await getPrimaryRole(email);
-            if (primaryRole != null) {
-              await saveCurrentRole(primaryRole);
-            }
-          }
-
-          return true;
-        }
-      } catch (e) {
-        debugPrint('❌ Secure session restoration failed: $e');
-        await _cleanupInvalidSession(userId, email);
-      }
-
-      debugPrint('❌ AUTO-LOGIN FAILED: Could not restore session');
-      return false;
-    } catch (e, stackTrace) {
-      debugPrint('❌ AUTO-LOGIN ERROR: $e');
-      debugPrint('Stack: $stackTrace');
+    final profile = await getProfileByEmail(email);
+    if (profile == null || profile.isEmpty) {
+      debugPrint('❌ Auto-login failed: No profile found');
       return false;
     }
+
+    final supabase = Supabase.instance.client;
+    final currentUser = supabase.auth.currentUser;
+    final currentSession = supabase.auth.currentSession;
+
+    // ✅ Check if already logged in
+    if (currentUser?.email == email && currentSession != null) {
+      if (isSessionValid(currentSession)) {
+        debugPrint('✅ AUTO-LOGIN SUCCESS: Already logged in');
+        await updateLastLogin(email);
+        return true;
+      }
+    }
+
+    final userId = profile['userId'] as String?;
+    if (userId == null) {
+      debugPrint('❌ Auto-login failed: No user ID found');
+      return false;
+    }
+
+    // ✅ Get refresh token
+    String? refreshToken;
+    try {
+      refreshToken = await _secureStorage.read(
+        key: '${userId}_refresh_token',
+        aOptions: _getAndroidOptions(),
+        iOptions: _getIOSOptions(),
+      );
+    } catch (e) {
+      debugPrint('⚠️ Secure storage read failed: $e');
+      refreshToken = _prefs.getString('${userId}_refresh_token_fallback');
+    }
+
+    if (refreshToken == null || refreshToken.isEmpty) {
+      debugPrint('❌ Auto-login failed: No secure refresh token found');
+      return false;
+    }
+
+    debugPrint('🔑 Refresh token found, attempting restore...');
+
+    // ═══════════════════════════════════════════════════════════
+    // 🔥 FIX: refreshSession(token) - token එක explicit pass කරනවා.
+    // Web + Mobile දෙකටම වැඩ කරනවා - platform-specific නෙවෙයි.
+    // (කලින් argument එකක් නැතුව call කළ නිසා, logged-out state
+    // එකේදී "no current session" කියලා fail වුනා.)
+    // ═══════════════════════════════════════════════════════════
+    try {
+      debugPrint('🔄 Attempt 1: refreshSession(with token)...');
+      final response = await supabase.auth.refreshSession(refreshToken);
+
+      if (response.session != null && response.user?.email == email) {
+        debugPrint('✅ AUTO-LOGIN SUCCESS: Session refreshed');
+        await updateLastLogin(email);
+        // ✅ Rotation policy එක නිසා අලුත් token එකම save කරන්න ඕන
+        await _updateSecureTokens(userId, response.session!);
+        return true;
+      }
+    } catch (refreshError) {
+      debugPrint('⚠️ refreshSession failed: $refreshError');
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // 🔥 FALLBACK: setSession(token) - web/mobile දෙකටම try කරනවා
+    // (කලින් kIsWeb check එකකින් mobile එකට මේ fallback එක
+    // block කරලා තිබ්බා - ඒක අනවශ්‍යයි, setSession() platform
+    // independent HTTP call එකක්)
+    // ═══════════════════════════════════════════════════════════
+    try {
+      debugPrint('🔄 Attempt 2: setSession(with token)...');
+      await supabase.auth.setSession(refreshToken);
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      final restoredUser = supabase.auth.currentUser;
+      final restoredSession = supabase.auth.currentSession;
+
+      if (restoredUser?.email == email && restoredSession != null) {
+        debugPrint('✅ AUTO-LOGIN SUCCESS: Session restored (setSession)');
+        await updateLastLogin(email);
+        await _updateSecureTokens(userId, restoredSession);
+        return true;
+      }
+    } catch (setError) {
+      debugPrint('⚠️ setSession failed: $setError');
+    }
+
+    // ✅ දෙකම fail උනොත් විතරයි token එක invalid කියලා සලකලා
+    // clean up කරන්නේ (network issue එකකට මේක වෙන්නත් ඉඩ
+    // තියෙනවා, නමුත් දෙකම fail උනොත් re-auth එක අවශ්‍යයි)
+    await _cleanupInvalidSession(userId, email);
+
+    debugPrint('❌ AUTO-LOGIN FAILED: Could not restore session');
+    return false;
+  } catch (e, stackTrace) {
+    debugPrint('❌ AUTO-LOGIN ERROR: $e');
+    debugPrint('Stack: $stackTrace');
+    return false;
   }
+}
 
   // =====================================================
   // ✅ NEW: SESSION + DB CHECK METHODS
@@ -2830,4 +2830,102 @@ class SessionManager {
       debugPrint('❌ Error force syncing available profiles: $e');
     }
   }
+
+// restoreSessionDirectly
+
+static Future<bool> restoreSessionDirectly(String email) async {
+  try {
+    debugPrint('🔄 Attempting direct session restore for: $email');
+
+    final profile = await getProfileByEmail(email);
+    if (profile == null || profile.isEmpty) {
+      debugPrint('❌ Profile not found');
+      return false;
+    }
+
+    final userId = profile['userId'] as String?;
+    if (userId == null) {
+      debugPrint('❌ No user ID found');
+      return false;
+    }
+
+    // ✅ Get refresh token
+    String? refreshToken;
+    try {
+      refreshToken = await _secureStorage.read(
+        key: '${userId}_refresh_token',
+        aOptions: _getAndroidOptions(),
+        iOptions: _getIOSOptions(),
+      );
+    } catch (e) {
+      debugPrint('⚠️ Secure storage read failed: $e');
+      refreshToken = _prefs.getString('${userId}_refresh_token_fallback');
+    }
+
+    if (refreshToken == null || refreshToken.isEmpty) {
+      debugPrint('❌ No refresh token found');
+      return false;
+    }
+
+    debugPrint('🔑 Refresh token found, restoring session...');
+
+    final supabaseClient = Supabase.instance.client;
+
+    // ✅ Check if already logged in
+    final currentUser = supabaseClient.auth.currentUser;
+    if (currentUser?.email == email) {
+      final currentSession = supabaseClient.auth.currentSession;
+      if (currentSession != null && isSessionValid(currentSession)) {
+        debugPrint('✅ Already have valid session');
+        return true;
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // 🔥 FIX: refreshSession(token) - token එක explicit pass කරනවා
+    // ═══════════════════════════════════════════════════════════
+    try {
+      debugPrint('🔄 Direct restore - Attempt 1: refreshSession(with token)...');
+      final response = await supabaseClient.auth.refreshSession(refreshToken);
+      if (response.session != null && response.user?.email == email) {
+        debugPrint('✅ Session restored via refreshSession');
+        await updateLastLogin(email);
+        await _updateSecureTokens(userId, response.session!);
+        return true;
+      }
+    } catch (refreshError) {
+      debugPrint('⚠️ refreshSession failed in restoreDirectly: $refreshError');
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // 🔥 FALLBACK: setSession(token) - web/mobile දෙකටම try කරනවා
+    // ═══════════════════════════════════════════════════════════
+    try {
+      debugPrint('🔄 Direct restore - Attempt 2: setSession(with token)...');
+      await supabaseClient.auth.setSession(refreshToken);
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      final user = supabaseClient.auth.currentUser;
+      final session = supabaseClient.auth.currentSession;
+
+      if (user?.email == email && session != null) {
+        debugPrint('✅ Session restored via setSession');
+        await _updateSecureTokens(userId, session);
+        await updateLastLogin(email);
+        return true;
+      }
+    } catch (setError) {
+      debugPrint('⚠️ setSession failed in restoreDirectly: $setError');
+    }
+
+    // ✅ දෙකම fail උනොත් විතරයි clean up කරන්නේ
+    await _cleanupInvalidSession(userId, email);
+
+    debugPrint('❌ Session restore failed');
+    return false;
+  } catch (e) {
+    debugPrint('❌ Direct session restore error: $e');
+    return false;
+  }
+}
 }

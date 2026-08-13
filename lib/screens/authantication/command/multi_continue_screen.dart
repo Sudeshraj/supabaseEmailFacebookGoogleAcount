@@ -1,18 +1,23 @@
 import 'dart:async';
-import 'package:flutter/foundation.dart'show defaultTargetPlatform, TargetPlatform;
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/config/environment_manager.dart';
 import 'package:flutter_application_1/main.dart';
 import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
 import 'package:flutter_application_1/services/google_sign_in_service.dart';
 import 'package:flutter_application_1/services/session_manager.dart';
+import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
 import 'package:flutter_svg/svg.dart';
+import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:go_router/go_router.dart';
 
 final supabase = Supabase.instance.client;
 final GoogleSignInService _googleSignInService =
     GoogleSignInService(); // ✅ field එක තියෙනවා
+
+enum _OAuthAttemptResult { success, cancelled, failed }
 
 class ContinueScreen extends StatefulWidget {
   const ContinueScreen({super.key});
@@ -23,6 +28,7 @@ class ContinueScreen extends StatefulWidget {
 
 class _ContinueScreenState extends State<ContinueScreen> {
   final EnvironmentManager _env = EnvironmentManager();
+  final FacebookAuth _facebookAuth = FacebookAuth.instance;
   List<Map<String, dynamic>> profiles = [];
   bool _loading = true;
   String? _selectedEmail;
@@ -656,13 +662,15 @@ class _ContinueScreenState extends State<ContinueScreen> {
   // off to the router. Status badges on the cards remain purely
   // informational (see _buildProfileCard).
   // ============================================================
+  /// Result of an OAuth attempt from the Continue screen - distinguishes
+  /// a genuine failure from a user-initiated cancellation so the caller
+  /// doesn't show a misleading "Login Failed" alert for a cancel.
+
   Future<void> _handleProfileLogin(
     Map<String, dynamic> profile,
     String role,
     String uniqueId,
   ) async {
-    // ✅ Guard first - before any await points - to prevent double-tap
-    // triggering the OAuth flow twice (PKCE code_verifier overwrite bug).
     if (_profileLoadingStates[uniqueId] == true) {
       debugPrint('⏭️ Already processing login for $uniqueId, ignoring tap');
       return;
@@ -692,39 +700,94 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
     try {
       bool loginSuccess = false;
+      // ✅ NEW: user cancel කළාද කියලා වෙනම track කරනවා - cancel
+      // නම් "Login Failed" error popup එකක් පෙන්නන්නේ නෑ.
+      bool userCancelled = false;
 
+      // ═══════════════════════════════════════════════════════════
+      // 🔥 STEP 1: Try Auto-Login (NO POPUP) - Mobile fixed!
+      // ═══════════════════════════════════════════════════════════
       debugPrint('🔄 Attempting auto login for: $email');
-      final autoSuccess = await SessionManager.tryAutoLogin(email);
+      loginSuccess = await SessionManager.tryAutoLogin(email);
 
-      if (autoSuccess) {
-        debugPrint('✅ Auto login successful!');
-        loginSuccess = true;
-      } else if (provider == 'email') {
-        debugPrint('🔐 Email login flow started (auto-login failed)');
-        SessionManager.setLocationContinuesc(true);
-        final password = await _showPasswordDialog(email);
-        if (password != null) {
-          final response = await supabase.auth.signInWithPassword(
-            email: email,
-            password: password,
-          );
-          loginSuccess = response.user != null;
-          debugPrint('📊 Email login success: $loginSuccess');
-        }
+      if (loginSuccess) {
+        debugPrint('✅ Auto login successful! (NO POPUP)');
+        await SessionManager.setCurrentUser(email);
+        await SessionManager.saveCurrentRole(role);
       } else {
-        debugPrint(
-          '🔐 OAuth login flow started for $provider (auto-login failed)',
-        );
-        loginSuccess = await _handleOAuthLoginForProfile(profile);
-        debugPrint('📊 OAuth login success: $loginSuccess');
+        debugPrint('❌ Auto-login failed');
+
+        // ═══════════════════════════════════════════════════════════
+        // 🔥 STEP 2: Try Direct Session Restore (NO POPUP)
+        // ═══════════════════════════════════════════════════════════
+        debugPrint('🔄 Trying direct session restore...');
+        loginSuccess = await SessionManager.restoreSessionDirectly(email);
+
+        if (loginSuccess) {
+          debugPrint('✅ Direct session restore successful! (NO POPUP)');
+          await SessionManager.setCurrentUser(email);
+          await SessionManager.saveCurrentRole(role);
+        } else {
+          debugPrint('❌ Direct session restore failed');
+
+          // ═══════════════════════════════════════════════════════════
+          // 🔥 STEP 3: Only if both fail, show OAuth popup
+          // ═══════════════════════════════════════════════════════════
+          if (provider == 'email') {
+            debugPrint('🔐 Email login flow started');
+            SessionManager.setLocationContinuesc(true);
+            final password = await _showPasswordDialog(email);
+
+            if (password == null) {
+              // ✅ User Cancel click කළා - error කියලා නෙවෙයි,
+              // cancel කියලා සලකනවා.
+              debugPrint('⏭️ User cancelled password dialog');
+              userCancelled = true;
+            } else {
+              final response = await supabase.auth.signInWithPassword(
+                email: email,
+                password: password,
+              );
+              loginSuccess = response.user != null;
+              debugPrint('📊 Email login success: $loginSuccess');
+
+              if (loginSuccess && response.user != null) {
+                await SessionManager.saveUserProfile(
+                  email: email,
+                  userId: response.user!.id,
+                  name:
+                      response.user!.userMetadata?['full_name'] ??
+                      email.split('@').first,
+                  photo: response.user!.userMetadata?['avatar_url'],
+                  roles: [role],
+                  rememberMe: true,
+                  provider: 'email',
+                  refreshToken: response.session?.refreshToken,
+                  accessToken: response.session?.accessToken,
+                );
+              }
+            }
+          } else {
+            debugPrint(
+              '🔐 OAuth login flow started for $provider (popup will show)',
+            );
+            final oauthResult = await _handleOAuthLoginForProfile(profile);
+            loginSuccess = oauthResult == _OAuthAttemptResult.success;
+            userCancelled = oauthResult == _OAuthAttemptResult.cancelled;
+            debugPrint('📊 OAuth login result: $oauthResult');
+          }
+        }
       }
 
       if (loginSuccess && mounted) {
         debugPrint('✅ Login successful for role: $role');
 
-        // ✅ Correct email set as current user before saving role
-        // (fixes stale-email validation clearing the role in
-        // getCurrentRole()).
+        // ✅ Check if refresh token was saved
+        final savedToken = await SessionManager.getRefreshToken(email);
+        debugPrint(
+          '🔑 Refresh token saved: ${savedToken != null ? "✅ YES" : "❌ NO"}',
+        );
+
         await SessionManager.setCurrentUser(email);
         await SessionManager.saveCurrentRole(role);
         debugPrint('💾 Saved role: $role to SessionManager');
@@ -739,16 +802,13 @@ class _ContinueScreenState extends State<ContinueScreen> {
           debugPrint('📝 Updated user metadata with role: $role');
         }
 
-        // ✅ SIMPLIFIED: hand off entirely to AppState + GoRouter.
-        // The redirect() logic in main.dart owns all of: blocked/
-        // inactive/scheduled-for-deletion handling, the restore/
-        // reactivate confirmation dialogs, role-selector vs single-
-        // role vs no-active-roles routing, and the "recoverable
-        // roles" smart redirect. No manual dashboard switch needed
-        // here - context.go('/') lets the router decide.
         await appState.refreshState();
         if (!mounted) return;
         context.go('/');
+      } else if (userCancelled) {
+        // ✅ User intentionally cancel කළා - error alert එකක් නෑ,
+        // silently loading state එක clear කරලා screen එකේම ඉන්නවා.
+        debugPrint('⏭️ Login cancelled by user - no error shown');
       } else {
         debugPrint('❌ Login failed for role: $role');
         if (mounted) {
@@ -794,28 +854,48 @@ class _ContinueScreenState extends State<ContinueScreen> {
   // final GoogleSignInService _googleSignInService = GoogleSignInService();
   // ============================================================
 
-  Future<bool> _handleOAuthLoginForProfile(Map<String, dynamic> profile) async {
+  Future<_OAuthAttemptResult> _handleOAuthLoginForProfile(
+    Map<String, dynamic> profile,
+  ) async {
     final email = profile['email'] as String?;
     final provider = profile['provider'] as String?;
-    if (email == null || provider == null) return false;
+    if (email == null || provider == null) return _OAuthAttemptResult.failed;
     final roles = profile['roles'] as List? ?? [];
     final role = roles.isNotEmpty ? roles.first.toString() : 'customer';
 
     try {
       final currentUser = supabase.auth.currentUser;
-      if (currentUser?.email == email) return true;
+      if (currentUser?.email == email) return _OAuthAttemptResult.success;
 
+      // ✅ First try auto-login (no popup)
       final autoSuccess = await SessionManager.tryAutoLogin(email);
-      if (autoSuccess) return true;
+      if (autoSuccess) {
+        debugPrint('✅ Auto-login successful from Continue screen!');
+        return _OAuthAttemptResult.success;
+      }
 
+      // ✅ Try direct session restore (no popup)
+      final restored = await SessionManager.restoreSessionDirectly(email);
+      if (restored) {
+        debugPrint('✅ Direct session restore successful from Continue screen!');
+        return _OAuthAttemptResult.success;
+      }
+
+      // ═══════════════════════════════════════════════════════════
+      // 🔥 මෙතනට එනවා නම් (rare) - refresh token එකම invalid/expired.
+      // Provider-specific OAuth login එකක් අවශ්‍යයි. Mobile එකේදී
+      // Google/Facebook/Apple තුනටම native SDK එකක් තියෙනවා නම් ඒක
+      // ප්‍රථමයෙන් try කරනවා (sign_in_screen.dart එකේ pattern එකම).
+      // ═══════════════════════════════════════════════════════════
       await SessionManager.setPendingRoleSelection(email: email, role: role);
 
       switch (provider) {
         case 'google':
-          // ✅ Mobile - try native Google Sign-In first (matches sign_in.dart)
           if (defaultTargetPlatform == TargetPlatform.android ||
               defaultTargetPlatform == TargetPlatform.iOS) {
-            debugPrint('🔐 Continue screen - using native Google Sign-In');
+            debugPrint(
+              '🔐 Continue screen - using native Google Sign-In (MOBILE)',
+            );
 
             final authData = await _googleSignInService
                 .authenticateAndGetDetails();
@@ -832,21 +912,55 @@ class _ContinueScreenState extends State<ContinueScreen> {
                   debugPrint(
                     '✅ Native Google sign-in successful (Continue screen)',
                   );
-                  return true; // ✅ Native success - no browser round-trip needed
+
+                  await SessionManager.saveUserProfile(
+                    email: email,
+                    userId: response.user!.id,
+                    name:
+                        response.user!.userMetadata?['full_name'] ??
+                        authData['displayName'] ??
+                        email.split('@').first,
+                    photo:
+                        response.user!.userMetadata?['avatar_url'] ??
+                        authData['photoUrl'],
+                    roles: [role],
+                    rememberMe: true,
+                    provider: 'google',
+                    refreshToken: response.session?.refreshToken,
+                    accessToken: response.session?.accessToken,
+                  );
+
+                  await _addToAvailableProfiles(
+                    email: email,
+                    role: role,
+                    userId: response.user!.id,
+                    photo: authData['photoUrl'],
+                  );
+
+                  await SessionManager.setCurrentUser(email);
+                  await SessionManager.saveCurrentRole(role);
+
+                  debugPrint(
+                    '✅ Continue screen: Profile saved with refresh token',
+                  );
+                  return _OAuthAttemptResult.success;
                 }
               } catch (e) {
                 debugPrint(
                   '❌ Native Google sign-in failed (Continue screen): $e',
                 );
-                return false; // ✅ Do NOT fall through to browser - avoid double popup
+                return _OAuthAttemptResult.failed;
               }
             }
 
-            debugPrint('❌ Native Google authentication cancelled or failed');
-            return false; // ✅ User cancelled - stop here, no browser fallback
+            // ✅ authData null - user cancel කළා. Browser popup එකට
+            // force fallback වෙන්නේ නෑ.
+            debugPrint('⏭️ Native Google authentication cancelled');
+            return _OAuthAttemptResult.cancelled;
           }
 
-          // Web or other platforms - use browser OAuth
+          // Web - browser OAuth
+          debugPrint('🔐 Continue screen - using browser OAuth (WEB)');
           await supabase.auth.signInWithOAuth(
             OAuthProvider.google,
             redirectTo: _env.getRedirectUrl(),
@@ -856,6 +970,77 @@ class _ContinueScreenState extends State<ContinueScreen> {
           break;
 
         case 'facebook':
+          // ═══════════════════════════════════════════════════════════
+          // 🔥 FIX: Mobile එකේදී sign_in_screen.dart එකේ පාවිච්චි කරන
+          // native FacebookAuth.login() එකම ප්‍රථමයෙන් try කරනවා -
+          // කලින් කෙළින්ම browser popup එකට යාම නවත්තලා.
+          // ═══════════════════════════════════════════════════════════
+          if (defaultTargetPlatform == TargetPlatform.android ||
+              defaultTargetPlatform == TargetPlatform.iOS) {
+            debugPrint(
+              '🔐 Continue screen - using native Facebook Sign-In (MOBILE)',
+            );
+
+            try {
+              final fbResult = await _facebookAuth.login(
+                permissions: ['email', 'public_profile'],
+              );
+
+              if (fbResult.status == LoginStatus.success) {
+                final accessToken = fbResult.accessToken!;
+                final response = await supabase.auth.signInWithIdToken(
+                  provider: OAuthProvider.facebook,
+                  idToken: accessToken.tokenString,
+                );
+
+                if (response.user != null) {
+                  debugPrint(
+                    '✅ Native Facebook sign-in successful (Continue screen)',
+                  );
+
+                  await SessionManager.saveUserProfile(
+                    email: email,
+                    userId: response.user!.id,
+                    name:
+                        response.user!.userMetadata?['full_name'] ??
+                        email.split('@').first,
+                    photo: response.user!.userMetadata?['avatar_url'],
+                    roles: [role],
+                    rememberMe: true,
+                    provider: 'facebook',
+                    refreshToken: response.session?.refreshToken,
+                    accessToken: response.session?.accessToken,
+                  );
+
+                  await _addToAvailableProfiles(
+                    email: email,
+                    role: role,
+                    userId: response.user!.id,
+                    photo: response.user!.userMetadata?['avatar_url'],
+                  );
+
+                  await SessionManager.setCurrentUser(email);
+                  await SessionManager.saveCurrentRole(role);
+
+                  return _OAuthAttemptResult.success;
+                }
+              } else if (fbResult.status == LoginStatus.cancelled) {
+                // ✅ Cancel කළොත් browser popup එකට force fallback
+                // වෙන්නේ නෑ.
+                debugPrint('⏭️ User cancelled native Facebook login');
+                return _OAuthAttemptResult.cancelled;
+              }
+              // status == failed - genuine error, පහළින් web fallback
+              debugPrint(
+                '⚠️ Native Facebook login failed (status: ${fbResult.status}), falling back to web',
+              );
+            } catch (e) {
+              debugPrint('⚠️ Native Facebook login threw exception: $e');
+            }
+          }
+
+          // Web fallback (හෝ native genuine failure එකකින් පස්සේ)
+          debugPrint('🔐 Continue screen - using browser OAuth for Facebook');
           await supabase.auth.signInWithOAuth(
             OAuthProvider.facebook,
             redirectTo: _env.getRedirectUrl(),
@@ -865,6 +1050,92 @@ class _ContinueScreenState extends State<ContinueScreen> {
           break;
 
         case 'apple':
+          // ═══════════════════════════════════════════════════════════
+          // 🔥 FIX: iOS එකේදී native SignInWithApple එකම ප්‍රථමයෙන් try
+          // කරනවා - Android/Web දෙකෙටම browser OAuth එකම (Apple
+          // native support Android එකේ නෑ, sign_in_screen.dart එකේ
+          // pattern එකම).
+          // ═══════════════════════════════════════════════════════════
+          if (defaultTargetPlatform == TargetPlatform.iOS) {
+            debugPrint('🔐 Continue screen - using native Apple Sign-In (iOS)');
+
+            try {
+              final credential = await SignInWithApple.getAppleIDCredential(
+                scopes: [
+                  AppleIDAuthorizationScopes.email,
+                  AppleIDAuthorizationScopes.fullName,
+                ],
+              );
+
+              if (credential.identityToken != null) {
+                final response = await supabase.auth.signInWithIdToken(
+                  provider: OAuthProvider.apple,
+                  idToken: credential.identityToken!,
+                );
+
+                if (response.user != null) {
+                  debugPrint(
+                    '✅ Native Apple sign-in successful (Continue screen)',
+                  );
+
+                  if (credential.authorizationCode.isNotEmpty) {
+                    try {
+                      await supabase.functions.invoke(
+                        'save-apple-auth-code',
+                        body: {
+                          'authorizationCode': credential.authorizationCode,
+                        },
+                      );
+                    } catch (e) {
+                      debugPrint(
+                        '⚠️ Failed to save Apple authorization code: $e',
+                      );
+                    }
+                  }
+
+                  await SessionManager.saveUserProfile(
+                    email: email,
+                    userId: response.user!.id,
+                    name:
+                        response.user!.userMetadata?['full_name'] ??
+                        email.split('@').first,
+                    photo: response.user!.userMetadata?['avatar_url'],
+                    roles: [role],
+                    rememberMe: true,
+                    provider: 'apple',
+                    refreshToken: response.session?.refreshToken,
+                    accessToken: response.session?.accessToken,
+                  );
+
+                  await _addToAvailableProfiles(
+                    email: email,
+                    role: role,
+                    userId: response.user!.id,
+                    photo: response.user!.userMetadata?['avatar_url'],
+                  );
+
+                  await SessionManager.setCurrentUser(email);
+                  await SessionManager.saveCurrentRole(role);
+
+                  return _OAuthAttemptResult.success;
+                }
+              }
+              // credential.identityToken null - edge case, web fallback
+            } on SignInWithAppleAuthorizationException catch (e) {
+              if (e.code == AuthorizationErrorCode.canceled) {
+                debugPrint('⏭️ User cancelled native Apple Sign-In');
+                return _OAuthAttemptResult.cancelled;
+              }
+              debugPrint(
+                '⚠️ Native Apple authorization error: ${e.code} - ${e.message}',
+              );
+            } catch (e) {
+              debugPrint('⚠️ Native Apple Sign-In failed: $e');
+            }
+          }
+
+          // Web fallback (Android හෝ iOS native genuine failure)
+          debugPrint('🔐 Continue screen - using browser OAuth for Apple');
           await supabase.auth.signInWithOAuth(
             OAuthProvider.apple,
             redirectTo: _env.getRedirectUrl(),
@@ -874,24 +1145,66 @@ class _ContinueScreenState extends State<ContinueScreen> {
           break;
 
         default:
-          return false;
+          return _OAuthAttemptResult.failed;
       }
 
-      // ✅ FIX: Increased from 10x500ms (5s) to 60x500ms (30s) - browser
-      // OAuth round-trip (Google login page load / account pick / deep
-      // link back to app) routinely takes longer than 5 seconds.
+      // Browser OAuth - wait for callback (Google web / FB web-fallback /
+      // Apple web-fallback / Android Apple)
       for (int i = 0; i < 60; i++) {
         await Future.delayed(const Duration(milliseconds: 500));
         final user = supabase.auth.currentUser;
         if (user?.email == email) {
-          return true;
+          final session = supabase.auth.currentSession;
+          if (session != null) {
+            await SessionManager.saveUserProfile(
+              email: email,
+              userId: user!.id,
+              name: user.userMetadata?['full_name'] ?? email.split('@').first,
+              photo: user.userMetadata?['avatar_url'],
+              roles: [role],
+              rememberMe: true,
+              provider: provider,
+              refreshToken: session.refreshToken,
+              accessToken: session.accessToken,
+            );
+          }
+          await SessionManager.setCurrentUser(email);
+          await SessionManager.saveCurrentRole(role);
+          return _OAuthAttemptResult.success;
         }
       }
 
-      return false;
+      // ✅ Timeout - cancel බව සහතික කරගන්න බැරි නිසා 'failed' කියලා සලකනවා
+      return _OAuthAttemptResult.failed;
     } catch (e) {
       debugPrint('OAuth error: $e');
-      return false;
+      return _OAuthAttemptResult.failed;
+    }
+  }
+
+  /// ✅ NEW helper - available profiles list එකට entry එකක් add
+  /// කරන logic එක native Google/Facebook/Apple paths තුනටම
+  /// duplicate වෙච්ච එකක් - මෙතනට extract කළා.
+  Future<void> _addToAvailableProfiles({
+    required String email,
+    required String role,
+    required String userId,
+    String? photo,
+  }) async {
+    final availableProfiles = await SessionManager.getAvailableProfiles();
+    final exists = availableProfiles.any(
+      (p) => p['email'] == email && p['role'] == role,
+    );
+    if (!exists) {
+      availableProfiles.add({
+        'id': userId,
+        'email': email,
+        'role': role,
+        'photo': photo,
+        'is_active': true,
+        'last_used': DateTime.now().toIso8601String(),
+      });
+      await SessionManager.saveAvailableProfiles(availableProfiles);
     }
   }
 

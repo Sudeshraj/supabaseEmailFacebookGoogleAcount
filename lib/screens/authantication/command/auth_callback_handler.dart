@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_application_1/services/session_manager.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -191,34 +192,175 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
       print('   Provider: ${user?.appMetadata['provider']}');
     }
 
+    // ✅ FIX: Web OAuth (සහ mobile browser-fallback OAuth) callback
+    // එකෙන් ආපු users ලාට profile එක local SessionManager storage
+    // එකට save කරනවා - SignInScreen එකේ _saveOAuthProfile() එකේ
+    // කරන දේම. මේක නැතුව Continue screen, Remember Me, සහ
+    // auto-login කිසිවක් web OAuth users ලාට වැඩ කරන්නේ නෑ.
+    if (user != null && user.email != null) {
+      await _saveProfileAfterOAuthCallback(user);
+    }
+
     await Future.delayed(const Duration(seconds: 1));
 
-    if (mounted) {
-      // Check if user needs to complete profile
-      final needsProfileSetup = await _checkIfNeedsProfileSetup(user);
-      if (!mounted) return;
-      if (needsProfileSetup) {
-        context.go('/reg');
-      } else {
-        context.go(
-          '/',
-          extra: {'showMessage': true, 'message': 'Welcome back!'},
-        );
-      }
-    }
+    // ✅ CLEANUP: '_checkIfNeedsProfileSetup()' කියන hardcoded-false
+    // dead code එක අයින් කළා. Profile-completion check එක ONE
+    // PLACE එකකින් විතරයි කරන්න ඕන - AppState._updateUserProfile()
+    // + main.dart router redirect() (appState.profileCompleted).
+    // ඒක duplicate කරන්න ගියොත්, දෙතැන කවදාහරි sync නොවී conflicting
+    // redirect logic එකක් හැදෙන්න පුළුවන් (කලින් auto-restore bug
+    // එක හැදුනේත් මේ විදිහටමයි). Router එකම හරි තැනට
+    // (dashboard/reg/role-selector/recoverable-roles) route කරයි.
+    if (!mounted) return;
+    context.go(
+      '/',
+      extra: {'showMessage': true, 'message': 'Welcome back!'},
+    );
   }
 
-  Future<bool> _checkIfNeedsProfileSetup(User? user) async {
-    // Add your logic here to check if user needs to complete profile
-    // For example, check if they have a username, profile picture, etc.
-    return false; // Default to false
+  /// ✅ Web OAuth (සහ mobile browser-fallback OAuth) callback එකෙන්
+  /// ආපු users ලාට profile එක local SessionManager storage එකට
+  /// save කරනවා - SignInScreen එකේ _saveOAuthProfile() එකේ කරන
+  /// දේම. මේක නැතුව Continue screen, Remember Me, සහ auto-login
+  /// කිසිවක් web OAuth users ලාට වැඩ කරන්නේ නෑ.
+  Future<void> _saveProfileAfterOAuthCallback(User user) async {
+    try {
+      final email = user.email!;
+      final session = supabase.auth.currentSession;
+      final userMetadata = user.userMetadata ?? {};
+      final appMetadata = user.appMetadata;
+
+      // Provider එක ගන්නවා
+      String provider = 'email';
+      if (appMetadata['provider'] != null) {
+        provider = appMetadata['provider'].toString();
+      } else if (userMetadata['provider'] != null) {
+        provider = userMetadata['provider'].toString();
+      }
+
+      // Photo url
+      String? photoUrl;
+      if (userMetadata['avatar_url'] != null &&
+          userMetadata['avatar_url'].toString().isNotEmpty) {
+        photoUrl = userMetadata['avatar_url'].toString();
+      } else if (userMetadata['picture'] != null &&
+          userMetadata['picture'].toString().isNotEmpty) {
+        photoUrl = userMetadata['picture'].toString();
+      }
+
+      // Display name
+      String name = email.split('@').first;
+      if (userMetadata['full_name'] != null &&
+          userMetadata['full_name'].toString().isNotEmpty) {
+        name = userMetadata['full_name'].toString();
+      } else if (userMetadata['name'] != null &&
+          userMetadata['name'].toString().isNotEmpty) {
+        name = userMetadata['name'].toString();
+      }
+
+      // ✅ Active roles fetch කරනවා (_saveOAuthProfile එකේ කරන විදිහටම)
+      List<String> roles = [];
+      try {
+        final userRolesResponse = await supabase
+            .from('user_roles')
+            .select('role_id, roles!inner (name), status')
+            .eq('user_id', user.id)
+            .eq('status', 'active');
+
+        for (var roleEntry in userRolesResponse) {
+          final role = roleEntry['roles'] as Map?;
+          if (role != null && role['name'] != null) {
+            roles.add(role['name'].toString());
+          }
+        }
+      } catch (e) {
+        debugPrint('⚠️ Error fetching roles in auth callback: $e');
+      }
+
+      // ═══════════════════════════════════════════════════════════
+      // 🔥 FIX: rememberMe default handling.
+      //
+      // Web OAuth callback එකේදී SignInScreen එකේ dialog එක
+      // (Remember Me checkbox) bypass වෙනවා - browser redirect
+      // එකකින් page reload එකක් වෙන නිසා, ඒ dialog එකේ user
+      // ගත්ත තීරණය මේ callback screen එකට කවදාවත් pass වෙන්නේ
+      // නෑ.
+      //
+      // කලින් තිබ්බ code එකේ:
+      //   `SessionManager.isRememberMeEnabled()` කියලා GLOBAL
+      //   setting එකක් කියෙව්වා. First-time user කෙනෙක්ට (කිසිම
+      //   profile එකක් තාම save වෙලා නැති කෙනෙක්ට) මේ global
+      //   setting එකේ default එක 'false'. rememberMe==false නම්
+      //   SessionManager.saveUserProfile() එකේ:
+      //       if (rememberMe) { profiles.add(profileData); }
+      //   කියන check එකෙන් - profile එකම local storage එකට
+      //   කිසිසේත් save වෙන්නේ නැහැ! ඒ කියන්නේ web OAuth එකෙන්
+      //   පළමු වතාවට login කරන කෙනාගේ profile එකම හදිසියේම
+      //   අතුරුදහන් වුනා (Continue screen, auto-login කිසිවක්
+      //   ඒ user ට වැඩ කරන්නේ නෑ).
+      //
+      // FIX: existing profile එකක් තියෙනවා නම් ඒකේ saved
+      // preference එකම respect කරනවා. නැත්නම් (පළමු වතාවේ user
+      // කෙනෙක් නම්) default 'true' - මොකද 'Remember Me' කියන
+      // core purpose එකම, පළමු වතාවේම profile එක save කරගැනීමයි.
+      // ═══════════════════════════════════════════════════════════
+      bool rememberMe = true;
+      try {
+        final existingProfile = await SessionManager.getProfileByEmail(email);
+        if (existingProfile != null && existingProfile.isNotEmpty) {
+          rememberMe = existingProfile['rememberMe'] as bool? ?? true;
+        }
+      } catch (e) {
+        debugPrint('⚠️ Error checking existing profile, defaulting rememberMe=true: $e');
+      }
+
+      await SessionManager.saveUserProfile(
+        email: email,
+        userId: user.id,
+        name: name,
+        photo: photoUrl ?? '',
+        roles: roles,
+        rememberMe: rememberMe,
+        refreshToken: session?.refreshToken,
+        accessToken: session?.accessToken,
+        provider: provider,
+        termsAcceptedAt: DateTime.now(),
+        privacyAcceptedAt: DateTime.now(),
+      );
+
+      // ✅ rememberMe true නම් auto-login/continue-screen flow
+      // එකට අවශ්‍ය current-user pointer එකත් මෙතනින්ම set කරනවා
+      // (SessionManager.saveUserProfile() එක ඇතුළතින්ම මේක කරනවා
+      // නම් duplicate වෙයි - නමුත් explicit කරන එක safe).
+      if (rememberMe) {
+        await SessionManager.setRememberMe(true);
+      }
+
+      debugPrint(
+        '✅ Profile saved from auth callback for: $email (rememberMe: $rememberMe, roles: $roles)',
+      );
+    } catch (e) {
+      debugPrint('❌ Error saving profile in auth callback: $e');
+      // Non-fatal - user ට login කරන්න පුළුවන්, next login එකේදී
+      // profile sync වෙයි (SessionManager rememberMe logic එකෙන්)
+    }
   }
 
   Future<void> _handleDefaultCallback() async {
     setState(() => _status = 'Completing authentication...');
 
     try {
-      // Try to refresh session
+      // ═══════════════════════════════════════════════════════════
+      // 🔥 NOTE: මේ path එක run වෙන්නේ 'sessionProcessed == false'
+      // වුනු විට විතරයි (i.e. getSessionFromUrl() fail වුනා /
+      // auth params නොතිබුනා). ඒ අවස්ථාවේ Supabase client එකේම
+      // දැනටමත් session එකක් තියෙනවා නම් විතරයි මේ no-argument
+      // refreshSession() එක success වෙන්නේ (refresh token එකක්
+      // explicit විදිහට අපිට මෙතන නෑ - Uri.base එකෙන් session
+      // සකසුනා නම් client එකේ already තියෙන session එකෙන්මයි
+      // refresh වෙන්නේ). මේක web browser-redirect callback
+      // path එකක් නිසා safe.
+      // ═══════════════════════════════════════════════════════════
       await supabase.auth.refreshSession();
 
       final user = supabase.auth.currentUser;
