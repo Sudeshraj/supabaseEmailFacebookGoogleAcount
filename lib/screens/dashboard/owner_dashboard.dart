@@ -5,7 +5,6 @@ import 'package:flutter_application_1/main.dart';
 import 'package:flutter_application_1/services/notification_service.dart';
 import 'package:flutter_application_1/services/permission_service.dart';
 import 'package:flutter_application_1/screens/settings/permission_manager.dart';
-import 'package:flutter_application_1/services/session_manager.dart';
 import 'package:flutter_application_1/widgets/permission_card.dart';
 import 'package:flutter_application_1/widgets/side_menu.dart';
 import 'package:flutter_application_1/widgets/dashboard_stat_card.dart';
@@ -82,7 +81,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   bool _hasHolidays = false;
 
   final supabase = Supabase.instance.client;
-  
+
   final ScrollController _scrollController = ScrollController();
 
   @override
@@ -309,10 +308,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                 color: Colors.red,
                 shape: BoxShape.circle,
               ),
-              constraints: const BoxConstraints(
-                minWidth: 16,
-                minHeight: 16,
-              ),
+              constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
               child: Text(
                 _unreadNotificationCount > 99
                     ? '99+'
@@ -336,14 +332,12 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
   void _showNewBookingAlert(RemoteMessage message) {
     if (!mounted) return;
-    
+
     showDialog(
       context: context,
       barrierDismissible: true,
       builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Row(
           children: [
             Container(
@@ -362,10 +356,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             const Expanded(
               child: Text(
                 'New Booking!',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
             ),
           ],
@@ -387,12 +378,9 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      message.notification?.body ?? 
-                      'A customer has booked an appointment',
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: Colors.grey[700],
-                      ),
+                      message.notification?.body ??
+                          'A customer has booked an appointment',
+                      style: TextStyle(fontSize: 14, color: Colors.grey[700]),
                     ),
                   ),
                 ],
@@ -401,19 +389,14 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             const SizedBox(height: 8),
             Text(
               'Would you like to view this booking now?',
-              style: TextStyle(
-                fontSize: 13,
-                color: Colors.grey[500],
-              ),
+              style: TextStyle(fontSize: 13, color: Colors.grey[500]),
             ),
           ],
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            style: TextButton.styleFrom(
-              foregroundColor: Colors.grey[600],
-            ),
+            style: TextButton.styleFrom(foregroundColor: Colors.grey[600]),
             child: const Text('Later'),
           ),
           ElevatedButton(
@@ -427,10 +410,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
-              padding: const EdgeInsets.symmetric(
-                horizontal: 20,
-                vertical: 12,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
             ),
             child: const Text('View Now'),
           ),
@@ -446,9 +426,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       context: context,
       barrierDismissible: true,
       builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Row(
           children: [
             Container(
@@ -467,10 +445,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             const Expanded(
               child: Text(
                 'New Booking Assigned!',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
             ),
           ],
@@ -505,21 +480,16 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             ),
             const SizedBox(height: 8),
             Text(
-              message.notification?.body ?? 
-              'You have a new booking assigned to your salon',
-              style: TextStyle(
-                fontSize: 13,
-                color: Colors.grey[500],
-              ),
+              message.notification?.body ??
+                  'You have a new booking assigned to your salon',
+              style: TextStyle(fontSize: 13, color: Colors.grey[500]),
             ),
           ],
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            style: TextButton.styleFrom(
-              foregroundColor: Colors.grey[600],
-            ),
+            style: TextButton.styleFrom(foregroundColor: Colors.grey[600]),
             child: const Text('Later'),
           ),
           ElevatedButton(
@@ -533,10 +503,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
-              padding: const EdgeInsets.symmetric(
-                horizontal: 20,
-                vertical: 12,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
             ),
             child: const Text('View Now'),
           ),
@@ -562,7 +529,9 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         decoration: BoxDecoration(
           color: Colors.white.withValues(alpha: 0.2),
           borderRadius: BorderRadius.circular(16),
-          border: isDSTActive ? Border.all(color: Colors.amber, width: 1) : null,
+          border: isDSTActive
+              ? Border.all(color: Colors.amber, width: 1)
+              : null,
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -689,7 +658,9 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                 title: Text(
                   salon['name'] ?? 'Unknown Salon',
                   style: TextStyle(
-                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                    fontWeight: isSelected
+                        ? FontWeight.bold
+                        : FontWeight.normal,
                   ),
                 ),
                 subtitle: Text(
@@ -2341,11 +2312,11 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           _loadNotificationCount();
         }
       });
-      
+
       FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
         if (message.data['type'] == 'new_booking') _viewBookings();
       });
-      
+
       FirebaseMessaging.instance.getInitialMessage().then((message) {
         if (message != null) {
           debugPrint('📱 App launched from terminated state with notification');
@@ -2698,11 +2669,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(
-                  Icons.warning,
-                  color: Colors.orange,
-                  size: 40,
-                ),
+                const Icon(Icons.warning, color: Colors.orange, size: 40),
                 const SizedBox(height: 8),
                 const Text(
                   'No Salons Found',
@@ -2715,10 +2682,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                 const SizedBox(height: 8),
                 const Text(
                   'Create your first salon to get started',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey,
-                  ),
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
                 ),
                 const SizedBox(height: 12),
                 ElevatedButton.icon(
@@ -2744,15 +2708,13 @@ class _OwnerDashboardState extends State<OwnerDashboard>
               ? const Padding(
                   padding: EdgeInsets.all(32.0),
                   child: Center(
-                    child: CircularProgressIndicator(
-                      color: Color(0xFFFF6B8B),
-                    ),
+                    child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
                   ),
                 )
               : _buildResponsiveStatCards(),
 
         const SizedBox(height: 16),
-        
+
         // ✅ MANAGEMENT CARD
         Container(
           margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -3180,8 +3142,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           ),
         );
         try {
-          await SessionManager.logoutForContinue();
-          await appState.refreshState();
+          await appState.logoutForContinue();
           if (context.mounted) {
             Navigator.pop(context);
             context.go('/');

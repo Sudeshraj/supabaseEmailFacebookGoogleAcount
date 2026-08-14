@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_application_1/main.dart';
 // import 'package:flutter_application_1/alertBox/show_logout_conf.dart';
 import 'package:go_router/go_router.dart';
-
-import '../../../services/session_manager.dart';
 
 class WelcomeScreen extends StatefulWidget {
   final void Function(String) onNext;
@@ -113,7 +112,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
 
     try {
       // Perform logout
-      await SessionManager.logoutForContinue();
+    await appState.logoutForContinue();
 
       if (!mounted) return;
 

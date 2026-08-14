@@ -2138,15 +2138,13 @@ class _SideMenuState extends State<SideMenu> {
         );
 
         try {
-          await SessionManager.logoutForContinue();
+          await appState.logoutForContinue();
 
           if (context.mounted) {
             if (Navigator.canPop(context)) {
               Navigator.pop(context);
             }
-          }
-
-          await appState.refreshState();
+          }         
 
           if (context.mounted) {
             WidgetsBinding.instance.addPostFrameCallback((_) {

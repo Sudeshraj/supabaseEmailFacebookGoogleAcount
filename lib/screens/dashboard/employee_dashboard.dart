@@ -2224,8 +2224,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         );
 
         try {
-          await SessionManager.logoutForContinue();
-          appState.refreshState();
+         await appState.logoutForContinue();
 
           if (context.mounted) {
             Navigator.pop(context);

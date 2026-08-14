@@ -867,37 +867,76 @@ class SessionManager {
     }
   }
 
-  static Future<void> removeProfile(String email) async {
-    try {
-      final profiles = await getProfiles();
-      final initialCount = profiles.length;
+static Future<void> removeProfile(String email) async {
+  try {
+    final profiles = await getProfiles();
+    final initialCount = profiles.length;
+    final profileToRemove = profiles.firstWhere(
+      (p) => p['email'] == email,
+      orElse: () => <String, dynamic>{},
+    );
 
-      profiles.removeWhere((p) => p['email'] == email);
+    profiles.removeWhere((p) => p['email'] == email);
 
-      if (profiles.length < initialCount) {
-        await _prefs.setString(_keyProfiles, jsonEncode(profiles));
+    if (profiles.length < initialCount) {
+      await _prefs.setString(_keyProfiles, jsonEncode(profiles));
 
-        final currentEmail = await getCurrentUserEmail();
-        if (currentEmail == email) {
-          await _prefs.remove(_currentUserKey);
-          await _prefs.remove(_keyCurrentRole);
-        }
-
-        final profile = await getProfileByEmail(email);
-        final userId = profile?['userId'] as String?;
-        if (userId != null) {
-          await _secureStorage.delete(key: '${userId}_refresh_token');
-          await _secureStorage.delete(key: '${userId}_access_token');
-        }
-
-        await clearUserRoles(email);
-
-        debugPrint('✅ Profile and secure data removed: $email');
+      final currentEmail = await getCurrentUserEmail();
+      if (currentEmail == email) {
+        await _prefs.remove(_currentUserKey);
+        await _prefs.remove(_keyCurrentRole);
       }
-    } catch (e) {
-      debugPrint('❌ Error removing profile: $e');
+
+      final userId = profileToRemove['userId'] as String?;
+
+      // ═══════════════════════════════════════════════════════════
+      // 🔥 NEW: User explicitly "Remove"/"Delete this account from
+      // device" කරද්දී - token එකම SERVER SIDE එකෙන්ම revoke
+      // කරනවා (global scope), local delete එකට අමතරව. මේකෙන්
+      // සහතික වෙනවා device එක compromise වුනත් ඒ token එකෙන්
+      // කවදාවත් reuse කරන්න බැරි බව - full security cleanup.
+      //
+      // (logoutForContinue() එකේ local-scope logout එකට වඩා මේක
+      // වෙනස් - "quick switch" එකට token එකම valid ඕනි, "remove
+      // account" කියන explicit user action එකට token එකම
+      // permanently invalid කරන්නම ඕන.)
+      // ═══════════════════════════════════════════════════════════
+      if (userId != null) {
+        try {
+          final currentUser = Supabase.instance.client.auth.currentUser;
+          if (currentUser?.id == userId) {
+            // දැනට active session එකම මේ user ගේ නම්, global
+            // signOut() එකෙන්ම server token එකත් revoke වෙනවා
+            await Supabase.instance.client.auth.signOut(
+              scope: SignOutScope.global,
+            );
+          } else {
+            // වෙනත් user කෙනෙක් active session එකේ ඉන්නවා නම්,
+            // admin API එකකින් විතරයි වෙනත් user කෙනෙක්ගේ token
+            // revoke කරන්න පුළුවන් (client SDK එකෙන් කෙලින්ම
+            // කරන්න බෑ) - ඒ නිසා මෙතන local delete එකෙන්ම
+            // සෑහෙනවා (secure storage එකෙන් අයින් වීම).
+            debugPrint(
+              'ℹ️ Removing non-active-session profile - local cleanup only',
+            );
+          }
+        } catch (e) {
+          debugPrint('⚠️ Server-side token revocation failed: $e');
+          // Non-fatal - local cleanup එකම continue කරනවා
+        }
+
+        await _secureStorage.delete(key: '${userId}_refresh_token');
+        await _secureStorage.delete(key: '${userId}_access_token');
+      }
+
+      await clearUserRoles(email);
+
+      debugPrint('✅ Profile and secure data removed: $email');
     }
+  } catch (e) {
+    debugPrint('❌ Error removing profile: $e');
   }
+}
 
   // =====================================================
   // ✅ GET MOST RECENT PROFILE
@@ -1611,50 +1650,71 @@ static Future<bool> tryAutoLogin(String email) async {
   // ✅ LOGOUT FUNCTIONS
   // =====================================================
 
-  static Future<void> logoutForContinue() async {
-    try {
-      final supabase = Supabase.instance.client;
-      final user = supabase.auth.currentUser;
-      final email = await getCurrentUserEmail();
-      final rememberMe = await isRememberMeEnabled();
+static Future<void> logoutForContinue() async {
+  try {
+    final supabase = Supabase.instance.client;
+    final user = supabase.auth.currentUser;
+    final email = await getCurrentUserEmail();
+    final rememberMe = await isRememberMeEnabled();
 
-      if (user != null && email != null && email == user.email) {
-        final currentSession = supabase.auth.currentSession;
-        final refreshToken = currentSession?.refreshToken;
+    if (user != null && email != null && email == user.email) {
+      final currentSession = supabase.auth.currentSession;
+      final refreshToken = currentSession?.refreshToken;
 
-        if (rememberMe && refreshToken != null) {
-          await saveUserProfile(
-            email: email,
-            userId: user.id,
-            name: user.userMetadata?['full_name'] ?? email.split('@').first,
-            rememberMe: rememberMe,
-            refreshToken: refreshToken,
-            provider: await _getUserProvider(email),
-          );
-          debugPrint('✅ Refresh token saved before continue logout');
-        }
-      }
-
-      await supabase.auth.signOut();
-
-      await _prefs.remove(_keyCurrentRole);
-      debugPrint('✅ Cleared current role on logout');
-
-      if (email != null && rememberMe) {
-        await setCurrentUser(email);
-        await _prefs.setBool(_showContinueKey, true);
-        debugPrint(
-          '✅ User prepared for continue screen (Remember Me: $rememberMe)',
+      if (rememberMe && refreshToken != null) {
+        await saveUserProfile(
+          email: email,
+          userId: user.id,
+          name: user.userMetadata?['full_name'] ?? email.split('@').first,
+          rememberMe: rememberMe,
+          refreshToken: refreshToken,
+          provider: await _getUserProvider(email),
         );
-      } else {
-        await _prefs.remove(_currentUserKey);
-        await clearContinueScreen();
-        debugPrint('✅ User cleared for continue screen');
+        debugPrint('✅ Refresh token saved before continue logout');
       }
-    } catch (e) {
-      debugPrint('❌ Error during continue logout: $e');
     }
+
+    // ═══════════════════════════════════════════════════════════
+    // 🔥 FIX: scope: SignOutScope.local පාවිච්චි කරනවා.
+    //
+    // Default signOut() (scope: global) කෝල් උනොත්, Supabase Auth
+    // server එකට request එකක් යවලා refresh token එකම SERVER SIDE
+    // එකෙන් REVOKE කරනවා. ඒ නිසා අපි ටිකකට කලින් secure storage
+    // එකට save කරපු token එකම, save කරලා තත්පරයකින්ම invalid
+    // වෙනවා - "Continue with this account" (Facebook-style quick
+    // switch) කියන feature එකේම core purpose එකම මේකෙන් break
+    // වෙනවා.
+    //
+    // scope: SignOutScope.local කියන්නේ - server call එකක් යවන්නේ
+    // නෑ, device එකේම local session/memory එකෙන් විතරයි sign out
+    // කරන්නේ. Refresh token එක server side එකේ valid විදිහටම
+    // තියෙනවා, ඒ නිසා පසුව tryAutoLogin()/restoreSessionDirectly()
+    // එකෙන් ඒම token එකෙන්ම session එකක් නැවත හදාගන්න පුළුවන්.
+    //
+    // (logoutUser() - permanent/full logout - එකේ default global
+    // scope එකම තියෙන්න ඕන, මොකද එතන token එකම permanently
+    // invalid කරන්නම ඕන.)
+    // ═══════════════════════════════════════════════════════════
+    await supabase.auth.signOut(scope: SignOutScope.local);
+
+    await _prefs.remove(_keyCurrentRole);
+    debugPrint('✅ Cleared current role on logout');
+
+    if (email != null && rememberMe) {
+      await setCurrentUser(email);
+      await _prefs.setBool(_showContinueKey, true);
+      debugPrint(
+        '✅ User prepared for continue screen (Remember Me: $rememberMe)',
+      );
+    } else {
+      await _prefs.remove(_currentUserKey);
+      await clearContinueScreen();
+      debugPrint('✅ User cleared for continue screen');
+    }
+  } catch (e) {
+    debugPrint('❌ Error during continue logout: $e');
   }
+}
 
   static Future<void> logoutUser() async {
     try {
