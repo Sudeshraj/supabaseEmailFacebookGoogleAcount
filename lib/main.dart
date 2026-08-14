@@ -63,7 +63,6 @@ import 'config/environment_manager.dart';
 import 'screens/authantication/command/splash.dart';
 import 'screens/authantication/command/sign_in.dart';
 import 'screens/authantication/command/signup_flow.dart';
-import 'screens/authantication/command/email_verify_checker.dart';
 import 'screens/authantication/command/multi_continue_screen.dart';
 import 'screens/dashboard/customer_dashboard.dart';
 import 'screens/dashboard/employee_dashboard.dart';
@@ -952,11 +951,7 @@ GoRouter _createRouter() {
           final user = appState.currentUser;
           return MaterialPage(child: RegistrationFlow(user: user));
         },
-      ),
-      GoRoute(
-        path: '/verify-email',
-        builder: (_, _) => const EmailVerifyChecker(),
-      ),
+      ),     
       GoRoute(
         path: '/verify-invalid',
         builder: (_, _) => const VerifyInvalidScreen(),

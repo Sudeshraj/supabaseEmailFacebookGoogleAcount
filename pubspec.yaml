@@ -123,7 +123,7 @@ flutter:
   uses-material-design: true
   
   assets:   
-    - .env
+    - .env.development
     - .env.production
     - assets/images/logo.png
     - assets/icons/google.svg

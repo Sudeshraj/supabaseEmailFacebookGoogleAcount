@@ -2,6 +2,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter_application_1/utils/app_version.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -1610,15 +1611,15 @@ class _HelpScreenState extends State<HelpScreen> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'MySalon',
-                style: TextStyle(
+              Text(
+                AppVersion.name,
+                style: const TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.bold,
                 ),
               ),
               Text(
-                '${t('version')} 1.0.0',
+                '${t('version')}  ${AppVersion.version}',
                 style: TextStyle(color: Colors.white54, fontSize: 12),
               ),
             ],
