@@ -4,11 +4,12 @@ import 'package:flutter/foundation.dart';
 class AppVersion {
   static String version = '1.0.0+1';
   static String buildType = 'debug';
+  static String name = '';
 
   static Future<void> init() async {
     try {
       final info = await PackageInfo.fromPlatform();
-      
+      name = info.appName;
       // Auto detect build type
       if (kReleaseMode) {
         buildType = 'production';

@@ -854,7 +854,7 @@ class _HelpScreenState extends State<HelpScreen> {
             const SizedBox(height: 24),
             _buildContactForm(),
           ] else if (widget.screenType == 'about') ...[
-            _buildAppInfoCard(),
+            // _buildAppInfoCard(),
             const SizedBox(height: 24),
             _buildMissionCard(),
             const SizedBox(height: 24),
@@ -1435,58 +1435,64 @@ class _HelpScreenState extends State<HelpScreen> {
   }
 
   // ============== APP INFO ==============
-  Widget _buildAppInfoCard() {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.03),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            width: 60,
-            height: 60,
-            decoration: const BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: LinearGradient(
-                colors: [Color(0xFF1877F2), Color(0xFF0A58CA)],
-              ),
-            ),
-            child: const Center(
-              child: Text(
-                'MS',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 20),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                t('app_name'),
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 22,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              Text(
-                '${t('version')} 1.0.0',
-                style: const TextStyle(color: Colors.white54, fontSize: 14),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
+  // Widget _buildAppInfoCard() {
+  //   return Container(
+  //     padding: const EdgeInsets.all(20),
+  //     decoration: BoxDecoration(
+  //       color: Colors.white.withValues(alpha: 0.03),
+  //       borderRadius: BorderRadius.circular(16),
+  //     ),
+  //     child: Row(
+  //       mainAxisAlignment: MainAxisAlignment.center,
+  //       children: [
+  //         Container(
+  //           width: 60,
+  //           height: 60,
+  //           decoration: const BoxDecoration(
+  //             shape: BoxShape.circle,
+  //             gradient: LinearGradient(
+  //               colors: [Color(0xFF1877F2), Color(0xFF0A58CA)],
+  //             ),
+  //           ),
+  //           child: ClipRRect(
+  //             borderRadius: BorderRadius.circular(20),
+  //             child: Image.asset(
+  //               'assets/images/logo.png',
+  //               fit: BoxFit.cover,
+  //               errorBuilder: (context, error, stackTrace) {
+  //                 return Center(
+  //                   child: Icon(
+  //                     Icons.account_circle,
+  //                     color: Colors.white,
+  //                     size: 40,
+  //                   ),
+  //                 );
+  //               },
+  //             ),
+  //           ),
+  //         ),
+  //         const SizedBox(width: 20),
+  //         Column(
+  //           crossAxisAlignment: CrossAxisAlignment.start,
+  //           children: [
+  //             Text(
+  //               t(AppVersion.name),
+  //               style: const TextStyle(
+  //                 color: Colors.white,
+  //                 fontSize: 22,
+  //                 fontWeight: FontWeight.bold,
+  //               ),
+  //             ),
+  //             Text(
+  //               '${t('version')}  ${AppVersion.version}',
+  //               style: const TextStyle(color: Colors.white54, fontSize: 14),
+  //             ),
+  //           ],
+  //         ),
+  //       ],
+  //     ),
+  //   );
+  // }
 
   // ============== MISSION ==============
   Widget _buildMissionCard() {
@@ -1588,25 +1594,6 @@ class _HelpScreenState extends State<HelpScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: const BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: LinearGradient(
-                colors: [Color(0xFF1877F2), Color(0xFF0A58CA)],
-              ),
-            ),
-            child: const Center(
-              child: Text(
-                'MS',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          ),
           const SizedBox(width: 12),
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
