@@ -277,48 +277,22 @@ class AppState extends ChangeNotifier {
   }
 
   // Logout user
+  /// Full, permanent logout - actually revokes the token server-side
+  /// via SessionManager.logoutUser()'s default-scope signOut().
   Future<void> logout() async {
     _setLoading(true);
-
     try {
-      final supabase = Supabase.instance.client;
-      final user = supabase.auth.currentUser;
-      final email = user?.email;
+      await SessionManager.logoutUser();
 
-      if (user != null && email != null) {
-        final currentSession = supabase.auth.currentSession;
-        final refreshToken = currentSession?.refreshToken;
-        final rememberMe = await SessionManager.isRememberMeEnabled();
-
-        if (rememberMe && refreshToken != null) {
-          final provider =
-              _loginProvider ??
-              user.userMetadata?['provider']?.toString().toLowerCase() ??
-              'email';
-
-          await SessionManager.saveUserProfile(
-            email: email,
-            userId: user.id,
-            name: user.userMetadata?['full_name'] ?? email.split('@').first,
-            rememberMe: rememberMe,
-            refreshToken: refreshToken,
-            provider: provider,
-          );
-        }
-      }
-
-      await supabase.auth.signOut();
-
-      // 🔥 CRITICAL: Clear all roles and current role
       _setLoggedIn(false);
       _setEmailVerified(false);
       _setProfileCompleted(false);
-      _setRoles([]); // Clear all roles
-      _setCurrentRole(null); // Clear current role
+      _setRoles([]);
+      _setCurrentRole(null);
       _setCurrentEmail(null);
       _setLoginProvider(null);
-      _setPendingDeletionRestore(pending: false); // ✅ clear any pending state
-      _setPendingReactivation(false); // ✅ clear any pending state
+      _setPendingDeletionRestore(pending: false);
+      _setPendingReactivation(false);
 
       developer.log('User logged out', name: 'AppState');
     } catch (e, stackTrace) {
@@ -336,9 +310,12 @@ class AppState extends ChangeNotifier {
   }
 
   /// Logout for continue screen
+  /// Quick-switch logout - UI-level only. Supabase's own session
+  /// stays untouched (see SessionManager.logoutForContinue), so
+  /// refreshState() is deliberately NOT called here - it would read
+  /// the still-valid Supabase session and set loggedIn back to true.
   Future<void> logoutForContinue() async {
     _setLoading(true);
-
     try {
       await SessionManager.logoutForContinue();
 
@@ -349,10 +326,10 @@ class AppState extends ChangeNotifier {
       _setCurrentRole(null);
       _setCurrentEmail(null);
       _setLoginProvider(null);
-      _setPendingDeletionRestore(pending: false); // ✅ clear any pending state
-      _setPendingReactivation(false); // ✅ clear any pending state
+      _setPendingDeletionRestore(pending: false);
+      _setPendingReactivation(false);
 
-      developer.log('User logged out for continue screen', name: 'AppState');
+      developer.log('Quick-switch logout complete', name: 'AppState');
     } catch (e, stackTrace) {
       developer.log(
         'Logout for continue error: $e',

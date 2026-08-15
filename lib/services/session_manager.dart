@@ -4,7 +4,7 @@ import 'package:flutter_application_1/utils/app_version.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:flutter/foundation.dart' show kDebugMode, debugPrint;
+import 'package:flutter/foundation.dart' show kDebugMode, debugPrint, kIsWeb;
 
 class SessionManager {
   // Keys
@@ -867,76 +867,76 @@ class SessionManager {
     }
   }
 
-static Future<void> removeProfile(String email) async {
-  try {
-    final profiles = await getProfiles();
-    final initialCount = profiles.length;
-    final profileToRemove = profiles.firstWhere(
-      (p) => p['email'] == email,
-      orElse: () => <String, dynamic>{},
-    );
+  static Future<void> removeProfile(String email) async {
+    try {
+      final profiles = await getProfiles();
+      final initialCount = profiles.length;
+      final profileToRemove = profiles.firstWhere(
+        (p) => p['email'] == email,
+        orElse: () => <String, dynamic>{},
+      );
 
-    profiles.removeWhere((p) => p['email'] == email);
+      profiles.removeWhere((p) => p['email'] == email);
 
-    if (profiles.length < initialCount) {
-      await _prefs.setString(_keyProfiles, jsonEncode(profiles));
+      if (profiles.length < initialCount) {
+        await _prefs.setString(_keyProfiles, jsonEncode(profiles));
 
-      final currentEmail = await getCurrentUserEmail();
-      if (currentEmail == email) {
-        await _prefs.remove(_currentUserKey);
-        await _prefs.remove(_keyCurrentRole);
-      }
-
-      final userId = profileToRemove['userId'] as String?;
-
-      // ═══════════════════════════════════════════════════════════
-      // 🔥 NEW: User explicitly "Remove"/"Delete this account from
-      // device" කරද්දී - token එකම SERVER SIDE එකෙන්ම revoke
-      // කරනවා (global scope), local delete එකට අමතරව. මේකෙන්
-      // සහතික වෙනවා device එක compromise වුනත් ඒ token එකෙන්
-      // කවදාවත් reuse කරන්න බැරි බව - full security cleanup.
-      //
-      // (logoutForContinue() එකේ local-scope logout එකට වඩා මේක
-      // වෙනස් - "quick switch" එකට token එකම valid ඕනි, "remove
-      // account" කියන explicit user action එකට token එකම
-      // permanently invalid කරන්නම ඕන.)
-      // ═══════════════════════════════════════════════════════════
-      if (userId != null) {
-        try {
-          final currentUser = Supabase.instance.client.auth.currentUser;
-          if (currentUser?.id == userId) {
-            // දැනට active session එකම මේ user ගේ නම්, global
-            // signOut() එකෙන්ම server token එකත් revoke වෙනවා
-            await Supabase.instance.client.auth.signOut(
-              scope: SignOutScope.global,
-            );
-          } else {
-            // වෙනත් user කෙනෙක් active session එකේ ඉන්නවා නම්,
-            // admin API එකකින් විතරයි වෙනත් user කෙනෙක්ගේ token
-            // revoke කරන්න පුළුවන් (client SDK එකෙන් කෙලින්ම
-            // කරන්න බෑ) - ඒ නිසා මෙතන local delete එකෙන්ම
-            // සෑහෙනවා (secure storage එකෙන් අයින් වීම).
-            debugPrint(
-              'ℹ️ Removing non-active-session profile - local cleanup only',
-            );
-          }
-        } catch (e) {
-          debugPrint('⚠️ Server-side token revocation failed: $e');
-          // Non-fatal - local cleanup එකම continue කරනවා
+        final currentEmail = await getCurrentUserEmail();
+        if (currentEmail == email) {
+          await _prefs.remove(_currentUserKey);
+          await _prefs.remove(_keyCurrentRole);
         }
 
-        await _secureStorage.delete(key: '${userId}_refresh_token');
-        await _secureStorage.delete(key: '${userId}_access_token');
+        final userId = profileToRemove['userId'] as String?;
+
+        // ═══════════════════════════════════════════════════════════
+        // 🔥 NEW: User explicitly "Remove"/"Delete this account from
+        // device" කරද්දී - token එකම SERVER SIDE එකෙන්ම revoke
+        // කරනවා (global scope), local delete එකට අමතරව. මේකෙන්
+        // සහතික වෙනවා device එක compromise වුනත් ඒ token එකෙන්
+        // කවදාවත් reuse කරන්න බැරි බව - full security cleanup.
+        //
+        // (logoutForContinue() එකේ local-scope logout එකට වඩා මේක
+        // වෙනස් - "quick switch" එකට token එකම valid ඕනි, "remove
+        // account" කියන explicit user action එකට token එකම
+        // permanently invalid කරන්නම ඕන.)
+        // ═══════════════════════════════════════════════════════════
+        if (userId != null) {
+          try {
+            final currentUser = Supabase.instance.client.auth.currentUser;
+            if (currentUser?.id == userId) {
+              // දැනට active session එකම මේ user ගේ නම්, global
+              // signOut() එකෙන්ම server token එකත් revoke වෙනවා
+              await Supabase.instance.client.auth.signOut(
+                scope: SignOutScope.global,
+              );
+            } else {
+              // වෙනත් user කෙනෙක් active session එකේ ඉන්නවා නම්,
+              // admin API එකකින් විතරයි වෙනත් user කෙනෙක්ගේ token
+              // revoke කරන්න පුළුවන් (client SDK එකෙන් කෙලින්ම
+              // කරන්න බෑ) - ඒ නිසා මෙතන local delete එකෙන්ම
+              // සෑහෙනවා (secure storage එකෙන් අයින් වීම).
+              debugPrint(
+                'ℹ️ Removing non-active-session profile - local cleanup only',
+              );
+            }
+          } catch (e) {
+            debugPrint('⚠️ Server-side token revocation failed: $e');
+            // Non-fatal - local cleanup එකම continue කරනවා
+          }
+
+          await _secureStorage.delete(key: '${userId}_refresh_token');
+          await _secureStorage.delete(key: '${userId}_access_token');
+        }
+
+        await clearUserRoles(email);
+
+        debugPrint('✅ Profile and secure data removed: $email');
       }
-
-      await clearUserRoles(email);
-
-      debugPrint('✅ Profile and secure data removed: $email');
+    } catch (e) {
+      debugPrint('❌ Error removing profile: $e');
     }
-  } catch (e) {
-    debugPrint('❌ Error removing profile: $e');
   }
-}
 
   // =====================================================
   // ✅ GET MOST RECENT PROFILE
@@ -1018,114 +1018,104 @@ static Future<void> removeProfile(String email) async {
   // =====================================================
   // ✅ AUTO-LOGIN & SESSION MANAGEMENT
   // =====================================================
-static Future<bool> tryAutoLogin(String email) async {
-  try {
-    debugPrint('===== ATTEMPTING AUTO-LOGIN =====');
-    debugPrint('Target email: $email');
+  static Future<bool> tryAutoLogin(String email) async {
+    try {
+      final profile = await getProfileByEmail(email);
+      if (profile == null || profile.isEmpty) return false;
 
-    final profile = await getProfileByEmail(email);
-    if (profile == null || profile.isEmpty) {
-      debugPrint('❌ Auto-login failed: No profile found');
-      return false;
-    }
+      final supabase = Supabase.instance.client;
+      final currentUser = supabase.auth.currentUser;
+      final currentSession = supabase.auth.currentSession;
 
-    final supabase = Supabase.instance.client;
-    final currentUser = supabase.auth.currentUser;
-    final currentSession = supabase.auth.currentSession;
-
-    // ✅ Check if already logged in
-    if (currentUser?.email == email && currentSession != null) {
-      if (isSessionValid(currentSession)) {
-        debugPrint('✅ AUTO-LOGIN SUCCESS: Already logged in');
+      if (currentUser?.email == email &&
+          currentSession != null &&
+          isSessionValid(currentSession)) {
         await updateLastLogin(email);
         return true;
       }
-    }
 
-    final userId = profile['userId'] as String?;
-    if (userId == null) {
-      debugPrint('❌ Auto-login failed: No user ID found');
+      final userId = profile['userId'] as String?;
+      if (userId == null) return false;
+
+      String? refreshToken;
+      try {
+        refreshToken = await _secureStorage.read(
+          key: '${userId}_refresh_token',
+          aOptions: _getAndroidOptions(),
+          iOptions: _getIOSOptions(),
+        );
+      } catch (e) {
+        debugPrint('⚠️ Secure storage read failed: $e');
+      }
+
+      if (refreshToken == null || refreshToken.isEmpty) {
+        debugPrint('❌ No refresh token found for $email');
+        return false;
+      }
+
+      bool shouldCleanup = false;
+      String? lastError;
+
+      // Attempt 1: refreshSession(token)
+      try {
+        final response = await supabase.auth.refreshSession(refreshToken);
+        if (response.session != null && response.user?.email == email) {
+          await updateLastLogin(email);
+          await _updateSecureTokens(userId, response.session!);
+          return true;
+        }
+      } on AuthApiException catch (e) {
+        lastError = '${e.code}: ${e.message}';
+        if (e.code == 'refresh_token_not_found' ||
+            e.code == 'refresh_token_already_used' ||
+            e.code == 'invalid_grant') {
+          shouldCleanup = true;
+        }
+      } catch (e) {
+        lastError = e.toString();
+      }
+
+      // Attempt 2 (fallback): setSession(token) - only if token
+      // isn't already confirmed dead
+      if (!shouldCleanup) {
+        try {
+          await supabase.auth.setSession(refreshToken);
+          await Future.delayed(const Duration(milliseconds: 500));
+          final user = supabase.auth.currentUser;
+          final session = supabase.auth.currentSession;
+          if (user?.email == email && session != null) {
+            await updateLastLogin(email);
+            await _updateSecureTokens(userId, session);
+            return true;
+          }
+        } on AuthApiException catch (e) {
+          lastError = '${e.code}: ${e.message}';
+          if (e.code == 'refresh_token_not_found' ||
+              e.code == 'refresh_token_already_used' ||
+              e.code == 'invalid_grant') {
+            shouldCleanup = true;
+          }
+        } catch (e) {
+          lastError = e.toString();
+        }
+      }
+
+      // Only delete the stored token when the server has explicitly
+      // confirmed it's dead - transient/network failures leave it
+      // in place so the next attempt can still succeed.
+      if (shouldCleanup) {
+        debugPrint('🧹 Token confirmed invalid ($lastError) - clearing');
+        await _cleanupInvalidSession(userId, email);
+      } else {
+        debugPrint('⚠️ Auto-login failed, keeping token ($lastError)');
+      }
+
       return false;
-    }
-
-    // ✅ Get refresh token
-    String? refreshToken;
-    try {
-      refreshToken = await _secureStorage.read(
-        key: '${userId}_refresh_token',
-        aOptions: _getAndroidOptions(),
-        iOptions: _getIOSOptions(),
-      );
     } catch (e) {
-      debugPrint('⚠️ Secure storage read failed: $e');
-      refreshToken = _prefs.getString('${userId}_refresh_token_fallback');
-    }
-
-    if (refreshToken == null || refreshToken.isEmpty) {
-      debugPrint('❌ Auto-login failed: No secure refresh token found');
+      debugPrint('❌ Auto-login error: $e');
       return false;
     }
-
-    debugPrint('🔑 Refresh token found, attempting restore...');
-
-    // ═══════════════════════════════════════════════════════════
-    // 🔥 FIX: refreshSession(token) - token එක explicit pass කරනවා.
-    // Web + Mobile දෙකටම වැඩ කරනවා - platform-specific නෙවෙයි.
-    // (කලින් argument එකක් නැතුව call කළ නිසා, logged-out state
-    // එකේදී "no current session" කියලා fail වුනා.)
-    // ═══════════════════════════════════════════════════════════
-    try {
-      debugPrint('🔄 Attempt 1: refreshSession(with token)...');
-      final response = await supabase.auth.refreshSession(refreshToken);
-
-      if (response.session != null && response.user?.email == email) {
-        debugPrint('✅ AUTO-LOGIN SUCCESS: Session refreshed');
-        await updateLastLogin(email);
-        // ✅ Rotation policy එක නිසා අලුත් token එකම save කරන්න ඕන
-        await _updateSecureTokens(userId, response.session!);
-        return true;
-      }
-    } catch (refreshError) {
-      debugPrint('⚠️ refreshSession failed: $refreshError');
-    }
-
-    // ═══════════════════════════════════════════════════════════
-    // 🔥 FALLBACK: setSession(token) - web/mobile දෙකටම try කරනවා
-    // (කලින් kIsWeb check එකකින් mobile එකට මේ fallback එක
-    // block කරලා තිබ්බා - ඒක අනවශ්‍යයි, setSession() platform
-    // independent HTTP call එකක්)
-    // ═══════════════════════════════════════════════════════════
-    try {
-      debugPrint('🔄 Attempt 2: setSession(with token)...');
-      await supabase.auth.setSession(refreshToken);
-      await Future.delayed(const Duration(milliseconds: 500));
-
-      final restoredUser = supabase.auth.currentUser;
-      final restoredSession = supabase.auth.currentSession;
-
-      if (restoredUser?.email == email && restoredSession != null) {
-        debugPrint('✅ AUTO-LOGIN SUCCESS: Session restored (setSession)');
-        await updateLastLogin(email);
-        await _updateSecureTokens(userId, restoredSession);
-        return true;
-      }
-    } catch (setError) {
-      debugPrint('⚠️ setSession failed: $setError');
-    }
-
-    // ✅ දෙකම fail උනොත් විතරයි token එක invalid කියලා සලකලා
-    // clean up කරන්නේ (network issue එකකට මේක වෙන්නත් ඉඩ
-    // තියෙනවා, නමුත් දෙකම fail උනොත් re-auth එක අවශ්‍යයි)
-    await _cleanupInvalidSession(userId, email);
-
-    debugPrint('❌ AUTO-LOGIN FAILED: Could not restore session');
-    return false;
-  } catch (e, stackTrace) {
-    debugPrint('❌ AUTO-LOGIN ERROR: $e');
-    debugPrint('Stack: $stackTrace');
-    return false;
   }
-}
 
   // =====================================================
   // ✅ NEW: SESSION + DB CHECK METHODS
@@ -1650,79 +1640,88 @@ static Future<bool> tryAutoLogin(String email) async {
   // ✅ LOGOUT FUNCTIONS
   // =====================================================
 
-static Future<void> logoutForContinue() async {
-  try {
-    final supabase = Supabase.instance.client;
-    final user = supabase.auth.currentUser;
-    final email = await getCurrentUserEmail();
-    final rememberMe = await isRememberMeEnabled();
+  /// ✅ Quick-switch logout (side-menu "Logout" button).
+  ///
+  /// Web: uses Supabase's local-scope signOut() as intended - this
+  /// works correctly on web (verified no token invalidation issue).
+  ///
+  /// Mobile: deliberately skips signOut() entirely. Testing confirmed
+  /// that even scope: SignOutScope.local invalidates the refresh
+  /// token on Android/iOS in this environment (likely a token-rotation
+  /// race triggered through the native secure-storage/platform-channel
+  /// path), which broke the "tap your profile to sign back in" flow.
+  /// Supabase's own client-side session is simply left untouched;
+  /// AppState clears its own in-memory "logged in" state instead.
+  ///
+  /// Either way, no password is ever stored (only a revocable refresh
+  /// token in encrypted secure storage), and a full, permanent,
+  /// token-revoking logout is always available via logoutUser().
+  static Future<void> logoutForContinue() async {
+    try {
+      final supabase = Supabase.instance.client;
+      final user = supabase.auth.currentUser;
+      final email = await getCurrentUserEmail();
+      final rememberMe = await isRememberMeEnabled();
 
-    if (user != null && email != null && email == user.email) {
-      final currentSession = supabase.auth.currentSession;
-      final refreshToken = currentSession?.refreshToken;
+      if (user != null && email != null && email == user.email) {
+        final refreshToken = supabase.auth.currentSession?.refreshToken;
 
-      if (rememberMe && refreshToken != null) {
-        await saveUserProfile(
-          email: email,
-          userId: user.id,
-          name: user.userMetadata?['full_name'] ?? email.split('@').first,
-          rememberMe: rememberMe,
-          refreshToken: refreshToken,
-          provider: await _getUserProvider(email),
-        );
-        debugPrint('✅ Refresh token saved before continue logout');
+        if (rememberMe && refreshToken != null) {
+          await saveUserProfile(
+            email: email,
+            userId: user.id,
+            name: user.userMetadata?['full_name'] ?? email.split('@').first,
+            rememberMe: rememberMe,
+            refreshToken: refreshToken,
+            provider: await _getUserProvider(email),
+          );
+          debugPrint('✅ Refresh token saved before quick-switch logout');
+        }
       }
+
+      // ═══════════════════════════════════════════════════════════
+      // 🔥 PLATFORM-CONDITIONAL: Web එකේ local-scope signOut() එක
+      // safely වැඩ කරනවා (verified), ඒ නිසා token එකම properly
+      // revoke කරනවා - වඩා secure. Mobile එකේදී විතරයි skip
+      // කරන්නේ (empirically confirmed token-invalidation bug එකක්
+      // නිසා).
+      // ═══════════════════════════════════════════════════════════
+      if (kIsWeb) {
+        await supabase.auth.signOut();
+        debugPrint('✅ Web: local-scope signOut() completed');
+      } else {
+        debugPrint(
+          '⏭️ Mobile: skipping signOut() to avoid token-invalidation bug '
+          '(Supabase client session left intact for later restore)',
+        );
+      }
+
+      await _prefs.remove(_keyCurrentRole);
+
+      if (email != null && rememberMe) {
+        await setCurrentUser(email);
+        await _prefs.setBool(_showContinueKey, true);
+      } else {
+        await _prefs.remove(_currentUserKey);
+        await clearContinueScreen();
+      }
+
+      debugPrint('✅ Quick-switch logout complete for: $email');
+    } catch (e) {
+      debugPrint('❌ Error during quick-switch logout: $e');
     }
-
-    // ═══════════════════════════════════════════════════════════
-    // 🔥 FIX: scope: SignOutScope.local පාවිච්චි කරනවා.
-    //
-    // Default signOut() (scope: global) කෝල් උනොත්, Supabase Auth
-    // server එකට request එකක් යවලා refresh token එකම SERVER SIDE
-    // එකෙන් REVOKE කරනවා. ඒ නිසා අපි ටිකකට කලින් secure storage
-    // එකට save කරපු token එකම, save කරලා තත්පරයකින්ම invalid
-    // වෙනවා - "Continue with this account" (Facebook-style quick
-    // switch) කියන feature එකේම core purpose එකම මේකෙන් break
-    // වෙනවා.
-    //
-    // scope: SignOutScope.local කියන්නේ - server call එකක් යවන්නේ
-    // නෑ, device එකේම local session/memory එකෙන් විතරයි sign out
-    // කරන්නේ. Refresh token එක server side එකේ valid විදිහටම
-    // තියෙනවා, ඒ නිසා පසුව tryAutoLogin()/restoreSessionDirectly()
-    // එකෙන් ඒම token එකෙන්ම session එකක් නැවත හදාගන්න පුළුවන්.
-    //
-    // (logoutUser() - permanent/full logout - එකේ default global
-    // scope එකම තියෙන්න ඕන, මොකද එතන token එකම permanently
-    // invalid කරන්නම ඕන.)
-    // ═══════════════════════════════════════════════════════════
-    await supabase.auth.signOut(scope: SignOutScope.local);
-
-    await _prefs.remove(_keyCurrentRole);
-    debugPrint('✅ Cleared current role on logout');
-
-    if (email != null && rememberMe) {
-      await setCurrentUser(email);
-      await _prefs.setBool(_showContinueKey, true);
-      debugPrint(
-        '✅ User prepared for continue screen (Remember Me: $rememberMe)',
-      );
-    } else {
-      await _prefs.remove(_currentUserKey);
-      await clearContinueScreen();
-      debugPrint('✅ User cleared for continue screen');
-    }
-  } catch (e) {
-    debugPrint('❌ Error during continue logout: $e');
   }
-}
 
+  /// ✅ Full, permanent logout (Settings screen). Actually revokes
+  /// the refresh token server-side (default global scope) - this
+  /// is the correct, secure behavior for an explicit "log out of
+  /// this account" action.
   static Future<void> logoutUser() async {
     try {
       final supabase = Supabase.instance.client;
       final user = supabase.auth.currentUser;
 
       if (user != null) {
-        // Update last_logout in database
         await supabase
             .from('profiles')
             .update({
@@ -1730,11 +1729,9 @@ static Future<void> logoutForContinue() async {
               'updated_at': DateTime.now().toIso8601String(),
             })
             .eq('id', user.id);
-
-        debugPrint('✅ Updated last_logout for user: ${user.email}');
       }
 
-      await supabase.auth.signOut();
+      await supabase.auth.signOut(); // default global scope - revokes token
 
       final email = await getCurrentUserEmail();
       if (email != null) {
@@ -1742,7 +1739,7 @@ static Future<void> logoutForContinue() async {
         await clearContinueScreen();
       }
 
-      debugPrint('✅ User logged out successfully');
+      debugPrint('✅ User logged out (full, token revoked)');
     } catch (e) {
       debugPrint('❌ Error during logout: $e');
       rethrow;
@@ -2798,7 +2795,6 @@ static Future<void> logoutForContinue() async {
     String? city,
   }) async {
     try {
-     
       final profiles = await getProfiles();
       final index = profiles.indexWhere((p) => p['email'] == email);
 
@@ -2819,7 +2815,6 @@ static Future<void> logoutForContinue() async {
 
       // Save to SharedPreferences
       await _prefs.setString(_keyProfiles, jsonEncode(profiles));
-    
     } catch (e) {
       debugPrint('❌ Error updating profile in storage: $e');
     }
@@ -2827,13 +2822,12 @@ static Future<void> logoutForContinue() async {
 
   ///  Force update available profiles with latest photos from saved_profiles
   static Future<void> forceSyncAvailableProfiles() async {
-    try {     
-
+    try {
       // Get saved profiles with latest data
-      final savedProfiles = await getProfiles();    
+      final savedProfiles = await getProfiles();
 
       // Get current available profiles
-      final availableProfiles = await getAvailableProfiles();     
+      final availableProfiles = await getAvailableProfiles();
 
       // Create a map of (email + role) -> photo from saved_profiles
       final Map<String, String> photoMap = {};
@@ -2846,7 +2840,7 @@ static Future<void> logoutForContinue() async {
           // For each role, map email+role to photo
           for (var role in roles) {
             final key = '$email-$role';
-            photoMap[key] = photo;           
+            photoMap[key] = photo;
           }
           // Also map just email for fallback
           photoMap[email] = photo;
@@ -2873,7 +2867,7 @@ static Future<void> logoutForContinue() async {
           newPhoto = photoMap[email];
         }
 
-        if (newPhoto != null && newPhoto.isNotEmpty) {        
+        if (newPhoto != null && newPhoto.isNotEmpty) {
           return {
             ...p,
             'photo': newPhoto,
@@ -2885,107 +2879,96 @@ static Future<void> logoutForContinue() async {
 
       // Save updated available profiles
       await saveAvailableProfiles(updatedProfiles);
-        
     } catch (e) {
       debugPrint('❌ Error force syncing available profiles: $e');
     }
   }
 
-// restoreSessionDirectly
+  // restoreSessionDirectly
 
-static Future<bool> restoreSessionDirectly(String email) async {
-  try {
-    debugPrint('🔄 Attempting direct session restore for: $email');
-
-    final profile = await getProfileByEmail(email);
-    if (profile == null || profile.isEmpty) {
-      debugPrint('❌ Profile not found');
-      return false;
-    }
-
-    final userId = profile['userId'] as String?;
-    if (userId == null) {
-      debugPrint('❌ No user ID found');
-      return false;
-    }
-
-    // ✅ Get refresh token
-    String? refreshToken;
+  static Future<bool> restoreSessionDirectly(String email) async {
     try {
-      refreshToken = await _secureStorage.read(
-        key: '${userId}_refresh_token',
-        aOptions: _getAndroidOptions(),
-        iOptions: _getIOSOptions(),
-      );
+      final profile = await getProfileByEmail(email);
+      if (profile == null || profile.isEmpty) return false;
+
+      final userId = profile['userId'] as String?;
+      if (userId == null) return false;
+
+      String? refreshToken;
+      try {
+        refreshToken = await _secureStorage.read(
+          key: '${userId}_refresh_token',
+          aOptions: _getAndroidOptions(),
+          iOptions: _getIOSOptions(),
+        );
+      } catch (e) {
+        debugPrint('⚠️ Secure storage read failed: $e');
+      }
+
+      if (refreshToken == null || refreshToken.isEmpty) return false;
+
+      final supabase = Supabase.instance.client;
+      final currentUser = supabase.auth.currentUser;
+      if (currentUser?.email == email) {
+        final session = supabase.auth.currentSession;
+        if (session != null && isSessionValid(session)) return true;
+      }
+
+      bool shouldCleanup = false;
+      String? lastError;
+
+      try {
+        final response = await supabase.auth.refreshSession(refreshToken);
+        if (response.session != null && response.user?.email == email) {
+          await updateLastLogin(email);
+          await _updateSecureTokens(userId, response.session!);
+          return true;
+        }
+      } on AuthApiException catch (e) {
+        lastError = '${e.code}: ${e.message}';
+        if (e.code == 'refresh_token_not_found' ||
+            e.code == 'refresh_token_already_used' ||
+            e.code == 'invalid_grant') {
+          shouldCleanup = true;
+        }
+      } catch (e) {
+        lastError = e.toString();
+      }
+
+      if (!shouldCleanup) {
+        try {
+          await supabase.auth.setSession(refreshToken);
+          await Future.delayed(const Duration(milliseconds: 500));
+          final user = supabase.auth.currentUser;
+          final session = supabase.auth.currentSession;
+          if (user?.email == email && session != null) {
+            await _updateSecureTokens(userId, session);
+            await updateLastLogin(email);
+            return true;
+          }
+        } on AuthApiException catch (e) {
+          lastError = '${e.code}: ${e.message}';
+          if (e.code == 'refresh_token_not_found' ||
+              e.code == 'refresh_token_already_used' ||
+              e.code == 'invalid_grant') {
+            shouldCleanup = true;
+          }
+        } catch (e) {
+          lastError = e.toString();
+        }
+      }
+
+      if (shouldCleanup) {
+        debugPrint('🧹 Token confirmed invalid ($lastError) - clearing');
+        await _cleanupInvalidSession(userId, email);
+      } else {
+        debugPrint('⚠️ Session restore failed, keeping token ($lastError)');
+      }
+
+      return false;
     } catch (e) {
-      debugPrint('⚠️ Secure storage read failed: $e');
-      refreshToken = _prefs.getString('${userId}_refresh_token_fallback');
-    }
-
-    if (refreshToken == null || refreshToken.isEmpty) {
-      debugPrint('❌ No refresh token found');
+      debugPrint('❌ Direct session restore error: $e');
       return false;
     }
-
-    debugPrint('🔑 Refresh token found, restoring session...');
-
-    final supabaseClient = Supabase.instance.client;
-
-    // ✅ Check if already logged in
-    final currentUser = supabaseClient.auth.currentUser;
-    if (currentUser?.email == email) {
-      final currentSession = supabaseClient.auth.currentSession;
-      if (currentSession != null && isSessionValid(currentSession)) {
-        debugPrint('✅ Already have valid session');
-        return true;
-      }
-    }
-
-    // ═══════════════════════════════════════════════════════════
-    // 🔥 FIX: refreshSession(token) - token එක explicit pass කරනවා
-    // ═══════════════════════════════════════════════════════════
-    try {
-      debugPrint('🔄 Direct restore - Attempt 1: refreshSession(with token)...');
-      final response = await supabaseClient.auth.refreshSession(refreshToken);
-      if (response.session != null && response.user?.email == email) {
-        debugPrint('✅ Session restored via refreshSession');
-        await updateLastLogin(email);
-        await _updateSecureTokens(userId, response.session!);
-        return true;
-      }
-    } catch (refreshError) {
-      debugPrint('⚠️ refreshSession failed in restoreDirectly: $refreshError');
-    }
-
-    // ═══════════════════════════════════════════════════════════
-    // 🔥 FALLBACK: setSession(token) - web/mobile දෙකටම try කරනවා
-    // ═══════════════════════════════════════════════════════════
-    try {
-      debugPrint('🔄 Direct restore - Attempt 2: setSession(with token)...');
-      await supabaseClient.auth.setSession(refreshToken);
-      await Future.delayed(const Duration(milliseconds: 500));
-
-      final user = supabaseClient.auth.currentUser;
-      final session = supabaseClient.auth.currentSession;
-
-      if (user?.email == email && session != null) {
-        debugPrint('✅ Session restored via setSession');
-        await _updateSecureTokens(userId, session);
-        await updateLastLogin(email);
-        return true;
-      }
-    } catch (setError) {
-      debugPrint('⚠️ setSession failed in restoreDirectly: $setError');
-    }
-
-    // ✅ දෙකම fail උනොත් විතරයි clean up කරන්නේ
-    await _cleanupInvalidSession(userId, email);
-
-    debugPrint('❌ Session restore failed');
-    return false;
-  } catch (e) {
-    debugPrint('❌ Direct session restore error: $e');
-    return false;
   }
-}
 }
