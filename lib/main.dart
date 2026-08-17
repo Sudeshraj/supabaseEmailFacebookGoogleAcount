@@ -258,6 +258,31 @@ Future<void> _validateSessionOnResume() async {
 
     final currentUser = Supabase.instance.client.auth.currentUser;
     if (currentUser == null) {
+      // ═══════════════════════════════════════════════════════════
+      // 🔥 FIX: User දැනටමත් Continue/Login screen එකේ ඉන්නවා නම්
+      // (e.g. profile card එකක් click කරලා native OAuth picker
+      // එකක් pending තියෙද්දී app එක brief moment එකකට
+      // pause/resume වුනොත්), background auto-login එකක් inject
+      // කරන්නේ නෑ. attemptAutoLogin() "most recent profile" එකටම
+      // silently login කරන්න පුළුවන් - user manually login වෙන්න
+      // try කරගෙන ඉන්නවනම් වෙනත් profile එකකට - router redirect
+      // එකෙන් user ව wrong dashboard එකකට ඇදගෙන යා හැක.
+      // ═══════════════════════════════════════════════════════════
+      String? currentPath;
+      try {
+        currentPath =
+            router.routerDelegate.currentConfiguration.last.matchedLocation;
+      } catch (_) {
+        currentPath = null;
+      }
+
+      if (currentPath == '/continue' || currentPath == '/login') {
+        debugPrint(
+          '⏭️ On $currentPath - skipping background auto-login (avoiding wrong-profile race)',
+        );
+        return;
+      }
+
       final rememberMe = await SessionManager.isRememberMeEnabled();
       if (rememberMe) {
         debugPrint('Attempting auto-login...');
@@ -343,7 +368,6 @@ Future<void> main() async {
     }
 
     // ========== PHASE 4: NOTIFICATION SERVICE ==========
-    // await NotificationService().init();
     final notificationService = NotificationService();
 
     // ✅ Web සහ Mobile දෙකටම - Permission ඉල්ලන්නේ නැහැ
@@ -353,7 +377,9 @@ Future<void> main() async {
     );
 
     // ========== PHASE 5: PLATFORM CONFIG ==========
-    await _setupPlatformSpecificConfig();
+    // ⚠️ MOVED: deep link setup (_setupPlatformSpecificConfig) is no
+    // longer called here. It's moved to PHASE 9B, AFTER the router
+    // is created - see the note there for why.
 
     // ========== PHASE 6: SERVICES ==========
     await SessionManager.init();
@@ -370,6 +396,20 @@ Future<void> main() async {
 
     // ========== PHASE 9: ROUTER ==========
     router = _createRouter();
+
+    // ========== PHASE 9B: PLATFORM CONFIG (deep links) ==========
+    // ✅ FIX: Moved here, AFTER router creation. Previously this ran
+    // in PHASE 5 (before the router existed). On a cold start via a
+    // deep link (e.g. Facebook/Apple browser-fallback OAuth on
+    // Android), _setupMobileDeepLinks() -> getInitialLink() ->
+    // _handleDeepLink() would call router.go(), but `router` was
+    // still an uninitialized `late` variable at that point - this
+    // threw a LateInitializationError that was silently swallowed
+    // by a try-catch, so the OAuth callback was silently dropped
+    // and the user appeared "stuck" after completing sign-in.
+    // Router is now guaranteed to exist before any deep link is
+    // processed.
+    await _setupPlatformSpecificConfig();
 
     // ========== PHASE 10: LIFECYCLE ==========
     WidgetsBinding.instance.addObserver(AppLifecycleObserver());
