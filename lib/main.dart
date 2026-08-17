@@ -9,6 +9,7 @@ import 'package:flutter_application_1/screens/authantication/command/auth_callba
 import 'package:flutter_application_1/screens/authantication/command/clear_data_screen.dart';
 import 'package:flutter_application_1/screens/authantication/command/common_screen.dart';
 import 'package:flutter_application_1/screens/authantication/command/data_consent_screen.dart';
+import 'package:flutter_application_1/screens/authantication/command/email_verify_checker.dart';
 import 'package:flutter_application_1/screens/authantication/command/policy_screen.dart';
 import 'package:flutter_application_1/screens/authantication/command/registration_flow.dart';
 import 'package:flutter_application_1/screens/authantication/command/reset_password_confirm.dart';
@@ -277,14 +278,14 @@ String getFlavor() {
   if (cmdFlavor.isNotEmpty) {
     return cmdFlavor;
   }
-  
+
   // 2. නැත්නම් mode එක අනුව(main mode 3i)
   if (kDebugMode) {
-    return 'development';//development
+    return 'development'; //development
   } else if (kProfileMode) {
-    return 'staging';//profile
+    return 'staging'; //profile
   } else {
-    return 'production';//release
+    return 'production'; //release
   }
 }
 
@@ -302,7 +303,7 @@ Future<void> main() async {
     environment = EnvironmentManager();
     final flavor = getFlavor();
     await environment.init(flavor: flavor);
-   
+
     // ========== PHASE 2: SUPABASE ==========
     await Supabase.initialize(
       url: environment.supabaseUrl,
@@ -951,7 +952,11 @@ GoRouter _createRouter() {
           final user = appState.currentUser;
           return MaterialPage(child: RegistrationFlow(user: user));
         },
-      ),     
+      ),
+      GoRoute(
+        path: '/verify-email',
+        builder: (_, _) => const EmailVerifyChecker(),
+      ),
       GoRoute(
         path: '/verify-invalid',
         builder: (_, _) => const VerifyInvalidScreen(),
