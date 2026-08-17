@@ -395,11 +395,22 @@ void _setupAuthStateListener() {
   supabase.auth.onAuthStateChange.listen((data) async {
     final event = data.event;
 
-    if (event == AuthChangeEvent.signedIn) {
-      debugPrint('🔄 Refreshing app state...');
-      appState.refreshState();
+    // Keeps secure storage in sync the instant Supabase rotates
+    // the refresh token in the background, so a logout that
+    // happens moments later never saves an already-dead token.
+    if (event == AuthChangeEvent.tokenRefreshed) {
+      final session = data.session;
+      final user = supabase.auth.currentUser;
+      if (session != null && user?.email != null) {
+        await SessionManager.saveRefreshToken(
+          user!.email!,
+          session.refreshToken,
+        );
+      }
+    }
 
-      // ✅ Login වුනාම locally save වෙච්ච FCM token එක Supabase එකට sync කරන්න
+    if (event == AuthChangeEvent.signedIn) {
+      appState.refreshState();
       await NotificationService().syncPendingToken();
     }
 
