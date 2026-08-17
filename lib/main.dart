@@ -102,55 +102,17 @@ const String cmdFlavor = String.fromEnvironment('flavor', defaultValue: '');
 
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  // ✅ Initialize Firebase for background isolate
+  // Initialize Firebase for background isolate
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-
   final notificationService = NotificationService();
-
-  // ✅ Show notification in background
+  // Show notification in background
   if (!notificationService.isWeb) {
     await notificationService.showMobileNotification(message);
-
-    // ✅ Save notification to database
-    final userId = message.data['userId'];
-    if (userId != null && userId.isNotEmpty) {
-      try {
-        final supabase = Supabase.instance.client;
-        await supabase.from('notifications').insert({
-          'user_id': userId,
-          'title': message.notification?.title ?? 'Notification',
-          'body': message.notification?.body ?? '',
-          'type': message.data['type'] ?? 'general',
-          'data': message.data,
-          'is_read': false,
-          'created_at': DateTime.now().toIso8601String(),
-        });
-      } catch (e) {
-        debugPrint('❌ Background notification save error: $e');
-      }
-    }
   }
-
-  // ✅ Android 16 (API 36) - Schedule background sync if needed
-  if (message.data['sync_required'] == 'true') {
-    await Workmanager().registerOneOffTask(
-      "sync_${DateTime.now().millisecondsSinceEpoch}",
-      "supabaseDataSyncTask",
-      initialDelay: const Duration(seconds: 5),
-      constraints: Constraints(
-        networkType: NetworkType.connected,
-        requiresBatteryNotLow: true,
-      ),
-      inputData: message.data,
-      existingWorkPolicy: ExistingWorkPolicy.keep,
-    );
-  }
-
-  debugPrint('📨 Background message processed: ${message.messageId}');
 }
 
 // ==========================================
-// 🔥 WORKMANAGER CALLBACK DISPATCHER
+// WORKMANAGER CALLBACK DISPATCHER
 // ==========================================
 
 @pragma('vm:entry-point')
@@ -160,16 +122,16 @@ void callbackDispatcher() {
 
     if (task == "supabaseDataSyncTask") {
       try {
-        // ✅ Initialize Firebase for background
-        await Firebase.initializeApp(
-          options: DefaultFirebaseOptions.currentPlatform,
-        );
+        // Initialize Firebase for background
+        // await Firebase.initializeApp(
+        //   options: DefaultFirebaseOptions.currentPlatform,
+        // );
 
-        // ✅ Initialize Supabase
-        await Supabase.initialize(
-          url: environment.supabaseUrl,
-          publishableKey: environment.supabaseAnonKey,
-        );
+        // Initialize Supabase
+        // await Supabase.initialize(
+        //   url: environment.supabaseUrl,
+        //   publishableKey: environment.supabaseAnonKey,
+        // );
 
         debugPrint("📥 Syncing data with Supabase...");
 
