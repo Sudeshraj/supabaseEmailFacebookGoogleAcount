@@ -10,6 +10,7 @@ class DashboardStatCard extends StatelessWidget {
   final String? subtitle;
   final double? percentageChange;
   final bool showProgress;
+  final double progressValue;
 
   const DashboardStatCard({
     super.key,
@@ -22,117 +23,149 @@ class DashboardStatCard extends StatelessWidget {
     this.subtitle,
     this.percentageChange,
     this.showProgress = false,
+    this.progressValue = 0.7,
   });
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: fullWidth ? double.infinity : null,
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.grey.withValues(alpha: 0.1),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Icon and Value Row
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: color.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(
-                    icon,
-                    color: color,
-                    size: 24,
-                  ),
-                ),
-                const Spacer(),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      value,
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: color,
+    // ✅ Responsive sizing
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isTablet = screenWidth >= 600;
+    
+    final padding = isTablet ? 20.0 : 16.0;
+    final iconSize = isTablet ? 28.0 : 24.0;
+    final valueSize = isTablet ? 28.0 : 24.0;
+    final titleSize = isTablet ? 16.0 : 14.0;
+    final subtitleSize = isTablet ? 13.0 : 12.0;
+    final iconPadding = isTablet ? 12.0 : 10.0;
+    final borderRadius = isTablet ? 20.0 : 16.0;
+    final minHeight = isTablet ? 120.0 : 100.0;
+
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(borderRadius),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(borderRadius),
+        splashColor: color.withValues(alpha: 0.1),
+        highlightColor: color.withValues(alpha: 0.05),
+        child: Container(
+          width: fullWidth ? double.infinity : null,
+          constraints: BoxConstraints(
+            minHeight: minHeight, // ✅ Minimum touch target
+          ),
+          padding: EdgeInsets.all(padding),
+          decoration: BoxDecoration(
+            color: Theme.of(context).cardColor, // ✅ Dark mode support
+            borderRadius: BorderRadius.circular(borderRadius),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.grey.withValues(alpha: 0.1),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              // Icon and Value Row
+              Row(
+                children: [
+                  Container(
+                    padding: EdgeInsets.all(iconPadding),
+                    decoration: BoxDecoration(
+                      color: color.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(
+                        isTablet ? 14.0 : 12.0,
                       ),
                     ),
-                    if (percentageChange != null)
-                      Row(
-                        children: [
-                          Icon(
-                            percentageChange! >= 0
-                                ? Icons.arrow_upward
-                                : Icons.arrow_downward,
-                            size: 14,
-                            color: percentageChange! >= 0
-                                ? Colors.green
-                                : Colors.red,
-                          ),
-                          const SizedBox(width: 2),
-                          Text(
-                            '${percentageChange!.abs()}%',
-                            style: TextStyle(
-                              fontSize: 12,
+                    child: Icon(
+                      icon,
+                      color: color,
+                      size: iconSize,
+                    ),
+                  ),
+                  const Spacer(),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        value,
+                        style: TextStyle(
+                          fontSize: valueSize,
+                          fontWeight: FontWeight.bold,
+                          color: color,
+                          height: 1.2,
+                        ),
+                      ),
+                      if (percentageChange != null)
+                        Row(
+                          children: [
+                            Icon(
+                              percentageChange! >= 0
+                                  ? Icons.arrow_upward
+                                  : Icons.arrow_downward,
+                              size: isTablet ? 16 : 14,
                               color: percentageChange! >= 0
                                   ? Colors.green
                                   : Colors.red,
-                              fontWeight: FontWeight.w600,
                             ),
-                          ),
-                        ],
-                      ),
-                  ],
+                            const SizedBox(width: 2),
+                            Text(
+                              '${percentageChange!.abs()}%',
+                              style: TextStyle(
+                                fontSize: isTablet ? 13 : 12,
+                                color: percentageChange! >= 0
+                                    ? Colors.green
+                                    : Colors.red,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              // Title
+              Text(
+                title,
+                style: TextStyle(
+                  fontSize: titleSize,
+                  fontWeight: FontWeight.w500,
+                  color: Colors.grey[700],
+                  height: 1.2,
+                ),
+              ),
+              // Subtitle
+              if (subtitle != null) ...[
+                const SizedBox(height: 4),
+                Text(
+                  subtitle!,
+                  style: TextStyle(
+                    fontSize: subtitleSize,
+                    color: Colors.grey[500],
+                  ),
                 ),
               ],
-            ),
-            const SizedBox(height: 12),
-            // Title
-            Text(
-              title,
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
-                color: Colors.grey[700],
-              ),
-            ),
-            // Subtitle
-            if (subtitle != null) ...[
-              const SizedBox(height: 4),
-              Text(
-                subtitle!,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey[500],
+              // Progress indicator
+              if (showProgress) ...[
+                const SizedBox(height: 12),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: LinearProgressIndicator(
+                    value: progressValue.clamp(0.0, 1.0),
+                    backgroundColor: Colors.grey[200],
+                    valueColor: AlwaysStoppedAnimation<Color>(color),
+                    minHeight: isTablet ? 6 : 4,
+                  ),
                 ),
-              ),
+              ],
             ],
-            // Progress indicator
-            if (showProgress) ...[
-              const SizedBox(height: 12),
-              LinearProgressIndicator(
-                value: 0.7, // Example value
-                backgroundColor: Colors.grey[200],
-                valueColor: AlwaysStoppedAnimation<Color>(color),
-                borderRadius: BorderRadius.circular(4),
-              ),
-            ],
-          ],
+          ),
         ),
       ),
     );
