@@ -50,15 +50,17 @@ import 'package:flutter_application_1/screens/owner/service_management.dart';
 import 'package:flutter_application_1/screens/settings/profile_management_screen.dart';
 import 'package:flutter_application_1/screens/settings/profile_screen.dart';
 import 'package:flutter_application_1/screens/settings/settings_screen.dart';
+import 'package:flutter_application_1/theme/app_theme.dart';
 import 'package:flutter_application_1/services/notification_service.dart';
 import 'package:flutter_application_1/services/timezone_service.dart';
 import 'package:flutter_application_1/utils/app_version.dart';
 import 'package:go_router/go_router.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:workmanager/workmanager.dart';
 
 import 'config/environment_manager.dart';
+
+import 'package:flutter_application_1/theme/theme_notifier.dart';
 
 // Screens
 import 'screens/authantication/command/splash.dart';
@@ -95,6 +97,9 @@ StreamSubscription<Uri>? _linkSubscription;
 
 //command eken flavor eka ganima
 const String cmdFlavor = String.fromEnvironment('flavor', defaultValue: '');
+
+// ✅ Global ThemeNotifier instance එක define කරන්න
+final ThemeNotifier themeNotifier = ThemeNotifier();
 
 // ==========================================
 // FIREBASE BACKGROUND MESSAGE HANDLER | BACKGROUND TOOLCHAIN (TOP-LEVEL FUNCTIONS)
@@ -1494,12 +1499,41 @@ class _MyAppState extends State<MyApp> {
   // more than once at a time (appState can notify listeners
   // several times while pendingDeletionRestore stays true).
   bool _restoreDialogShowing = false;
-
+  ThemeMode themeMode = ThemeMode.system;
   @override
   void initState() {
     super.initState();
     _initNetworkMonitoring();
     appState.addListener(_onAppStateChanged);
+    _loadThemeMode();
+     themeNotifier.addListener(_onThemeChanged);
+  }
+
+    void _onThemeChanged() {
+    // Theme change වුනාම rebuild වෙන්න
+    setState(() {});
+  }
+
+  Future<void> _loadThemeMode() async {
+    final themeModeString = await SessionManager.getThemeMode();
+    setState(() {
+      themeMode = themeModeString == 'light' 
+          ? ThemeMode.light 
+          : themeModeString == 'dark' 
+              ? ThemeMode.dark 
+              : ThemeMode.system;
+    });
+  }
+
+    Future<void> refreshTheme() async {
+    final themeModeString = await SessionManager.getThemeMode();
+    setState(() {
+      themeMode = themeModeString == 'light' 
+          ? ThemeMode.light 
+          : themeModeString == 'dark' 
+              ? ThemeMode.dark 
+              : ThemeMode.system;
+    });
   }
 
   void _initNetworkMonitoring() {
@@ -1657,6 +1691,7 @@ class _MyAppState extends State<MyApp> {
     _networkService.dispose();
     _linkSubscription?.cancel();
     appState.removeListener(_onAppStateChanged);
+    themeNotifier.removeListener(_onThemeChanged);
     super.dispose();
   }
 
@@ -1667,23 +1702,11 @@ class _MyAppState extends State<MyApp> {
       scaffoldMessengerKey: messengerKey,
       debugShowCheckedModeBanner: false,
       title: 'Salon Management',
-      theme: ThemeData(
-        textTheme: GoogleFonts.notoSansTextTheme(),
-        primaryColor: const Color(0xFFFF6B8B),
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFFFF6B8B),
-          primary: const Color(0xFFFF6B8B),
-        ),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFFFF6B8B),
-          foregroundColor: Colors.white,
-          elevation: 0,
-        ),
-        floatingActionButtonTheme: const FloatingActionButtonThemeData(
-          backgroundColor: Color(0xFFFF6B8B),
-          foregroundColor: Colors.white,
-        ),
-      ),
+
+      theme: AppTheme.lightTheme,
+      darkTheme: AppTheme.darkTheme,
+      themeMode: themeNotifier.currentTheme,
+
       builder: (context, child) {
         return Stack(
           children: [

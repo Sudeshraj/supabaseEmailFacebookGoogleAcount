@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_application_1/main.dart';
 import 'package:flutter_application_1/services/auth_provider_service.dart';
+import 'package:flutter_application_1/widgets/side_menu.dart';
+import 'package:flutter_application_1/extensions/context_extensions.dart';
+import 'package:flutter_application_1/services/session_manager.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -17,10 +20,48 @@ class _SettingsScreenState extends State<SettingsScreen> {
   int _oauthCount = 0;
   bool _isLoading = true;
 
+  // ✅ Theme state
+  ThemeMode _currentTheme = ThemeMode.system;
+
+  // ✅ GlobalKey for Scaffold
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+
   @override
   void initState() {
     super.initState();
     _checkAuthProviders();
+    _loadThemeMode();
+    themeNotifier.addListener(_onThemeChanged);
+  }
+
+  void _onThemeChanged() {
+    setState(() {
+      _currentTheme = themeNotifier.currentTheme;
+    });
+  }
+
+  @override
+  void dispose() {
+    themeNotifier.removeListener(_onThemeChanged);
+    super.dispose();
+  }
+
+  Future<void> _loadThemeMode() async {
+    final themeMode = await SessionManager.getThemeMode();
+    setState(() {
+      _currentTheme = themeMode == 'light' 
+          ? ThemeMode.light 
+          : themeMode == 'dark' 
+              ? ThemeMode.dark 
+              : ThemeMode.system;
+    });
+  }
+
+  void _changeTheme(ThemeMode mode) {
+    themeNotifier.setTheme(mode);
+    setState(() {
+      _currentTheme = mode;
+    });
   }
 
   Future<void> _checkAuthProviders() async {
@@ -39,284 +80,515 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // ✅ Responsive sizing
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isWeb = screenWidth > 800;
+    final isTablet = screenWidth > 600 && screenWidth <= 800;
+    final contentWidth = isWeb ? 1000.0 : double.infinity;
+
     return Scaffold(
+      key: _scaffoldKey,
+      drawer: SideMenu(
+        userRole: appState.currentRole ?? 'customer',
+        userName: appState.currentUser?.userMetadata?['full_name'] ?? 'User',
+        userEmail: appState.currentEmail,
+        profileImageUrl: appState.currentUser?.userMetadata?['avatar_url'],
+        selectedSalonId: null,
+        onMenuItemSelected: () {},
+      ),
       appBar: AppBar(
-        title: const Text('Settings'),
-        backgroundColor: const Color(0xFFFF6B8B),
+        leading: IconButton(
+          icon: const Icon(Icons.menu, color: Colors.white),
+          onPressed: () {
+            _scaffoldKey.currentState?.openDrawer();
+          },
+          tooltip: 'Menu',
+        ),
+        title: const Text(
+          'Settings',
+          style: TextStyle(color: Colors.white),
+        ),
+        backgroundColor: context.primaryColor,
         foregroundColor: Colors.white,
         elevation: 0,
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh, color: Colors.white),
             onPressed: _checkAuthProviders,
             tooltip: 'Refresh',
           ),
         ],
       ),
       body: _isLoading
-          ? const Center(
+          ? Center(
               child: CircularProgressIndicator(
-                color: Color(0xFFFF6B8B),
+                color: context.primaryColor,
               ),
             )
-          : ListView(
-              children: [
-                // ============================================================
-                // ✅ PROFILE MANAGEMENT SECTION
-                // ============================================================
-                _buildSectionHeader('Profile Management'),
-
-                ListTile(
-                  leading: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFF6B8B).withValues(alpha:0.1),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.people_outline,
-                      color: Color(0xFFFF6B8B),
-                    ),
+          : Center(
+              child: Container(
+                constraints: BoxConstraints(maxWidth: contentWidth),
+                child: ListView(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: isWeb ? 24 : 16,
+                    vertical: 8,
                   ),
-                  title: const Text('Manage Profiles'),
-                  subtitle: const Text('Switch between your owner, barber, or customer roles'),
-                  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                  onTap: () {
-                    context.push('/settings/profiles');
-                  },
-                ),
+                  children: [
+                    // ============================================================
+                    // ✅ THEME SECTION - Dashboard Card Style
+                    // ============================================================
+                    _buildSectionHeader('Appearance'),
 
-                const Divider(),
-
-                // ============================================================
-                // ✅ ACCOUNT SECTION
-                // ============================================================
-                _buildSectionHeader('Account'),
-
-                // ✅ Personal Information
-                ListTile(
-                  leading: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.blue.withValues(alpha:0.1),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(Icons.person_outline, color: Colors.blue),
-                  ),
-                  title: const Text('Personal Information'),
-                  subtitle: const Text('Edit your profile details'),
-                  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                  onTap: () {
-                    context.push('/profile');
-                  },
-                ),
-
-                // ✅ Change Password - Only for Email/Password users
-                if (_hasEmailPassword)
-                  ListTile(
-                    leading: Container(
-                      padding: const EdgeInsets.all(8),
+                    Container(
+                      width: double.infinity,
+                      padding: EdgeInsets.all(isTablet ? 20 : 16),
                       decoration: BoxDecoration(
-                        color: Colors.purple.withValues(alpha:0.1),
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(Icons.lock_outline, color: Colors.purple),
-                    ),
-                    title: const Text('Change Password'),
-                    subtitle: const Text('Update your account password'),
-                    trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                    onTap: () {
-                      context.push('/settings/change-password');
-                    },
-                  ),
-
-                // ✅ Authentication Settings - OAuth Management
-                ListTile(
-                  leading: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.green.withValues(alpha:0.1),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(Icons.security_outlined, color: Colors.green),
-                  ),
-                  title: const Text('Authentication Settings'),
-                  subtitle: _hasOAuth
-                      ? const Text('Manage connected accounts (Google, Facebook, Apple)')
-                      : const Text('Manage your authentication methods'),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (_hasOAuth)
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.green.withValues(alpha:0.1),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: Colors.green.withValues(alpha:0.3),
-                            ),
-                          ),
-                          child: Text(
-                            '$_oauthCount',
-                            style: TextStyle(
-                              fontSize: 10,
-                              color: Colors.green[700],
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
+                        color: context.cardColor,
+                        borderRadius: BorderRadius.circular(isTablet ? 20 : 16),
+                        border: Border.all(
+                          color: context.dividerColor,
                         ),
-                      const SizedBox(width: 4),
-                      const Icon(Icons.arrow_forward_ios, size: 16),
-                    ],
-                  ),
-                  onTap: () {
-                    context.push('/settings/auth');
-                  },
-                ),
-
-                // ✅ DELETE ACCOUNT - Dedicated, clearly-labeled entry
-                // Required for Google Play & Apple App Store discoverability
-                ListTile(
-                  leading: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.red.withValues(alpha: 0.1),
-                      shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.05),
+                            blurRadius: 10,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                padding: EdgeInsets.all(isTablet ? 12 : 10),
+                                decoration: BoxDecoration(
+                                  color: Colors.purple.withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(isTablet ? 14 : 12),
+                                ),
+                                child: Icon(
+                                  Icons.palette_outlined,
+                                  color: Colors.purple[400],
+                                  size: isTablet ? 24 : 22,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Theme',
+                                      style: context.bodyLarge.copyWith(
+                                        fontWeight: FontWeight.w600,
+                                        color: context.textColor,
+                                        fontSize: isTablet ? 18 : 16,
+                                      ),
+                                    ),
+                                    Text(
+                                      _getThemeModeText(),
+                                      style: context.bodySmall.copyWith(
+                                        color: context.secondaryTextColor,
+                                        fontSize: isTablet ? 14 : 13,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+                          
+                          // ✅ Responsive Theme Options
+                          isWeb || isTablet
+                              ? Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    _buildThemeOption(
+                                      icon: Icons.brightness_auto,
+                                      label: 'System',
+                                      mode: ThemeMode.system,
+                                      isSelected: _currentTheme == ThemeMode.system,
+                                      isTablet: isTablet,
+                                    ),
+                                    const SizedBox(width: 12),
+                                    _buildThemeOption(
+                                      icon: Icons.brightness_5,
+                                      label: 'Light',
+                                      mode: ThemeMode.light,
+                                      isSelected: _currentTheme == ThemeMode.light,
+                                      isTablet: isTablet,
+                                    ),
+                                    const SizedBox(width: 12),
+                                    _buildThemeOption(
+                                      icon: Icons.brightness_2,
+                                      label: 'Dark',
+                                      mode: ThemeMode.dark,
+                                      isSelected: _currentTheme == ThemeMode.dark,
+                                      isTablet: isTablet,
+                                    ),
+                                  ],
+                                )
+                              : Column(
+                                  children: [
+                                    _buildThemeOption(
+                                      icon: Icons.brightness_auto,
+                                      label: 'System',
+                                      mode: ThemeMode.system,
+                                      isSelected: _currentTheme == ThemeMode.system,
+                                      isTablet: false,
+                                    ),
+                                    const SizedBox(height: 8),
+                                    _buildThemeOption(
+                                      icon: Icons.brightness_5,
+                                      label: 'Light',
+                                      mode: ThemeMode.light,
+                                      isSelected: _currentTheme == ThemeMode.light,
+                                      isTablet: false,
+                                    ),
+                                    const SizedBox(height: 8),
+                                    _buildThemeOption(
+                                      icon: Icons.brightness_2,
+                                      label: 'Dark',
+                                      mode: ThemeMode.dark,
+                                      isSelected: _currentTheme == ThemeMode.dark,
+                                      isTablet: false,
+                                    ),
+                                  ],
+                                ),
+                        ],
+                      ),
                     ),
-                    child: const Icon(
-                      Icons.delete_forever_outlined,
-                      color: Colors.red,
+
+                    const SizedBox(height: 16),
+                    Divider(
+                      color: context.dividerColor,
+                      height: 1,
                     ),
-                  ),
-                  title: const Text('Delete Account'),
-                  subtitle: const Text('Permanently delete your account and data'),
-                  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                  onTap: () {
-                    context.push('/settings/delete-account');
-                  },
-                ),
+                    const SizedBox(height: 8),
 
-                const Divider(),
+                    // ============================================================
+                    // ✅ PROFILE MANAGEMENT SECTION
+                    // ============================================================
+                    _buildSectionHeader('Profile Management'),
 
-                // ============================================================
-                // ✅ PREFERENCES SECTION
-                // ============================================================
-                _buildSectionHeader('Preferences'),
-
-                ListTile(
-                  leading: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.orange.withValues(alpha:0.1),
-                      shape: BoxShape.circle,
+                    _buildSettingsTile(
+                      icon: Icons.people_outline,
+                      iconColor: context.primaryColor,
+                      title: 'Manage Profiles',
+                      subtitle: 'Switch between your owner, barber, or customer roles',
+                      onTap: () => context.push('/settings/profiles'),
+                      isTablet: isTablet,
                     ),
-                    child: const Icon(Icons.notifications_outlined, color: Colors.orange),
-                  ),
-                  title: const Text('Notifications'),
-                  subtitle: const Text('Manage your notification preferences'),
-                  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                  onTap: () {
-                    // ✅ FIXED: use actual current role instead of hardcoded 'customer'
-                    final role = appState.currentRole ?? 'customer';
-                    context.push('/notifications?role=$role');
-                  },
-                ),
 
-                ListTile(
-                  leading: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.purple.withValues(alpha:0.1),
-                      shape: BoxShape.circle,
+                    const SizedBox(height: 8),
+                    Divider(
+                      color: context.dividerColor,
+                      height: 1,
                     ),
-                    child: const Icon(Icons.language_outlined, color: Colors.purple),
-                  ),
-                  title: const Text('Language'),
-                  subtitle: const Text('Select your preferred language'),
-                  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                  onTap: () {
-                    // Navigate to language
-                  },
-                ),
+                    const SizedBox(height: 8),
 
-                ListTile(
-                  leading: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.teal.withValues(alpha:0.1),
-                      shape: BoxShape.circle,
+                    // ============================================================
+                    // ✅ ACCOUNT SECTION
+                    // ============================================================
+                    _buildSectionHeader('Account'),
+
+                    _buildSettingsTile(
+                      icon: Icons.person_outline,
+                      iconColor: Colors.blue,
+                      title: 'Personal Information',
+                      subtitle: 'Edit your profile details',
+                      onTap: () => context.push('/profile'),
+                      isTablet: isTablet,
                     ),
-                    child: const Icon(Icons.palette_outlined, color: Colors.teal),
-                  ),
-                  title: const Text('Theme'),
-                  subtitle: const Text('Choose light or dark theme'),
-                  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                  onTap: () {
-                    // Navigate to theme
-                  },
-                ),
 
-                const Divider(),
+                    if (_hasEmailPassword)
+                      _buildSettingsTile(
+                        icon: Icons.lock_outline,
+                        iconColor: Colors.purple,
+                        title: 'Change Password',
+                        subtitle: 'Update your account password',
+                        onTap: () => context.push('/settings/change-password'),
+                        isTablet: isTablet,
+                      ),
 
-                // ============================================================
-                // ✅ SUPPORT SECTION
-                // ============================================================
-                _buildSectionHeader('Support'),
-
-                ListTile(
-                  leading: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.grey.withValues(alpha:0.1),
-                      shape: BoxShape.circle,
+                    _buildSettingsTile(
+                      icon: Icons.security_outlined,
+                      iconColor: Colors.green,
+                      title: 'Authentication Settings',
+                      subtitle: _hasOAuth
+                          ? 'Manage connected accounts (Google, Facebook, Apple)'
+                          : 'Manage your authentication methods',
+                      onTap: () => context.push('/settings/auth'),
+                      isTablet: isTablet,
+                      badge: _hasOAuth ? '$_oauthCount' : null,
                     ),
-                    child: const Icon(Icons.help_outline, color: Colors.grey),
-                  ),
-                  title: const Text('Help & Support'),
-                  subtitle: const Text('Get help or contact support'),
-                  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                  onTap: () {
-                    context.push('/help');
-                  },
-                ),
 
-                ListTile(
-                  leading: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.grey.withValues(alpha:0.1),
-                      shape: BoxShape.circle,
+                    _buildSettingsTile(
+                      icon: Icons.delete_forever_outlined,
+                      iconColor: Colors.red,
+                      title: 'Delete Account',
+                      subtitle: 'Permanently delete your account and data',
+                      onTap: () => context.push('/settings/delete-account'),
+                      isTablet: isTablet,
                     ),
-                    child: const Icon(Icons.info_outline, color: Colors.grey),
-                  ),
-                  title: const Text('About'),
-                  subtitle: const Text('App version and information'),
-                  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                  onTap: () {
-                    context.push('/about');
-                  },
-                ),
 
-                const SizedBox(height: 20)
-              ],
+                    const SizedBox(height: 8),
+                    Divider(
+                      color: context.dividerColor,
+                      height: 1,
+                    ),
+                    const SizedBox(height: 8),
+
+                    // ============================================================
+                    // ✅ PREFERENCES SECTION
+                    // ============================================================
+                    _buildSectionHeader('Preferences'),
+
+                    _buildSettingsTile(
+                      icon: Icons.notifications_outlined,
+                      iconColor: Colors.orange,
+                      title: 'Notifications',
+                      subtitle: 'Manage your notification preferences',
+                      onTap: () {
+                        final role = appState.currentRole ?? 'customer';
+                        context.push('/notifications?role=$role');
+                      },
+                      isTablet: isTablet,
+                    ),
+
+                    _buildSettingsTile(
+                      icon: Icons.language_outlined,
+                      iconColor: Colors.purple,
+                      title: 'Language',
+                      subtitle: 'Select your preferred language',
+                      onTap: () {},
+                      isTablet: isTablet,
+                    ),
+
+                    const SizedBox(height: 8),
+                    Divider(
+                      color: context.dividerColor,
+                      height: 1,
+                    ),
+                    const SizedBox(height: 8),
+
+                    // ============================================================
+                    // ✅ SUPPORT SECTION
+                    // ============================================================
+                    _buildSectionHeader('Support'),
+
+                    _buildSettingsTile(
+                      icon: Icons.help_outline,
+                      iconColor: Colors.grey,
+                      title: 'Help & Support',
+                      subtitle: 'Get help or contact support',
+                      onTap: () => context.push('/help'),
+                      isTablet: isTablet,
+                    ),
+
+                    _buildSettingsTile(
+                      icon: Icons.info_outline,
+                      iconColor: Colors.grey,
+                      title: 'About',
+                      subtitle: 'App version and information',
+                      onTap: () => context.push('/about'),
+                      isTablet: isTablet,
+                    ),
+
+                    const SizedBox(height: 40),
+                  ],
+                ),
+              ),
             ),
     );
   }
 
+  // ============================================================
+  // ✅ SETTINGS TILE WIDGET (Reusable)
+  // ============================================================
+  Widget _buildSettingsTile({
+    required IconData icon,
+    required Color iconColor,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+    required bool isTablet,
+    String? badge,
+  }) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 4),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(isTablet ? 14 : 12),
+      ),
+      child: ListTile(
+        leading: Container(
+          padding: EdgeInsets.all(isTablet ? 10 : 8),
+          decoration: BoxDecoration(
+            color: iconColor.withValues(alpha: 0.1),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(
+            icon,
+            color: iconColor,
+            size: isTablet ? 24 : 22,
+          ),
+        ),
+        title: Text(
+          title,
+          style: context.bodyMedium.copyWith(
+            fontWeight: FontWeight.w600,
+            color: context.textColor,
+            fontSize: isTablet ? 16 : 15,
+          ),
+        ),
+        subtitle: Text(
+          subtitle,
+          style: context.bodySmall.copyWith(
+            color: context.secondaryTextColor,
+            fontSize: isTablet ? 14 : 13,
+          ),
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (badge != null)
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 2,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.green.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: Colors.green.withValues(alpha: 0.3),
+                  ),
+                ),
+                child: Text(
+                  badge,
+                  style: TextStyle(
+                    fontSize: isTablet ? 12 : 10,
+                    color: Colors.green[700],
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            const SizedBox(width: 4),
+            Icon(
+              Icons.arrow_forward_ios,
+              size: isTablet ? 18 : 16,
+              color: context.secondaryTextColor,
+            ),
+          ],
+        ),
+        onTap: onTap,
+        contentPadding: EdgeInsets.symmetric(
+          horizontal: isTablet ? 20 : 16,
+          vertical: isTablet ? 8 : 4,
+        ),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(isTablet ? 14 : 12),
+        ),
+        splashColor: iconColor.withValues(alpha: 0.1),
+        hoverColor: iconColor.withValues(alpha: 0.05),
+      ),
+    );
+  }
+
+  // ============================================================
+  // ✅ THEME OPTION WIDGET
+  // ============================================================
+  Widget _buildThemeOption({
+    required IconData icon,
+    required String label,
+    required ThemeMode mode,
+    required bool isSelected,
+    required bool isTablet,
+  }) {
+    final isDark = context.isDarkMode;
+    
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => _changeTheme(mode),
+        child: Container(
+          padding: EdgeInsets.symmetric(
+            vertical: isTablet ? 16 : 12,
+            horizontal: isTablet ? 12 : 8,
+          ),
+          decoration: BoxDecoration(
+            color: isSelected
+                ? (isDark ? Colors.white.withValues(alpha: 0.1) : const Color(0xFFFF6B8B).withValues(alpha: 0.1))
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(isTablet ? 14 : 12),
+            border: Border.all(
+              color: isSelected
+                  ? const Color(0xFFFF6B8B)
+                  : (isDark ? Colors.grey[700]! : Colors.grey[300]!),
+              width: isSelected ? 2 : 1,
+            ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                icon,
+                color: isSelected
+                    ? const Color(0xFFFF6B8B)
+                    : (isDark ? Colors.grey[400] : Colors.grey[600]),
+                size: isTablet ? 32 : 28,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                label,
+                style: context.bodySmall.copyWith(
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                  color: isSelected
+                      ? const Color(0xFFFF6B8B)
+                      : (isDark ? Colors.grey[400] : Colors.grey[600]),
+                  fontSize: isTablet ? 14 : 12,
+                ),
+              ),
+              if (isSelected)
+                const SizedBox(height: 2),
+              if (isSelected)
+                Container(
+                  width: isTablet ? 20 : 16,
+                  height: isTablet ? 4 : 3,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFF6B8B),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _getThemeModeText() {
+    switch (_currentTheme) {
+      case ThemeMode.light:
+        return 'Light Mode';
+      case ThemeMode.dark:
+        return 'Dark Mode';
+      default:
+        return 'System Default';
+    }
+  }
+
   Widget _buildSectionHeader(String title) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      padding: const EdgeInsets.fromLTRB(8, 16, 8, 8),
       child: Text(
         title,
-        style: TextStyle(
-          fontSize: 13,
+        style: context.bodySmall.copyWith(
           fontWeight: FontWeight.w600,
-          color: Colors.grey[600],
+          color: context.secondaryTextColor,
           letterSpacing: 0.5,
+          fontSize: context.isTablet ? 14 : 13,
         ),
       ),
     );

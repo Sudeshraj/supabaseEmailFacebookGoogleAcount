@@ -165,6 +165,22 @@ class SessionManager {
     }
   }
 
+  // ============================================================
+  // THEME PREFERENCES
+  // ============================================================
+  
+  static const String _keyThemeMode = 'theme_mode';
+
+  static Future<void> saveThemeMode(String mode) async {
+    await _prefs.setString(_keyThemeMode, mode);
+    debugPrint('✅ Theme mode saved: $mode');
+  }
+
+  static Future<String> getThemeMode() async {
+    return _prefs.getString(_keyThemeMode) ?? 'system';
+  }
+ // ============================================================
+ 
   static const String _keySalonId = 'salon_id';
   static const String _keySalonName = 'salon_name';
 
