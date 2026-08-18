@@ -1499,41 +1499,18 @@ class _MyAppState extends State<MyApp> {
   // more than once at a time (appState can notify listeners
   // several times while pendingDeletionRestore stays true).
   bool _restoreDialogShowing = false;
-  ThemeMode themeMode = ThemeMode.system;
+  // ThemeMode themeMode = ThemeMode.system;
   @override
   void initState() {
     super.initState();
     _initNetworkMonitoring();
     appState.addListener(_onAppStateChanged);
-    _loadThemeMode();
-     themeNotifier.addListener(_onThemeChanged);
+    themeNotifier.addListener(_onThemeChanged);
   }
 
-    void _onThemeChanged() {
+  void _onThemeChanged() {
     // Theme change වුනාම rebuild වෙන්න
     setState(() {});
-  }
-
-  Future<void> _loadThemeMode() async {
-    final themeModeString = await SessionManager.getThemeMode();
-    setState(() {
-      themeMode = themeModeString == 'light' 
-          ? ThemeMode.light 
-          : themeModeString == 'dark' 
-              ? ThemeMode.dark 
-              : ThemeMode.system;
-    });
-  }
-
-    Future<void> refreshTheme() async {
-    final themeModeString = await SessionManager.getThemeMode();
-    setState(() {
-      themeMode = themeModeString == 'light' 
-          ? ThemeMode.light 
-          : themeModeString == 'dark' 
-              ? ThemeMode.dark 
-              : ThemeMode.system;
-    });
   }
 
   void _initNetworkMonitoring() {
