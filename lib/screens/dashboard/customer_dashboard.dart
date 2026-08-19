@@ -12,7 +12,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:universal_platform/universal_platform.dart';
 import '../../services/timezone_service.dart';
-import '../../extensions/context_extensions.dart'; // ✅ NEW
+import '../../extensions/context_extensions.dart';
 
 class CustomerDashboard extends StatefulWidget {
   const CustomerDashboard({super.key});
@@ -486,6 +486,8 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   Widget _buildWebStep(String number, String text) {
+    final isDark = context.isDarkMode;
+
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -493,30 +495,41 @@ class _CustomerDashboardState extends State<CustomerDashboard>
           width: 24,
           height: 24,
           decoration: BoxDecoration(
-            color: const Color(0xFFFF6B8B).withAlpha(20),
+            color: AppTheme.primary.withAlpha(20),
             shape: BoxShape.circle,
           ),
           child: Center(
             child: Text(
               number,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.bold,
-                color: Color(0xFFFF6B8B),
+                color: AppTheme.primary,
               ),
             ),
           ),
         ),
         const SizedBox(width: 12),
-        Expanded(child: Text(text, style: const TextStyle(fontSize: 14))),
+        Expanded(
+          child: Text(
+            text,
+            style: TextStyle(
+              fontSize: 14,
+              color: isDark ? Colors.white : Colors.black87,
+            ),
+          ),
+        ),
       ],
     );
   }
 
   void _showSettingsDialog() {
+    final isDark = context.isDarkMode;
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
         title: const Text('🔔 Notifications Disabled'),
         content: const Text(
           'To enable notifications, please go to your device settings.',
@@ -532,7 +545,8 @@ class _CustomerDashboardState extends State<CustomerDashboard>
               _permissionService.openAppSettings();
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFFF6B8B),
+              backgroundColor: AppTheme.primary,
+              foregroundColor: Colors.white,
             ),
             child: const Text('Open Settings'),
           ),
@@ -866,18 +880,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
 
   void _viewVipBookings() {
     context.push('/customer/vip-bookings');
-  }
-
-  void _openDrawer() {
-    try {
-      if (_scaffoldKey.currentState != null) {
-        _scaffoldKey.currentState!.openDrawer();
-      } else {
-        Scaffold.of(context).openDrawer();
-      }
-    } catch (e) {
-      debugPrint('❌ Error opening drawer: $e');
-    }
   }
 
   // ============================================================
@@ -1278,7 +1280,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                 }
               },
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFFF6B8B),
+                backgroundColor: AppTheme.primary,
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
@@ -1380,7 +1382,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   Color _getDiscountColor(String? discountType) {
     switch (discountType) {
       case 'percentage':
-        return const Color(0xFFFF6B8B);
+        return AppTheme.primary;
       case 'fixed':
         return Colors.green.shade600;
       case 'free_service':
@@ -1665,23 +1667,21 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       margin: const EdgeInsets.symmetric(vertical: 2),
       decoration: BoxDecoration(
         color: isSelected
-            ? const Color(0xFFFF6B8B).withValues(alpha: 0.1)
+            ? AppTheme.primary.withValues(alpha: 0.1)
             : null,
         borderRadius: BorderRadius.circular(12),
       ),
       child: ListTile(
         leading: CircleAvatar(
           radius: 20,
-          backgroundColor: isSelected
-              ? const Color(0xFFFF6B8B)
-              : Colors.grey[200],
+          backgroundColor: isSelected ? AppTheme.primary : Colors.grey[200],
           child: Text(flag, style: const TextStyle(fontSize: 16)),
         ),
         title: Text(
           displayName,
           style: TextStyle(
             fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-            color: isSelected ? const Color(0xFFFF6B8B) : null,
+            color: isSelected ? AppTheme.primary : null,
           ),
         ),
         subtitle: Text(
@@ -1691,7 +1691,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
           overflow: TextOverflow.ellipsis,
         ),
         trailing: isSelected
-            ? const Icon(Icons.check_circle, color: Color(0xFFFF6B8B))
+            ? const Icon(Icons.check_circle, color: AppTheme.primary)
             : null,
         onTap: () => Navigator.of(context).pop(tz),
       ),
@@ -1737,15 +1737,15 @@ class _CustomerDashboardState extends State<CustomerDashboard>
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             decoration: BoxDecoration(
-              color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+              color: AppTheme.primary.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(20),
             ),
             child: Text(
               offset,
-              style: const TextStyle(
+              style: TextStyle(
                 fontWeight: FontWeight.bold,
                 fontSize: 11,
-                color: Color(0xFFFF6B8B),
+                color: AppTheme.primary,
               ),
             ),
           ),
@@ -1762,12 +1762,12 @@ class _CustomerDashboardState extends State<CustomerDashboard>
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+              color: AppTheme.primary.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(12),
             ),
             child: const Icon(
               Icons.access_time,
-              color: Color(0xFFFF6B8B),
+              color: AppTheme.primary,
               size: 28,
             ),
           ),
@@ -1778,7 +1778,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
               style: TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.bold,
-                color: Color(0xFFFF6B8B),
+                color: AppTheme.primary,
               ),
             ),
           ),
@@ -1925,9 +1925,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                                     height: 45,
                                     child: TabBar(
                                       isScrollable: true,
-                                      labelColor: const Color(0xFFFF6B8B),
+                                      labelColor: AppTheme.primary,
                                       unselectedLabelColor: Colors.grey,
-                                      indicatorColor: const Color(0xFFFF6B8B),
+                                      indicatorColor: AppTheme.primary,
                                       labelStyle: const TextStyle(
                                         fontWeight: FontWeight.w600,
                                         fontSize: 13,
@@ -2197,7 +2197,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
           color: Colors.transparent,
           child: Container(
             decoration: BoxDecoration(
-              color: context.cardColor, // 👈 Colors.white → context.cardColor
+              color: context.cardColor,
               borderRadius: BorderRadius.circular(12),
               boxShadow: [
                 BoxShadow(
@@ -2217,7 +2217,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                         height: 24,
                         child: CircularProgressIndicator(
                           strokeWidth: 2,
-                          color: Color(0xFFFF6B8B),
+                          color: AppTheme.primary,
                         ),
                       ),
                     ),
@@ -2265,7 +2265,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
               width: 45,
               height: 45,
               decoration: BoxDecoration(
-                color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                color: AppTheme.primary.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: salon['logo_url'] != null
@@ -2277,10 +2277,10 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                         errorBuilder: (context, error, stackTrace) => Center(
                           child: Text(
                             salon['name']?.substring(0, 1) ?? 'S',
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 20,
                               fontWeight: FontWeight.bold,
-                              color: Color(0xFFFF6B8B),
+                              color: AppTheme.primary,
                             ),
                           ),
                         ),
@@ -2289,10 +2289,10 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                   : Center(
                       child: Text(
                         salon['name']?.substring(0, 1) ?? 'S',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 20,
                           fontWeight: FontWeight.bold,
-                          color: Color(0xFFFF6B8B),
+                          color: AppTheme.primary,
                         ),
                       ),
                     ),
@@ -2304,16 +2304,20 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                 children: [
                   Text(
                     salon['name'] ?? 'Salon',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 14,
+                      color: context.textColor,
                     ),
                   ),
                   const SizedBox(height: 2),
                   if (salon['address'] != null)
                     Text(
                       salon['address'],
-                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: context.secondaryTextColor,
+                      ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -2323,12 +2327,15 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                       Icon(
                         Icons.access_time,
                         size: 10,
-                        color: Colors.grey[500],
+                        color: context.secondaryTextColor,
                       ),
                       const SizedBox(width: 2),
                       Text(
                         _getFormattedSalonHours(salon),
-                        style: TextStyle(fontSize: 10, color: Colors.grey[500]),
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: context.secondaryTextColor,
+                        ),
                       ),
                     ],
                   ),
@@ -2338,7 +2345,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
-                color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                color: AppTheme.primary.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Row(
@@ -2347,14 +2354,14 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                   const Icon(
                     Icons.chevron_right,
                     size: 14,
-                    color: Color(0xFFFF6B8B),
+                    color: AppTheme.primary,
                   ),
                   const SizedBox(width: 2),
                   Text(
                     'View',
                     style: TextStyle(
                       fontSize: 11,
-                      color: const Color(0xFFFF6B8B),
+                      color: AppTheme.primary,
                       fontWeight: FontWeight.w500,
                     ),
                   ),
@@ -2455,7 +2462,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
 
   Widget _buildResponsiveBookButton() {
     return ElevatedButton.icon(
-      // 👈 Expanded ඉවත් කළා
       onPressed: _bookAppointment,
       icon: const Icon(Icons.calendar_today, size: 18, color: Colors.white),
       label: const Text(
@@ -2467,10 +2473,12 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         ),
       ),
       style: ElevatedButton.styleFrom(
-        backgroundColor: const Color(0xFFFF6B8B),
+        backgroundColor: AppTheme.primary,
         foregroundColor: Colors.white,
         padding: const EdgeInsets.symmetric(vertical: 14),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
         elevation: 0,
       ),
     );
@@ -2478,7 +2486,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
 
   Widget _buildResponsiveVipButton() {
     return OutlinedButton.icon(
-      // 👈 Expanded ඉවත් කළා
       onPressed: _createVipBooking,
       icon: const Icon(Icons.star, size: 18, color: Colors.amber),
       label: const Text(
@@ -2492,7 +2499,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       style: OutlinedButton.styleFrom(
         side: const BorderSide(color: Colors.amber, width: 1.5),
         padding: const EdgeInsets.symmetric(vertical: 14),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
       ),
     );
   }
@@ -2538,7 +2547,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
               _viewMyBookings,
             ),
           ],
-          // 👆 GridView children ට Expanded දාන්න ඕන නෑ - GridView itself child sizing එක handle කරනවා
         ),
       );
     }
@@ -2589,7 +2597,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     VoidCallback onTap,
   ) {
     return GestureDetector(
-      // 👈 Expanded ඉවත් කළා
       onTap: onTap,
       child: Container(
         width: double.infinity,
@@ -2663,16 +2670,14 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                           errorBuilder: (context, error, stackTrace) =>
                               Container(
                                 height: _isTablet ? 130 : 100,
-                                color: const Color(
-                                  0xFFFF6B8B,
-                                ).withValues(alpha: 0.1),
+                                color: AppTheme.primary.withValues(alpha: 0.1),
                                 child: Center(
                                   child: Text(
                                     salon['name'][0].toUpperCase(),
                                     style: const TextStyle(
                                       fontSize: 40,
                                       fontWeight: FontWeight.bold,
-                                      color: Color(0xFFFF6B8B),
+                                      color: AppTheme.primary,
                                     ),
                                   ),
                                 ),
@@ -2680,14 +2685,14 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                         )
                       : Container(
                           height: _isTablet ? 130 : 100,
-                          color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                          color: AppTheme.primary.withValues(alpha: 0.1),
                           child: Center(
                             child: Text(
                               salon['name'][0].toUpperCase(),
                               style: const TextStyle(
                                 fontSize: 40,
                                 fontWeight: FontWeight.bold,
-                                color: Color(0xFFFF6B8B),
+                                color: AppTheme.primary,
                               ),
                             ),
                           ),
@@ -2800,15 +2805,13 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                         Container(
                           padding: const EdgeInsets.all(4),
                           decoration: BoxDecoration(
-                            color: const Color(
-                              0xFFFF6B8B,
-                            ).withValues(alpha: 0.1),
+                            color: AppTheme.primary.withValues(alpha: 0.1),
                             shape: BoxShape.circle,
                           ),
                           child: const Icon(
                             Icons.arrow_forward_ios,
                             size: 12,
-                            color: Color(0xFFFF6B8B),
+                            color: AppTheme.primary,
                           ),
                         ),
                       ],
@@ -2834,7 +2837,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
             height: 32,
             child: CircularProgressIndicator(
               strokeWidth: 2,
-              color: Color(0xFFFF6B8B),
+              color: AppTheme.primary,
             ),
           ),
         ),
@@ -2856,13 +2859,13 @@ class _CustomerDashboardState extends State<CustomerDashboard>
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                color: AppTheme.primary.withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
               child: Icon(
                 Icons.store_outlined,
                 size: 48,
-                color: const Color(0xFFFF6B8B).withValues(alpha: 0.5),
+                color: AppTheme.primary.withValues(alpha: 0.5),
               ),
             ),
             const SizedBox(height: 20),
@@ -2899,7 +2902,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                 width: 4,
                 height: 20,
                 decoration: const BoxDecoration(
-                  color: Color(0xFFFF6B8B),
+                  color: AppTheme.primary,
                   borderRadius: BorderRadius.horizontal(
                     right: Radius.circular(4),
                   ),
@@ -2990,6 +2993,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
 
   Widget _buildProfilePhoto() {
     final hasImage = _customerImage != null && _customerImage!.isNotEmpty;
+    final isDark = context.isDarkMode;
 
     return GestureDetector(
       onTap: _navigateToProfile,
@@ -3009,10 +3013,10 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                   _customerName.isNotEmpty
                       ? _customerName[0].toUpperCase()
                       : 'U',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
-                    color: Colors.white,
+                    color: isDark ? Colors.white : Colors.white,
                   ),
                 )
               : null,
@@ -3022,6 +3026,8 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   Widget _buildActivitySummaryCard() {
+    final isDark = context.isDarkMode;
+
     return Container(
       margin: const EdgeInsets.all(16),
       padding: const EdgeInsets.all(20),
@@ -3030,17 +3036,17 @@ class _CustomerDashboardState extends State<CustomerDashboard>
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            const Color(0xFFFF6B8B).withValues(alpha: 0.05),
-            Colors.white,
+            AppTheme.primary.withValues(alpha: 0.05),
+            isDark ? const Color(0xFF1E1E1E) : Colors.white,
           ],
         ),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
-          color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+          color: AppTheme.primary.withValues(alpha: 0.1),
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withValues(alpha: 0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 10,
             offset: const Offset(0, 2),
           ),
@@ -3054,19 +3060,23 @@ class _CustomerDashboardState extends State<CustomerDashboard>
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                  color: AppTheme.primary.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: const Icon(
                   Icons.analytics,
-                  color: Color(0xFFFF6B8B),
+                  color: AppTheme.primary,
                   size: 24,
                 ),
               ),
               const SizedBox(width: 12),
-              const Text(
+              Text(
                 'Activity Summary',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
               ),
             ],
           ),
@@ -3138,7 +3148,10 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                   ],
                 ),
                 const SizedBox(height: 16),
-                Divider(color: Colors.grey[200], height: 1),
+                Divider(
+                  color: isDark ? Colors.white12 : Colors.grey[200],
+                  height: 1,
+                ),
                 const SizedBox(height: 16),
                 Row(
                   children: [
@@ -3181,6 +3194,8 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     required String value,
     required Color color,
   }) {
+    final isDark = context.isDarkMode;
+
     return Column(
       children: [
         Icon(icon, color: color, size: _isTablet ? 28 : 22),
@@ -3190,14 +3205,14 @@ class _CustomerDashboardState extends State<CustomerDashboard>
           style: TextStyle(
             fontSize: _isTablet ? 22 : 18,
             fontWeight: FontWeight.bold,
-            color: color,
+            color: isDark ? Colors.white : color,
           ),
         ),
         Text(
           label,
           style: TextStyle(
             fontSize: _isTablet ? 12 : 11,
-            color: Colors.grey[500],
+            color: isDark ? Colors.white60 : Colors.grey[500],
           ),
           textAlign: TextAlign.center,
         ),
@@ -3217,18 +3232,19 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     final daysLeft = _getDaysLeft(offer['valid_to']);
     final discountColor = _getDiscountColor(offer['discount_type']);
     final discountText = _getDiscountText(offer);
+    final isDark = context.isDarkMode;
 
     return Container(
       margin: inGrid
           ? EdgeInsets.zero
           : const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
-        color: context.cardColor, // 👈 Colors.white → context.cardColor
+        color: context.cardColor,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(
-              alpha: context.isDarkMode ? 0.2 : 0.1,
+              alpha: isDark ? 0.2 : 0.1,
             ),
             blurRadius: 8,
             offset: const Offset(0, 2),
@@ -3246,9 +3262,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
               children: [
                 CircleAvatar(
                   radius: 22,
-                  backgroundColor: const Color(
-                    0xFFFF6B8B,
-                  ).withValues(alpha: 0.1),
+                  backgroundColor: AppTheme.primary.withValues(alpha: 0.1),
                   backgroundImage: salonLogo != null
                       ? NetworkImage(salonLogo)
                       : null,
@@ -3260,7 +3274,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                           style: const TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
-                            color: Color(0xFFFF6B8B),
+                            color: AppTheme.primary,
                           ),
                         )
                       : null,
@@ -3323,9 +3337,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                   ),
                 ),
                 const SizedBox(width: 6),
-                // ✅ FIX: badge text length caused right-edge overflow on
-                // narrow cards — constrain its max width instead of
-                // letting it size unbounded.
                 ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 90),
                   child: Container(
@@ -3430,7 +3441,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // ✅ MAIN BUILD METHOD - WEB + MOBILE FIXED
+  // ✅ MAIN BUILD METHOD - WEB + MOBILE
   // ============================================================
 
   @override
@@ -3448,17 +3459,20 @@ class _CustomerDashboardState extends State<CustomerDashboard>
           foregroundColor: Colors.white,
           elevation: 0,
           centerTitle: isWeb,
-          leading: IconButton(
-            icon: Icon(Icons.menu, color: Colors.white),
-            onPressed: _openDrawer,
-            tooltip: 'Menu',
-            iconSize: 28,
+          leading: Builder(
+            builder: (context) => IconButton(
+              icon: const Icon(Icons.menu, color: Colors.white),
+              onPressed: () => Scaffold.of(context).openDrawer(),
+              tooltip: 'Menu',
+              iconSize: 28,
+            ),
           ),
           title: Text(
             'Dashboard',
             style: TextStyle(
               fontSize: isWeb ? 20 : 16,
               fontWeight: FontWeight.w600,
+              color: Colors.white,
             ),
           ),
           actions: [_buildProfilePhoto()],
@@ -3467,7 +3481,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+              CircularProgressIndicator(color: AppTheme.primary),
               SizedBox(height: 16),
               Text('Loading timezone...'),
             ],
@@ -3480,20 +3494,23 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       return Scaffold(
         key: _scaffoldKey,
         appBar: AppBar(
-          backgroundColor: const Color(0xFFFF6B8B),
+          backgroundColor: AppTheme.primary,
           foregroundColor: Colors.white,
           elevation: 0,
-          leading: IconButton(
-            icon: const Icon(Icons.menu),
-            onPressed: _openDrawer,
-            tooltip: 'Menu',
-            iconSize: 28,
+          leading: Builder(
+            builder: (context) => IconButton(
+              icon: const Icon(Icons.menu, color: Colors.white),
+              onPressed: () => Scaffold.of(context).openDrawer(),
+              tooltip: 'Menu',
+              iconSize: 28,
+            ),
           ),
           title: Text(
             'Dashboard',
             style: TextStyle(
               fontSize: isWeb ? 20 : 16,
               fontWeight: FontWeight.w600,
+              color: Colors.white,
             ),
           ),
           actions: [_buildProfilePhoto()],
@@ -3526,7 +3543,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
               ElevatedButton(
                 onPressed: _loadDashboardData,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFFF6B8B),
+                  backgroundColor: AppTheme.primary,
                   foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
@@ -3540,25 +3557,28 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       );
     }
 
-    // ✅ Main Scaffold - Search Bar: Web = inside content, Mobile = below AppBar
+    // ✅ Main Scaffold - Using Builder pattern
     return Scaffold(
       key: _scaffoldKey,
       appBar: AppBar(
-        backgroundColor: const Color(0xFFFF6B8B),
+        backgroundColor: AppTheme.primary,
         foregroundColor: Colors.white,
         elevation: 0,
         centerTitle: isWeb,
-        leading: IconButton(
-          icon: const Icon(Icons.menu),
-          onPressed: _openDrawer,
-          tooltip: 'Menu',
-          iconSize: 28,
+        leading: Builder(
+          builder: (context) => IconButton(
+            icon: const Icon(Icons.menu, color: Colors.white),
+            onPressed: () => Scaffold.of(context).openDrawer(),
+            tooltip: 'Menu',
+            iconSize: 28,
+          ),
         ),
         title: Text(
           'Dashboard',
           style: TextStyle(
             fontSize: isWeb ? 20 : 16,
             fontWeight: FontWeight.w600,
+            color: Colors.white,
           ),
         ),
         actions: [
@@ -3575,7 +3595,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         profileImageUrl: _customerImage,
         onMenuItemSelected: () => _loadDashboardData(),
       ),
-      body: SafeArea(child: isWeb ? _buildWebLayout() : _buildMobileLayout()),
+      body: SafeArea(
+        child: isWeb ? _buildWebLayout() : _buildMobileLayout(),
+      ),
     );
   }
 
@@ -3593,7 +3615,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
           scrollbarOrientation: ScrollbarOrientation.right,
           child: RefreshIndicator(
             onRefresh: _loadDashboardData,
-            color: const Color(0xFFFF6B8B),
+            color: AppTheme.primary,
             child: SingleChildScrollView(
               controller: _scrollController,
               physics: const AlwaysScrollableScrollPhysics(),
@@ -3662,27 +3684,20 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     return Column(
       children: [
         Container(
-          color: context
-              .backgroundColor, // 👈 Colors.white → context.backgroundColor
+          color: context.backgroundColor,
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
           child: Container(
             decoration: BoxDecoration(
-              color:
-                  context
-                      .isDarkMode // 👈 dark mode friendly fill
+              color: context.isDarkMode
                   ? Colors.white.withValues(alpha: 0.08)
                   : Colors.grey.shade100,
               borderRadius: BorderRadius.circular(30),
-              border: Border.all(
-                color: context.dividerColor,
-              ), // 👈 hardcoded grey → context.dividerColor
+              border: Border.all(color: context.dividerColor),
             ),
             child: TextField(
               controller: _searchController,
               focusNode: _searchFocusNode,
-              style: TextStyle(
-                color: context.textColor,
-              ), // 👈 hardcoded black87 → context.textColor
+              style: TextStyle(color: context.textColor),
               decoration: InputDecoration(
                 hintText: '🔍 Search for salons...',
                 hintStyle: TextStyle(color: context.secondaryTextColor),
@@ -3722,11 +3737,11 @@ class _CustomerDashboardState extends State<CustomerDashboard>
             },
             child: _isLoading
                 ? const Center(
-                    child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+                    child: CircularProgressIndicator(color: AppTheme.primary),
                   )
                 : RefreshIndicator(
                     onRefresh: _loadDashboardData,
-                    color: const Color(0xFFFF6B8B),
+                    color: AppTheme.primary,
                     child: SingleChildScrollView(
                       physics: const AlwaysScrollableScrollPhysics(),
                       padding: EdgeInsets.zero,
@@ -3744,6 +3759,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   // ============================================================
 
   Widget _buildDashboardContent() {
+  final isDark = context.isDarkMode; 
     return Column(
       children: [
         if (_showPermissionCard && !_hasPermission)
@@ -3799,7 +3815,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                   children: [
                     Expanded(
                       child: _buildResponsiveBookButton(),
-                    ), // 👈 mobile branch එකටත් Expanded දාන්න ඕන
+                    ),
                     const SizedBox(width: 12),
                     Expanded(child: _buildResponsiveVipButton()),
                   ],
@@ -3876,7 +3892,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                   width: 4,
                   height: 20,
                   decoration: const BoxDecoration(
-                    color: Color(0xFFFF6B8B),
+                    color: AppTheme.primary,
                     borderRadius: BorderRadius.horizontal(
                       right: Radius.circular(4),
                     ),
@@ -3900,7 +3916,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
             ),
           ),
           const SizedBox(height: 8),
-          // ✅ Web: 2-column grid. Mobile/Tablet: single column feed (unchanged).
           _isWeb
               ? Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -3941,7 +3956,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                   width: 4,
                   height: 20,
                   decoration: const BoxDecoration(
-                    color: Color(0xFFFF6B8B),
+                    color: AppTheme.primary,
                     borderRadius: BorderRadius.horizontal(
                       right: Radius.circular(4),
                     ),
@@ -3953,6 +3968,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                   style: TextStyle(
                     fontSize: _isTablet ? 20 : 18,
                     fontWeight: FontWeight.bold,
+                    color: context.textColor,
                   ),
                 ),
                 const Spacer(),
@@ -3977,12 +3993,14 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                   margin: const EdgeInsets.only(right: 12),
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.grey.shade200),
+                    border: Border.all(
+                      color: isDark ? Colors.grey[700]! : Colors.grey.shade200,
+                    ),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.grey.withValues(alpha: 0.1),
+                        color: Colors.black.withValues(alpha: 0.1),
                         blurRadius: 4,
                       ),
                     ],
@@ -3991,9 +4009,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                     children: [
                       CircleAvatar(
                         radius: _isTablet ? 40 : 35,
-                        backgroundColor: const Color(
-                          0xFFFF6B8B,
-                        ).withValues(alpha: 0.1),
+                        backgroundColor: AppTheme.primary.withValues(alpha: 0.1),
                         backgroundImage: barber['avatar'] != null
                             ? NetworkImage(barber['avatar'])
                             : null,
@@ -4003,7 +4019,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                                 style: TextStyle(
                                   fontSize: _isTablet ? 32 : 28,
                                   fontWeight: FontWeight.bold,
-                                  color: Color(0xFFFF6B8B),
+                                  color: AppTheme.primary,
                                 ),
                               )
                             : null,
@@ -4014,6 +4030,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                         style: TextStyle(
                           fontSize: _isTablet ? 18 : 16,
                           fontWeight: FontWeight.w600,
+                          color: isDark ? Colors.white : Colors.black87,
                         ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -4026,9 +4043,10 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                           const SizedBox(width: 2),
                           Text(
                             barber['rating'].toStringAsFixed(1),
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.w600,
+                              color: isDark ? Colors.white : Colors.black87,
                             ),
                           ),
                           const SizedBox(width: 4),
@@ -4036,7 +4054,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                             '(${barber['count']} cuts)',
                             style: TextStyle(
                               fontSize: 10,
-                              color: Colors.grey[500],
+                              color: isDark ? Colors.white60 : Colors.grey[500],
                             ),
                           ),
                         ],
@@ -4047,8 +4065,8 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                         child: OutlinedButton(
                           onPressed: _bookAppointment,
                           style: OutlinedButton.styleFrom(
-                            foregroundColor: const Color(0xFFFF6B8B),
-                            side: const BorderSide(color: Color(0xFFFF6B8B)),
+                            foregroundColor: AppTheme.primary,
+                            side: const BorderSide(color: AppTheme.primary),
                             padding: const EdgeInsets.symmetric(vertical: 6),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(8),

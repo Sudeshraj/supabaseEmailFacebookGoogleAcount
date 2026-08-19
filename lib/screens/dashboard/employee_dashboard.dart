@@ -1,7 +1,5 @@
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_application_1/alertBox/show_logout_conf.dart';
-import 'package:flutter_application_1/main.dart';
 import 'package:flutter_application_1/services/notification_service.dart';
 import 'package:flutter_application_1/services/permission_service.dart';
 import 'package:flutter_application_1/screens/settings/permission_manager.dart';
@@ -11,6 +9,8 @@ import 'package:flutter_application_1/widgets/side_menu.dart';
 import 'package:flutter_application_1/widgets/dashboard_stat_card.dart';
 import 'package:flutter_application_1/widgets/booking_tile.dart';
 import 'package:flutter_application_1/widgets/section_header.dart';
+import 'package:flutter_application_1/extensions/context_extensions.dart';
+import 'package:flutter_application_1/theme/app_theme.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -69,6 +69,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
   // ✅ Android 16: Responsive screen variables
   bool _isLargeScreen = false;
   bool _isTablet = false;
+  bool _isWeb = false;
 
   // ==================== TIMEZONE VARIABLES ====================
   String _userTimezone = '';
@@ -108,11 +109,15 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
     final size = MediaQuery.of(context).size;
     final isLarge = size.width > 800 || size.height > 800;
     final isTablet = size.shortestSide >= 600;
+    final isWeb = size.width > 800;
 
-    if (_isLargeScreen != isLarge || _isTablet != isTablet) {
+    if (_isLargeScreen != isLarge || 
+        _isTablet != isTablet || 
+        _isWeb != isWeb) {
       setState(() {
         _isLargeScreen = isLarge;
         _isTablet = isTablet;
+        _isWeb = isWeb;
       });
     }
   }
@@ -262,11 +267,13 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
   void _showWebPermissionHelp() {
     if (!mounted) return;
+    final isDark = context.isDarkMode;
 
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
         title: const Row(
           children: [
             Text('🌐'),
@@ -327,7 +334,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
               _permissionService.refreshWebPage();
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFFF6B8B),
+              backgroundColor: AppTheme.primary,
               foregroundColor: Colors.white,
             ),
             icon: const Icon(Icons.refresh),
@@ -339,6 +346,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
   }
 
   Widget _buildWebStep(String number, String text) {
+    final isDark = context.isDarkMode;
+
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -346,22 +355,30 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
           width: 24,
           height: 24,
           decoration: BoxDecoration(
-            color: const Color(0xFFFF6B8B).withAlpha(20),
+            color: AppTheme.primary.withAlpha(20),
             shape: BoxShape.circle,
           ),
           child: Center(
             child: Text(
               number,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.bold,
-                color: Color(0xFFFF6B8B),
+                color: AppTheme.primary,
               ),
             ),
           ),
         ),
         const SizedBox(width: 12),
-        Expanded(child: Text(text, style: const TextStyle(fontSize: 14))),
+        Expanded(
+          child: Text(
+            text,
+            style: TextStyle(
+              fontSize: 14,
+              color: isDark ? Colors.white : Colors.black87,
+            ),
+          ),
+        ),
       ],
     );
   }
@@ -609,9 +626,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                                     height: 45,
                                     child: TabBar(
                                       isScrollable: true,
-                                      labelColor: const Color(0xFFFF6B8B),
+                                      labelColor: AppTheme.primary,
                                       unselectedLabelColor: Colors.grey,
-                                      indicatorColor: const Color(0xFFFF6B8B),
+                                      indicatorColor: AppTheme.primary,
                                       labelStyle: const TextStyle(
                                         fontWeight: FontWeight.w600,
                                         fontSize: 13,
@@ -949,24 +966,20 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 2),
       decoration: BoxDecoration(
-        color: isSelected
-            ? const Color(0xFFFF6B8B).withValues(alpha: 0.1)
-            : null,
+        color: isSelected ? AppTheme.primary.withValues(alpha: 0.1) : null,
         borderRadius: BorderRadius.circular(12),
       ),
       child: ListTile(
         leading: CircleAvatar(
           radius: 20,
-          backgroundColor: isSelected
-              ? const Color(0xFFFF6B8B)
-              : Colors.grey[200],
+          backgroundColor: isSelected ? AppTheme.primary : Colors.grey[200],
           child: Text(flag, style: const TextStyle(fontSize: 16)),
         ),
         title: Text(
           displayName,
           style: TextStyle(
             fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-            color: isSelected ? const Color(0xFFFF6B8B) : null,
+            color: isSelected ? AppTheme.primary : null,
           ),
         ),
         subtitle: Text(
@@ -976,7 +989,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
           overflow: TextOverflow.ellipsis,
         ),
         trailing: isSelected
-            ? const Icon(Icons.check_circle, color: Color(0xFFFF6B8B))
+            ? const Icon(Icons.check_circle, color: AppTheme.primary)
             : null,
         onTap: () => Navigator.of(context).pop(tz),
       ),
@@ -1022,15 +1035,15 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             decoration: BoxDecoration(
-              color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+              color: AppTheme.primary.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(20),
             ),
             child: Text(
               offset,
-              style: const TextStyle(
+              style: TextStyle(
                 fontWeight: FontWeight.bold,
                 fontSize: 11,
-                color: Color(0xFFFF6B8B),
+                color: AppTheme.primary,
               ),
             ),
           ),
@@ -1047,12 +1060,12 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+              color: AppTheme.primary.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(12),
             ),
             child: const Icon(
               Icons.access_time,
-              color: Color(0xFFFF6B8B),
+              color: AppTheme.primary,
               size: 28,
             ),
           ),
@@ -1063,7 +1076,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
               style: TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.bold,
-                color: Color(0xFFFF6B8B),
+                color: AppTheme.primary,
               ),
             ),
           ),
@@ -1091,9 +1104,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         decoration: BoxDecoration(
           color: Colors.white.withValues(alpha: 0.2),
           borderRadius: BorderRadius.circular(16),
-          border: isDSTActive
-              ? Border.all(color: Colors.amber, width: 1)
-              : null,
+          border: isDSTActive ? Border.all(color: Colors.amber, width: 1) : null,
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -1137,6 +1148,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
   Widget _buildProfileImage() {
     final hasImage = _employeeAvatar.isNotEmpty;
+    final isDark = context.isDarkMode;
 
     return GestureDetector(
       onTap: () {
@@ -1148,7 +1160,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
           radius: 18,
           backgroundColor: Colors.white.withValues(alpha: 0.2),
           backgroundImage: hasImage ? NetworkImage(_employeeAvatar) : null,
-          // ✅ 429 Error Fix: swallow image load errors
           onBackgroundImageError: hasImage
               ? (exception, stackTrace) {
                   debugPrint('⚠️ Failed to load avatar image: $exception');
@@ -1159,8 +1170,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                   _employeeName.isNotEmpty
                       ? _employeeName[0].toUpperCase()
                       : '?',
-                  style: const TextStyle(
-                    color: Colors.white,
+                  style: TextStyle(
+                    color: isDark ? Colors.grey[300] : Colors.white,
                     fontWeight: FontWeight.bold,
                     fontSize: 16,
                   ),
@@ -1404,7 +1415,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         final salonData = item['salons'] as Map?;
         if (salonData != null) {
           final salon = {
-            'id': salonData['id'].toString(), // ✅ Convert to String
+            'id': salonData['id'].toString(),
             'name': salonData['name'],
             'address': salonData['address'],
             'phone': salonData['phone'],
@@ -1838,10 +1849,12 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
   void _showNewAssignmentAlert(RemoteMessage message) {
     if (!mounted) return;
+    final isDark = context.isDarkMode;
 
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
           children: [
@@ -1854,18 +1867,30 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
               child: const Icon(Icons.assignment_add, color: Colors.blue),
             ),
             const SizedBox(width: 12),
-            const Text('New Booking Assigned!'),
+            Text(
+              'New Booking Assigned!',
+              style: TextStyle(
+                color: isDark ? Colors.white : Colors.black87,
+              ),
+            ),
           ],
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(message.notification?.title ?? 'New Appointment'),
+            Text(
+              message.notification?.title ?? 'New Appointment',
+              style: TextStyle(
+                color: isDark ? Colors.white : Colors.black87,
+              ),
+            ),
             const SizedBox(height: 8),
             Text(
               message.notification?.body ?? 'You have a new booking assigned',
-              style: TextStyle(color: Colors.grey[600]),
+              style: TextStyle(
+                color: isDark ? Colors.white60 : Colors.grey[600],
+              ),
             ),
           ],
         ),
@@ -1880,7 +1905,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
               _viewMySchedule();
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFFF6B8B),
+              backgroundColor: AppTheme.primary,
+              foregroundColor: Colors.white,
             ),
             child: const Text('View'),
           ),
@@ -1899,7 +1925,10 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
             const Icon(Icons.access_time, color: Colors.white),
             const SizedBox(width: 8),
             Expanded(
-              child: Text(message.notification?.body ?? 'Upcoming appointment'),
+              child: Text(
+                message.notification?.body ?? 'Upcoming appointment',
+                style: const TextStyle(color: Colors.white),
+              ),
             ),
           ],
         ),
@@ -1988,9 +2017,12 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
   }
 
   void _showSettingsDialog() {
+    final isDark = context.isDarkMode;
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
         title: const Text('🔔 Notifications Disabled'),
         content: const Text(
           'To enable notifications, please go to your device settings.',
@@ -2006,7 +2038,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
               _permissionService.openAppSettings();
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFFF6B8B),
+              backgroundColor: AppTheme.primary,
+              foregroundColor: Colors.white,
             ),
             child: const Text('Open Settings'),
           ),
@@ -2101,6 +2134,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
+        backgroundColor: context.backgroundColor,
         title: const Text('Complete Appointment'),
         content: const Text('Mark this appointment as completed?'),
         actions: [
@@ -2127,146 +2161,39 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
     );
   }
 
-  void _openDrawer() {
-    try {
-      if (_scaffoldKey.currentState != null) {
-        _scaffoldKey.currentState!.openDrawer();
-      } else {
-        Scaffold.of(context).openDrawer();
-      }
-    } catch (e) {
-      debugPrint('❌ Error opening drawer: $e');
-      _showMenuDialog();
-    }
-  }
-
-  void _showMenuDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Menu'),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: ListView(
-            shrinkWrap: true,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.dashboard, color: Colors.blue),
-                title: const Text('Dashboard'),
-                onTap: () => Navigator.pop(context),
-              ),
-              ListTile(
-                leading: const Icon(Icons.calendar_today, color: Colors.green),
-                title: const Text('My Schedule'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _viewMySchedule();
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.people, color: Colors.purple),
-                title: const Text('My Customers'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _viewMyCustomers();
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.attach_money, color: Colors.green),
-                title: const Text('Earnings'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _viewTodayEarnings();
-                },
-              ),
-              const Divider(),
-              ListTile(
-                leading: const Icon(Icons.settings, color: Colors.grey),
-                title: const Text('Settings'),
-                onTap: () {
-                  Navigator.pop(context);
-                  context.push('/employee/settings');
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.logout, color: Colors.red),
-                title: const Text('Logout'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _logout(context);
-                },
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _logout(BuildContext context) async {
-    showLogoutConfirmation(
-      context,
-      onLogoutConfirmed: () async {
-        if (!mounted) return;
-
-        showDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (context) => const Center(
-            child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
-          ),
-        );
-
-        try {
-         await appState.logoutForContinue();
-
-          if (context.mounted) {
-            Navigator.pop(context);
-            context.go('/');
-          }
-        } catch (e) {
-          if (context.mounted) {
-            Navigator.pop(context);
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Logout failed: $e'),
-                backgroundColor: Colors.red,
-              ),
-            );
-          }
-        }
-      },
-    );
-  }
-
+ 
   // ==================== SALON SELECTOR DIALOG ====================
 
   Future<void> _showSalonSelectorDialog() async {
+    final isDark = context.isDarkMode;
+
     await showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
+      backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       builder: (context) => Container(
         padding: const EdgeInsets.all(16),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'Select Salon',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
             ),
             const SizedBox(height: 8),
-            const Text(
+            Text(
               'Choose a salon to view its data',
-              style: TextStyle(fontSize: 14, color: Colors.grey),
+              style: TextStyle(
+                fontSize: 14,
+                color: isDark ? Colors.white60 : Colors.grey,
+              ),
             ),
             const SizedBox(height: 16),
             ..._assignedSalons.map((salon) {
@@ -2274,9 +2201,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
               return ListTile(
                 leading: CircleAvatar(
                   radius: 20,
-                  backgroundColor: isSelected
-                      ? const Color(0xFFFF6B8B)
-                      : Colors.grey[200],
+                  backgroundColor: isSelected ? AppTheme.primary : Colors.grey[200],
                   backgroundImage: salon['logo_url'] != null
                       ? NetworkImage(salon['logo_url'])
                       : null,
@@ -2291,18 +2216,20 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                 title: Text(
                   salon['name'] ?? 'Unknown Salon',
                   style: TextStyle(
-                    fontWeight: isSelected
-                        ? FontWeight.bold
-                        : FontWeight.normal,
+                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                    color: isDark ? Colors.white : Colors.black87,
                   ),
                 ),
                 subtitle: Text(
                   salon['address'] ?? '',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: isDark ? Colors.white60 : Colors.grey[600],
+                  ),
                 ),
                 trailing: isSelected
-                    ? const Icon(Icons.check_circle, color: Color(0xFFFF6B8B))
+                    ? const Icon(Icons.check_circle, color: AppTheme.primary)
                     : null,
                 onTap: () {
                   Navigator.pop(context);
@@ -2324,6 +2251,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
     required Color color,
     required VoidCallback onTap,
   }) {
+    final isDark = context.isDarkMode;
+
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -2341,7 +2270,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
               label,
               style: TextStyle(
                 fontSize: 12,
-                color: color,
+                color: isDark ? Colors.white : color,
                 fontWeight: FontWeight.w500,
               ),
             ),
@@ -2357,6 +2286,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
     required IconData icon,
     required Color color,
   }) {
+    final isDark = context.isDarkMode;
+
     return Column(
       children: [
         Icon(icon, color: color, size: 20),
@@ -2366,21 +2297,28 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
           style: TextStyle(
             fontSize: 18,
             fontWeight: FontWeight.bold,
-            color: color,
+            color: isDark ? Colors.white : color,
           ),
         ),
-        Text(label, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            color: isDark ? Colors.white60 : Colors.grey[600],
+          ),
+        ),
       ],
     );
   }
 
   // =====================================================
-  // ✅ BUILD METHOD - Web Scrollbar + Edge-to-Edge
+  // ✅ BUILD METHOD - Web Scrollbar + Edge-to-Edge + Menu Icon Fix
   // =====================================================
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
     final isWeb = screenWidth > 800;
+    final isDark = context.isDarkMode;
 
     // ✅ Check screen size on every build
     _checkScreenSize();
@@ -2390,15 +2328,24 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         key: _scaffoldKey,
         appBar: AppBar(
           title: const Text('Employee Dashboard'),
-          backgroundColor: const Color(0xFFFF6B8B),
+          backgroundColor: AppTheme.primary,
           foregroundColor: Colors.white,
           elevation: 0,
+          // ✅ Fixed: Menu Icon with Builder
+          leading: Builder(
+            builder: (context) => IconButton(
+              icon: const Icon(Icons.menu, color: Colors.white),
+              onPressed: () => Scaffold.of(context).openDrawer(),
+              tooltip: 'Menu',
+              iconSize: 28,
+            ),
+          ),
         ),
         body: const Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+              CircularProgressIndicator(color: AppTheme.primary),
               SizedBox(height: 16),
               Text('Loading timezone...'),
             ],
@@ -2410,15 +2357,18 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
     return Scaffold(
       key: _scaffoldKey,
       appBar: AppBar(
-        backgroundColor: const Color(0xFFFF6B8B),
+        backgroundColor: AppTheme.primary,
         foregroundColor: Colors.white,
         elevation: 0,
         centerTitle: isWeb,
-        leading: IconButton(
-          icon: const Icon(Icons.menu),
-          onPressed: _openDrawer,
-          tooltip: 'Menu',
-          iconSize: 28,
+        // ✅ Fixed: Menu Icon with Builder - Now working!
+        leading: Builder(
+          builder: (context) => IconButton(
+            icon: const Icon(Icons.menu, color: Colors.white),
+            onPressed: () => Scaffold.of(context).openDrawer(),
+            tooltip: 'Menu',
+            iconSize: 28,
+          ),
         ),
         title: Row(
           children: [
@@ -2431,6 +2381,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                   style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
+                    color: Colors.white,
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -2526,7 +2477,11 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
             clipBehavior: Clip.none,
             children: [
               IconButton(
-                icon: const Icon(Icons.notifications_outlined, size: 22),
+                icon: Icon(
+                  Icons.notifications_outlined,
+                  size: 22,
+                  color: Colors.white,
+                ),
                 onPressed: _viewNotifications,
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints(),
@@ -2573,45 +2528,52 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
       ),
       // ✅ EDGE-TO-EDGE: SafeArea with Web Scrollbar
       body: SafeArea(
-        child: _isLoading
-            ? const Center(
-                child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
-              )
-            : Center(
-                child: Container(
-                  constraints: BoxConstraints(
-                    maxWidth: isWeb ? 1200 : double.infinity,
-                  ),
-                  child: isWeb
-                      ? Scrollbar(
-                          controller: _scrollController,
-                          thumbVisibility: true,
-                          trackVisibility: true,
-                          thickness: 8.0,
-                          radius: const Radius.circular(10),
-                          scrollbarOrientation: ScrollbarOrientation.right,
-                          child: SingleChildScrollView(
-                            controller: _scrollController,
-                            physics: const AlwaysScrollableScrollPhysics(),
-                            padding: const EdgeInsets.all(24),
-                            child: _buildDashboardContent(),
-                          ),
-                        )
-                      : SingleChildScrollView(
-                          physics: const AlwaysScrollableScrollPhysics(),
-                          padding: EdgeInsets.zero,
-                          child: _buildDashboardContent(),
-                        ),
-                ),
-              ),
+        child: isDark
+            ? Container(color: const Color(0xFF121212), child: _buildBody(isWeb))
+            : _buildBody(isWeb),
       ),
     );
+  }
+
+  Widget _buildBody(bool isWeb) {
+    return _isLoading
+        ? const Center(
+            child: CircularProgressIndicator(color: AppTheme.primary),
+          )
+        : Center(
+            child: Container(
+              constraints: BoxConstraints(
+                maxWidth: isWeb ? 1200 : double.infinity,
+              ),
+              child: isWeb
+                  ? Scrollbar(
+                      controller: _scrollController,
+                      thumbVisibility: true,
+                      trackVisibility: true,
+                      thickness: 8.0,
+                      radius: const Radius.circular(10),
+                      scrollbarOrientation: ScrollbarOrientation.right,
+                      child: SingleChildScrollView(
+                        controller: _scrollController,
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        padding: const EdgeInsets.all(24),
+                        child: _buildDashboardContent(),
+                      ),
+                    )
+                  : SingleChildScrollView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: EdgeInsets.zero,
+                      child: _buildDashboardContent(),
+                    ),
+            ),
+          );
   }
 
   // =====================================================
   // ✅ DASHBOARD CONTENT
   // =====================================================
   Widget _buildDashboardContent() {
+    final isDark = context.isDarkMode;
 
     return Column(
       children: [
@@ -2639,14 +2601,15 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                         'Welcome, ',
                         style: TextStyle(
                           fontSize: 14,
-                          color: Colors.grey[600],
+                          color: isDark ? Colors.white60 : Colors.grey[600],
                         ),
                       ),
                       Text(
                         _employeeName,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 20,
                           fontWeight: FontWeight.bold,
+                          color: isDark ? Colors.white : Colors.black87,
                         ),
                       ),
                     ],
@@ -2660,9 +2623,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                           vertical: 2,
                         ),
                         decoration: BoxDecoration(
-                          color: Colors.purple.withValues(
-                            alpha: 0.1,
-                          ),
+                          color: Colors.purple.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(10),
                         ),
                         child: Text(
@@ -2685,9 +2646,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                             vertical: 2,
                           ),
                           decoration: BoxDecoration(
-                            color: Colors.blue.withValues(
-                              alpha: 0.1,
-                            ),
+                            color: Colors.blue.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(10),
                           ),
                           child: Row(
@@ -2741,9 +2700,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                               width: 6,
                               height: 6,
                               decoration: BoxDecoration(
-                                color: _isOnBreak
-                                    ? Colors.orange
-                                    : Colors.green,
+                                color: _isOnBreak ? Colors.orange : Colors.green,
                                 shape: BoxShape.circle,
                               ),
                             ),
@@ -2752,9 +2709,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                               _isOnBreak ? 'Break' : 'Working',
                               style: TextStyle(
                                 fontSize: 8,
-                                color: _isOnBreak
-                                    ? Colors.orange
-                                    : Colors.green,
+                                color: _isOnBreak ? Colors.orange : Colors.green,
                                 fontWeight: FontWeight.w500,
                               ),
                             ),
@@ -3066,13 +3021,18 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
               ? Container(
                   padding: const EdgeInsets.all(32),
                   decoration: BoxDecoration(
-                    color: Colors.grey[50],
+                    color: isDark ? const Color(0xFF1E1E1E) : Colors.grey[50],
                     borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: isDark ? Colors.white12 : Colors.grey[200]!,
+                    ),
                   ),
-                  child: const Center(
+                  child: Center(
                     child: Text(
                       'No appointments today',
-                      style: TextStyle(color: Colors.grey),
+                      style: TextStyle(
+                        color: isDark ? Colors.white60 : Colors.grey,
+                      ),
                     ),
                   ),
                 )
@@ -3123,18 +3083,21 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
           margin: const EdgeInsets.all(16),
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: Colors.grey[50],
+            color: isDark ? const Color(0xFF1E1E1E) : Colors.grey[50],
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.grey[200]!),
+            border: Border.all(
+              color: isDark ? Colors.white12 : Colors.grey[200]!,
+            ),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
+              Text(
                 "Today's Performance",
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white : Colors.black87,
                 ),
               ),
               const SizedBox(height: 16),

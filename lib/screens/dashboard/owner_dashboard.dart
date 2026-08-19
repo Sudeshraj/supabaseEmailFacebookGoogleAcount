@@ -1,7 +1,5 @@
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_application_1/alertBox/show_logout_conf.dart';
-import 'package:flutter_application_1/main.dart';
 import 'package:flutter_application_1/services/notification_service.dart';
 import 'package:flutter_application_1/services/permission_service.dart';
 import 'package:flutter_application_1/screens/settings/permission_manager.dart';
@@ -229,7 +227,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
   Widget _buildProfileImage() {
     final hasImage = _profileImageUrl != null && _profileImageUrl!.isNotEmpty;
-    final isDark = context.isDarkMode; // ✅ Use extension
+    final isDark = context.isDarkMode;
 
     return GestureDetector(
       onTap: () {
@@ -250,9 +248,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
               ? Text(
                   _userName.isNotEmpty ? _userName[0].toUpperCase() : '?',
                   style: TextStyle(
-                    color: isDark
-                        ? Colors.grey[300]
-                        : Colors.white, // ✅ Dark mode aware
+                    color: isDark ? Colors.grey[300] : Colors.white,
                     fontWeight: FontWeight.bold,
                     fontSize: 16,
                   ),
@@ -296,8 +292,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   // ============================================================
 
   Widget _buildNotificationIcon() {
-    final isDark = context.isDarkMode;
-
     return Stack(
       clipBehavior: Clip.none,
       children: [
@@ -305,7 +299,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           icon: Icon(
             Icons.notifications_outlined,
             size: 22,
-            color: isDark ? Colors.white : Colors.white,
+            color: Colors.white,
           ),
           onPressed: _viewNotifications,
           padding: EdgeInsets.zero,
@@ -2593,11 +2587,13 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         foregroundColor: Colors.white,
         elevation: 0,
         centerTitle: isWeb,
-        leading: IconButton(
-          icon: Icon(Icons.menu, color: Colors.white),
-          onPressed: _openDrawer,
-          tooltip: 'Menu',
-          iconSize: 28,
+        leading: Builder(
+          builder: (context) => IconButton(
+            icon: const Icon(Icons.menu, color: Colors.white),
+            onPressed: () => Scaffold.of(context).openDrawer(),
+            tooltip: 'Menu',
+            iconSize: 28,
+          ),
         ),
         title: Row(
           children: [
@@ -3157,116 +3153,8 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   // ✅ DRAWER & LOGOUT
   // ============================================================
 
-  void _openDrawer() {
-    try {
-      if (_scaffoldKey.currentState != null) {
-        _scaffoldKey.currentState!.openDrawer();
-      } else {
-        Scaffold.of(context).openDrawer();
-      }
-    } catch (e) {
-      _showMenuDialog();
-    }
-  }
 
-  void _showMenuDialog() {
-    final isDark = context.isDarkMode;
 
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-        title: const Text('Menu'),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: ListView(
-            shrinkWrap: true,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.dashboard, color: AppTheme.primary),
-                title: const Text('Dashboard'),
-                onTap: () => Navigator.pop(context),
-              ),
-              ListTile(
-                leading: const Icon(Icons.calendar_today, color: Colors.blue),
-                title: const Text('Appointments'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _viewBookings();
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.people, color: Colors.purple),
-                title: const Text('Customers'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _viewAllCustomers();
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.content_cut, color: Colors.orange),
-                title: const Text('Barbers'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _navigateToBarberList();
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.local_offer, color: AppTheme.primary),
-                title: const Text('Offers'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _navigateToOffers();
-                },
-              ),
-              const Divider(),
-              ListTile(
-                leading: const Icon(Icons.logout, color: Colors.red),
-                title: const Text('Logout'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _logout(context);
-                },
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Future<void> _logout(BuildContext context) async {
-    showLogoutConfirmation(
-      context,
-      onLogoutConfirmed: () async {
-        if (!mounted) return;
-        showDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (context) => const Center(
-            child: CircularProgressIndicator(color: AppTheme.primary),
-          ),
-        );
-        try {
-          await appState.logoutForContinue();
-          if (context.mounted) {
-            Navigator.pop(context);
-            context.go('/');
-          }
-        } catch (e) {
-          if (context.mounted) {
-            Navigator.pop(context);
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Logout failed: $e'),
-                backgroundColor: Colors.red,
-              ),
-            );
-          }
-        }
-      },
-    );
-  }
 
   // ============================================================
   // ✅ SIMPLE HEADER
