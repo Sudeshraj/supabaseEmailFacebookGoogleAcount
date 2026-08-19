@@ -3,6 +3,8 @@ import 'package:flutter_application_1/alertBox/show_logout_conf.dart';
 import 'package:flutter_application_1/main.dart';
 import 'package:flutter_application_1/services/session_manager.dart';
 import 'package:flutter_application_1/utils/app_version.dart';
+import 'package:flutter_application_1/theme/app_theme.dart';
+import 'package:flutter_application_1/extensions/context_extensions.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -622,6 +624,8 @@ class _SideMenuState extends State<SideMenu> {
       context: context,
       builder: (context) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        backgroundColor:
+            Theme.of(context).dialogTheme.backgroundColor ?? Colors.white,
         title: const Text('Create New Profile'),
         content: SingleChildScrollView(
           child: Column(
@@ -977,6 +981,8 @@ class _SideMenuState extends State<SideMenu> {
     required String description,
     required String role,
   }) {
+    final isDark = context.isDarkMode;
+
     return Material(
       color: Colors.transparent,
       borderRadius: BorderRadius.circular(12),
@@ -1007,12 +1013,15 @@ class _SideMenuState extends State<SideMenu> {
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
-                        color: color,
+                        color: isDark ? Colors.white : color,
                       ),
                     ),
                     Text(
                       description,
-                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isDark ? Colors.white60 : Colors.grey[600],
+                      ),
                     ),
                   ],
                 ),
@@ -1033,6 +1042,7 @@ class _SideMenuState extends State<SideMenu> {
         .where((p) => p['is_current'] != true && p['is_active'] == true)
         .length;
     final canCreateNewProfile = _allUserRoles.length < 3;
+    final isDark = context.isDarkMode;
 
     // ✅ Responsive sizes
     final avatarSize = _isTablet ? 80.0 : 70.0;
@@ -1040,11 +1050,16 @@ class _SideMenuState extends State<SideMenu> {
     final padding = _isTablet ? 24.0 : 20.0;
 
     return Container(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFFFF6B8B), Color(0xFFFF8A9F)],
+          colors: [
+            isDark ? AppTheme.primaryDark : AppTheme.primary,
+            isDark
+                ? AppTheme.primaryDark.withValues(alpha: 0.7)
+                : AppTheme.primaryLight,
+          ],
         ),
       ),
       child: SafeArea(
@@ -1074,13 +1089,18 @@ class _SideMenuState extends State<SideMenu> {
                           height: avatarSize,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white, width: 3),
+                            border: Border.all(
+                              color: isDark ? Colors.grey[300]! : Colors.white,
+                              width: 3,
+                            ),
                           ),
                           child:
                               (widget.profileImageUrl == null ||
                                   widget.profileImageUrl!.isEmpty)
                               ? CircleAvatar(
-                                  backgroundColor: Colors.white,
+                                  backgroundColor: isDark
+                                      ? Colors.grey[800]
+                                      : Colors.white,
                                   child: Text(
                                     widget.userName.isNotEmpty
                                         ? widget.userName[0].toUpperCase()
@@ -1088,7 +1108,9 @@ class _SideMenuState extends State<SideMenu> {
                                     style: TextStyle(
                                       fontSize: _isTablet ? 32 : 28,
                                       fontWeight: FontWeight.bold,
-                                      color: const Color(0xFFFF6B8B),
+                                      color: isDark
+                                          ? Colors.white
+                                          : AppTheme.primary,
                                     ),
                                   ),
                                 )
@@ -1098,21 +1120,26 @@ class _SideMenuState extends State<SideMenu> {
                                     fit: BoxFit.cover,
                                     width: avatarSize,
                                     height: avatarSize,
-                                    placeholder: (context, url) =>
-                                        const CircleAvatar(
-                                          backgroundColor: Colors.white,
-                                          child: SizedBox(
-                                            width: 25,
-                                            height: 25,
-                                            child: CircularProgressIndicator(
-                                              color: Color(0xFFFF6B8B),
-                                              strokeWidth: 2,
-                                            ),
-                                          ),
+                                    placeholder: (context, url) => CircleAvatar(
+                                      backgroundColor: isDark
+                                          ? Colors.grey[800]
+                                          : Colors.white,
+                                      child: SizedBox(
+                                        width: 25,
+                                        height: 25,
+                                        child: CircularProgressIndicator(
+                                          color: isDark
+                                              ? Colors.white
+                                              : AppTheme.primary,
+                                          strokeWidth: 2,
                                         ),
+                                      ),
+                                    ),
                                     errorWidget: (context, url, error) =>
                                         CircleAvatar(
-                                          backgroundColor: Colors.white,
+                                          backgroundColor: isDark
+                                              ? Colors.grey[800]
+                                              : Colors.white,
                                           child: Text(
                                             widget.userName.isNotEmpty
                                                 ? widget.userName[0]
@@ -1121,7 +1148,9 @@ class _SideMenuState extends State<SideMenu> {
                                             style: TextStyle(
                                               fontSize: _isTablet ? 32 : 28,
                                               fontWeight: FontWeight.bold,
-                                              color: const Color(0xFFFF6B8B),
+                                              color: isDark
+                                                  ? Colors.white
+                                                  : AppTheme.primary,
                                             ),
                                           ),
                                         ),
@@ -1135,17 +1164,19 @@ class _SideMenuState extends State<SideMenu> {
                             child: Container(
                               padding: const EdgeInsets.all(5),
                               decoration: BoxDecoration(
-                                color: Colors.blue,
+                                color: isDark ? Colors.blue[700] : Colors.blue,
                                 shape: BoxShape.circle,
                                 border: Border.all(
-                                  color: Colors.white,
+                                  color: isDark
+                                      ? Colors.grey[300]!
+                                      : Colors.white,
                                   width: 2,
                                 ),
                               ),
                               child: Text(
                                 '+$otherProfilesCount',
-                                style: const TextStyle(
-                                  color: Colors.white,
+                                style: TextStyle(
+                                  color: isDark ? Colors.white70 : Colors.white,
                                   fontSize: 10,
                                   fontWeight: FontWeight.bold,
                                 ),
@@ -1168,7 +1199,7 @@ class _SideMenuState extends State<SideMenu> {
                                 style: TextStyle(
                                   fontSize: fontSize,
                                   fontWeight: FontWeight.bold,
-                                  color: Colors.white,
+                                  color: isDark ? Colors.white : Colors.white,
                                 ),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
@@ -1194,7 +1225,9 @@ class _SideMenuState extends State<SideMenu> {
                                     _showProfileSwitcher
                                         ? Icons.keyboard_arrow_up
                                         : Icons.swap_horiz,
-                                    color: Colors.white,
+                                    color: isDark
+                                        ? Colors.white70
+                                        : Colors.white,
                                     size: 20,
                                   ),
                                 ),
@@ -1219,7 +1252,9 @@ class _SideMenuState extends State<SideMenu> {
                                     _showProfileSwitcher
                                         ? Icons.keyboard_arrow_up
                                         : Icons.add,
-                                    color: Colors.white,
+                                    color: isDark
+                                        ? Colors.white70
+                                        : Colors.white,
                                     size: 20,
                                   ),
                                 ),
@@ -1233,7 +1268,9 @@ class _SideMenuState extends State<SideMenu> {
                             widget.userEmail!,
                             style: TextStyle(
                               fontSize: _isTablet ? 14 : 13,
-                              color: Colors.white.withValues(alpha: 0.9),
+                              color: isDark
+                                  ? Colors.white.withValues(alpha: 0.8)
+                                  : Colors.white.withValues(alpha: 0.9),
                             ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
@@ -1246,14 +1283,16 @@ class _SideMenuState extends State<SideMenu> {
                             vertical: 4,
                           ),
                           decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.2),
+                            color: isDark
+                                ? Colors.white.withValues(alpha: 0.15)
+                                : Colors.white.withValues(alpha: 0.2),
                             borderRadius: BorderRadius.circular(20),
                           ),
                           child: Text(
                             _getRoleDisplayName(widget.userRole),
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 11,
-                              color: Colors.white,
+                              color: isDark ? Colors.white70 : Colors.white,
                               fontWeight: FontWeight.w600,
                             ),
                           ),
@@ -1283,12 +1322,13 @@ class _SideMenuState extends State<SideMenu> {
 
     final hasMultipleProfiles = _availableProfiles.length > 1;
     final canCreateNewProfile = _allUserRoles.length < 3;
+    final isDark = context.isDarkMode;
 
     return Container(
       margin: const EdgeInsets.only(top: 16),
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
@@ -1320,6 +1360,7 @@ class _SideMenuState extends State<SideMenu> {
     final Color roleColor = _getRoleColor(profile['role']);
     final avatarSize = _isTablet ? 56.0 : 50.0;
     final fontSize = _isTablet ? 16.0 : 15.0;
+    final isDark = context.isDarkMode;
 
     return Material(
       color: Colors.transparent,
@@ -1397,7 +1438,9 @@ class _SideMenuState extends State<SideMenu> {
                           style: TextStyle(
                             fontSize: fontSize,
                             fontWeight: FontWeight.w600,
-                            color: const Color(0xFF1A1A1A),
+                            color: isDark
+                                ? Colors.white
+                                : const Color(0xFF1A1A1A),
                           ),
                         ),
                         Container(
@@ -1465,7 +1508,7 @@ class _SideMenuState extends State<SideMenu> {
                       profile['email'] ?? '',
                       style: TextStyle(
                         fontSize: _isTablet ? 13 : 12,
-                        color: Colors.grey[500],
+                        color: isDark ? Colors.white60 : Colors.grey[500],
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -1500,6 +1543,7 @@ class _SideMenuState extends State<SideMenu> {
     final salons = item['salons'] as List<Map<String, dynamic>>;
     final selectedId = item['selectedSalonId'] as String?;
     final onChanged = item['onSalonChanged'] as Function(String?)?;
+    final isDark = context.isDarkMode;
 
     if (widget.userRole != 'owner') return const SizedBox.shrink();
 
@@ -1507,22 +1551,28 @@ class _SideMenuState extends State<SideMenu> {
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.grey[50],
+        color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[200]!),
+        border: Border.all(
+          color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(Icons.store_outlined, color: Colors.grey[600], size: 18),
+              Icon(
+                Icons.store_outlined,
+                color: isDark ? Colors.white60 : Colors.grey[600],
+                size: 18,
+              ),
               const SizedBox(width: 10),
               Text(
                 'Select Salon',
                 style: TextStyle(
                   fontSize: _isTablet ? 14 : 13,
-                  color: Colors.grey[600],
+                  color: isDark ? Colors.white60 : Colors.grey[600],
                   fontWeight: FontWeight.w500,
                 ),
               ),
@@ -1549,7 +1599,7 @@ class _SideMenuState extends State<SideMenu> {
                   fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
                   color: isSelected
                       ? const Color(0xFFFF6B8B)
-                      : Colors.grey[800],
+                      : (isDark ? Colors.white70 : Colors.grey[800]),
                 ),
                 overflow: TextOverflow.ellipsis,
               ),
@@ -1592,13 +1642,14 @@ class _SideMenuState extends State<SideMenu> {
   Widget _buildSalonInfoItem(Map<String, dynamic> item) {
     final salonId = item['salonId'] as String?;
     final subtitle = item['subtitle'] as String? ?? 'No salon assigned';
+    final isDark = context.isDarkMode;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Divider(color: Colors.grey, thickness: 0.5),
+          Divider(color: isDark ? Colors.white12 : Colors.grey, thickness: 0.5),
           const SizedBox(height: 8),
           Row(
             children: [
@@ -1624,7 +1675,7 @@ class _SideMenuState extends State<SideMenu> {
                       style: TextStyle(
                         fontSize: _isTablet ? 14 : 13,
                         fontWeight: FontWeight.w600,
-                        color: const Color(0xFF1A1A1A),
+                        color: isDark ? Colors.white : const Color(0xFF1A1A1A),
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -1637,7 +1688,9 @@ class _SideMenuState extends State<SideMenu> {
                               fontSize: _isTablet ? 13 : 12,
                               color: salonId != null
                                   ? const Color(0xFFFF6B8B)
-                                  : Colors.grey[500],
+                                  : (isDark
+                                        ? Colors.white70
+                                        : Colors.grey[500]),
                               fontWeight: salonId != null
                                   ? FontWeight.w500
                                   : FontWeight.normal,
@@ -1867,10 +1920,17 @@ class _SideMenuState extends State<SideMenu> {
   // 🔥 BOTTOM SECTION
   // ============================================================
   Widget _buildBottomSection() {
+    final isDark = context.isDarkMode;
+
     return Container(
       decoration: BoxDecoration(
         border: Border(
-          top: BorderSide(color: Colors.grey.withValues(alpha: 0.15), width: 1),
+          top: BorderSide(
+            color: isDark
+                ? Colors.white12
+                : Colors.grey.withValues(alpha: 0.15),
+            width: 1,
+          ),
         ),
       ),
       child: Column(
@@ -1897,12 +1957,14 @@ class _SideMenuState extends State<SideMenu> {
                     Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
-                        color: Colors.grey.withValues(alpha: 0.08),
+                        color: isDark
+                            ? Colors.grey[800]
+                            : Colors.grey.withValues(alpha: 0.08),
                         shape: BoxShape.circle,
                       ),
-                      child: const Icon(
+                      child: Icon(
                         Icons.settings_outlined,
-                        color: Colors.grey,
+                        color: isDark ? Colors.white60 : Colors.grey,
                         size: 22,
                       ),
                     ),
@@ -1911,14 +1973,14 @@ class _SideMenuState extends State<SideMenu> {
                       'Settings',
                       style: TextStyle(
                         fontSize: _isTablet ? 16 : 15,
-                        color: const Color(0xFF333333),
+                        color: isDark ? Colors.white : const Color(0xFF333333),
                       ),
                     ),
                     const Spacer(),
                     Icon(
                       Icons.arrow_forward_ios,
                       size: 14,
-                      color: Colors.grey[400],
+                      color: isDark ? Colors.white30 : Colors.grey[400],
                     ),
                   ],
                 ),
@@ -1947,9 +2009,9 @@ class _SideMenuState extends State<SideMenu> {
                         color: Colors.red.withValues(alpha: 0.08),
                         shape: BoxShape.circle,
                       ),
-                      child: const Icon(
+                      child: Icon(
                         Icons.logout,
-                        color: Colors.red,
+                        color: isDark ? Colors.red[300] : Colors.red,
                         size: 22,
                       ),
                     ),
@@ -1958,14 +2020,14 @@ class _SideMenuState extends State<SideMenu> {
                       'Logout',
                       style: TextStyle(
                         fontSize: _isTablet ? 16 : 15,
-                        color: Colors.red,
+                        color: isDark ? Colors.red[300] : Colors.red,
                       ),
                     ),
                     const Spacer(),
                     Icon(
                       Icons.arrow_forward_ios,
                       size: 14,
-                      color: Colors.grey[400],
+                      color: isDark ? Colors.white30 : Colors.grey[400],
                     ),
                   ],
                 ),
@@ -1978,8 +2040,11 @@ class _SideMenuState extends State<SideMenu> {
           Padding(
             padding: const EdgeInsets.all(16),
             child: Text(
-              'Version ${AppVersion.version}', // ✅ Auto detect
-              style: TextStyle(fontSize: 12, color: Colors.grey[400]),
+              'Version ${AppVersion.version}',
+              style: TextStyle(
+                fontSize: _isTablet ? 13 : 12,
+                color: isDark ? Colors.white70 : Colors.grey[400],
+              ),
             ),
           ),
           const SizedBox(height: 8),
@@ -1993,6 +2058,7 @@ class _SideMenuState extends State<SideMenu> {
   // ============================================================
   List<Widget> _buildMenuItems() {
     final List<Map<String, dynamic>> items = [];
+    final isDark = context.isDarkMode;
 
     switch (widget.userRole) {
       case 'owner':
@@ -2017,7 +2083,7 @@ class _SideMenuState extends State<SideMenu> {
         return _buildSalonInfoItem(item);
       }
 
-      Color itemColor = Colors.grey.shade700;
+      Color itemColor = isDark ? Colors.white60 : Colors.grey.shade700;
       if (item['color'] != null) {
         itemColor = item['color'] as Color;
       }
@@ -2025,7 +2091,12 @@ class _SideMenuState extends State<SideMenu> {
       if (item['divider'] == true) {
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Divider(color: Colors.grey.withValues(alpha: 0.15), height: 1),
+          child: Divider(
+            color: isDark
+                ? Colors.white12
+                : Colors.grey.withValues(alpha: 0.15),
+            height: 1,
+          ),
         );
       }
 
@@ -2049,7 +2120,7 @@ class _SideMenuState extends State<SideMenu> {
             item['title'] as String? ?? 'Unknown',
             style: TextStyle(
               fontSize: _isTablet ? 16 : 15,
-              color: const Color(0xFF333333),
+              color: isDark ? Colors.white : const Color(0xFF333333),
               fontWeight: FontWeight.w500,
             ),
           ),
@@ -2075,7 +2146,7 @@ class _SideMenuState extends State<SideMenu> {
               : Icon(
                   Icons.arrow_forward_ios,
                   size: 14,
-                  color: Colors.grey[400],
+                  color: isDark ? Colors.white30 : Colors.grey[400],
                 ),
           onTap: () {
             Navigator.pop(context);
@@ -2144,7 +2215,7 @@ class _SideMenuState extends State<SideMenu> {
             if (Navigator.canPop(context)) {
               Navigator.pop(context);
             }
-          }         
+          }
 
           if (context.mounted) {
             WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -2178,6 +2249,8 @@ class _SideMenuState extends State<SideMenu> {
   // ✅ Android 16: CREATE NEW PROFILE ITEM
   // ============================================================
   Widget _buildCreateNewProfileItem() {
+    final isDark = context.isDarkMode;
+
     return Material(
       color: Colors.transparent,
       borderRadius: BorderRadius.circular(12),
@@ -2214,7 +2287,7 @@ class _SideMenuState extends State<SideMenu> {
                 style: TextStyle(
                   fontSize: _isTablet ? 15 : 14,
                   fontWeight: FontWeight.w500,
-                  color: const Color(0xFFFF6B8B),
+                  color: isDark ? Colors.white : const Color(0xFFFF6B8B),
                 ),
               ),
             ],
@@ -2232,13 +2305,15 @@ class _SideMenuState extends State<SideMenu> {
     // ✅ Check screen size on every build
     _checkScreenSize();
 
+    final isDark = context.isDarkMode;
+
     return Drawer(
       child: _isLoading
           ? const Center(
               child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
             )
           : Container(
-              color: Colors.white,
+              color: isDark ? const Color(0xFF121212) : Colors.white,
               child: Column(
                 children: [
                   _buildProfileHeader(),

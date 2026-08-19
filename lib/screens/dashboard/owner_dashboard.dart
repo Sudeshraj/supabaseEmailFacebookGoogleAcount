@@ -8,6 +8,8 @@ import 'package:flutter_application_1/screens/settings/permission_manager.dart';
 import 'package:flutter_application_1/widgets/permission_card.dart';
 import 'package:flutter_application_1/widgets/side_menu.dart';
 import 'package:flutter_application_1/widgets/dashboard_stat_card.dart';
+import 'package:flutter_application_1/extensions/context_extensions.dart';
+import 'package:flutter_application_1/theme/app_theme.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -64,6 +66,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   // ✅ Android 16: Responsive screen variables
   bool _isLargeScreen = false;
   bool _isTablet = false;
+  bool _isWeb = false;
 
   // Timezone
   String _currentTimezone = '';
@@ -115,11 +118,13 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     final size = MediaQuery.of(context).size;
     final isLarge = size.width > 800 || size.height > 800;
     final isTablet = size.shortestSide >= 600;
+    final isWeb = size.width > 800;
 
-    if (_isLargeScreen != isLarge || _isTablet != isTablet) {
+    if (_isLargeScreen != isLarge || _isTablet != isTablet || _isWeb != isWeb) {
       setState(() {
         _isLargeScreen = isLarge;
         _isTablet = isTablet;
+        _isWeb = isWeb;
       });
     }
   }
@@ -224,6 +229,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
   Widget _buildProfileImage() {
     final hasImage = _profileImageUrl != null && _profileImageUrl!.isNotEmpty;
+    final isDark = context.isDarkMode; // ✅ Use extension
 
     return GestureDetector(
       onTap: () {
@@ -243,8 +249,10 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           child: !hasImage
               ? Text(
                   _userName.isNotEmpty ? _userName[0].toUpperCase() : '?',
-                  style: const TextStyle(
-                    color: Colors.white,
+                  style: TextStyle(
+                    color: isDark
+                        ? Colors.grey[300]
+                        : Colors.white, // ✅ Dark mode aware
                     fontWeight: FontWeight.bold,
                     fontSize: 16,
                   ),
@@ -288,15 +296,20 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   // ============================================================
 
   Widget _buildNotificationIcon() {
+    final isDark = context.isDarkMode;
+
     return Stack(
       clipBehavior: Clip.none,
       children: [
         IconButton(
-          icon: const Icon(Icons.notifications_outlined, size: 22),
+          icon: Icon(
+            Icons.notifications_outlined,
+            size: 22,
+            color: isDark ? Colors.white : Colors.white,
+          ),
           onPressed: _viewNotifications,
           padding: EdgeInsets.zero,
           constraints: const BoxConstraints(),
-          color: Colors.white,
         ),
         if (_unreadNotificationCount > 0)
           Positioned(
@@ -332,31 +345,37 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
   void _showNewBookingAlert(RemoteMessage message) {
     if (!mounted) return;
+    final isDark = context.isDarkMode;
 
     showDialog(
       context: context,
       barrierDismissible: true,
       builder: (context) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
         title: Row(
           children: [
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                color: AppTheme.primary.withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
               child: const Icon(
                 Icons.notifications_active,
-                color: Color(0xFFFF6B8B),
+                color: AppTheme.primary,
                 size: 28,
               ),
             ),
             const SizedBox(width: 12),
-            const Expanded(
+            Expanded(
               child: Text(
                 'New Booking!',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
               ),
             ),
           ],
@@ -380,7 +399,10 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                     child: Text(
                       message.notification?.body ??
                           'A customer has booked an appointment',
-                      style: TextStyle(fontSize: 14, color: Colors.grey[700]),
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: isDark ? Colors.white70 : Colors.grey[700],
+                      ),
                     ),
                   ),
                 ],
@@ -389,14 +411,19 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             const SizedBox(height: 8),
             Text(
               'Would you like to view this booking now?',
-              style: TextStyle(fontSize: 13, color: Colors.grey[500]),
+              style: TextStyle(
+                fontSize: 13,
+                color: isDark ? Colors.white60 : Colors.grey[500],
+              ),
             ),
           ],
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            style: TextButton.styleFrom(foregroundColor: Colors.grey[600]),
+            style: TextButton.styleFrom(
+              foregroundColor: isDark ? Colors.white60 : Colors.grey[600],
+            ),
             child: const Text('Later'),
           ),
           ElevatedButton(
@@ -405,7 +432,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
               _viewBookings();
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFFF6B8B),
+              backgroundColor: AppTheme.primary,
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
@@ -421,12 +448,14 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
   void _showNewAssignmentAlert(RemoteMessage message) {
     if (!mounted) return;
+    final isDark = context.isDarkMode;
 
     showDialog(
       context: context,
       barrierDismissible: true,
       builder: (context) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
         title: Row(
           children: [
             Container(
@@ -442,10 +471,14 @@ class _OwnerDashboardState extends State<OwnerDashboard>
               ),
             ),
             const SizedBox(width: 12),
-            const Expanded(
+            Expanded(
               child: Text(
                 'New Booking Assigned!',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
               ),
             ),
           ],
@@ -471,7 +504,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w500,
-                        color: Colors.grey[800],
+                        color: isDark ? Colors.white70 : Colors.grey[800],
                       ),
                     ),
                   ),
@@ -482,14 +515,19 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             Text(
               message.notification?.body ??
                   'You have a new booking assigned to your salon',
-              style: TextStyle(fontSize: 13, color: Colors.grey[500]),
+              style: TextStyle(
+                fontSize: 13,
+                color: isDark ? Colors.white60 : Colors.grey[500],
+              ),
             ),
           ],
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            style: TextButton.styleFrom(foregroundColor: Colors.grey[600]),
+            style: TextButton.styleFrom(
+              foregroundColor: isDark ? Colors.white60 : Colors.grey[600],
+            ),
             child: const Text('Later'),
           ),
           ElevatedButton(
@@ -498,7 +536,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
               _viewBookings();
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFFF6B8B),
+              backgroundColor: AppTheme.primary,
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
@@ -614,26 +652,35 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
   Future<void> _showSalonSelectorDialog() async {
     if (_ownerSalons.length <= 1) return;
+    final isDark = context.isDarkMode;
 
     await showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
+      backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       builder: (context) => Container(
         padding: const EdgeInsets.all(16),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'Select Salon',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
             ),
             const SizedBox(height: 8),
-            const Text(
+            Text(
               'Choose a salon to view its data',
-              style: TextStyle(fontSize: 14, color: Colors.grey),
+              style: TextStyle(
+                fontSize: 14,
+                color: isDark ? Colors.white60 : Colors.grey,
+              ),
             ),
             const SizedBox(height: 16),
             ..._ownerSalons.map((salon) {
@@ -642,7 +689,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                 leading: CircleAvatar(
                   radius: 20,
                   backgroundColor: isSelected
-                      ? const Color(0xFFFF6B8B)
+                      ? AppTheme.primary
                       : Colors.grey[200],
                   backgroundImage: salon['logo_url'] != null
                       ? NetworkImage(salon['logo_url'])
@@ -661,15 +708,19 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                     fontWeight: isSelected
                         ? FontWeight.bold
                         : FontWeight.normal,
+                    color: isDark ? Colors.white : Colors.black87,
                   ),
                 ),
                 subtitle: Text(
                   salon['address'] ?? '',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: isDark ? Colors.white60 : Colors.grey[600],
+                  ),
                 ),
                 trailing: isSelected
-                    ? const Icon(Icons.check_circle, color: Color(0xFFFF6B8B))
+                    ? const Icon(Icons.check_circle, color: AppTheme.primary)
                     : null,
                 onTap: () {
                   Navigator.pop(context);
@@ -789,11 +840,13 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
   void _showWebPermissionHelp() {
     if (!mounted) return;
+    final isDark = context.isDarkMode;
 
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
         title: const Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -863,7 +916,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
               _permissionService.refreshWebPage();
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFFF6B8B),
+              backgroundColor: AppTheme.primary,
               foregroundColor: Colors.white,
               minimumSize: const Size(0, 36),
             ),
@@ -876,6 +929,8 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   }
 
   Widget _buildWebStep(String number, String text) {
+    final isDark = context.isDarkMode;
+
     return Row(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -884,30 +939,41 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           width: 24,
           height: 24,
           decoration: BoxDecoration(
-            color: const Color(0xFFFF6B8B).withAlpha(20),
+            color: AppTheme.primary.withAlpha(20),
             shape: BoxShape.circle,
           ),
           child: Center(
             child: Text(
               number,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.bold,
-                color: Color(0xFFFF6B8B),
+                color: AppTheme.primary,
               ),
             ),
           ),
         ),
         const SizedBox(width: 12),
-        Flexible(child: Text(text, style: const TextStyle(fontSize: 14))),
+        Flexible(
+          child: Text(
+            text,
+            style: TextStyle(
+              fontSize: 14,
+              color: isDark ? Colors.white : Colors.black87,
+            ),
+          ),
+        ),
       ],
     );
   }
 
   void _showSettingsDialog() {
+    final isDark = context.isDarkMode;
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
         title: const Text('🔔 Notifications Disabled'),
         content: const Text(
           'To enable notifications, please go to your device settings.',
@@ -923,7 +989,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
               _permissionService.openAppSettings();
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFFF6B8B),
+              backgroundColor: AppTheme.primary,
               foregroundColor: Colors.white,
               minimumSize: const Size(0, 36),
             ),
@@ -944,9 +1010,12 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   // ============================================================
 
   void _showNoSalonSelectedDialog() {
+    final isDark = context.isDarkMode;
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
         title: const Text('No Salon Selected'),
         content: const Text(
           'Please select a salon first to view this data.\n\n'
@@ -963,7 +1032,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
               _navigateToCreateSalon();
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFFF6B8B),
+              backgroundColor: AppTheme.primary,
               foregroundColor: Colors.white,
             ),
             child: const Text('Create Salon'),
@@ -1365,9 +1434,9 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                                     height: 45,
                                     child: TabBar(
                                       isScrollable: true,
-                                      labelColor: const Color(0xFFFF6B8B),
+                                      labelColor: AppTheme.primary,
                                       unselectedLabelColor: Colors.grey,
-                                      indicatorColor: const Color(0xFFFF6B8B),
+                                      indicatorColor: AppTheme.primary,
                                       labelStyle: const TextStyle(
                                         fontWeight: FontWeight.w600,
                                         fontSize: 13,
@@ -1700,24 +1769,20 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 2),
       decoration: BoxDecoration(
-        color: isSelected
-            ? const Color(0xFFFF6B8B).withValues(alpha: 0.1)
-            : null,
+        color: isSelected ? AppTheme.primary.withValues(alpha: 0.1) : null,
         borderRadius: BorderRadius.circular(12),
       ),
       child: ListTile(
         leading: CircleAvatar(
           radius: 20,
-          backgroundColor: isSelected
-              ? const Color(0xFFFF6B8B)
-              : Colors.grey[200],
+          backgroundColor: isSelected ? AppTheme.primary : Colors.grey[200],
           child: Text(flag, style: const TextStyle(fontSize: 16)),
         ),
         title: Text(
           displayName,
           style: TextStyle(
             fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-            color: isSelected ? const Color(0xFFFF6B8B) : null,
+            color: isSelected ? AppTheme.primary : null,
           ),
         ),
         subtitle: Text(
@@ -1727,7 +1792,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           overflow: TextOverflow.ellipsis,
         ),
         trailing: isSelected
-            ? const Icon(Icons.check_circle, color: Color(0xFFFF6B8B))
+            ? const Icon(Icons.check_circle, color: AppTheme.primary)
             : null,
         onTap: () => Navigator.of(context).pop(tz),
       ),
@@ -1774,15 +1839,15 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             decoration: BoxDecoration(
-              color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+              color: AppTheme.primary.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(20),
             ),
             child: Text(
               offset,
-              style: const TextStyle(
+              style: TextStyle(
                 fontWeight: FontWeight.bold,
                 fontSize: 11,
-                color: Color(0xFFFF6B8B),
+                color: AppTheme.primary,
               ),
             ),
           ),
@@ -1800,12 +1865,12 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+              color: AppTheme.primary.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(12),
             ),
             child: const Icon(
               Icons.access_time,
-              color: Color(0xFFFF6B8B),
+              color: AppTheme.primary,
               size: 28,
             ),
           ),
@@ -1816,7 +1881,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
               style: TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.bold,
-                color: Color(0xFFFF6B8B),
+                color: AppTheme.primary,
               ),
             ),
           ),
@@ -2342,6 +2407,8 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     required VoidCallback onTap,
     bool enabled = true,
   }) {
+    final isDark = context.isDarkMode;
+
     return GestureDetector(
       onTap: enabled ? onTap : null,
       child: Container(
@@ -2349,19 +2416,29 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         decoration: BoxDecoration(
           color: enabled
               ? color.withValues(alpha: 0.1)
-              : Colors.grey.withValues(alpha: 0.05),
+              : (isDark
+                    ? Colors.grey[800]
+                    : Colors.grey.withValues(alpha: 0.05)),
           borderRadius: BorderRadius.circular(12),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, color: enabled ? color : Colors.grey[400], size: 28),
+            Icon(
+              icon,
+              color: enabled
+                  ? color
+                  : (isDark ? Colors.grey[600] : Colors.grey[400]),
+              size: 28,
+            ),
             const SizedBox(height: 4),
             Text(
               label,
               style: TextStyle(
                 fontSize: 12,
-                color: enabled ? color : Colors.grey[500],
+                color: enabled
+                    ? color
+                    : (isDark ? Colors.grey[500] : Colors.grey[500]),
                 fontWeight: FontWeight.w500,
               ),
               textAlign: TextAlign.center,
@@ -2505,17 +2582,19 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
     final isWeb = screenWidth > 800;
+    final isDark = context.isDarkMode;
+
     _checkScreenSize();
 
     return Scaffold(
       key: _scaffoldKey,
       appBar: AppBar(
-        backgroundColor: const Color(0xFFFF6B8B),
+        backgroundColor: AppTheme.primary,
         foregroundColor: Colors.white,
         elevation: 0,
         centerTitle: isWeb,
         leading: IconButton(
-          icon: const Icon(Icons.menu),
+          icon: Icon(Icons.menu, color: Colors.white),
           onPressed: _openDrawer,
           tooltip: 'Menu',
           iconSize: 28,
@@ -2531,6 +2610,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                   style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
+                    color: Colors.white,
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -2600,39 +2680,48 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       ),
       // ✅ EDGE-TO-EDGE: SafeArea with responsive body
       body: SafeArea(
-        child: _isLoading
-            ? const Center(
-                child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+        child: isDark
+            ? Container(
+                color: const Color(0xFF121212),
+                child: _buildBody(isWeb),
               )
-            : Center(
-                child: Container(
-                  constraints: BoxConstraints(
-                    maxWidth: isWeb ? 1200 : double.infinity,
-                  ),
-                  child: isWeb
-                      ? Scrollbar(
-                          controller: _scrollController,
-                          thumbVisibility: true,
-                          trackVisibility: true,
-                          thickness: 8.0,
-                          radius: const Radius.circular(10),
-                          scrollbarOrientation: ScrollbarOrientation.right,
-                          child: SingleChildScrollView(
-                            controller: _scrollController,
-                            physics: const AlwaysScrollableScrollPhysics(),
-                            padding: const EdgeInsets.all(24),
-                            child: _buildDashboardContent(),
-                          ),
-                        )
-                      : SingleChildScrollView(
-                          physics: const AlwaysScrollableScrollPhysics(),
-                          padding: EdgeInsets.zero,
-                          child: _buildDashboardContent(),
-                        ),
-                ),
-              ),
+            : _buildBody(isWeb),
       ),
     );
+  }
+
+  Widget _buildBody(bool isWeb) {
+    return _isLoading
+        ? const Center(
+            child: CircularProgressIndicator(color: AppTheme.primary),
+          )
+        : Center(
+            child: Container(
+              constraints: BoxConstraints(
+                maxWidth: isWeb ? 1200 : double.infinity,
+              ),
+              child: isWeb
+                  ? Scrollbar(
+                      controller: _scrollController,
+                      thumbVisibility: true,
+                      trackVisibility: true,
+                      thickness: 8.0,
+                      radius: const Radius.circular(10),
+                      scrollbarOrientation: ScrollbarOrientation.right,
+                      child: SingleChildScrollView(
+                        controller: _scrollController,
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        padding: const EdgeInsets.all(24),
+                        child: _buildDashboardContent(),
+                      ),
+                    )
+                  : SingleChildScrollView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: EdgeInsets.zero,
+                      child: _buildDashboardContent(),
+                    ),
+            ),
+          );
   }
 
   // ============================================================
@@ -2642,6 +2731,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   Widget _buildDashboardContent() {
     final screenWidth = MediaQuery.of(context).size.width;
     final isDesktop = screenWidth > 800;
+    final isDark = context.isDarkMode;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -2690,7 +2780,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                   icon: const Icon(Icons.add_business, size: 18),
                   label: const Text('Create Salon'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFFF6B8B),
+                    backgroundColor: AppTheme.primary,
                     foregroundColor: Colors.white,
                     minimumSize: const Size(0, 40),
                     padding: const EdgeInsets.symmetric(
@@ -2708,7 +2798,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
               ? const Padding(
                   padding: EdgeInsets.all(32.0),
                   child: Center(
-                    child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+                    child: CircularProgressIndicator(color: AppTheme.primary),
                   ),
                 )
               : _buildResponsiveStatCards(),
@@ -2720,11 +2810,11 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
             borderRadius: BorderRadius.circular(16),
             boxShadow: [
               BoxShadow(
-                color: Colors.grey.withValues(alpha: 0.1),
+                color: Colors.black.withValues(alpha: 0.1),
                 blurRadius: 8.0,
                 offset: const Offset(0, 2),
               ),
@@ -2734,24 +2824,28 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Row(
+              Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.settings, size: 20, color: Color(0xFFFF6B8B)),
-                  SizedBox(width: 8),
+                  Icon(Icons.settings, size: 20, color: AppTheme.primary),
+                  const SizedBox(width: 8),
                   Text(
                     'Management',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
                   ),
                 ],
               ),
               const SizedBox(height: 16),
-              const Text(
+              Text(
                 'Salon Management',
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
-                  color: Colors.grey,
+                  color: isDark ? Colors.white60 : Colors.grey,
                 ),
               ),
               const SizedBox(height: 8),
@@ -2764,7 +2858,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                     child: _buildQuickAction(
                       icon: Icons.add_business,
                       label: 'Create Salon',
-                      color: const Color(0xFFFF6B8B),
+                      color: AppTheme.primary,
                       onTap: _navigateToCreateSalon,
                     ),
                   ),
@@ -2791,12 +2885,12 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                 ],
               ),
               const SizedBox(height: 16),
-              const Text(
+              Text(
                 'Service Management',
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
-                  color: Colors.grey,
+                  color: isDark ? Colors.white60 : Colors.grey,
                 ),
               ),
               const SizedBox(height: 8),
@@ -2827,12 +2921,12 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                 ],
               ),
               const SizedBox(height: 16),
-              const Text(
+              Text(
                 'Barber Management',
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
-                  color: Colors.grey,
+                  color: isDark ? Colors.white60 : Colors.grey,
                 ),
               ),
               const SizedBox(height: 8),
@@ -2883,12 +2977,12 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                 ],
               ),
               const SizedBox(height: 16),
-              const Text(
+              Text(
                 'Offers & Promotions',
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
-                  color: Colors.grey,
+                  color: isDark ? Colors.white60 : Colors.grey,
                 ),
               ),
               const SizedBox(height: 8),
@@ -2901,7 +2995,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                     child: _buildQuickAction(
                       icon: Icons.local_offer,
                       label: 'Manage Offers',
-                      color: const Color(0xFFFF6B8B),
+                      color: AppTheme.primary,
                       onTap: _navigateToOffers,
                       enabled: _ownerSalons.isNotEmpty,
                     ),
@@ -2909,12 +3003,12 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                 ],
               ),
               const SizedBox(height: 16),
-              const Text(
+              Text(
                 'Reports',
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
-                  color: Colors.grey,
+                  color: isDark ? Colors.white60 : Colors.grey,
                 ),
               ),
               const SizedBox(height: 8),
@@ -2981,9 +3075,12 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   }
 
   void _showSalonSelectionDialogForServices() {
+    final isDark = context.isDarkMode;
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
         title: const Text('Select Salon'),
         content: SizedBox(
           width: double.maxFinite,
@@ -2993,10 +3090,13 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             itemBuilder: (context, index) {
               final salon = _ownerSalons[index];
               return ListTile(
-                leading: const Icon(Icons.store, color: Color(0xFFFF6B8B)),
+                leading: const Icon(Icons.store, color: AppTheme.primary),
                 title: Text(
                   salon['name'] ?? 'Salon',
                   overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
                 ),
                 onTap: () {
                   Navigator.pop(context);
@@ -3021,9 +3121,12 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   void _viewSettings() => context.push('/settings');
 
   void _showCreateSalonFirstDialog() {
+    final isDark = context.isDarkMode;
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
         title: const Text('Create Salon First'),
         content: const Text(
           'You need to create a salon before managing barbers or services.',
@@ -3039,7 +3142,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
               _navigateToCreateSalon();
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFFF6B8B),
+              backgroundColor: AppTheme.primary,
               foregroundColor: Colors.white,
               minimumSize: const Size(0, 36),
             ),
@@ -3067,9 +3170,12 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   }
 
   void _showMenuDialog() {
+    final isDark = context.isDarkMode;
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
         title: const Text('Menu'),
         content: SizedBox(
           width: double.maxFinite,
@@ -3077,12 +3183,12 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             shrinkWrap: true,
             children: [
               ListTile(
-                leading: const Icon(Icons.dashboard),
+                leading: const Icon(Icons.dashboard, color: AppTheme.primary),
                 title: const Text('Dashboard'),
                 onTap: () => Navigator.pop(context),
               ),
               ListTile(
-                leading: const Icon(Icons.calendar_today),
+                leading: const Icon(Icons.calendar_today, color: Colors.blue),
                 title: const Text('Appointments'),
                 onTap: () {
                   Navigator.pop(context);
@@ -3090,7 +3196,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                 },
               ),
               ListTile(
-                leading: const Icon(Icons.people),
+                leading: const Icon(Icons.people, color: Colors.purple),
                 title: const Text('Customers'),
                 onTap: () {
                   Navigator.pop(context);
@@ -3098,7 +3204,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                 },
               ),
               ListTile(
-                leading: const Icon(Icons.content_cut),
+                leading: const Icon(Icons.content_cut, color: Colors.orange),
                 title: const Text('Barbers'),
                 onTap: () {
                   Navigator.pop(context);
@@ -3106,7 +3212,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                 },
               ),
               ListTile(
-                leading: const Icon(Icons.local_offer),
+                leading: const Icon(Icons.local_offer, color: AppTheme.primary),
                 title: const Text('Offers'),
                 onTap: () {
                   Navigator.pop(context);
@@ -3138,7 +3244,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           context: context,
           barrierDismissible: false,
           builder: (context) => const Center(
-            child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+            child: CircularProgressIndicator(color: AppTheme.primary),
           ),
         );
         try {
@@ -3168,6 +3274,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
   Widget _buildSimpleHeader() {
     final isWeb = MediaQuery.of(context).size.width > 800;
+    final isDark = context.isDarkMode;
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -3182,11 +3289,11 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                     vertical: 10,
                   ),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
                     borderRadius: BorderRadius.circular(16),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.grey.withValues(alpha: 0.1),
+                        color: Colors.black.withValues(alpha: 0.1),
                         blurRadius: 8,
                         offset: const Offset(0, 2),
                       ),
@@ -3203,9 +3310,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                             vertical: 5,
                           ),
                           decoration: BoxDecoration(
-                            color: const Color(
-                              0xFFFF6B8B,
-                            ).withValues(alpha: 0.1),
+                            color: AppTheme.primary.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(20),
                           ),
                           child: Row(
@@ -3222,10 +3327,10 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                                       .split('/')
                                       .last
                                       .replaceAll('_', ' '),
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontSize: 12,
                                     fontWeight: FontWeight.w500,
-                                    color: Color(0xFFFF6B8B),
+                                    color: AppTheme.primary,
                                   ),
                                   overflow: TextOverflow.ellipsis,
                                 ),
@@ -3241,7 +3346,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                               const Icon(
                                 Icons.arrow_drop_down,
                                 size: 16,
-                                color: Color(0xFFFF6B8B),
+                                color: AppTheme.primary,
                               ),
                             ],
                           ),
@@ -3273,11 +3378,11 @@ class _OwnerDashboardState extends State<OwnerDashboard>
               margin: const EdgeInsets.symmetric(horizontal: 16),
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
                 borderRadius: BorderRadius.circular(12),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.grey.withValues(alpha: 0.1),
+                    color: Colors.black.withValues(alpha: 0.1),
                     blurRadius: 8,
                     offset: const Offset(0, 2),
                   ),
@@ -3316,7 +3421,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                         vertical: 5,
                       ),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                        color: AppTheme.primary.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Row(
@@ -3333,10 +3438,10 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                                   .split('/')
                                   .last
                                   .replaceAll('_', ' '),
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 10,
                                 fontWeight: FontWeight.w500,
-                                color: Color(0xFFFF6B8B),
+                                color: AppTheme.primary,
                               ),
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -3344,7 +3449,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                           const Icon(
                             Icons.arrow_drop_down,
                             size: 14,
-                            color: Color(0xFFFF6B8B),
+                            color: AppTheme.primary,
                           ),
                         ],
                       ),
@@ -3407,15 +3512,16 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     final nextIdx = steps.indexWhere(
       (s) => !(s['isCompleted'] as bool) && !(s['locked'] as bool? ?? false),
     );
-    const pink = Color(0xFFFF6B8B);
+    const pink = AppTheme.primary;
     const green = Color(0xFF22C55E);
     final pct = _totalSteps == 0 ? 0.0 : _completedSteps / _totalSteps;
+    final isDark = context.isDarkMode;
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
@@ -3450,19 +3556,19 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'Salon Setup',
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w700,
-                        color: Color(0xFF1A1A1A),
+                        color: isDark ? Colors.white : const Color(0xFF1A1A1A),
                       ),
                     ),
                     Text(
                       '$_completedSteps of $_totalSteps steps complete',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
-                        color: Color(0xFF9CA3AF),
+                        color: isDark ? Colors.white60 : Color(0xFF9CA3AF),
                       ),
                     ),
                   ],
@@ -3585,7 +3691,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                   Flexible(
                     child: Text(
                       'Up next:  ${steps[nextIdx]['label'] as String}',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
                         color: pink,
                         fontWeight: FontWeight.w500,
@@ -3657,7 +3763,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     required double cardWidth,
     VoidCallback? onTap,
   }) {
-    const pink = Color(0xFFFF6B8B);
+    const pink = AppTheme.primary;
     const green = Color(0xFF22C55E);
     final Color circleBg = isCompleted
         ? green
@@ -3776,9 +3882,9 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       return _chip('Locked', const Color(0xFFADB5BD), const Color(0xFFF3F4F6));
     }
     if (isNext) {
-      return _chip('Do This', const Color(0xFFFF6B8B), const Color(0xFFFFEDF1));
+      return _chip('Do This', AppTheme.primary, const Color(0xFFFFEDF1));
     }
-    return _chip('Pending', const Color(0xFFFF6B8B), const Color(0xFFFFEDF1));
+    return _chip('Pending', AppTheme.primary, const Color(0xFFFFEDF1));
   }
 
   Widget _chip(String text, Color textColor, Color bgColor) => Container(

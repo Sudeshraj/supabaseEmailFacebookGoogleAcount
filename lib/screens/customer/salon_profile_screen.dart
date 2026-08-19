@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/timezone_service.dart';
+import '../../extensions/context_extensions.dart';
 
 class SalonProfileScreen extends StatefulWidget {
   final Map<String, dynamic> salon;
@@ -67,9 +68,9 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         TimezoneService.getCurrentTimezone();
     await TimezoneService.setTimezone(_userTimezone);
 
-    // Convert salon hours to local time using user's timezone
     _convertSalonHoursToLocal();
 
+    if (!mounted) return;
     setState(() {
       _isTimezoneLoaded = true;
     });
@@ -78,12 +79,13 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
   }
 
   // ============================================================
-  // ✅ NEW: LOAD USER STATUS (user_roles.status check)
+  // ✅ LOAD USER STATUS
   // ============================================================
   Future<void> _loadUserStatus() async {
     try {
       final user = supabase.auth.currentUser;
       if (user == null) {
+        if (!mounted) return;
         setState(() {
           _isUserActive = false;
           _isUserLoaded = true;
@@ -91,16 +93,16 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         return;
       }
 
-      // ✅ Check if user has active customer role
       final customerCheck = await supabase
           .from('user_roles')
           .select('status')
           .eq('user_id', user.id)
-          .eq('role_id', 3) // customer role ID
+          .eq('role_id', 3)
           .maybeSingle();
 
       if (customerCheck == null || customerCheck['status'] != 'active') {
         debugPrint('⚠️ User is not an active customer');
+        if (!mounted) return;
         setState(() {
           _isUserActive = false;
           _isUserLoaded = true;
@@ -108,7 +110,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         return;
       }
 
-      // ✅ Check if profile is active and not blocked
       final profileCheck = await supabase
           .from('profiles')
           .select('is_active, is_blocked')
@@ -118,6 +119,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
       if (profileCheck != null) {
         if (profileCheck['is_blocked'] == true) {
           debugPrint('⚠️ User account is blocked');
+          if (!mounted) return;
           setState(() {
             _isUserActive = false;
             _isUserLoaded = true;
@@ -126,6 +128,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         }
         if (profileCheck['is_active'] == false) {
           debugPrint('⚠️ User profile is inactive');
+          if (!mounted) return;
           setState(() {
             _isUserActive = false;
             _isUserLoaded = true;
@@ -134,6 +137,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         }
       }
 
+      if (!mounted) return;
       setState(() {
         _isUserActive = true;
         _isUserLoaded = true;
@@ -141,6 +145,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
       debugPrint('✅ User is active and has customer role');
     } catch (e) {
       debugPrint('❌ Error loading user status: $e');
+      if (!mounted) return;
       setState(() {
         _isUserActive = false;
         _isUserLoaded = true;
@@ -150,7 +155,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
 
   // ==================== TIMEZONE CONVERSION ====================
 
-  /// Convert UTC salon hours to user's local time
   void _convertSalonHoursToLocal() {
     try {
       final openTimeUtc = widget.salon['open_time']?.toString() ?? '09:00:00';
@@ -173,7 +177,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     }
   }
 
-  /// Convert UTC time string to user's local time string
   String _utcToLocalTimeString(String utcTime) {
     try {
       return TimezoneService.utcToLocalTimeRecurring(utcTime);
@@ -183,7 +186,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     }
   }
 
-  /// Format time string (fallback)
   String _formatTimeString(String timeStr) {
     try {
       final parts = timeStr.split(':');
@@ -197,7 +199,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     }
   }
 
-  /// Check if salon is open now (using user's local time)
   bool _isOpenNow() {
     try {
       final now = DateTime.now();
@@ -220,7 +221,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
       final closeMinutes = closeTime.hour * 60 + closeTime.minute;
 
       if (closeMinutes < openMinutes) {
-        // Overnight hours (e.g., 9 PM to 2 AM)
         return nowMinutes >= openMinutes || nowMinutes <= closeMinutes;
       }
       return nowMinutes >= openMinutes && nowMinutes <= closeMinutes;
@@ -239,6 +239,8 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
           .select('overall_rating')
           .eq('salon_id', widget.salon['id'])
           .eq('status', 'published');
+
+      if (!mounted) return;
 
       if (reviews.isNotEmpty) {
         double total = 0;
@@ -259,6 +261,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
       }
     } catch (e) {
       debugPrint('Error loading reviews: $e');
+      if (!mounted) return;
       setState(() => _isLoadingRating = false);
     }
   }
@@ -270,11 +273,13 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
           .select('id')
           .eq('salon_id', widget.salon['id']);
 
+      if (!mounted) return;
       setState(() {
         _followersCount = followers.length;
       });
     } catch (e) {
       debugPrint('Error loading followers: $e');
+      if (!mounted) return;
       setState(() => _followersCount = 0);
     }
   }
@@ -302,36 +307,35 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
           .gte('valid_to', today)
           .order('points_required', ascending: true);
 
+      if (!mounted) return;
       setState(() {
         _offers = List<Map<String, dynamic>>.from(offers);
         _isLoadingOffers = false;
       });
     } catch (e) {
       debugPrint('Error loading offers: $e');
+      if (!mounted) return;
       setState(() => _isLoadingOffers = false);
     }
   }
 
-  // ============================================================
-  // ✅ UPDATED: _checkIfFollowing() with user status check
-  // ============================================================
   Future<void> _checkIfFollowing() async {
     try {
       final user = supabase.auth.currentUser;
       if (user == null) {
+        if (!mounted) return;
         setState(() {
           _isFollowing = false;
         });
         return;
       }
 
-      // ✅ Wait for user status to load
       if (!_isUserLoaded) {
         await _loadUserStatus();
       }
 
-      // ✅ If user is not active, don't show follow status
       if (!_isUserActive) {
+        if (!mounted) return;
         setState(() {
           _isFollowing = false;
         });
@@ -345,20 +349,19 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
           .eq('salon_id', widget.salon['id'])
           .maybeSingle();
 
+      if (!mounted) return;
       setState(() {
         _isFollowing = result != null;
       });
     } catch (e) {
       debugPrint('Error checking follow status: $e');
+      if (!mounted) return;
       setState(() {
         _isFollowing = false;
       });
     }
   }
 
-  // ============================================================
-  // ✅ UPDATED: _toggleFollow() with user status check
-  // ============================================================
   Future<void> _toggleFollow() async {
     try {
       final user = supabase.auth.currentUser;
@@ -367,7 +370,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         return;
       }
 
-      // ✅ Check if user is active
       if (!_isUserLoaded) {
         await _loadUserStatus();
       }
@@ -387,6 +389,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
             .eq('customer_id', user.id)
             .eq('salon_id', widget.salon['id']);
 
+        if (!mounted) return;
         setState(() {
           _isFollowing = false;
           _followersCount--;
@@ -398,6 +401,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
           'salon_id': widget.salon['id'],
         });
 
+        if (!mounted) return;
         setState(() {
           _isFollowing = true;
           _followersCount++;
@@ -410,11 +414,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     }
   }
 
-  // ============================================================
-  // ✅ UPDATED: _openWhatsApp() with user status check
-  // ============================================================
   Future<void> _openWhatsApp() async {
-    // ✅ Check if user is active
     if (!_isUserLoaded) {
       await _loadUserStatus();
     }
@@ -453,9 +453,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     }
   }
 
-  // ============================================================
-  // ✅ UPDATED: _startBookingFlow() with user status check
-  // ============================================================
   void _startBookingFlow() async {
     try {
       final user = supabase.auth.currentUser;
@@ -464,7 +461,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         return;
       }
 
-      // ✅ Check if user is active
       if (!_isUserLoaded) {
         await _loadUserStatus();
       }
@@ -485,9 +481,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     }
   }
 
-  // ============================================================
-  // ✅ UPDATED: _navigateToVipBooking() with user status check
-  // ============================================================
   void _navigateToVipBooking() async {
     try {
       final user = supabase.auth.currentUser;
@@ -496,7 +489,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         return;
       }
 
-      // ✅ Check if user is active
       if (!_isUserLoaded) {
         await _loadUserStatus();
       }
@@ -519,11 +511,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     }
   }
 
-  // ============================================================
-  // ✅ UPDATED: _claimOffer() with user status check
-  // ============================================================
   void _claimOffer(Map<String, dynamic> offer) {
-    // Check if user is active before showing dialog
     _checkAndShowOfferDialog(offer);
   }
 
@@ -535,7 +523,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         return;
       }
 
-      // ✅ Check if user is active
       if (!_isUserLoaded) {
         await _loadUserStatus();
       }
@@ -548,7 +535,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         return;
       }
 
-      // Show dialog
+      if (!mounted) return;
       _showOfferDialog(offer);
     } catch (e) {
       debugPrint('Error checking user status: $e');
@@ -561,12 +548,13 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
       context: context,
       builder: (context) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        backgroundColor: context.backgroundColor,
         title: Row(
           children: [
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                color: context.primaryColor.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Text(
@@ -578,9 +566,8 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
             Expanded(
               child: Text(
                 offer['title'],
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
+                style: context.titleLarge.copyWith(
+                  color: context.textColor,
                 ),
               ),
             ),
@@ -590,12 +577,19 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(offer['description'] ?? ''),
+            Text(
+              offer['description'] ?? '',
+              style: context.bodyMedium.copyWith(
+                color: context.secondaryTextColor,
+              ),
+            ),
             const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.grey[50],
+                color: context.isDarkMode
+                    ? Colors.grey.withValues(alpha: 0.1)
+                    : Colors.grey[50],
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Column(
@@ -603,28 +597,22 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                   if (offer['discount_type'] == 'percentage')
                     Text(
                       '${offer['discount_value']}% OFF',
-                      style: const TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFFFF6B8B),
+                      style: context.titleLarge.copyWith(
+                        color: context.primaryColor,
                       ),
                     )
                   else if (offer['discount_type'] == 'fixed')
                     Text(
                       'Rs. ${offer['discount_value']} OFF',
-                      style: const TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFFFF6B8B),
+                      style: context.titleLarge.copyWith(
+                        color: context.primaryColor,
                       ),
                     )
                   else
                     Text(
                       'FREE SERVICE',
-                      style: const TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFFFF6B8B),
+                      style: context.titleLarge.copyWith(
+                        color: context.primaryColor,
                       ),
                     ),
                   const SizedBox(height: 8),
@@ -636,9 +624,8 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                         const SizedBox(width: 4),
                         Text(
                           '${offer['points_required']} points required',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[600],
+                          style: context.bodySmall.copyWith(
+                            color: context.secondaryTextColor,
                           ),
                         ),
                       ],
@@ -653,7 +640,9 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                 const SizedBox(width: 4),
                 Text(
                   'Valid until: ${DateFormat('MMM dd, yyyy').format(DateTime.parse(offer['valid_to']))}',
-                  style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                  style: context.bodySmall.copyWith(
+                    color: Colors.grey[500],
+                  ),
                 ),
               ],
             ),
@@ -670,7 +659,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
               _applyOffer(offer);
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFFF6B8B),
+              backgroundColor: context.primaryColor,
               foregroundColor: Colors.white,
             ),
             child: const Text('Apply Offer'),
@@ -680,9 +669,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     );
   }
 
-  // ============================================================
-  // ✅ UPDATED: _applyOffer() with user status check
-  // ============================================================
   void _applyOffer(Map<String, dynamic> offer) async {
     try {
       final user = supabase.auth.currentUser;
@@ -691,7 +677,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         return;
       }
 
-      // ✅ Check if user is active
       if (!_isUserLoaded) {
         await _loadUserStatus();
       }
@@ -716,11 +701,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     }
   }
 
-  // ============================================================
-  // ✅ UPDATED: _showAllOffersDialog() with user status check
-  // ============================================================
   void _showAllOffersDialog() {
-    // Check if user is active
     if (!_isUserLoaded) {
       _loadUserStatus().then((_) {
         if (mounted && _isUserActive) {
@@ -750,6 +731,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      backgroundColor: context.backgroundColor,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -765,15 +747,17 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
               width: 40,
               height: 4,
               decoration: BoxDecoration(
-                color: Colors.grey[300],
+                color: context.isDarkMode ? Colors.grey[700] : Colors.grey[300],
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
-            const Padding(
-              padding: EdgeInsets.all(16),
+            Padding(
+              padding: const EdgeInsets.all(16),
               child: Text(
                 'All Offers',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                style: context.titleLarge.copyWith(
+                  color: context.textColor,
+                ),
               ),
             ),
             Expanded(
@@ -858,10 +842,10 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
 
     if (!_isTimezoneLoaded) {
       return Scaffold(
-        backgroundColor: Colors.white,
+        backgroundColor: context.backgroundColor,
         appBar: AppBar(
           title: const Text('Salon Profile'),
-          backgroundColor: const Color(0xFFFF6B8B),
+          backgroundColor: context.primaryColor,
           foregroundColor: Colors.white,
           elevation: 0,
         ),
@@ -879,723 +863,415 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     }
 
     return Scaffold(
-      backgroundColor: Colors.white,
-      body: SingleChildScrollView(
+      backgroundColor: context.backgroundColor,
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          // ✅ Frame for web view
+          if (isWeb) {
+            return Container(
+              color: context.backgroundColor,
+              child: Center(
+                child: Container(
+                  width: contentWidth,
+                  constraints: BoxConstraints(
+                    maxHeight: constraints.maxHeight,
+                  ),
+                  decoration: BoxDecoration(
+                    color: context.backgroundColor,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.05),
+                        blurRadius: 20,
+                        offset: const Offset(0, 0),
+                      ),
+                    ],
+                  ),
+                  child: _buildContent(isWeb, isTablet, openTime, closeTime, isOpen),
+                ),
+              ),
+            );
+          }
+          return _buildContent(isWeb, isTablet, openTime, closeTime, isOpen);
+        },
+      ),
+    );
+  }
+
+  Widget _buildContent(
+    bool isWeb,
+    bool isTablet,
+    String openTime,
+    String closeTime,
+    bool isOpen,
+  ) {
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ✅ Cover Image Section
+          _buildCoverSection(isWeb),
+
+          // ✅ Logo and Action Buttons
+          _buildLogoAndActionsSection(isWeb),
+
+          // ✅ Main Content
+          Container(
+            margin: EdgeInsets.only(top: 20),
+            child: Center(
+              child: Container(
+                constraints: BoxConstraints(
+                  maxWidth: isWeb ? 1000.0 : double.infinity,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // ✅ Salon Info Section
+                    _buildSalonInfoSection(isWeb, isTablet, openTime, closeTime, isOpen),
+
+                    const SizedBox(height: 24),
+
+                    // ✅ Booking Buttons
+                    _buildBookingButtons(isWeb, isTablet),
+
+                    const SizedBox(height: 32),
+                    Divider(color: context.dividerColor, height: 1),
+                    const SizedBox(height: 24),
+
+                    // ✅ Offers Section
+                    _buildOffersSection(),
+
+                    const SizedBox(height: 24),
+
+                    // ✅ About Section
+                    _buildAboutSection(),
+
+                    const SizedBox(height: 24),
+
+                    // ✅ Contact Section
+                    _buildContactSection(),
+
+                    const SizedBox(height: 24),
+
+                    // ✅ Services Section
+                    _buildServicesSection(),
+
+                    const SizedBox(height: 40),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ============================================================
+  // ✅ BUILD: COVER SECTION
+  // ============================================================
+
+  Widget _buildCoverSection(bool isWeb) {
+    return Stack(
+      children: [
+        SizedBox(
+          width: double.infinity,
+          height: isWeb ? 350 : 280,
+          child: _buildCoverImage(),
+        ),
+        Positioned(
+          bottom: 0,
+          left: 0,
+          right: 0,
+          height: 100,
+          child: Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Colors.transparent,
+                  Colors.black.withValues(alpha: 0.3),
+                  Colors.black.withValues(alpha: 0.6),
+                ],
+              ),
+            ),
+          ),
+        ),
+        Positioned(
+          top: 40,
+          left: 16,
+          child: IconButton(
+            icon: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.3),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.arrow_back,
+                color: Colors.white,
+                size: 22,
+              ),
+            ),
+            onPressed: () => Navigator.pop(context),
+          ),
+        ),
+        Positioned(
+          top: 40,
+          right: 16,
+          child: Row(
+            children: [
+              IconButton(
+                icon: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.3),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.share,
+                    color: Colors.white,
+                    size: 22,
+                  ),
+                ),
+                onPressed: () {},
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                icon: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.3),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    _isFollowing ? Icons.favorite : Icons.favorite_border,
+                    color: _isFollowing ? Colors.red : Colors.white,
+                    size: 22,
+                  ),
+                ),
+                onPressed: _toggleFollow,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ============================================================
+  // ✅ BUILD: LOGO AND ACTIONS
+  // ✅ FIX: RenderFlex overflow (61px) on mobile. Previously:
+  // Row(children: [logo, Spacer(), Row([whatsapp, follow])])
+  // The inner Row had no bound, so on narrow screens the
+  // WhatsApp + Follow buttons together didn't fit and overflowed
+  // to the right (also caused a cascading "Incorrect use of
+  // ParentDataWidget" error). Now the button group is wrapped in
+  // Expanded(child: Wrap(...)) so it's bounded to the remaining
+  // width and wraps to a second line instead of overflowing.
+  // ============================================================
+
+  Widget _buildLogoAndActionsSection(bool isWeb) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Transform.translate(
+            offset: Offset(0, -40),
+            child: _buildLogo(),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Wrap(
+              alignment: WrapAlignment.end,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 12,
+              runSpacing: 8,
+              children: [
+                _buildWhatsAppButton(),
+                _buildFollowButton(),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ============================================================
+  // ✅ BUILD: SALON INFO SECTION
+  // ============================================================
+
+  Widget _buildSalonInfoSection(
+    bool isWeb,
+    bool isTablet,
+    String openTime,
+    String closeTime,
+    bool isOpen,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: context.cardColor,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.05),
+              blurRadius: 10,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Cover Image Section
-            Stack(
-              children: [
-                SizedBox(
-                  width: double.infinity,
-                  height: isWeb ? 350 : 280,
-                  child: _buildCoverImage(),
-                ),
-                Positioned(
-                  bottom: 0,
-                  left: 0,
-                  right: 0,
-                  height: 100,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          Colors.transparent,
-                          Colors.black.withValues(alpha: 0.3),
-                          Colors.black.withValues(alpha: 0.6),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                Positioned(
-                  top: 40,
-                  left: 16,
-                  child: IconButton(
-                    icon: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.3),
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(
-                        Icons.arrow_back,
-                        color: Colors.white,
-                        size: 22,
-                      ),
-                    ),
-                    onPressed: () => Navigator.pop(context),
-                  ),
-                ),
-                Positioned(
-                  top: 40,
-                  right: 16,
-                  child: Row(
+            Text(
+              widget.salon['name'] ?? 'Salon',
+              style: context.headlineMedium.copyWith(
+                color: context.textColor,
+              ),
+            ),
+            const SizedBox(height: 6),
+
+            if (!_isLoadingRating)
+              Wrap(
+                spacing: 16,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      IconButton(
-                        icon: Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.3),
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(
-                            Icons.share,
-                            color: Colors.white,
-                            size: 22,
-                          ),
+                      _buildStarRating(_averageRating),
+                      const SizedBox(width: 6),
+                      Text(
+                        _averageRating.toStringAsFixed(1),
+                        style: context.bodyMedium.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: context.textColor,
                         ),
-                        onPressed: () {},
                       ),
-                      const SizedBox(width: 8),
-                      IconButton(
-                        icon: Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.3),
-                            shape: BoxShape.circle,
-                          ),
-                          child: Icon(
-                            _isFollowing
-                                ? Icons.favorite
-                                : Icons.favorite_border,
-                            color: _isFollowing ? Colors.red : Colors.white,
-                            size: 22,
-                          ),
+                      const SizedBox(width: 4),
+                      Text(
+                        '($_totalReviews reviews)',
+                        style: context.bodySmall.copyWith(
+                          color: context.secondaryTextColor,
                         ),
-                        onPressed: _toggleFollow,
+                      ),
+                    ],
+                  ),
+                  Container(
+                    width: 4,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: context.isDarkMode
+                          ? Colors.white30
+                          : Colors.grey[400],
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.people,
+                        size: 16,
+                        color: context.secondaryTextColor,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        '$_followersCount followers',
+                        style: context.bodySmall.copyWith(
+                          color: context.secondaryTextColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+
+            const SizedBox(height: 12),
+
+            if (widget.salon['address'] != null)
+              Row(
+                children: [
+                  Icon(
+                    Icons.location_on,
+                    size: 16,
+                    color: context.secondaryTextColor,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      widget.salon['address'],
+                      style: context.bodyMedium.copyWith(
+                        color: context.secondaryTextColor,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+
+            const SizedBox(height: 10),
+
+            Wrap(
+              spacing: 16,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.access_time,
+                      size: 16,
+                      color: context.secondaryTextColor,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      '$openTime - $closeTime',
+                      style: context.bodyMedium.copyWith(
+                        color: context.secondaryTextColor,
+                      ),
+                    ),
+                  ],
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: isOpen
+                        ? Colors.green.withValues(alpha: 0.1)
+                        : Colors.red.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                          color: isOpen ? Colors.green : Colors.red,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        isOpen ? 'Open Now' : 'Closed',
+                        style: context.bodySmall.copyWith(
+                          color: isOpen ? Colors.green : Colors.red,
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
                     ],
                   ),
                 ),
               ],
-            ),
-
-            // Logo and Action Buttons
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Transform.translate(
-                    offset: Offset(0, -40),
-                    child: _buildLogo(),
-                  ),
-                  const Spacer(),
-                  Row(
-                    children: [
-                      _buildWhatsAppButton(),
-                      const SizedBox(width: 12),
-                      _buildFollowButton(),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-
-            // Main Content
-            Container(
-              margin: EdgeInsets.only(top: 20),
-              child: Center(
-                child: Container(
-                  constraints: BoxConstraints(maxWidth: contentWidth),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Salon Info Section
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              widget.salon['name'] ?? 'Salon',
-                              style: TextStyle(
-                                fontSize: isWeb ? 28 : (isTablet ? 24 : 22),
-                                fontWeight: FontWeight.bold,
-                                color: Colors.black87,
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-
-                            if (!_isLoadingRating)
-                              Wrap(
-                                spacing: 16,
-                                crossAxisAlignment: WrapCrossAlignment.center,
-                                children: [
-                                  Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      _buildStarRating(_averageRating),
-                                      const SizedBox(width: 6),
-                                      Text(
-                                        _averageRating.toStringAsFixed(1),
-                                        style: const TextStyle(
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w600,
-                                          color: Colors.black87,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        '($_totalReviews reviews)',
-                                        style: TextStyle(
-                                          fontSize: 13,
-                                          color: Colors.grey[600],
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  Container(
-                                    width: 4,
-                                    height: 4,
-                                    decoration: BoxDecoration(
-                                      color: Colors.grey[400],
-                                      shape: BoxShape.circle,
-                                    ),
-                                  ),
-                                  Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(
-                                        Icons.people,
-                                        size: 16,
-                                        color: Colors.grey[600],
-                                      ),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        '$_followersCount followers',
-                                        style: TextStyle(
-                                          fontSize: 13,
-                                          color: Colors.grey[600],
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-
-                            const SizedBox(height: 12),
-
-                            if (widget.salon['address'] != null)
-                              Row(
-                                children: [
-                                  Icon(
-                                    Icons.location_on,
-                                    size: 16,
-                                    color: Colors.grey[600],
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Expanded(
-                                    child: Text(
-                                      widget.salon['address'],
-                                      style: TextStyle(
-                                        fontSize: 14,
-                                        color: Colors.grey[700],
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-
-                            const SizedBox(height: 10),
-
-                            Wrap(
-                              spacing: 16,
-                              crossAxisAlignment: WrapCrossAlignment.center,
-                              children: [
-                                Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      Icons.access_time,
-                                      size: 16,
-                                      color: Colors.grey[600],
-                                    ),
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      '$openTime - $closeTime',
-                                      style: TextStyle(
-                                        fontSize: 14,
-                                        color: Colors.grey[700],
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 4,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: isOpen
-                                        ? Colors.green.withValues(alpha: 0.1)
-                                        : Colors.red.withValues(alpha: 0.1),
-                                    borderRadius: BorderRadius.circular(20),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Container(
-                                        width: 8,
-                                        height: 8,
-                                        decoration: BoxDecoration(
-                                          color: isOpen
-                                              ? Colors.green
-                                              : Colors.red,
-                                          shape: BoxShape.circle,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 6),
-                                      Text(
-                                        isOpen ? 'Open Now' : 'Closed',
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          color: isOpen
-                                              ? Colors.green
-                                              : Colors.red,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-
-                            const SizedBox(height: 24),
-
-                            // Booking Buttons
-                            isWeb || isTablet
-                                ? Row(
-                                    children: [
-                                      Expanded(
-                                        flex: 2,
-                                        child: ElevatedButton.icon(
-                                          onPressed: _startBookingFlow,
-                                          icon: const Icon(
-                                            Icons.calendar_today,
-                                            color: Colors.white,
-                                            size: 20,
-                                          ),
-                                          label: const Text(
-                                            'Book Appointment',
-                                            style: TextStyle(
-                                              fontSize: 16,
-                                              fontWeight: FontWeight.w600,
-                                              color: Colors.white,
-                                            ),
-                                          ),
-                                          style: ElevatedButton.styleFrom(
-                                            backgroundColor: const Color(
-                                              0xFFFF6B8B,
-                                            ),
-                                            padding: const EdgeInsets.symmetric(
-                                              vertical: 14,
-                                            ),
-                                            shape: RoundedRectangleBorder(
-                                              borderRadius:
-                                                  BorderRadius.circular(12),
-                                            ),
-                                            elevation: 2,
-                                          ),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Expanded(
-                                        flex: 1,
-                                        child: OutlinedButton.icon(
-                                          onPressed: _navigateToVipBooking,
-                                          icon: const Icon(
-                                            Icons.star,
-                                            color: Colors.amber,
-                                            size: 20,
-                                          ),
-                                          label: const Text(
-                                            'VIP',
-                                            style: TextStyle(
-                                              fontSize: 16,
-                                              fontWeight: FontWeight.w600,
-                                              color: Colors.amber,
-                                            ),
-                                          ),
-                                          style: OutlinedButton.styleFrom(
-                                            side: const BorderSide(
-                                              color: Colors.amber,
-                                              width: 1.5,
-                                            ),
-                                            padding: const EdgeInsets.symmetric(
-                                              vertical: 14,
-                                            ),
-                                            shape: RoundedRectangleBorder(
-                                              borderRadius:
-                                                  BorderRadius.circular(12),
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  )
-                                : Column(
-                                    children: [
-                                      SizedBox(
-                                        width: double.infinity,
-                                        child: ElevatedButton.icon(
-                                          onPressed: _startBookingFlow,
-                                          icon: const Icon(
-                                            Icons.calendar_today,
-                                            color: Colors.white,
-                                            size: 20,
-                                          ),
-                                          label: const Text(
-                                            'Book Appointment',
-                                            style: TextStyle(
-                                              fontSize: 16,
-                                              fontWeight: FontWeight.w600,
-                                              color: Colors.white,
-                                            ),
-                                          ),
-                                          style: ElevatedButton.styleFrom(
-                                            backgroundColor: const Color(
-                                              0xFFFF6B8B,
-                                            ),
-                                            padding: const EdgeInsets.symmetric(
-                                              vertical: 14,
-                                            ),
-                                            shape: RoundedRectangleBorder(
-                                              borderRadius:
-                                                  BorderRadius.circular(12),
-                                            ),
-                                            elevation: 2,
-                                          ),
-                                        ),
-                                      ),
-                                      const SizedBox(height: 12),
-                                      SizedBox(
-                                        width: double.infinity,
-                                        child: OutlinedButton.icon(
-                                          onPressed: _navigateToVipBooking,
-                                          icon: const Icon(
-                                            Icons.star,
-                                            color: Colors.amber,
-                                            size: 20,
-                                          ),
-                                          label: const Text(
-                                            'VIP Booking',
-                                            style: TextStyle(
-                                              fontSize: 16,
-                                              fontWeight: FontWeight.w600,
-                                              color: Colors.amber,
-                                            ),
-                                          ),
-                                          style: OutlinedButton.styleFrom(
-                                            side: const BorderSide(
-                                              color: Colors.amber,
-                                              width: 1.5,
-                                            ),
-                                            padding: const EdgeInsets.symmetric(
-                                              vertical: 14,
-                                            ),
-                                            shape: RoundedRectangleBorder(
-                                              borderRadius:
-                                                  BorderRadius.circular(12),
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-
-                            const SizedBox(height: 32),
-                            Divider(color: Colors.grey[200], height: 1),
-                            const SizedBox(height: 24),
-                          ],
-                        ),
-                      ),
-
-                      // Offers Section
-                      if (_offers.isNotEmpty || _isLoadingOffers)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  const Text(
-                                    '🔥 Special Offers',
-                                    style: TextStyle(
-                                      fontSize: 20,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  if (_offers.length > 2)
-                                    TextButton(
-                                      onPressed: _showAllOffersDialog,
-                                      child: const Text(
-                                        'View All',
-                                        style: TextStyle(
-                                          color: Color(0xFFFF6B8B),
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                    ),
-                                ],
-                              ),
-                              const SizedBox(height: 16),
-                              _isLoadingOffers
-                                  ? const Center(
-                                      child: Padding(
-                                        padding: EdgeInsets.all(32),
-                                        child: CircularProgressIndicator(
-                                          color: Color(0xFFFF6B8B),
-                                        ),
-                                      ),
-                                    )
-                                  : SizedBox(
-                                      height: 260,
-                                      child: ListView.builder(
-                                        scrollDirection: Axis.horizontal,
-                                        itemCount: _offers.length > 3
-                                            ? 3
-                                            : _offers.length,
-                                        itemBuilder: (context, index) =>
-                                            _buildOfferCard(
-                                              _offers[index],
-                                              index,
-                                            ),
-                                      ),
-                                    ),
-                              const SizedBox(height: 20),
-                              Divider(color: Colors.grey[200], height: 1),
-                            ],
-                          ),
-                        ),
-
-                      const SizedBox(height: 24),
-
-                      // About Section
-                      if (widget.salon['description'] != null &&
-                          widget.salon['description'].toString().isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'About',
-                                style: TextStyle(
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              const SizedBox(height: 12),
-                              Container(
-                                width: double.infinity,
-                                padding: const EdgeInsets.all(16),
-                                decoration: BoxDecoration(
-                                  color: Colors.grey[50],
-                                  borderRadius: BorderRadius.circular(16),
-                                ),
-                                child: Text(
-                                  widget.salon['description'],
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    color: Colors.grey[700],
-                                    height: 1.5,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(height: 24),
-                              Divider(color: Colors.grey[200], height: 1),
-                            ],
-                          ),
-                        ),
-
-                      const SizedBox(height: 24),
-
-                      // Contact Section
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Contact & Location',
-                              style: TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            Container(
-                              width: double.infinity,
-                              decoration: BoxDecoration(
-                                color: Colors.grey[50],
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                              child: Column(
-                                children: [
-                                  if (widget.salon['phone'] != null &&
-                                      widget.salon['phone']
-                                          .toString()
-                                          .isNotEmpty)
-                                    ListTile(
-                                      leading: Container(
-                                        padding: const EdgeInsets.all(10),
-                                        decoration: BoxDecoration(
-                                          color: const Color(
-                                            0xFFFF6B8B,
-                                          ).withValues(alpha: 0.1),
-                                          borderRadius: BorderRadius.circular(
-                                            12,
-                                          ),
-                                        ),
-                                        child: const Icon(
-                                          Icons.phone,
-                                          color: Color(0xFFFF6B8B),
-                                          size: 22,
-                                        ),
-                                      ),
-                                      title: const Text(
-                                        'Phone',
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                      subtitle: Text(
-                                        widget.salon['phone'],
-                                        style: TextStyle(
-                                          color: Colors.grey[600],
-                                        ),
-                                      ),
-                                      trailing: const Icon(
-                                        Icons.chevron_right,
-                                        size: 20,
-                                        color: Colors.grey,
-                                      ),
-                                      onTap: _openWhatsApp,
-                                    ),
-                                  if (widget.salon['email'] != null &&
-                                      widget.salon['email']
-                                          .toString()
-                                          .isNotEmpty)
-                                    ListTile(
-                                      leading: Container(
-                                        padding: const EdgeInsets.all(10),
-                                        decoration: BoxDecoration(
-                                          color: const Color(
-                                            0xFFFF6B8B,
-                                          ).withValues(alpha: 0.1),
-                                          borderRadius: BorderRadius.circular(
-                                            12,
-                                          ),
-                                        ),
-                                        child: const Icon(
-                                          Icons.email,
-                                          color: Color(0xFFFF6B8B),
-                                          size: 22,
-                                        ),
-                                      ),
-                                      title: const Text(
-                                        'Email',
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                      subtitle: Text(
-                                        widget.salon['email'],
-                                        style: TextStyle(
-                                          color: Colors.grey[600],
-                                        ),
-                                      ),
-                                      trailing: const Icon(
-                                        Icons.chevron_right,
-                                        size: 20,
-                                        color: Colors.grey,
-                                      ),
-                                      onTap: () {},
-                                    ),
-                                  if (widget.salon['address'] != null &&
-                                      widget.salon['address']
-                                          .toString()
-                                          .isNotEmpty)
-                                    ListTile(
-                                      leading: Container(
-                                        padding: const EdgeInsets.all(10),
-                                        decoration: BoxDecoration(
-                                          color: const Color(
-                                            0xFFFF6B8B,
-                                          ).withValues(alpha: 0.1),
-                                          borderRadius: BorderRadius.circular(
-                                            12,
-                                          ),
-                                        ),
-                                        child: const Icon(
-                                          Icons.location_on,
-                                          color: Color(0xFFFF6B8B),
-                                          size: 22,
-                                        ),
-                                      ),
-                                      title: const Text(
-                                        'Address',
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                      subtitle: Text(
-                                        widget.salon['address'],
-                                        style: TextStyle(
-                                          color: Colors.grey[600],
-                                        ),
-                                      ),
-                                      trailing: const Icon(
-                                        Icons.chevron_right,
-                                        size: 20,
-                                        color: Colors.grey,
-                                      ),
-                                      onTap: () {},
-                                    ),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(height: 24),
-                            Divider(color: Colors.grey[200], height: 1),
-                          ],
-                        ),
-                      ),
-
-                      const SizedBox(height: 24),
-
-                      // Services Section
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Popular Services',
-                              style: TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            const SizedBox(height: 16),
-                            _buildServicesPreview(),
-                          ],
-                        ),
-                      ),
-
-                      const SizedBox(height: 40),
-                    ],
-                  ),
-                ),
-              ),
             ),
           ],
         ),
@@ -1603,12 +1279,423 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     );
   }
 
-  // ==================== HELPER WIDGETS ====================
+  // ============================================================
+  // ✅ BUILD: BOOKING BUTTONS
+  // ============================================================
+
+  Widget _buildBookingButtons(bool isWeb, bool isTablet) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: isWeb || isTablet
+          ? Row(
+              children: [
+                Expanded(
+                  flex: 2,
+                  child: ElevatedButton.icon(
+                    onPressed: _startBookingFlow,
+                    icon: const Icon(
+                      Icons.calendar_today,
+                      color: Colors.white,
+                      size: 20,
+                    ),
+                    label: const Text(
+                      'Book Appointment',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white,
+                      ),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: context.primaryColor,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      elevation: 2,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  flex: 1,
+                  child: OutlinedButton.icon(
+                    onPressed: _navigateToVipBooking,
+                    icon: const Icon(
+                      Icons.star,
+                      color: Colors.amber,
+                      size: 20,
+                    ),
+                    label: const Text(
+                      'VIP',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.amber,
+                      ),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: Colors.amber, width: 1.5),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            )
+          : Column(
+              children: [
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: _startBookingFlow,
+                    icon: const Icon(
+                      Icons.calendar_today,
+                      color: Colors.white,
+                      size: 20,
+                    ),
+                    label: const Text(
+                      'Book Appointment',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white,
+                      ),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: context.primaryColor,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      elevation: 2,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _navigateToVipBooking,
+                    icon: const Icon(
+                      Icons.star,
+                      color: Colors.amber,
+                      size: 20,
+                    ),
+                    label: const Text(
+                      'VIP Booking',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.amber,
+                      ),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: Colors.amber, width: 1.5),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+    );
+  }
+
+  // ============================================================
+  // ✅ BUILD: OFFERS SECTION
+  // ============================================================
+
+  Widget _buildOffersSection() {
+    if (!_offers.isNotEmpty && !_isLoadingOffers) {
+      return const SizedBox.shrink();
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                '🔥 Special Offers',
+                style: context.titleLarge.copyWith(
+                  color: context.textColor,
+                ),
+              ),
+              if (_offers.length > 2)
+                TextButton(
+                  onPressed: _showAllOffersDialog,
+                  child: Text(
+                    'View All',
+                    style: context.bodyMedium.copyWith(
+                      color: context.primaryColor,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          _isLoadingOffers
+              ? const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(32),
+                    child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+                  ),
+                )
+              : SizedBox(
+                  height: 260,
+                  child: ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: _offers.length > 3 ? 3 : _offers.length,
+                    itemBuilder: (context, index) =>
+                        _buildOfferCard(_offers[index], index),
+                  ),
+                ),
+          const SizedBox(height: 20),
+          Divider(color: context.dividerColor, height: 1),
+        ],
+      ),
+    );
+  }
+
+  // ============================================================
+  // ✅ BUILD: ABOUT SECTION
+  // ============================================================
+
+  Widget _buildAboutSection() {
+    if (widget.salon['description'] == null ||
+        widget.salon['description'].toString().isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'About',
+            style: context.titleLarge.copyWith(
+              color: context.textColor,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: context.cardColor,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: context.dividerColor),
+            ),
+            child: Text(
+              widget.salon['description'],
+              style: context.bodyMedium.copyWith(
+                color: context.secondaryTextColor,
+                height: 1.5,
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+          Divider(color: context.dividerColor, height: 1),
+        ],
+      ),
+    );
+  }
+
+  // ============================================================
+  // ✅ BUILD: CONTACT SECTION
+  // ✅ FIX: "ListTile background color or ink splashes may be
+  // invisible". Previously the ListTiles sat directly inside a
+  // Container that had its own BoxDecoration(color: ...), with no
+  // Material ancestor of its own — the ListTile's ink/splash layer
+  // could get painted over by that decoration. Wrapped the Column
+  // of ListTiles in a Material(color: Colors.transparent) so the
+  // splashes render correctly, while the outer Container still
+  // supplies the visible card background/border/radius.
+  // ============================================================
+
+  Widget _buildContactSection() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Contact & Location',
+            style: context.titleLarge.copyWith(
+              color: context.textColor,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            width: double.infinity,
+            decoration: BoxDecoration(
+              color: context.cardColor,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: context.dividerColor),
+            ),
+            child: Material(
+              color: Colors.transparent,
+              borderRadius: BorderRadius.circular(16),
+              clipBehavior: Clip.antiAlias,
+              child: Column(
+                children: [
+                  if (widget.salon['phone'] != null &&
+                      widget.salon['phone'].toString().isNotEmpty)
+                    ListTile(
+                      leading: Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: context.primaryColor.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(
+                          Icons.phone,
+                          color: context.primaryColor,
+                          size: 22,
+                        ),
+                      ),
+                      title: Text(
+                        'Phone',
+                        style: context.bodyMedium.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: context.textColor,
+                        ),
+                      ),
+                      subtitle: Text(
+                        widget.salon['phone'],
+                        style: context.bodySmall.copyWith(
+                          color: context.secondaryTextColor,
+                        ),
+                      ),
+                      trailing: Icon(
+                        Icons.chevron_right,
+                        size: 20,
+                        color: context.secondaryTextColor,
+                      ),
+                      onTap: _openWhatsApp,
+                    ),
+                  if (widget.salon['email'] != null &&
+                      widget.salon['email'].toString().isNotEmpty)
+                    ListTile(
+                      leading: Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: context.primaryColor.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(
+                          Icons.email,
+                          color: context.primaryColor,
+                          size: 22,
+                        ),
+                      ),
+                      title: Text(
+                        'Email',
+                        style: context.bodyMedium.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: context.textColor,
+                        ),
+                      ),
+                      subtitle: Text(
+                        widget.salon['email'],
+                        style: context.bodySmall.copyWith(
+                          color: context.secondaryTextColor,
+                        ),
+                      ),
+                      trailing: Icon(
+                        Icons.chevron_right,
+                        size: 20,
+                        color: context.secondaryTextColor,
+                      ),
+                      onTap: () {},
+                    ),
+                  if (widget.salon['address'] != null &&
+                      widget.salon['address'].toString().isNotEmpty)
+                    ListTile(
+                      leading: Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: context.primaryColor.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(
+                          Icons.location_on,
+                          color: context.primaryColor,
+                          size: 22,
+                        ),
+                      ),
+                      title: Text(
+                        'Address',
+                        style: context.bodyMedium.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: context.textColor,
+                        ),
+                      ),
+                      subtitle: Text(
+                        widget.salon['address'],
+                        style: context.bodySmall.copyWith(
+                          color: context.secondaryTextColor,
+                        ),
+                      ),
+                      trailing: Icon(
+                        Icons.chevron_right,
+                        size: 20,
+                        color: context.secondaryTextColor,
+                      ),
+                      onTap: () {},
+                    ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+          Divider(color: context.dividerColor, height: 1),
+        ],
+      ),
+    );
+  }
+
+  // ============================================================
+  // ✅ BUILD: SERVICES SECTION
+  // ============================================================
+
+  Widget _buildServicesSection() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Popular Services',
+            style: context.titleLarge.copyWith(
+              color: context.textColor,
+            ),
+          ),
+          const SizedBox(height: 16),
+          _buildServicesPreview(),
+        ],
+      ),
+    );
+  }
+
+  // ============================================================
+  // ✅ HELPER WIDGETS
+  // ============================================================
 
   Widget _buildLogo() {
     final screenWidth = MediaQuery.of(context).size.width;
-    final isDesktop = screenWidth > 800;
-    final logoSize = isDesktop ? 120.0 : 90.0;
+    final isWeb = screenWidth > 800;
+    final logoSize = isWeb ? 120.0 : 90.0;
 
     final logoUrl = widget.salon['logo_url'];
     final hasLogo = logoUrl != null && logoUrl.toString().isNotEmpty;
@@ -1618,7 +1705,10 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
       height: logoSize,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        border: Border.all(color: Colors.white, width: isDesktop ? 4 : 3),
+        border: Border.all(
+          color: context.isDarkMode ? Colors.grey[800]! : Colors.white,
+          width: isWeb ? 4 : 3,
+        ),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.2),
@@ -1640,7 +1730,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                 child: Text(
                   widget.salon['name']?.substring(0, 1).toUpperCase() ?? 'S',
                   style: TextStyle(
-                    fontSize: isDesktop ? 48 : 36,
+                    fontSize: isWeb ? 48 : 36,
                     fontWeight: FontWeight.bold,
                     color: Colors.white,
                   ),
@@ -1655,13 +1745,12 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     final phone = widget.salon['phone'];
     final hasPhone = phone != null && phone.toString().isNotEmpty;
 
-    // ✅ Check if user is active before enabling WhatsApp button
     if (!_isUserLoaded || !_isUserActive) {
       return OutlinedButton(
         onPressed: null,
         style: OutlinedButton.styleFrom(
-          foregroundColor: Colors.grey[400],
-          side: BorderSide(color: Colors.grey[300]!),
+          foregroundColor: context.secondaryTextColor,
+          side: BorderSide(color: context.dividerColor),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(30),
@@ -1670,14 +1759,13 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.chat, size: 18, color: Colors.grey[400]),
+            Icon(Icons.chat, size: 18, color: context.secondaryTextColor),
             const SizedBox(width: 6),
             Text(
               'WhatsApp',
-              style: TextStyle(
-                fontSize: 14,
+              style: context.bodyMedium.copyWith(
                 fontWeight: FontWeight.w600,
-                color: Colors.grey[400],
+                color: context.secondaryTextColor,
               ),
             ),
           ],
@@ -1688,9 +1776,11 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     return OutlinedButton(
       onPressed: hasPhone ? _openWhatsApp : null,
       style: OutlinedButton.styleFrom(
-        foregroundColor: const Color(0xFF25D366),
+        foregroundColor: hasPhone ? const Color(0xFF25D366) : context.secondaryTextColor,
         side: BorderSide(
-          color: hasPhone ? const Color(0xFF25D366) : Colors.grey[300]!,
+          color: hasPhone
+              ? const Color(0xFF25D366)
+              : context.dividerColor,
         ),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
@@ -1702,10 +1792,11 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
           const SizedBox(width: 6),
           Text(
             'WhatsApp',
-            style: TextStyle(
-              fontSize: 14,
+            style: context.bodyMedium.copyWith(
               fontWeight: FontWeight.w600,
-              color: hasPhone ? const Color(0xFF25D366) : Colors.grey[400],
+              color: hasPhone
+                  ? const Color(0xFF25D366)
+                  : context.secondaryTextColor,
             ),
           ),
         ],
@@ -1714,22 +1805,24 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
   }
 
   Widget _buildFollowButton() {
-    // ✅ Check if user is active before enabling follow button
     if (!_isUserLoaded || !_isUserActive) {
       return ElevatedButton(
         onPressed: null,
         style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.grey[200],
-          foregroundColor: Colors.grey[500],
+          backgroundColor: context.isDarkMode ? Colors.grey[800] : Colors.grey[200],
+          foregroundColor: context.secondaryTextColor,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(30),
           ),
           elevation: 0,
         ),
-        child: const Text(
+        child: Text(
           'Login to Follow',
-          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+          style: context.bodyMedium.copyWith(
+            fontWeight: FontWeight.w600,
+            color: context.secondaryTextColor,
+          ),
         ),
       );
     }
@@ -1738,16 +1831,23 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
       onPressed: _toggleFollow,
       style: ElevatedButton.styleFrom(
         backgroundColor: _isFollowing
-            ? Colors.grey[200]
-            : const Color(0xFFFF6B8B),
-        foregroundColor: _isFollowing ? Colors.grey[600] : Colors.white,
+            ? (context.isDarkMode ? Colors.grey[800] : Colors.grey[200])
+            : context.primaryColor,
+        foregroundColor: _isFollowing
+            ? context.secondaryTextColor
+            : Colors.white,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
         elevation: 0,
       ),
       child: Text(
         _isFollowing ? 'Following' : 'Follow',
-        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+        style: context.bodyMedium.copyWith(
+          fontWeight: FontWeight.w600,
+          color: _isFollowing
+              ? context.secondaryTextColor
+              : Colors.white,
+        ),
       ),
     );
   }
@@ -1775,11 +1875,17 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [
-            const Color(0xFFFF6B8B).withValues(alpha: 0.8),
-            const Color(0xFFFF9A9E).withValues(alpha: 0.9),
-            const Color(0xFFFF6B8B),
-          ],
+          colors: context.isDarkMode
+              ? [
+                  const Color(0xFFFF6B8B).withValues(alpha: 0.6),
+                  const Color(0xFFFF9A9E).withValues(alpha: 0.7),
+                  const Color(0xFFFF6B8B).withValues(alpha: 0.5),
+                ]
+              : [
+                  const Color(0xFFFF6B8B).withValues(alpha: 0.8),
+                  const Color(0xFFFF9A9E).withValues(alpha: 0.9),
+                  const Color(0xFFFF6B8B),
+                ],
         ),
       ),
       child: Center(
@@ -1817,7 +1923,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         } else {
           return Icon(
             Icons.star_border,
-            color: Colors.amber.withValues(alpha: 0.7),
+            color: context.isDarkMode ? Colors.white30 : Colors.amber.withValues(alpha: 0.7),
             size: 16,
           );
         }
@@ -1837,10 +1943,20 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [color.withValues(alpha: 0.1), Colors.white],
+          colors: context.isDarkMode
+              ? [
+                  color.withValues(alpha: 0.15),
+                  const Color(0xFF1E1E1E),
+                ]
+              : [
+                  color.withValues(alpha: 0.1),
+                  Colors.white,
+                ],
         ),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
+        border: Border.all(
+          color: context.isDarkMode ? color.withValues(alpha: 0.3) : color.withValues(alpha: 0.3),
+        ),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.05),
@@ -1883,10 +1999,9 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                         children: [
                           Text(
                             offer['title'],
-                            style: TextStyle(
-                              fontSize: 16,
+                            style: context.bodyLarge.copyWith(
                               fontWeight: FontWeight.bold,
-                              color: color,
+                              color: context.isDarkMode ? Colors.white : color,
                             ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
@@ -1903,8 +2018,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                             ),
                             child: Text(
                               _getDiscountText(offer),
-                              style: TextStyle(
-                                fontSize: 12,
+                              style: context.bodySmall.copyWith(
                                 fontWeight: FontWeight.w600,
                                 color: color,
                               ),
@@ -1918,7 +2032,9 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                 const SizedBox(height: 12),
                 Text(
                   offer['description'] ?? '',
-                  style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                  style: context.bodySmall.copyWith(
+                    color: context.isDarkMode ? Colors.white60 : Colors.grey[600],
+                  ),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -1946,8 +2062,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                             const SizedBox(width: 2),
                             Text(
                               '${offer['points_required']} pts',
-                              style: const TextStyle(
-                                fontSize: 10,
+                              style: context.bodySmall.copyWith(
                                 fontWeight: FontWeight.w500,
                               ),
                             ),
@@ -1963,7 +2078,9 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                       decoration: BoxDecoration(
                         color: daysLeft <= 3
                             ? Colors.red.withValues(alpha: 0.1)
-                            : Colors.grey.withValues(alpha: 0.1),
+                            : (context.isDarkMode
+                                ? Colors.white10
+                                : Colors.grey.withValues(alpha: 0.1)),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Row(
@@ -1974,16 +2091,17 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                             size: 10,
                             color: daysLeft <= 3
                                 ? Colors.red
-                                : Colors.grey[600],
+                                : (context.isDarkMode ? Colors.white60 : Colors.grey[600]),
                           ),
                           const SizedBox(width: 2),
                           Text(
                             daysLeft <= 0 ? 'Expired' : '$daysLeft days left',
-                            style: TextStyle(
-                              fontSize: 10,
+                            style: context.bodySmall.copyWith(
                               color: daysLeft <= 3
                                   ? Colors.red
-                                  : Colors.grey[600],
+                                  : (context.isDarkMode
+                                      ? Colors.white60
+                                      : Colors.grey[600]),
                             ),
                           ),
                         ],
@@ -2055,10 +2173,18 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
             width: double.infinity,
             padding: const EdgeInsets.all(32),
             decoration: BoxDecoration(
-              color: Colors.grey[50],
+              color: context.cardColor,
               borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: context.dividerColor),
             ),
-            child: const Center(child: Text('No services available')),
+            child: Center(
+              child: Text(
+                'No services available',
+                style: context.bodyMedium.copyWith(
+                  color: context.secondaryTextColor,
+                ),
+              ),
+            ),
           );
         }
 
@@ -2081,9 +2207,9 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
               margin: const EdgeInsets.only(bottom: 12),
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: context.cardColor,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.grey[200]!),
+                border: Border.all(color: context.dividerColor),
               ),
               child: Row(
                 children: [
@@ -2091,12 +2217,12 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                     width: 48,
                     height: 48,
                     decoration: BoxDecoration(
-                      color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                      color: context.primaryColor.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: const Icon(
+                    child: Icon(
                       Icons.content_cut,
-                      color: Color(0xFFFF6B8B),
+                      color: context.primaryColor,
                       size: 24,
                     ),
                   ),
@@ -2107,17 +2233,16 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                       children: [
                         Text(
                           service['name'] ?? 'Service',
-                          style: const TextStyle(
-                            fontSize: 15,
+                          style: context.bodyMedium.copyWith(
                             fontWeight: FontWeight.w600,
+                            color: context.textColor,
                           ),
                         ),
                         if (service['description'] != null)
                           Text(
                             service['description'],
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey[500],
+                            style: context.bodySmall.copyWith(
+                              color: context.secondaryTextColor,
                             ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
@@ -2127,10 +2252,9 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                   ),
                   Text(
                     'Rs. ${lowestPrice.toInt()}',
-                    style: const TextStyle(
-                      fontSize: 16,
+                    style: context.bodyLarge.copyWith(
                       fontWeight: FontWeight.bold,
-                      color: Color(0xFFFF6B8B),
+                      color: context.primaryColor,
                     ),
                   ),
                 ],

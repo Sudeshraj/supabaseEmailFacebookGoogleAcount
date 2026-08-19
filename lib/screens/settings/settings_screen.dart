@@ -35,6 +35,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   void _onThemeChanged() {
+    if (!mounted) return; // ✅ FIX: guard against setState after dispose
     setState(() {
       _currentTheme = themeNotifier.currentTheme;
     });
@@ -48,26 +49,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _loadThemeMode() async {
     final themeMode = await SessionManager.getThemeMode();
+    if (!mounted) return; // ✅ FIX: guard against setState after dispose
     setState(() {
-      _currentTheme = themeMode == 'light' 
-          ? ThemeMode.light 
-          : themeMode == 'dark' 
-              ? ThemeMode.dark 
+      _currentTheme = themeMode == 'light'
+          ? ThemeMode.light
+          : themeMode == 'dark'
+              ? ThemeMode.dark
               : ThemeMode.system;
     });
   }
 
   void _changeTheme(ThemeMode mode) {
     themeNotifier.setTheme(mode);
+    if (!mounted) return;
     setState(() {
       _currentTheme = mode;
     });
   }
 
   Future<void> _checkAuthProviders() async {
+    if (!mounted) return;
     setState(() => _isLoading = true);
     try {
       final providers = await _authService.getUserAuthProviders();
+      if (!mounted) return; // ✅ FIX: guard after async gap
       _hasEmailPassword = providers.any((p) => p['is_email_password'] == true);
       _hasOAuth = providers.any((p) => p['is_oauth'] == true);
       _oauthCount = providers.where((p) => p['is_oauth'] == true).length;
@@ -199,38 +204,51 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             ],
                           ),
                           const SizedBox(height: 16),
-                          
-                          // ✅ Responsive Theme Options
+
+                          // ✅ FIX: Row branch wraps each option in Expanded at the
+                          // call site (bounded width from Row -> safe).
+                          // Column branch (mobile) passes options with NO Expanded
+                          // wrapper (unbounded height from ListView -> Expanded
+                          // there was the crash). This is the fix for the
+                          // "RenderFlex children have non-zero flex but incoming
+                          // height constraints are unbounded" error on mobile.
                           isWeb || isTablet
                               ? Row(
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
-                                    _buildThemeOption(
-                                      icon: Icons.brightness_auto,
-                                      label: 'System',
-                                      mode: ThemeMode.system,
-                                      isSelected: _currentTheme == ThemeMode.system,
-                                      isTablet: isTablet,
+                                    Expanded(
+                                      child: _buildThemeOption(
+                                        icon: Icons.brightness_auto,
+                                        label: 'System',
+                                        mode: ThemeMode.system,
+                                        isSelected: _currentTheme == ThemeMode.system,
+                                        isTablet: isTablet,
+                                      ),
                                     ),
                                     const SizedBox(width: 12),
-                                    _buildThemeOption(
-                                      icon: Icons.brightness_5,
-                                      label: 'Light',
-                                      mode: ThemeMode.light,
-                                      isSelected: _currentTheme == ThemeMode.light,
-                                      isTablet: isTablet,
+                                    Expanded(
+                                      child: _buildThemeOption(
+                                        icon: Icons.brightness_5,
+                                        label: 'Light',
+                                        mode: ThemeMode.light,
+                                        isSelected: _currentTheme == ThemeMode.light,
+                                        isTablet: isTablet,
+                                      ),
                                     ),
                                     const SizedBox(width: 12),
-                                    _buildThemeOption(
-                                      icon: Icons.brightness_2,
-                                      label: 'Dark',
-                                      mode: ThemeMode.dark,
-                                      isSelected: _currentTheme == ThemeMode.dark,
-                                      isTablet: isTablet,
+                                    Expanded(
+                                      child: _buildThemeOption(
+                                        icon: Icons.brightness_2,
+                                        label: 'Dark',
+                                        mode: ThemeMode.dark,
+                                        isSelected: _currentTheme == ThemeMode.dark,
+                                        isTablet: isTablet,
+                                      ),
                                     ),
                                   ],
                                 )
                               : Column(
+                                  mainAxisSize: MainAxisSize.min,
                                   children: [
                                     _buildThemeOption(
                                       icon: Icons.brightness_auto,
@@ -499,6 +517,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   // ============================================================
   // ✅ THEME OPTION WIDGET
+  // ✅ FIX: No longer returns an `Expanded` itself. `Expanded` only
+  // makes sense inside a bounded-height/width Flex (like the Row
+  // used on web/tablet). On mobile this widget sits inside a
+  // Column nested in a ListView (unbounded height axis), so
+  // wrapping it in Expanded there crashed with:
+  // "RenderFlex children have non-zero flex but incoming height
+  // constraints are unbounded."
+  // Now the caller decides whether to wrap it in Expanded (Row
+  // case) or not (Column case) — this widget just sizes itself.
   // ============================================================
   Widget _buildThemeOption({
     required IconData icon,
@@ -508,61 +535,61 @@ class _SettingsScreenState extends State<SettingsScreen> {
     required bool isTablet,
   }) {
     final isDark = context.isDarkMode;
-    
-    return Expanded(
-      child: GestureDetector(
-        onTap: () => _changeTheme(mode),
-        child: Container(
-          padding: EdgeInsets.symmetric(
-            vertical: isTablet ? 16 : 12,
-            horizontal: isTablet ? 12 : 8,
-          ),
-          decoration: BoxDecoration(
+
+    return GestureDetector(
+      onTap: () => _changeTheme(mode),
+      child: Container(
+        width: double.infinity, // ✅ fills whatever bounded width it's given
+        padding: EdgeInsets.symmetric(
+          vertical: isTablet ? 16 : 12,
+          horizontal: isTablet ? 12 : 8,
+        ),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? (isDark
+                  ? Colors.white.withValues(alpha: 0.1)
+                  : const Color(0xFFFF6B8B).withValues(alpha: 0.1))
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(isTablet ? 14 : 12),
+          border: Border.all(
             color: isSelected
-                ? (isDark ? Colors.white.withValues(alpha: 0.1) : const Color(0xFFFF6B8B).withValues(alpha: 0.1))
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(isTablet ? 14 : 12),
-            border: Border.all(
+                ? const Color(0xFFFF6B8B)
+                : (isDark ? Colors.grey[700]! : Colors.grey[300]!),
+            width: isSelected ? 2 : 1,
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min, // ✅ shrink-wrap, don't expand
+          children: [
+            Icon(
+              icon,
               color: isSelected
                   ? const Color(0xFFFF6B8B)
-                  : (isDark ? Colors.grey[700]! : Colors.grey[300]!),
-              width: isSelected ? 2 : 1,
+                  : (isDark ? Colors.grey[400] : Colors.grey[600]),
+              size: isTablet ? 32 : 28,
             ),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                icon,
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: context.bodySmall.copyWith(
+                fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
                 color: isSelected
                     ? const Color(0xFFFF6B8B)
                     : (isDark ? Colors.grey[400] : Colors.grey[600]),
-                size: isTablet ? 32 : 28,
+                fontSize: isTablet ? 14 : 12,
               ),
-              const SizedBox(height: 4),
-              Text(
-                label,
-                style: context.bodySmall.copyWith(
-                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                  color: isSelected
-                      ? const Color(0xFFFF6B8B)
-                      : (isDark ? Colors.grey[400] : Colors.grey[600]),
-                  fontSize: isTablet ? 14 : 12,
+            ),
+            if (isSelected) const SizedBox(height: 2),
+            if (isSelected)
+              Container(
+                width: isTablet ? 20 : 16,
+                height: isTablet ? 4 : 3,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFF6B8B),
+                  borderRadius: BorderRadius.circular(2),
                 ),
               ),
-              if (isSelected)
-                const SizedBox(height: 2),
-              if (isSelected)
-                Container(
-                  width: isTablet ? 20 : 16,
-                  height: isTablet ? 4 : 3,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFF6B8B),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-            ],
-          ),
+          ],
         ),
       ),
     );

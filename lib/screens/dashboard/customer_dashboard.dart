@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_application_1/screens/settings/permission_manager.dart';
 import 'package:flutter_application_1/services/notification_service.dart';
 import 'package:flutter_application_1/services/permission_service.dart';
+import 'package:flutter_application_1/theme/app_theme.dart';
 import 'package:flutter_application_1/widgets/permission_card.dart';
 import 'package:flutter_application_1/widgets/side_menu.dart';
 import 'package:go_router/go_router.dart';
@@ -11,6 +12,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:universal_platform/universal_platform.dart';
 import '../../services/timezone_service.dart';
+import '../../extensions/context_extensions.dart'; // ✅ NEW
 
 class CustomerDashboard extends StatefulWidget {
   const CustomerDashboard({super.key});
@@ -586,7 +588,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // LOAD DASHBOARD DATA (කෙටි කරපු - පෙර තිබූ දේමයි)
+  // LOAD DASHBOARD DATA
   // ============================================================
 
   Future<void> _loadDashboardData() async {
@@ -1064,7 +1066,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // APPLY OFFER METHOD (කෙටි කරපු)
+  // APPLY OFFER METHOD
   // ============================================================
 
   void _showSnackBar(String message, Color color) {
@@ -1512,7 +1514,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // TIMEZONE PICKER METHODS (කෙටි කරපු)
+  // TIMEZONE PICKER METHODS
   // ============================================================
 
   String _extractCountryCode(String timezone) {
@@ -2195,11 +2197,11 @@ class _CustomerDashboardState extends State<CustomerDashboard>
           color: Colors.transparent,
           child: Container(
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: context.cardColor, // 👈 Colors.white → context.cardColor
               borderRadius: BorderRadius.circular(12),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.1),
+                  color: Colors.black.withValues(alpha: 0.15),
                   blurRadius: 8,
                   offset: const Offset(0, 2),
                 ),
@@ -2221,9 +2223,14 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                     ),
                   )
                 : _searchResults.isEmpty
-                ? const Padding(
-                    padding: EdgeInsets.all(16),
-                    child: Center(child: Text('No salons found')),
+                ? Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Center(
+                      child: Text(
+                        'No salons found',
+                        style: TextStyle(color: context.textColor),
+                      ),
+                    ),
                   )
                 : ListView.builder(
                     shrinkWrap: true,
@@ -2400,7 +2407,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         decoration: BoxDecoration(
           color: Colors.white.withValues(alpha: 0.2),
           borderRadius: BorderRadius.circular(16),
-          border: isDSTActive ? Border.all(color: Colors.amber, width: 1) : null,
+          border: isDSTActive
+              ? Border.all(color: Colors.amber, width: 1)
+              : null,
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -2445,51 +2454,45 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   // ============================================================
 
   Widget _buildResponsiveBookButton() {
-    return Expanded(
-      child: ElevatedButton.icon(
-        onPressed: _bookAppointment,
-        icon: const Icon(Icons.calendar_today, size: 18, color: Colors.white),
-        label: const Text(
-          'Book Now',
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-            color: Colors.white,
-          ),
+    return ElevatedButton.icon(
+      // 👈 Expanded ඉවත් කළා
+      onPressed: _bookAppointment,
+      icon: const Icon(Icons.calendar_today, size: 18, color: Colors.white),
+      label: const Text(
+        'Book Now',
+        style: TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+          color: Colors.white,
         ),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFFFF6B8B),
-          foregroundColor: Colors.white,
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          elevation: 0,
-        ),
+      ),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: const Color(0xFFFF6B8B),
+        foregroundColor: Colors.white,
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        elevation: 0,
       ),
     );
   }
 
   Widget _buildResponsiveVipButton() {
-    return Expanded(
-      child: OutlinedButton.icon(
-        onPressed: _createVipBooking,
-        icon: const Icon(Icons.star, size: 18, color: Colors.amber),
-        label: const Text(
-          'VIP Booking',
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-            color: Colors.amber,
-          ),
+    return OutlinedButton.icon(
+      // 👈 Expanded ඉවත් කළා
+      onPressed: _createVipBooking,
+      icon: const Icon(Icons.star, size: 18, color: Colors.amber),
+      label: const Text(
+        'VIP Booking',
+        style: TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+          color: Colors.amber,
         ),
-        style: OutlinedButton.styleFrom(
-          side: const BorderSide(color: Colors.amber, width: 1.5),
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-        ),
+      ),
+      style: OutlinedButton.styleFrom(
+        side: const BorderSide(color: Colors.amber, width: 1.5),
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
     );
   }
@@ -2535,6 +2538,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
               _viewMyBookings,
             ),
           ],
+          // 👆 GridView children ට Expanded දාන්න ඕන නෑ - GridView itself child sizing එක handle කරනවා
         ),
       );
     }
@@ -2543,28 +2547,34 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(
         children: [
-          _buildStatCard(
-            'Upcoming',
-            '$_upcomingBookings',
-            Icons.calendar_today,
-            Colors.blue,
-            _viewMyBookings,
+          Expanded(
+            child: _buildStatCard(
+              'Upcoming',
+              '$_upcomingBookings',
+              Icons.calendar_today,
+              Colors.blue,
+              _viewMyBookings,
+            ),
           ),
           const SizedBox(width: 12),
-          _buildStatCard(
-            'VIP',
-            '$_vipBookings',
-            Icons.star,
-            Colors.amber,
-            _viewVipBookings,
+          Expanded(
+            child: _buildStatCard(
+              'VIP',
+              '$_vipBookings',
+              Icons.star,
+              Colors.amber,
+              _viewVipBookings,
+            ),
           ),
           const SizedBox(width: 12),
-          _buildStatCard(
-            'Points',
-            '$_loyaltyPoints',
-            Icons.card_giftcard,
-            Colors.green,
-            _viewLoyaltyProgram,
+          Expanded(
+            child: _buildStatCard(
+              'Points',
+              '$_loyaltyPoints',
+              Icons.card_giftcard,
+              Colors.green,
+              _viewLoyaltyProgram,
+            ),
           ),
         ],
       ),
@@ -2578,35 +2588,36 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     Color color,
     VoidCallback onTap,
   ) {
-    return Expanded(
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.1),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: color.withValues(alpha: 0.2)),
-          ),
-          child: Column(
-            children: [
-              Icon(icon, color: color, size: 24),
-              const SizedBox(height: 4),
-              Text(
-                value,
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: color,
-                ),
+    return GestureDetector(
+      // 👈 Expanded ඉවත් කළා
+      onTap: onTap,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withValues(alpha: 0.2)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: color, size: 24),
+            const SizedBox(height: 4),
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: color,
               ),
-              Text(
-                title,
-                style: TextStyle(fontSize: 11, color: Colors.grey[600]),
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ),
+            ),
+            Text(
+              title,
+              style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+              textAlign: TextAlign.center,
+            ),
+          ],
         ),
       ),
     );
@@ -3194,7 +3205,11 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     );
   }
 
-  Widget _buildFacebookStyleOfferPost(Map<String, dynamic> offer, int index) {
+  Widget _buildFacebookStyleOfferPost(
+    Map<String, dynamic> offer,
+    int index, {
+    bool inGrid = false,
+  }) {
     final salonData = offer['salons'];
     final salonName = salonData != null ? salonData['name'] : 'Special Offer';
     final salonLogo = salonData != null ? salonData['logo_url'] : null;
@@ -3204,20 +3219,25 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     final discountText = _getDiscountText(offer);
 
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      margin: inGrid
+          ? EdgeInsets.zero
+          : const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: context.cardColor, // 👈 Colors.white → context.cardColor
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withValues(alpha: 0.1),
+            color: Colors.black.withValues(
+              alpha: context.isDarkMode ? 0.2 : 0.1,
+            ),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
         ],
-        border: Border.all(color: Colors.grey[100]!),
+        border: Border.all(color: context.dividerColor),
       ),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
@@ -3252,10 +3272,13 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                     children: [
                       Text(
                         salonName,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.bold,
+                          color: context.textColor,
                         ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                       const SizedBox(height: 2),
                       Row(
@@ -3263,16 +3286,19 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                           Icon(
                             Icons.access_time,
                             size: 12,
-                            color: Colors.grey[400],
+                            color: context.secondaryTextColor,
                           ),
                           const SizedBox(width: 4),
-                          Text(
-                            daysLeft <= 0 ? 'Expired' : '$daysLeft days left',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: daysLeft <= 3
-                                  ? Colors.red
-                                  : Colors.grey[500],
+                          Flexible(
+                            child: Text(
+                              daysLeft <= 0 ? 'Expired' : '$daysLeft days left',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: daysLeft <= 3
+                                    ? Colors.red
+                                    : context.secondaryTextColor,
+                              ),
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
                           if ((offer['points_required'] ?? 0) > 0) ...[
@@ -3296,50 +3322,66 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                     ],
                   ),
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [Colors.amber.shade400, Colors.orange.shade500],
+                const SizedBox(width: 6),
+                // ✅ FIX: badge text length caused right-edge overflow on
+                // narrow cards — constrain its max width instead of
+                // letting it size unbounded.
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 90),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
                     ),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    discountText,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [Colors.amber.shade400, Colors.orange.shade500],
+                      ),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      discountText,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
                     ),
                   ),
                 ),
               ],
             ),
           ),
-          Divider(color: Colors.grey[200], height: 1),
+          Divider(color: context.dividerColor, height: 1),
           Padding(
             padding: const EdgeInsets.all(12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
                   offer['title'],
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
+                    color: context.textColor,
                   ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 8),
                 Text(
                   offer['description'] ?? '',
                   style: TextStyle(
                     fontSize: 13,
-                    color: Colors.grey[600],
+                    color: context.secondaryTextColor,
                     height: 1.4,
                   ),
+                  maxLines: inGrid ? 2 : 3,
+                  overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 12),
                 Row(
@@ -3365,8 +3407,8 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                     OutlinedButton(
                       onPressed: () => _bookAppointment(),
                       style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.grey[600],
-                        side: BorderSide(color: Colors.grey[300]!),
+                        foregroundColor: context.secondaryTextColor,
+                        side: BorderSide(color: context.dividerColor),
                         padding: const EdgeInsets.symmetric(
                           vertical: 10,
                           horizontal: 16,
@@ -3402,12 +3444,12 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       return Scaffold(
         key: _scaffoldKey,
         appBar: AppBar(
-          backgroundColor: const Color(0xFFFF6B8B),
+          backgroundColor: AppTheme.primary,
           foregroundColor: Colors.white,
           elevation: 0,
           centerTitle: isWeb,
           leading: IconButton(
-            icon: const Icon(Icons.menu),
+            icon: Icon(Icons.menu, color: Colors.white),
             onPressed: _openDrawer,
             tooltip: 'Menu',
             iconSize: 28,
@@ -3533,11 +3575,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         profileImageUrl: _customerImage,
         onMenuItemSelected: () => _loadDashboardData(),
       ),
-      body: SafeArea(
-        child: isWeb
-            ? _buildWebLayout()
-            : _buildMobileLayout(),
-      ),
+      body: SafeArea(child: isWeb ? _buildWebLayout() : _buildMobileLayout()),
     );
   }
 
@@ -3566,29 +3604,40 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                   Container(
                     margin: const EdgeInsets.only(bottom: 20),
                     decoration: BoxDecoration(
-                      color: Colors.grey.shade100,
+                      color: context.isDarkMode
+                          ? Colors.white.withValues(alpha: 0.08)
+                          : Colors.grey.shade100,
                       borderRadius: BorderRadius.circular(30),
-                      border: Border.all(color: Colors.grey.shade300),
+                      border: Border.all(color: context.dividerColor),
                     ),
                     child: TextField(
                       controller: _searchController,
                       focusNode: _searchFocusNode,
-                      style: const TextStyle(color: Colors.black87),
+                      style: TextStyle(color: context.textColor),
                       decoration: InputDecoration(
                         hintText: '🔍 Search for salons...',
-                        hintStyle: TextStyle(color: Colors.grey.shade500),
-                        prefixIcon: Icon(Icons.search, color: Colors.grey.shade600),
+                        hintStyle: TextStyle(color: context.secondaryTextColor),
+                        prefixIcon: Icon(
+                          Icons.search,
+                          color: context.secondaryTextColor,
+                        ),
                         suffixIcon: _searchController.text.isNotEmpty
                             ? GestureDetector(
                                 onTap: () {
                                   _searchController.clear();
                                   _hideSearchResults();
                                 },
-                                child: Icon(Icons.close, color: Colors.grey.shade600),
+                                child: Icon(
+                                  Icons.close,
+                                  color: context.secondaryTextColor,
+                                ),
                               )
                             : null,
                         border: InputBorder.none,
-                        contentPadding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+                        contentPadding: const EdgeInsets.symmetric(
+                          vertical: 14,
+                          horizontal: 8,
+                        ),
                       ),
                       onTap: () {
                         if (_searchController.text.isNotEmpty &&
@@ -3612,31 +3661,45 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   Widget _buildMobileLayout() {
     return Column(
       children: [
-        // ✅ Search Bar below AppBar (Mobile)
         Container(
-          color: Colors.white,
+          color: context
+              .backgroundColor, // 👈 Colors.white → context.backgroundColor
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
           child: Container(
             decoration: BoxDecoration(
-              color: Colors.grey.shade100,
+              color:
+                  context
+                      .isDarkMode // 👈 dark mode friendly fill
+                  ? Colors.white.withValues(alpha: 0.08)
+                  : Colors.grey.shade100,
               borderRadius: BorderRadius.circular(30),
-              border: Border.all(color: Colors.grey.shade300),
+              border: Border.all(
+                color: context.dividerColor,
+              ), // 👈 hardcoded grey → context.dividerColor
             ),
             child: TextField(
               controller: _searchController,
               focusNode: _searchFocusNode,
-              style: const TextStyle(color: Colors.black87),
+              style: TextStyle(
+                color: context.textColor,
+              ), // 👈 hardcoded black87 → context.textColor
               decoration: InputDecoration(
                 hintText: '🔍 Search for salons...',
-                hintStyle: TextStyle(color: Colors.grey.shade500),
-                prefixIcon: Icon(Icons.search, color: Colors.grey.shade600),
+                hintStyle: TextStyle(color: context.secondaryTextColor),
+                prefixIcon: Icon(
+                  Icons.search,
+                  color: context.secondaryTextColor,
+                ),
                 suffixIcon: _searchController.text.isNotEmpty
                     ? GestureDetector(
                         onTap: () {
                           _searchController.clear();
                           _hideSearchResults();
                         },
-                        child: Icon(Icons.close, color: Colors.grey.shade600),
+                        child: Icon(
+                          Icons.close,
+                          color: context.secondaryTextColor,
+                        ),
                       )
                     : null,
                 border: InputBorder.none,
@@ -3651,7 +3714,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
             ),
           ),
         ),
-        // ✅ Content
         Expanded(
           child: GestureDetector(
             onTap: () {
@@ -3700,13 +3762,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
           child: _isTablet
               ? Row(
                   children: [
-                    Expanded(
-                      child: _buildResponsiveBookButton(),
-                    ),
+                    Expanded(child: _buildResponsiveBookButton()),
                     const SizedBox(width: 12),
-                    Expanded(
-                      child: _buildResponsiveVipButton(),
-                    ),
+                    Expanded(child: _buildResponsiveVipButton()),
                     const SizedBox(width: 12),
                     Expanded(
                       child: ElevatedButton.icon(
@@ -3739,9 +3797,11 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                 )
               : Row(
                   children: [
-                    _buildResponsiveBookButton(),
+                    Expanded(
+                      child: _buildResponsiveBookButton(),
+                    ), // 👈 mobile branch එකටත් Expanded දාන්න ඕන
                     const SizedBox(width: 12),
-                    _buildResponsiveVipButton(),
+                    Expanded(child: _buildResponsiveVipButton()),
                   ],
                 ),
         ),
@@ -3754,10 +3814,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               gradient: LinearGradient(
-                colors: [
-                  Colors.amber.shade300,
-                  Colors.amber.shade600,
-                ],
+                colors: [Colors.amber.shade300, Colors.amber.shade600],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
@@ -3771,11 +3828,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                     color: Colors.white.withValues(alpha: 0.2),
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(
-                    Icons.star,
-                    color: Colors.white,
-                    size: 28,
-                  ),
+                  child: const Icon(Icons.star, color: Colors.white, size: 28),
                 ),
                 const SizedBox(width: 16),
                 Expanded(
@@ -3835,6 +3888,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                   style: TextStyle(
                     fontSize: _isTablet ? 20 : 18,
                     fontWeight: FontWeight.bold,
+                    color: context.textColor,
                   ),
                 ),
                 const Spacer(),
@@ -3846,12 +3900,36 @@ class _CustomerDashboardState extends State<CustomerDashboard>
             ),
           ),
           const SizedBox(height: 8),
-          ..._offers.map(
-            (offer) => _buildFacebookStyleOfferPost(
-              offer,
-              _offers.indexOf(offer),
-            ),
-          ),
+          // ✅ Web: 2-column grid. Mobile/Tablet: single column feed (unchanged).
+          _isWeb
+              ? Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: GridView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: _offers.length,
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 2,
+                          crossAxisSpacing: 16,
+                          mainAxisSpacing: 16,
+                          childAspectRatio: 1.6,
+                        ),
+                    itemBuilder: (context, index) =>
+                        _buildFacebookStyleOfferPost(
+                          _offers[index],
+                          index,
+                          inGrid: true,
+                        ),
+                  ),
+                )
+              : Column(
+                  children: _offers
+                      .asMap()
+                      .entries
+                      .map((e) => _buildFacebookStyleOfferPost(e.value, e.key))
+                      .toList(),
+                ),
         ],
         if (_favoriteBarbers.isNotEmpty) ...[
           const SizedBox(height: 20),
@@ -3913,9 +3991,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                     children: [
                       CircleAvatar(
                         radius: _isTablet ? 40 : 35,
-                        backgroundColor: const Color(0xFFFF6B8B).withValues(
-                          alpha: 0.1,
-                        ),
+                        backgroundColor: const Color(
+                          0xFFFF6B8B,
+                        ).withValues(alpha: 0.1),
                         backgroundImage: barber['avatar'] != null
                             ? NetworkImage(barber['avatar'])
                             : null,
@@ -3944,11 +4022,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          const Icon(
-                            Icons.star,
-                            color: Colors.amber,
-                            size: 14,
-                          ),
+                          const Icon(Icons.star, color: Colors.amber, size: 14),
                           const SizedBox(width: 2),
                           Text(
                             barber['rating'].toStringAsFixed(1),
