@@ -15,7 +15,7 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_application_1/services/session_manager.dart';
 import 'package:flutter_svg/flutter_svg.dart';
-import '../../../utils/simple_toast.dart';
+import '../../../alertBox/simple_toast.dart';
 
 // IMPORT SERVICES
 import 'package:flutter_application_1/services/google_sign_in_service.dart';
