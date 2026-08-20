@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_application_1/screens/settings/permission_manager.dart';
+import 'package:flutter_application_1/services/permission_manager.dart';
 import 'package:flutter_application_1/services/notification_service.dart';
 import 'package:flutter_application_1/services/permission_service.dart';
 import 'package:flutter_application_1/theme/app_theme.dart';
