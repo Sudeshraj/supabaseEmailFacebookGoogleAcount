@@ -532,15 +532,15 @@ class _SideMenuState extends State<SideMenu> {
 
       Navigator.pop(context);
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Switched to ${_getRoleDisplayName(profile['role'])} profile',
-          ),
-          backgroundColor: Colors.green,
-          duration: const Duration(seconds: 2),
-        ),
-      );
+      // ScaffoldMessenger.of(context).showSnackBar(
+      //   SnackBar(
+      //     content: Text(
+      //       'Switched to ${_getRoleDisplayName(profile['role'])} profile',
+      //     ),
+      //     backgroundColor: Colors.green,
+      //     duration: const Duration(seconds: 2),
+      //   ),
+      // );
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;

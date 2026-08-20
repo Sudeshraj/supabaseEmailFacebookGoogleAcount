@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_application_1/extensions/context_extensions.dart';
 
 class DashboardStatCard extends StatelessWidget {
   final String title;
@@ -29,8 +30,8 @@ class DashboardStatCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // ✅ Responsive sizing
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isTablet = screenWidth >= 600;
+    final isTablet = context.isTablet;
+    final isDark = context.isDarkMode;
     
     final padding = isTablet ? 20.0 : 16.0;
     final iconSize = isTablet ? 28.0 : 24.0;
@@ -40,6 +41,9 @@ class DashboardStatCard extends StatelessWidget {
     final iconPadding = isTablet ? 12.0 : 10.0;
     final borderRadius = isTablet ? 20.0 : 16.0;
     final minHeight = isTablet ? 120.0 : 100.0;
+    final shadowColor = isDark 
+        ? Colors.black.withValues(alpha: 0.3) 
+        : Colors.grey.withValues(alpha: 0.1);
 
     return Material(
       color: Colors.transparent,
@@ -52,19 +56,22 @@ class DashboardStatCard extends StatelessWidget {
         child: Container(
           width: fullWidth ? double.infinity : null,
           constraints: BoxConstraints(
-            minHeight: minHeight, // ✅ Minimum touch target
+            minHeight: minHeight,
           ),
           padding: EdgeInsets.all(padding),
           decoration: BoxDecoration(
-            color: Theme.of(context).cardColor, // ✅ Dark mode support
+            color: context.cardColor,
             borderRadius: BorderRadius.circular(borderRadius),
             boxShadow: [
               BoxShadow(
-                color: Colors.grey.withValues(alpha: 0.1),
+                color: shadowColor,
                 blurRadius: 10,
                 offset: const Offset(0, 4),
               ),
             ],
+            border: isDark 
+                ? Border.all(color: Colors.grey[800]!, width: 0.5)
+                : null,
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -136,7 +143,7 @@ class DashboardStatCard extends StatelessWidget {
                 style: TextStyle(
                   fontSize: titleSize,
                   fontWeight: FontWeight.w500,
-                  color: Colors.grey[700],
+                  color: isDark ? Colors.white70 : Colors.grey[700],
                   height: 1.2,
                 ),
               ),
@@ -147,7 +154,7 @@ class DashboardStatCard extends StatelessWidget {
                   subtitle!,
                   style: TextStyle(
                     fontSize: subtitleSize,
-                    color: Colors.grey[500],
+                    color: isDark ? Colors.white70 : Colors.grey[500],
                   ),
                 ),
               ],
@@ -158,7 +165,9 @@ class DashboardStatCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(4),
                   child: LinearProgressIndicator(
                     value: progressValue.clamp(0.0, 1.0),
-                    backgroundColor: Colors.grey[200],
+                    backgroundColor: isDark 
+                        ? Colors.grey[800] 
+                        : Colors.grey[200],
                     valueColor: AlwaysStoppedAnimation<Color>(color),
                     minHeight: isTablet ? 6 : 4,
                   ),

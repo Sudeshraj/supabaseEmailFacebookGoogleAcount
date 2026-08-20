@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_application_1/extensions/context_extensions.dart';
 
 class BookingTile extends StatelessWidget {
   final String customerName;
@@ -45,6 +46,7 @@ class BookingTile extends StatelessWidget {
     // ✅ Responsive sizing
     final screenWidth = MediaQuery.of(context).size.width;
     final isTablet = screenWidth >= 600;
+    final isDark = context.isDarkMode;
     
     final padding = isTablet ? 16.0 : 12.0;
     final avatarSize = isTablet ? 60.0 : 50.0;
@@ -62,7 +64,7 @@ class BookingTile extends StatelessWidget {
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(borderRadius),
       ),
-      color: Theme.of(context).cardColor, // ✅ Dark mode support
+      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(borderRadius),
@@ -70,12 +72,13 @@ class BookingTile extends StatelessWidget {
         highlightColor: const Color(0xFFFF6B8B).withValues(alpha: 0.05),
         child: Container(
           constraints: BoxConstraints(
-            minHeight: minHeight, // ✅ Minimum touch target
+            minHeight: minHeight,
           ),
           padding: EdgeInsets.all(padding),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // ✅ Responsive Profile Image
+              // ✅ Profile Image
               Container(
                 width: avatarSize,
                 height: avatarSize,
@@ -106,83 +109,88 @@ class BookingTile extends StatelessWidget {
               ),
               SizedBox(width: padding),
 
-              // Booking Details
+              // ✅ Booking Details - Expanded
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Customer Name Row with VIP Badge
+                    // ✅ Customer Name Row with VIP Badge - FIXED OVERFLOW
                     Row(
                       children: [
-                        Expanded(
+                        Flexible(
                           child: Text(
                             customerName,
                             style: TextStyle(
                               fontSize: nameSize,
                               fontWeight: FontWeight.w600,
-                              color: Theme.of(context).textTheme.bodyLarge?.color,
+                              color: isDark ? Colors.white : Colors.black87,
                             ),
                             overflow: TextOverflow.ellipsis,
+                            maxLines: 1,
                           ),
                         ),
-                        // VIP Badge
+                        // VIP Badge - FIXED OVERFLOW
                         if (isVip)
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              gradient: const LinearGradient(
-                                colors: [Colors.amber, Colors.orange],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
+                          Flexible(
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
                               ),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  Icons.star,
-                                  size: 10,
-                                  color: Colors.white,
+                              margin: const EdgeInsets.only(left: 6),
+                              decoration: BoxDecoration(
+                                gradient: const LinearGradient(
+                                  colors: [Colors.amber, Colors.orange],
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
                                 ),
-                                const SizedBox(width: 4),
-                                Text(
-                                  'VIP',
-                                  style: TextStyle(
-                                    fontSize: smallSize * 0.8,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.star,
+                                    size: 8,
                                     color: Colors.white,
-                                    fontWeight: FontWeight.bold,
                                   ),
-                                ),
-                              ],
+                                  const SizedBox(width: 2),
+                                  Text(
+                                    'VIP',
+                                    style: TextStyle(
+                                      fontSize: smallSize * 0.7,
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                       ],
                     ),
                     const SizedBox(height: 4),
 
-                    // Salon Name
+                    // ✅ Salon Name - FIXED OVERFLOW
                     if (salonName != null && salonName!.isNotEmpty) ...[
                       Row(
                         children: [
                           Icon(
                             Icons.store,
                             size: iconSize,
-                            color: Colors.blue[600],
+                            color: isDark ? Colors.blue[300] : Colors.blue[600],
                           ),
                           const SizedBox(width: 4),
-                          Expanded(
+                          Flexible(
                             child: Text(
                               salonName!,
                               style: TextStyle(
                                 fontSize: subSize * 0.9,
-                                color: Colors.blue[700],
+                                color: isDark ? Colors.blue[300] : Colors.blue[700],
                                 fontWeight: FontWeight.w500,
                               ),
                               overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
                             ),
                           ),
                         ],
@@ -190,23 +198,24 @@ class BookingTile extends StatelessWidget {
                       const SizedBox(height: 2),
                     ],
 
-                    // Service and Barber
+                    // ✅ Service and Barber - FIXED OVERFLOW
                     Row(
                       children: [
                         Icon(
                           Icons.content_cut,
                           size: iconSize,
-                          color: Colors.grey[500],
+                          color: isDark ? Colors.grey[400] : Colors.grey[500],
                         ),
                         const SizedBox(width: 4),
-                        Expanded(
+                        Flexible(
                           child: Text(
                             serviceName,
                             style: TextStyle(
                               fontSize: subSize,
-                              color: Colors.grey[600],
+                              color: isDark ? Colors.grey[400] : Colors.grey[600],
                             ),
                             overflow: TextOverflow.ellipsis,
+                            maxLines: 1,
                           ),
                         ),
                       ],
@@ -218,21 +227,25 @@ class BookingTile extends StatelessWidget {
                           Icon(
                             Icons.person_outline,
                             size: iconSize,
-                            color: Colors.grey[500],
+                            color: isDark ? Colors.grey[400] : Colors.grey[500],
                           ),
                           const SizedBox(width: 4),
-                          Text(
-                            barberName!,
-                            style: TextStyle(
-                              fontSize: subSize,
-                              color: Colors.grey[600],
+                          Flexible(
+                            child: Text(
+                              barberName!,
+                              style: TextStyle(
+                                fontSize: subSize,
+                                color: isDark ? Colors.grey[400] : Colors.grey[600],
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
                             ),
                           ),
                         ],
                       ),
                     ],
 
-                    // Time, Queue Number and Status
+                    // ✅ Time, Queue Number and Status - Wrap (already good)
                     const SizedBox(height: 8),
                     Wrap(
                       spacing: 8,
@@ -245,7 +258,9 @@ class BookingTile extends StatelessWidget {
                             vertical: 2,
                           ),
                           decoration: BoxDecoration(
-                            color: Colors.grey.withValues(alpha: 0.1),
+                            color: isDark 
+                                ? Colors.white.withValues(alpha: 0.08)
+                                : Colors.grey.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Row(
@@ -254,21 +269,21 @@ class BookingTile extends StatelessWidget {
                               Icon(
                                 Icons.access_time,
                                 size: smallSize,
-                                color: Colors.grey[600],
+                                color: isDark ? Colors.grey[400] : Colors.grey[600],
                               ),
                               const SizedBox(width: 4),
                               Text(
                                 time,
                                 style: TextStyle(
                                   fontSize: smallSize,
-                                  color: Colors.grey[600],
+                                  color: isDark ? Colors.grey[400] : Colors.grey[600],
                                 ),
                               ),
                             ],
                           ),
                         ),
                         
-                        // Queue Number / Token
+                        // Queue Number
                         if (queueNumber != null)
                           Container(
                             padding: const EdgeInsets.symmetric(
@@ -288,14 +303,14 @@ class BookingTile extends StatelessWidget {
                                 Icon(
                                   Icons.numbers,
                                   size: smallSize,
-                                  color: Colors.blue[700],
+                                  color: isDark ? Colors.blue[300] : Colors.blue[700],
                                 ),
                                 const SizedBox(width: 4),
                                 Text(
                                   'Q-$queueNumber',
                                   style: TextStyle(
                                     fontSize: smallSize,
-                                    color: Colors.blue[700],
+                                    color: isDark ? Colors.blue[300] : Colors.blue[700],
                                     fontWeight: FontWeight.w500,
                                   ),
                                 ),
@@ -303,6 +318,7 @@ class BookingTile extends StatelessWidget {
                             ),
                           ),
                           
+                        // Queue Token
                         if (queueToken != null && queueNumber == null)
                           Container(
                             padding: const EdgeInsets.symmetric(
@@ -322,14 +338,14 @@ class BookingTile extends StatelessWidget {
                                 Icon(
                                   Icons.qr_code,
                                   size: smallSize,
-                                  color: Colors.blue[700],
+                                  color: isDark ? Colors.blue[300] : Colors.blue[700],
                                 ),
                                 const SizedBox(width: 4),
                                 Text(
                                   queueToken!,
                                   style: TextStyle(
                                     fontSize: smallSize,
-                                    color: Colors.blue[700],
+                                    color: isDark ? Colors.blue[300] : Colors.blue[700],
                                     fontWeight: FontWeight.w500,
                                   ),
                                 ),
@@ -361,24 +377,23 @@ class BookingTile extends StatelessWidget {
 
                     const SizedBox(height: 8),
 
-                    // Price Row
+                    // ✅ Price
                     if (price != null)
                       Text(
                         'Rs. ${price!.toStringAsFixed(0)}',
                         style: TextStyle(
                           fontSize: priceSize,
                           fontWeight: FontWeight.w600,
-                          color: Colors.green[700],
+                          color: isDark ? Colors.green[300] : Colors.green[700],
                         ),
                       ),
 
-                    // Action buttons if showActions is true
+                    // ✅ Action buttons
                     if (showActions && onComplete != null) ...[
                       const SizedBox(height: 12),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.end,
                         children: [
-                          // Complete button - Responsive
                           ElevatedButton(
                             onPressed: onComplete,
                             style: ElevatedButton.styleFrom(
@@ -400,7 +415,6 @@ class BookingTile extends StatelessWidget {
                             child: const Text('Complete'),
                           ),
                           const SizedBox(width: 8),
-                          // Reschedule button - Responsive
                           OutlinedButton(
                             onPressed: () {
                               ScaffoldMessenger.of(context).showSnackBar(
@@ -435,12 +449,12 @@ class BookingTile extends StatelessWidget {
                 ),
               ),
 
-              // Arrow icon - hide when actions are shown
+              // ✅ Arrow icon - hide when actions are shown
               if (!showActions)
                 Icon(
                   Icons.arrow_forward_ios,
                   size: isTablet ? 16 : 14,
-                  color: Colors.grey[400],
+                  color: isDark ? Colors.grey[600] : Colors.grey[400],
                 ),
             ],
           ),
