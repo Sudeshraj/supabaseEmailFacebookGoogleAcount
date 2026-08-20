@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/main.dart';
 import 'package:flutter_application_1/services/session_manager.dart';
+import 'package:flutter_application_1/theme/app_theme.dart';
+import 'package:flutter_application_1/extensions/context_extensions.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -19,10 +21,19 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
   String? currentUserId;
   bool _isProfileLevelStatus = false;
 
+  // ✅ Web Scroll Controller
+  final ScrollController _scrollController = ScrollController();
+
   @override
   void initState() {
     super.initState();
     _loadProfiles();
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
   }
 
   // ============================================================
@@ -46,7 +57,6 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
       debugPrint('📋 Loading profiles for user: ${user.id}');
       debugPrint('📋 Current role: $_currentRole');
 
-      // ✅ Get user roles with status from user_roles table
       final userRolesResponse = await supabase
           .from('user_roles')
           .select('''
@@ -64,7 +74,6 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
 
       debugPrint('📋 User roles response: $userRolesResponse');
 
-      // ✅ Get profile data
       final profileResponse = await supabase
           .from('profiles')
           .select('''
@@ -94,13 +103,10 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
           profileResponse['extra_data'] as Map<String, dynamic>? ?? {};
       debugPrint('📋 Extra data: $extraData');
 
-      // ✅ Check if profile level status exists
       _isProfileLevelStatus = extraData.containsKey('profile_status');
 
-      // ✅ Build profile list from user_roles
       final List<ProfileData> profileList = [];
 
-      // ✅ Check profile level status first
       String profileLevelStatus = 'active';
       DateTime? profileDeletionDueDate;
       int profileGracePeriodDays = 90;
@@ -120,7 +126,6 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
         }
       }
 
-      // ✅ Build profile data for each role
       for (var roleEntry in userRolesResponse) {
         final role = roleEntry['roles'] as Map?;
         if (role == null) continue;
@@ -129,19 +134,16 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
         String roleStatus = roleEntry['status'] as String? ?? 'active';
         final roleKey = 'profile_$roleName';
 
-        // ✅ If profile level status exists, use it instead of role status
         if (_isProfileLevelStatus) {
           roleStatus = profileLevelStatus;
         }
 
-        // ✅ Get display name
         String displayName =
             profileResponse['full_name'] ??
             extraData['full_name'] ??
             user.email?.split('@').first ??
             'User';
 
-        // ✅ Get role-specific data from extra_data
         DateTime? deletionDueDate;
         DateTime? scheduledAt;
         int gracePeriodDays = 90;
@@ -162,7 +164,6 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
           }
         }
 
-        // ✅ Use profile level deletion date if available
         if (_isProfileLevelStatus &&
             profileLevelStatus == 'scheduled_for_deletion') {
           deletionDueDate = profileDeletionDueDate;
@@ -215,9 +216,7 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
     try {
       debugPrint('📝 Updating role status: ${profile.role} -> $status');
 
-      // ✅ Check if profile level status exists
       if (profile.isProfileLevel) {
-        // ✅ Update profile level status
         final success = await SessionManager.updateProfileLevelStatus(
           email: profile.email,
           status: status,
@@ -228,7 +227,6 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
           throw Exception('Failed to update profile status');
         }
       } else {
-        // ✅ Update individual role status
         final success = await SessionManager.updateRoleStatus(
           email: profile.email,
           role: profile.role,
@@ -243,13 +241,9 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
 
       debugPrint('✅ Status updated successfully');
 
-      // ✅ Refresh local profiles
       await _loadProfiles();
-
-      // ✅ Refresh app state
       await appState.refreshState();
 
-      // ✅ Show success message
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -274,29 +268,24 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
   // ============================================================
   // 🔥 PROFILE LEVEL ACTIONS
   // ============================================================
-  // ✅ NOTE: Complete profile *deletion* is intentionally not
-  // available from this screen anymore. Deleting the entire
-  // account is now handled exclusively by Settings → Delete
-  // Account (a dedicated, clearly-labeled screen), so there is
-  // a single, unambiguous path for that destructive action -
-  // matching Google Play / Apple App Store discoverability
-  // requirements. Deactivate/Reactivate All remain here since
-  // they're a non-destructive pause, not a deletion request.
 
-  /// ✅ Deactivate entire profile
   Future<void> _deactivateCompleteProfile(ProfileData profile) async {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
+        backgroundColor: context.backgroundColor,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Deactivate Complete Profile?'),
+        title: Text(
+          'Deactivate Complete Profile?',
+          style: context.titleLarge.copyWith(color: context.textColor),
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               'Are you sure you want to deactivate your entire profile?',
-              style: const TextStyle(fontSize: 16),
+              style: context.bodyMedium.copyWith(color: context.textColor),
             ),
             const SizedBox(height: 12),
             Container(
@@ -306,14 +295,14 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
               ),
-              child: const Row(
+              child: Row(
                 children: [
-                  Icon(Icons.info_outline, color: Colors.orange),
-                  SizedBox(width: 8),
+                  const Icon(Icons.info_outline, color: Colors.orange),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       'All your roles will be deactivated. You can reactivate anytime.',
-                      style: TextStyle(fontSize: 13),
+                      style: context.bodySmall.copyWith(color: Colors.orange),
                     ),
                   ),
                 ],
@@ -339,20 +328,23 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
     );
 
     if (confirm == true) {
-      // ✅ Update profile level status to inactive
       await _updateProfileLevelStatus(profile, 'inactive');
     }
   }
 
-  /// ✅ Reactivate entire profile
   Future<void> _reactivateCompleteProfile(ProfileData profile) async {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
+        backgroundColor: context.backgroundColor,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Reactivate Complete Profile?'),
-        content: const Text(
+        title: Text(
+          'Reactivate Complete Profile?',
+          style: context.titleLarge.copyWith(color: context.textColor),
+        ),
+        content: Text(
           'Your entire profile will be reactivated immediately.',
+          style: context.bodyMedium.copyWith(color: context.textColor),
         ),
         actions: [
           TextButton(
@@ -372,12 +364,10 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
     );
 
     if (confirm == true) {
-      // ✅ Update profile level status to active
       await _updateProfileLevelStatus(profile, 'active');
     }
   }
 
-  /// ✅ Update profile level status
   Future<void> _updateProfileLevelStatus(
     ProfileData profile,
     String status,
@@ -387,7 +377,6 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
     try {
       debugPrint('📝 Updating profile level status: $status');
 
-      // ✅ Use SessionManager to update profile level status
       final success = await SessionManager.updateProfileLevelStatus(
         email: profile.email,
         status: status,
@@ -400,7 +389,6 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
 
       debugPrint('✅ Profile level status updated successfully');
 
-      // ✅ Refresh
       await _loadProfiles();
       await appState.refreshState();
 
@@ -433,10 +421,15 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
+        backgroundColor: context.backgroundColor,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Switch to ${_getRoleDisplayName(profile.role)}?'),
+        title: Text(
+          'Switch to ${_getRoleDisplayName(profile.role)}?',
+          style: context.titleLarge.copyWith(color: context.textColor),
+        ),
         content: Text(
           'You are switching to your ${_getRoleDisplayName(profile.role)} profile.',
+          style: context.bodyMedium.copyWith(color: context.textColor),
         ),
         actions: [
           TextButton(
@@ -446,7 +439,7 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFFF6B8B),
+              backgroundColor: AppTheme.primary,
               foregroundColor: Colors.white,
             ),
             child: const Text('Switch'),
@@ -502,14 +495,19 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
+        backgroundColor: context.backgroundColor,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Deactivate Role?'),
+        title: Text(
+          'Deactivate Role?',
+          style: context.titleLarge.copyWith(color: context.textColor),
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               'Are you sure you want to deactivate your ${_getRoleDisplayName(profile.role)} role?',
+              style: context.bodyMedium.copyWith(color: context.textColor),
             ),
             const SizedBox(height: 12),
             Container(
@@ -519,14 +517,14 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
               ),
-              child: const Row(
+              child: Row(
                 children: [
-                  Icon(Icons.info_outline, color: Colors.orange),
-                  SizedBox(width: 8),
+                  const Icon(Icons.info_outline, color: Colors.orange),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       'You can reactivate this role anytime from settings.',
-                      style: TextStyle(fontSize: 13),
+                      style: context.bodySmall.copyWith(color: Colors.orange),
                     ),
                   ),
                 ],
@@ -560,15 +558,19 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
+        backgroundColor: context.backgroundColor,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Delete Role?'),
+        title: Text(
+          'Delete Role?',
+          style: context.titleLarge.copyWith(color: context.textColor),
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               'Are you sure you want to delete your ${_getRoleDisplayName(profile.role)} role?',
-              style: const TextStyle(fontSize: 16),
+              style: context.bodyMedium.copyWith(color: context.textColor),
             ),
             const SizedBox(height: 16),
             Container(
@@ -604,14 +606,14 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: Colors.green.withValues(alpha: 0.2)),
               ),
-              child: const Row(
+              child: Row(
                 children: [
-                  Icon(Icons.restore, color: Colors.green),
-                  SizedBox(width: 8),
+                  const Icon(Icons.restore, color: Colors.green),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       'You can restore this role at any time within 90 days by logging in or clicking "Reactivate".',
-                      style: TextStyle(fontSize: 12, color: Colors.green),
+                      style: context.bodySmall.copyWith(color: Colors.green),
                     ),
                   ),
                 ],
@@ -645,9 +647,16 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
+        backgroundColor: context.backgroundColor,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Reactivate ${_getRoleDisplayName(profile.role)}?'),
-        content: const Text('Your role will be reactivated immediately.'),
+        title: Text(
+          'Reactivate ${_getRoleDisplayName(profile.role)}?',
+          style: context.titleLarge.copyWith(color: context.textColor),
+        ),
+        content: Text(
+          'Your role will be reactivated immediately.',
+          style: context.bodyMedium.copyWith(color: context.textColor),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -674,10 +683,15 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
+        backgroundColor: context.backgroundColor,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Cancel Deletion?'),
-        content: const Text(
+        title: Text(
+          'Cancel Deletion?',
+          style: context.titleLarge.copyWith(color: context.textColor),
+        ),
+        content: Text(
           'Your role will be reactivated and will not be deleted.',
+          style: context.bodyMedium.copyWith(color: context.textColor),
         ),
         actions: [
           TextButton(
@@ -819,25 +833,42 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
     required VoidCallback onPressed,
     bool isDestructive = false,
   }) {
+    final isDark = context.isDarkMode;
+
     return ElevatedButton.icon(
       onPressed: onPressed,
       icon: Icon(icon, size: 18),
-      label: Text(label),
+      label: Text(
+        label,
+        style: TextStyle(color: isDark ? Colors.white : color),
+      ),
       style: ElevatedButton.styleFrom(
-        backgroundColor: color.withValues(alpha: 0.1),
-        foregroundColor: color,
+        backgroundColor: isDark
+            ? color.withValues(alpha: 0.15)
+            : color.withValues(alpha: 0.1),
+        foregroundColor: isDark ? Colors.white : color,
         elevation: 0,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(10),
-          side: BorderSide(color: color.withValues(alpha: 0.3)),
+          side: BorderSide(
+            color: isDark
+                ? color.withValues(alpha: 0.4)
+                : color.withValues(alpha: 0.3),
+          ),
         ),
-        textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+        textStyle: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          color: isDark ? Colors.white : color,
+        ),
       ),
     );
   }
 
+  // ✅ FIXED: Profile Card with Responsive Wrap
   Widget _buildProfileCard(ProfileData profile) {
+    final isDark = context.isDarkMode;
     final isCurrent = profile.isCurrent;
     final isActive = profile.isActive;
     final isScheduledForDeletion = profile.status == 'scheduled_for_deletion';
@@ -873,10 +904,11 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
 
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
+      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
         side: isCurrent
-            ? BorderSide(color: const Color(0xFFFF6B8B), width: 2)
+            ? BorderSide(color: AppTheme.primary, width: 2)
             : BorderSide.none,
       ),
       elevation: isCurrent ? 4 : 2,
@@ -930,9 +962,10 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
                           Expanded(
                             child: Text(
                               profile.displayName,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 18,
                                 fontWeight: FontWeight.bold,
+                                color: isDark ? Colors.white : Colors.black87,
                               ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
@@ -945,10 +978,10 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
                                 vertical: 4,
                               ),
                               decoration: BoxDecoration(
-                                color: const Color(0xFFFF6B8B),
+                                color: AppTheme.primary,
                                 borderRadius: BorderRadius.circular(12),
                               ),
-                              child: const Text(
+                              child: Text(
                                 'Active',
                                 style: TextStyle(
                                   fontSize: 10,
@@ -960,23 +993,34 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
                         ],
                       ),
                       const SizedBox(height: 4),
-                      Row(
+                      // ✅ FIXED: Use Wrap instead of Row for status badges
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 4,
+                        alignment: WrapAlignment.start,
+                        crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
-                          Icon(
-                            _getRoleIcon(profile.role),
-                            size: 14,
-                            color: _getRoleColor(profile.role),
+                          // Role icon and name
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                _getRoleIcon(profile.role),
+                                size: 14,
+                                color: _getRoleColor(profile.role),
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                _getRoleDisplayName(profile.role),
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: _getRoleColor(profile.role),
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
                           ),
-                          const SizedBox(width: 4),
-                          Text(
-                            _getRoleDisplayName(profile.role),
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: _getRoleColor(profile.role),
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
+                          // Status badge
                           Container(
                             padding: const EdgeInsets.symmetric(
                               horizontal: 6,
@@ -1005,6 +1049,7 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
                               ],
                             ),
                           ),
+                          // Profile level badge
                           if (isProfileLevel)
                             Container(
                               padding: const EdgeInsets.symmetric(
@@ -1018,11 +1063,13 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
                                   color: Colors.purple.withValues(alpha: 0.2),
                                 ),
                               ),
-                              child: const Text(
+                              child: Text(
                                 'Profile Level',
                                 style: TextStyle(
                                   fontSize: 8,
-                                  color: Colors.purple,
+                                  color: isDark
+                                      ? Colors.purple[300]
+                                      : Colors.purple,
                                   fontWeight: FontWeight.w500,
                                 ),
                               ),
@@ -1032,7 +1079,10 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
                       const SizedBox(height: 4),
                       Text(
                         profile.email,
-                        style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: isDark ? Colors.white60 : Colors.grey[500],
+                        ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -1096,20 +1146,33 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.grey.withValues(alpha: 0.05),
+                  color: isDark
+                      ? Colors.grey[800]
+                      : Colors.grey.withValues(alpha: 0.05),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.grey.withValues(alpha: 0.2)),
+                  border: Border.all(
+                    color: isDark
+                        ? Colors.grey[700]!
+                        : Colors.grey.withValues(alpha: 0.2),
+                  ),
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.info_outline, size: 18, color: Colors.grey[600]),
+                    Icon(
+                      Icons.info_outline,
+                      size: 18,
+                      color: isDark ? Colors.white60 : Colors.grey[600],
+                    ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         isProfileLevel
                             ? 'Complete profile is inactive. You can reactivate it anytime.'
                             : 'This role is inactive. You can reactivate it anytime.',
-                        style: TextStyle(fontSize: 13, color: Colors.grey),
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: isDark ? Colors.white60 : Colors.grey,
+                        ),
                       ),
                     ),
                   ],
@@ -1119,12 +1182,12 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
 
             const SizedBox(height: 16),
 
-            // Action Buttons
+            // ✅ FIXED: Action Buttons - Wrap with proper spacing
             Wrap(
               spacing: 8,
               runSpacing: 8,
+              alignment: WrapAlignment.start,
               children: [
-                // Switch to this profile
                 if (!isCurrent && isActive && !isBlocked)
                   _buildActionButton(
                     icon: Icons.swap_horiz,
@@ -1133,7 +1196,6 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
                     onPressed: () => _switchProfile(profile),
                   ),
 
-                // Reactivate - for inactive profiles
                 if (isInactive && !isBlocked)
                   _buildActionButton(
                     icon: Icons.restore,
@@ -1142,7 +1204,6 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
                     onPressed: () => _reactivateProfile(profile),
                   ),
 
-                // Reactivate - for scheduled deletion (within grace period)
                 if (isScheduledForDeletion &&
                     profile.deletionDueDate != null &&
                     profile.deletionDueDate!.isAfter(DateTime.now()) &&
@@ -1154,7 +1215,6 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
                     onPressed: () => _reactivateProfile(profile),
                   ),
 
-                // Deactivate
                 if (isActive && !isCurrent && !isBlocked)
                   _buildActionButton(
                     icon: Icons.pause_circle_outline,
@@ -1163,7 +1223,6 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
                     onPressed: () => _deactivateProfile(profile),
                   ),
 
-                // Delete (Schedule Deletion)
                 if ((isActive || isInactive) && !isCurrent && !isBlocked)
                   _buildActionButton(
                     icon: Icons.delete_outline,
@@ -1173,7 +1232,6 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
                     onPressed: () => _scheduleDeletion(profile),
                   ),
 
-                // Cancel Deletion
                 if (isScheduledForDeletion &&
                     profile.deletionDueDate != null &&
                     profile.deletionDueDate!.isAfter(DateTime.now()) &&
@@ -1185,12 +1243,7 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
                     onPressed: () => _cancelDeletion(profile),
                   ),
 
-                // ✅ Profile Level Actions (Only show if profile level exists)
-                // ✅ NOTE: "Delete All" removed - complete account
-                // deletion now lives exclusively in
-                // Settings → Delete Account.
                 if (isProfileLevel) ...[
-                  // Deactivate Complete Profile
                   if (isActive && !isBlocked)
                     _buildActionButton(
                       icon: Icons.pause_circle_filled,
@@ -1199,7 +1252,6 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
                       onPressed: () => _deactivateCompleteProfile(profile),
                     ),
 
-                  // Reactivate Complete Profile
                   if ((isInactive || isScheduledForDeletion) && !isBlocked)
                     _buildActionButton(
                       icon: Icons.restore,
@@ -1211,15 +1263,16 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
               ],
             ),
 
-            // ✅ Hint pointing to the single, canonical place to
-            // delete the whole account.
             if (isProfileLevel && !isScheduledForDeletion) ...[
               const SizedBox(height: 12),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 4),
                 child: Text(
                   'Want to delete your entire account? Go to Settings → Delete Account.',
-                  style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: isDark ? Colors.white70 : Colors.grey[500],
+                  ),
                 ),
               ),
             ],
@@ -1229,43 +1282,129 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
     );
   }
 
+  // ============================================================
+  // ✅ BUILD METHOD - WITH WEB FRAME
+  // ============================================================
   @override
   Widget build(BuildContext context) {
+    final isDark = context.isDarkMode;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isWeb = screenWidth > 800;
+
     return Scaffold(
+      backgroundColor: isDark ? const Color(0xFF121212) : Colors.white,
       appBar: AppBar(
-        title: const Text('Profile Management'),
-        backgroundColor: const Color(0xFFFF6B8B),
+        title: Text(
+          'Profile Management',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
+        backgroundColor: AppTheme.primary,
         foregroundColor: Colors.white,
         elevation: 0,
+        centerTitle: isWeb,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+          tooltip: 'Back',
+        ),
         actions: [
-          IconButton(icon: const Icon(Icons.refresh), onPressed: _loadProfiles),
+          IconButton(
+            icon: Icon(Icons.refresh, color: Colors.white),
+            onPressed: _loadProfiles,
+          ),
         ],
       ),
-      body: _isLoading
-          ? const Center(
-              child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
-            )
-          : _profiles.isEmpty
-          ? const Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.person_off_outlined, size: 64, color: Colors.grey),
-                  SizedBox(height: 16),
-                  Text(
-                    'No profiles found',
-                    style: TextStyle(fontSize: 18, color: Colors.grey),
-                  ),
-                ],
-              ),
-            )
-          : ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: _profiles.length,
-              itemBuilder: (context, index) {
-                return _buildProfileCard(_profiles[index]);
-              },
+      // ✅ EDGE-TO-EDGE: SafeArea with Web Frame
+      body: SafeArea(
+        child: _isLoading
+            ? Center(child: CircularProgressIndicator(color: AppTheme.primary))
+            : _profiles.isEmpty
+            ? Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.person_off_outlined,
+                      size: 64,
+                      color: isDark ? Colors.white70 : Colors.grey,
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'No profiles found',
+                      style: TextStyle(
+                        fontSize: 18,
+                        color: isDark ? Colors.white70 : Colors.grey,
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            : isWeb
+            ? _buildWebLayout()
+            : _buildMobileLayout(),
+      ),
+    );
+  }
+
+  // ✅ WEB LAYOUT - Centered with Scrollbar
+  Widget _buildWebLayout() {
+    final isDark = context.isDarkMode;
+
+    return Center(
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 800),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isDark ? Colors.grey[800]! : Colors.grey[200]!,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.05),
+              blurRadius: 20,
+              offset: const Offset(0, 4),
             ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: Scrollbar(
+            controller: _scrollController,
+            thumbVisibility: true,
+            trackVisibility: true,
+            thickness: 8.0,
+            radius: const Radius.circular(10),
+            scrollbarOrientation: ScrollbarOrientation.right,
+            child: SingleChildScrollView(
+              controller: _scrollController,
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.all(24),
+              child: _buildContent(),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ✅ MOBILE LAYOUT
+  Widget _buildMobileLayout() {
+    return SingleChildScrollView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.all(16),
+      child: _buildContent(),
+    );
+  }
+
+  // ✅ CONTENT
+  Widget _buildContent() {
+    return Column(
+      children: [
+        // ✅ toList() remove කරන්න
+        ..._profiles.map((profile) => _buildProfileCard(profile)),
+        const SizedBox(height: 20),
+      ],
     );
   }
 }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_application_1/services/permission_manager.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -7,11 +8,12 @@ import 'package:universal_platform/universal_platform.dart';
 import '../../services/notification_service.dart';
 import '../../services/permission_service.dart';
 import '../../services/timezone_service.dart';
-import '../../screens/settings/permission_manager.dart';
 import '../../widgets/permission_card.dart';
+import '../../extensions/context_extensions.dart';
+import '../../theme/app_theme.dart';
 
 class NotificationScreen extends StatefulWidget {
-  final String? role; // 'customer', 'barber', 'owner'
+  final String? role;
 
   const NotificationScreen({
     super.key,
@@ -32,25 +34,24 @@ class _NotificationScreenState extends State<NotificationScreen> {
   bool _isLoading = true;
   bool _hasError = false;
   String _errorMessage = '';
-  String _selectedFilter = 'all'; // all, unread, read
+  String _selectedFilter = 'all';
 
-  // Permission state
   bool _hasPermission = false;
   bool _showPermissionCard = false;
 
-  // Pagination variables
   bool _isLoadingMore = false;
   bool _hasMore = true;
   int _currentPage = 0;
   static const int _pageSize = 20;
 
-  // Scroll controller for pagination
   final ScrollController _scrollController = ScrollController();
 
-  // ============================================
-  // TIMEZONE VARIABLES
-  // ============================================
   bool _isTimezoneLoaded = false;
+
+  // ✅ Responsive variables
+  bool _isWeb = false;
+  bool _isTablet = false;
+  bool _isLargeScreen = false;
 
   @override
   void initState() {
@@ -61,9 +62,31 @@ class _NotificationScreenState extends State<NotificationScreen> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _checkScreenSize();
+  }
+
+  @override
   void dispose() {
     _scrollController.dispose();
     super.dispose();
+  }
+
+  // ✅ Check screen size for responsive layout
+  void _checkScreenSize() {
+    final size = MediaQuery.of(context).size;
+    final isWeb = size.width > 800;
+    final isTablet = size.shortestSide >= 600;
+    final isLarge = size.width > 800 || size.height > 800;
+
+    if (_isWeb != isWeb || _isTablet != isTablet || _isLargeScreen != isLarge) {
+      setState(() {
+        _isWeb = isWeb;
+        _isTablet = isTablet;
+        _isLargeScreen = isLarge;
+      });
+    }
   }
 
   // ============================================
@@ -76,7 +99,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
     if (!_hasPermission) {
       _showPermissionCard = await _permissionManager.shouldShowPermissionCard(
         screen: 'notifications',
-        action: 'notification', // ✅ Important action
+        action: 'notification',
       );
       
       if (UniversalPlatform.isWeb && _showPermissionCard) {
@@ -193,11 +216,13 @@ class _NotificationScreenState extends State<NotificationScreen> {
 
   void _showWebPermissionHelp() {
     if (!mounted) return;
+    final isDark = context.isDarkMode;
 
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
         title: const Row(
           children: [
             Text('🌐'),
@@ -258,7 +283,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
               _permissionService.refreshWebPage();
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFFF6B8B),
+              backgroundColor: AppTheme.primary,
               foregroundColor: Colors.white,
             ),
             icon: const Icon(Icons.refresh),
@@ -270,6 +295,8 @@ class _NotificationScreenState extends State<NotificationScreen> {
   }
 
   Widget _buildWebStep(String number, String text) {
+    final isDark = context.isDarkMode;
+
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -277,16 +304,16 @@ class _NotificationScreenState extends State<NotificationScreen> {
           width: 24,
           height: 24,
           decoration: BoxDecoration(
-            color: const Color(0xFFFF6B8B).withAlpha(20),
+            color: AppTheme.primary.withAlpha(20),
             shape: BoxShape.circle,
           ),
           child: Center(
             child: Text(
               number,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.bold,
-                color: Color(0xFFFF6B8B),
+                color: AppTheme.primary,
               ),
             ),
           ),
@@ -295,7 +322,10 @@ class _NotificationScreenState extends State<NotificationScreen> {
         Expanded(
           child: Text(
             text,
-            style: const TextStyle(fontSize: 14),
+            style: TextStyle(
+              fontSize: 14,
+              color: isDark ? Colors.white : Colors.black87,
+            ),
           ),
         ),
       ],
@@ -303,9 +333,12 @@ class _NotificationScreenState extends State<NotificationScreen> {
   }
 
   void _showSettingsDialog() {
+    final isDark = context.isDarkMode;
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
         title: const Text('🔔 Notifications Disabled'),
         content: const Text(
           'To enable notifications, please go to your device settings.',
@@ -321,7 +354,8 @@ class _NotificationScreenState extends State<NotificationScreen> {
               _permissionService.openAppSettings();
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFFF6B8B),
+              backgroundColor: AppTheme.primary,
+              foregroundColor: Colors.white,
             ),
             child: const Text('Open Settings'),
           ),
@@ -560,10 +594,19 @@ class _NotificationScreenState extends State<NotificationScreen> {
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
+        backgroundColor: context.backgroundColor,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Clear All Notifications'),
-        content: const Text(
+        title: Text(
+          'Clear All Notifications',
+          style: context.titleLarge.copyWith(
+            color: context.textColor,
+          ),
+        ),
+        content: Text(
           'Are you sure you want to clear all notifications? This action cannot be undone.',
+          style: context.bodyMedium.copyWith(
+            color: context.textColor,
+          ),
         ),
         actions: [
           TextButton(
@@ -627,7 +670,6 @@ class _NotificationScreenState extends State<NotificationScreen> {
     final data = notification['data'] as Map<String, dynamic>?;
     final role = widget.role ?? 'customer';
 
-    // ========== BARBER NAVIGATION ==========
     if (role == 'barber') {
       if (type == 'new_booking_assigned' || type == 'booking_reminder') {
         final appointmentId = data?['appointmentId'] ?? data?['bookingId'];
@@ -650,9 +692,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
       } else {
         await context.push('/barber/dashboard');
       }
-    }
-    // ========== OWNER NAVIGATION ==========
-    else if (role == 'owner') {
+    } else if (role == 'owner') {
       if (type == 'new_leave_request') {
         await context.push('/owner/leaves');
       } else if (type == 'new_follower') {
@@ -668,9 +708,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
       } else {
         await context.push('/owner/dashboard');
       }
-    }
-    // ========== CUSTOMER NAVIGATION ==========
-    else {
+    } else {
       if (type == 'appointment_confirmed' || type == 'booking_confirmed') {
         final appointmentId = data?['appointment_id'] ?? data?['bookingId'];
         if (appointmentId != null) {
@@ -738,7 +776,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
       case 'owner':
         return Colors.purple;
       default:
-        return const Color(0xFFFF6B8B);
+        return AppTheme.primary;
     }
   }
 
@@ -796,7 +834,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
       case 'vip_rejected':
         return Colors.red;
       case 'special_offer':
-        return const Color(0xFFFF6B8B);
+        return AppTheme.primary;
       case 'booking_reminder':
         return Colors.blue;
       case 'next_appointment_alert':
@@ -852,19 +890,33 @@ class _NotificationScreenState extends State<NotificationScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = context.isDarkMode;
+    final isWeb = _isWeb;
+
+    _checkScreenSize();
+
     if (!_isTimezoneLoaded) {
       return Scaffold(
+        backgroundColor: isDark ? const Color(0xFF121212) : Colors.white,
         appBar: AppBar(
-          title: Text(_getTitle()),
+          title: Text(
+            _getTitle(),
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
           backgroundColor: _getAppBarColor(),
           foregroundColor: Colors.white,
           elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: Colors.white),
+            onPressed: () => Navigator.pop(context),
+            tooltip: 'Back',
+          ),
         ),
         body: const Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+              CircularProgressIndicator(color: AppTheme.primary),
               SizedBox(height: 16),
               Text('Loading timezone...'),
             ],
@@ -878,13 +930,16 @@ class _NotificationScreenState extends State<NotificationScreen> {
         .length;
 
     return Scaffold(
-      backgroundColor: Colors.grey[50],
+      backgroundColor: isDark ? const Color(0xFF121212) : Colors.grey[50],
       appBar: AppBar(
         title: Row(
           children: [
             Text(
               _getTitle(),
-              style: const TextStyle(fontWeight: FontWeight.bold),
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
             ),
             if (unreadCount > 0) ...[
               const SizedBox(width: 8),
@@ -909,11 +964,16 @@ class _NotificationScreenState extends State<NotificationScreen> {
         backgroundColor: _getAppBarColor(),
         foregroundColor: Colors.white,
         elevation: 0,
-        centerTitle: false,
+        centerTitle: isWeb,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+          tooltip: 'Back',
+        ),
         actions: [
           if (_notifications.isNotEmpty) ...[
             PopupMenuButton<String>(
-              icon: const Icon(Icons.more_vert),
+              icon: const Icon(Icons.more_vert, color: Colors.white),
               onSelected: (value) {
                 if (value == 'mark_all_read') {
                   _markAllAsRead();
@@ -947,362 +1007,451 @@ class _NotificationScreenState extends State<NotificationScreen> {
           ],
         ],
       ),
-      body: _isLoading
-          ? const Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  CircularProgressIndicator(color: Color(0xFFFF6B8B)),
-                  SizedBox(height: 16),
-                  Text('Loading notifications...'),
-                ],
+      body: SafeArea(
+        child: isWeb
+            ? _buildWebLayout(isDark)
+            : _buildMobileLayout(isDark),
+      ),
+    );
+  }
+
+  // ✅ WEB LAYOUT - Centered with Scrollbar
+  Widget _buildWebLayout(bool isDark) {
+    return Center(
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 800),
+        child: Scrollbar(
+          controller: _scrollController,
+          thumbVisibility: true,
+          trackVisibility: true,
+          thickness: 8.0,
+          radius: const Radius.circular(10),
+          scrollbarOrientation: ScrollbarOrientation.right,
+          child: SingleChildScrollView(
+            controller: _scrollController,
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.all(24),
+            child: _buildContent(isDark),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ✅ MOBILE LAYOUT
+  Widget _buildMobileLayout(bool isDark) {
+    return Column(
+      children: [
+        // Permission Card
+        if (_showPermissionCard && !_hasPermission)
+          PermissionCard(
+            onEnable: () => _enableNotifications(action: 'notification'),
+            onNotNow: _handleNotNow,
+            title: _permissionManager.getPermissionCardTitle(action: 'notification'),
+            message: _permissionManager.getPermissionCardMessage(action: 'notification'),
+            compact: true,
+            iconEmoji: _permissionManager.getPermissionCardIcon(action: 'notification'),
+          ),
+        
+        // Filter Bar
+        Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 12,
+          ),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+            border: Border(
+              bottom: BorderSide(
+                color: isDark ? Colors.grey[800]! : Colors.grey[200]!,
               ),
-            )
-          : _hasError
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.error_outline, size: 64, color: Colors.grey[400]),
-                  const SizedBox(height: 16),
-                  Text(
-                    _errorMessage,
-                    style: TextStyle(color: Colors.grey[600]),
+            ),
+          ),
+          child: Row(
+            children: [
+              _buildFilterChip('All', 'all', isDark),
+              const SizedBox(width: 8),
+              _buildFilterChip('Unread', 'unread', isDark),
+              const SizedBox(width: 8),
+              _buildFilterChip('Read', 'read', isDark),
+              const Spacer(),
+              if (_filteredNotifications.isEmpty &&
+                  _selectedFilter != 'all')
+                Text(
+                  'No results',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isDark ? Colors.white70 : Colors.grey[500],
                   ),
-                  const SizedBox(height: 24),
-                  ElevatedButton(
-                    onPressed: _loadNotifications,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: _getAppBarColor(),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: const Text('Try Again'),
-                  ),
-                ],
+                ),
+            ],
+          ),
+        ),
+
+        // Notifications List
+        Expanded(
+          child: _buildNotificationsList(isDark),
+        ),
+      ],
+    );
+  }
+
+  // ✅ CONTENT
+  Widget _buildContent(bool isDark) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Permission Card
+        if (_showPermissionCard && !_hasPermission)
+          PermissionCard(
+            onEnable: () => _enableNotifications(action: 'notification'),
+            onNotNow: _handleNotNow,
+            title: _permissionManager.getPermissionCardTitle(action: 'notification'),
+            message: _permissionManager.getPermissionCardMessage(action: 'notification'),
+            compact: true,
+            iconEmoji: _permissionManager.getPermissionCardIcon(action: 'notification'),
+          ),
+        
+        // Filter Bar
+        Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 12,
+          ),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+            border: Border(
+              bottom: BorderSide(
+                color: isDark ? Colors.grey[800]! : Colors.grey[200]!,
               ),
-            )
-          : Column(
-              children: [
-                // ✅ PERMISSION CARD
-                if (_showPermissionCard && !_hasPermission)
-                  PermissionCard(
-                    onEnable: () => _enableNotifications(action: 'notification'),
-                    onNotNow: _handleNotNow,
-                    title: _permissionManager.getPermissionCardTitle(action: 'notification'),
-                    message: _permissionManager.getPermissionCardMessage(action: 'notification'),
-                    compact: true,
-                    iconEmoji: _permissionManager.getPermissionCardIcon(action: 'notification'),
+            ),
+          ),
+          child: Row(
+            children: [
+              _buildFilterChip('All', 'all', isDark),
+              const SizedBox(width: 8),
+              _buildFilterChip('Unread', 'unread', isDark),
+              const SizedBox(width: 8),
+              _buildFilterChip('Read', 'read', isDark),
+              const Spacer(),
+              if (_filteredNotifications.isEmpty &&
+                  _selectedFilter != 'all')
+                Text(
+                  'No results',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isDark ? Colors.white70 : Colors.grey[500],
                   ),
-                
-                // Filter Bar
-                Container(
-                  padding: const EdgeInsets.symmetric(
+                ),
+            ],
+          ),
+        ),
+
+        // Notifications List
+        _buildNotificationsList(isDark),
+      ],
+    );
+  }
+
+  // ✅ NOTIFICATIONS LIST
+  Widget _buildNotificationsList(bool isDark) {
+    if (_isLoading) {
+      return const Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircularProgressIndicator(color: AppTheme.primary),
+            SizedBox(height: 16),
+            Text('Loading notifications...'),
+          ],
+        ),
+      );
+    }
+
+    if (_hasError) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.error_outline, size: 64, color: isDark ? Colors.white70 : Colors.grey[400]),
+            const SizedBox(height: 16),
+            Text(
+              _errorMessage,
+              style: TextStyle(
+                color: isDark ? Colors.white60 : Colors.grey[600],
+              ),
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton(
+              onPressed: _loadNotifications,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _getAppBarColor(),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: const Text('Try Again'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_notifications.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: _getAppBarColor().withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.notifications_none,
+                size: 64,
+                color: _getAppBarColor().withValues(alpha: 0.5),
+              ),
+            ),
+            const SizedBox(height: 24),
+            Text(
+              _getEmptyMessage(),
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white : Colors.grey[700],
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _getEmptySubMessage(),
+              style: TextStyle(
+                fontSize: 14,
+                color: isDark ? Colors.white70 : Colors.grey[500],
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_filteredNotifications.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.filter_alt_off,
+              size: 48,
+              color: isDark ? Colors.white70 : Colors.grey[400],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              _selectedFilter == 'unread'
+                  ? 'No unread notifications'
+                  : 'No read notifications',
+              style: TextStyle(
+                color: isDark ? Colors.white70 : Colors.grey[500],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: _refreshNotifications,
+      color: _getAppBarColor(),
+      child: ListView.builder(
+        controller: _scrollController,
+        physics: const BouncingScrollPhysics(),
+        itemCount:
+            _filteredNotifications.length +
+            (_isLoadingMore ? 1 : 0),
+        itemBuilder: (context, index) {
+          if (index == _filteredNotifications.length &&
+              _isLoadingMore) {
+            return Padding(
+              padding: const EdgeInsets.all(16),
+              child: Center(
+                child: SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: AppTheme.primary,
+                  ),
+                ),
+              ),
+            );
+          }
+
+          final notification = _filteredNotifications[index];
+          final originalIndex = _notifications.indexWhere(
+            (n) => n['id'] == notification['id'],
+          );
+          final isUnread = notification['is_read'] == false;
+          final icon = _getNotificationIcon(notification['type']);
+          final iconColor = _getNotificationColor(notification['type']);
+          final timeAgo = _formatTime(notification['created_at']);
+
+          return Dismissible(
+            key: Key(notification['id'].toString()),
+            direction: DismissDirection.endToStart,
+            background: Container(
+              alignment: Alignment.centerRight,
+              padding: const EdgeInsets.only(right: 20),
+              decoration: BoxDecoration(
+                color: Colors.red,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(
+                Icons.delete,
+                color: Colors.white,
+              ),
+            ),
+            onDismissed: (direction) {
+              _deleteNotification(notification['id'], originalIndex);
+            },
+            child: Material(
+              color: isUnread
+                  ? _getAppBarColor().withValues(alpha: 0.05)
+                  : (isDark ? const Color(0xFF1E1E1E) : Colors.white),
+              child: InkWell(
+                onTap: () => _handleNotificationTap(notification),
+                borderRadius: BorderRadius.circular(12),
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  margin: const EdgeInsets.symmetric(
                     horizontal: 16,
-                    vertical: 12,
+                    vertical: 4,
                   ),
                   decoration: BoxDecoration(
-                    color: Colors.white,
-                    border: Border(
-                      bottom: BorderSide(color: Colors.grey[200]!),
-                    ),
+                    color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.05),
+                        blurRadius: 4,
+                        offset: const Offset(0, 1),
+                      ),
+                    ],
+                    border: isUnread
+                        ? Border.all(
+                            color: _getAppBarColor().withValues(alpha: 0.3),
+                          )
+                        : null,
                   ),
                   child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _buildFilterChip('All', 'all'),
-                      const SizedBox(width: 8),
-                      _buildFilterChip('Unread', 'unread'),
-                      const SizedBox(width: 8),
-                      _buildFilterChip('Read', 'read'),
-                      const Spacer(),
-                      if (_filteredNotifications.isEmpty &&
-                          _selectedFilter != 'all')
-                        Text(
-                          'No results',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[500],
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: iconColor.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(
+                          icon,
+                          color: iconColor,
+                          size: 24,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    notification['title'] ?? 'Notification',
+                                    style: TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: isUnread
+                                          ? FontWeight.bold
+                                          : FontWeight.w500,
+                                      color: isDark ? Colors.white : Colors.grey[800],
+                                    ),
+                                  ),
+                                ),
+                                Text(
+                                  timeAgo,
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: isDark ? Colors.white70 : Colors.grey[500],
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              notification['body'] ?? '',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: isDark ? Colors.white60 : Colors.grey[600],
+                                height: 1.3,
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      if (isUnread)
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: const BoxDecoration(
+                            color: AppTheme.primary,
+                            shape: BoxShape.circle,
                           ),
                         ),
                     ],
                   ),
                 ),
-
-                // Notifications List with Pagination
-                Expanded(
-                  child: RefreshIndicator(
-                    onRefresh: _refreshNotifications,
-                    color: _getAppBarColor(),
-                    child: _notifications.isEmpty
-                        ? Center(
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.all(24),
-                                  decoration: BoxDecoration(
-                                    color: _getAppBarColor().withValues(alpha: 0.1),
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: Icon(
-                                    Icons.notifications_none,
-                                    size: 64,
-                                    color: _getAppBarColor().withValues(alpha: 0.5),
-                                  ),
-                                ),
-                                const SizedBox(height: 24),
-                                Text(
-                                  _getEmptyMessage(),
-                                  style: TextStyle(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.grey[700],
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  _getEmptySubMessage(),
-                                  style: TextStyle(fontSize: 14, color: Colors.grey[500]),
-                                  textAlign: TextAlign.center,
-                                ),
-                              ],
-                            ),
-                          )
-                        : _filteredNotifications.isEmpty
-                        ? Center(
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(
-                                  Icons.filter_alt_off,
-                                  size: 48,
-                                  color: Colors.grey[400],
-                                ),
-                                const SizedBox(height: 12),
-                                Text(
-                                  _selectedFilter == 'unread'
-                                      ? 'No unread notifications'
-                                      : 'No read notifications',
-                                  style: TextStyle(color: Colors.grey[500]),
-                                ),
-                              ],
-                            ),
-                          )
-                        : ListView.builder(
-                            controller: _scrollController,
-                            physics: const BouncingScrollPhysics(),
-                            itemCount:
-                                _filteredNotifications.length +
-                                (_isLoadingMore ? 1 : 0),
-                            itemBuilder: (context, index) {
-                              // Loading indicator at the end
-                              if (index == _filteredNotifications.length &&
-                                  _isLoadingMore) {
-                                return const Padding(
-                                  padding: EdgeInsets.all(16),
-                                  child: Center(
-                                    child: SizedBox(
-                                      width: 24,
-                                      height: 24,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        color: Color(0xFFFF6B8B),
-                                      ),
-                                    ),
-                                  ),
-                                );
-                              }
-
-                              final notification =
-                                  _filteredNotifications[index];
-                              final originalIndex = _notifications.indexWhere(
-                                (n) => n['id'] == notification['id'],
-                              );
-                              final isUnread = notification['is_read'] == false;
-                              final icon = _getNotificationIcon(
-                                notification['type'],
-                              );
-                              final iconColor = _getNotificationColor(
-                                notification['type'],
-                              );
-                              final timeAgo = _formatTime(
-                                notification['created_at'],
-                              );
-
-                              return Dismissible(
-                                key: Key(notification['id'].toString()),
-                                direction: DismissDirection.endToStart,
-                                background: Container(
-                                  alignment: Alignment.centerRight,
-                                  padding: const EdgeInsets.only(right: 20),
-                                  decoration: BoxDecoration(
-                                    color: Colors.red,
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  child: const Icon(
-                                    Icons.delete,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                                onDismissed: (direction) {
-                                  _deleteNotification(
-                                    notification['id'],
-                                    originalIndex,
-                                  );
-                                },
-                                child: Material(
-                                  color: isUnread
-                                      ? _getAppBarColor().withValues(alpha: 0.05)
-                                      : Colors.white,
-                                  child: InkWell(
-                                    onTap: () =>
-                                        _handleNotificationTap(notification),
-                                    borderRadius: BorderRadius.circular(12),
-                                    child: Container(
-                                      padding: const EdgeInsets.all(16),
-                                      margin: const EdgeInsets.symmetric(
-                                        horizontal: 16,
-                                        vertical: 4,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: Colors.white,
-                                        borderRadius: BorderRadius.circular(12),
-                                        boxShadow: [
-                                          BoxShadow(
-                                            color: Colors.grey.withValues(
-                                              alpha: 0.05,
-                                            ),
-                                            blurRadius: 4,
-                                            offset: const Offset(0, 1),
-                                          ),
-                                        ],
-                                        border: isUnread
-                                            ? Border.all(
-                                                color: _getAppBarColor().withValues(alpha: 0.3),
-                                              )
-                                            : null,
-                                      ),
-                                      child: Row(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          // Icon
-                                          Container(
-                                            padding: const EdgeInsets.all(10),
-                                            decoration: BoxDecoration(
-                                              color: iconColor.withValues(
-                                                alpha: 0.1,
-                                              ),
-                                              borderRadius:
-                                                  BorderRadius.circular(12),
-                                            ),
-                                            child: Icon(
-                                              icon,
-                                              color: iconColor,
-                                              size: 24,
-                                            ),
-                                          ),
-                                          const SizedBox(width: 12),
-
-                                          // Content
-                                          Expanded(
-                                            child: Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: [
-                                                Row(
-                                                  children: [
-                                                    Expanded(
-                                                      child: Text(
-                                                        notification['title'] ??
-                                                            'Notification',
-                                                        style: TextStyle(
-                                                          fontSize: 15,
-                                                          fontWeight: isUnread
-                                                              ? FontWeight.bold
-                                                              : FontWeight.w500,
-                                                          color:
-                                                              Colors.grey[800],
-                                                        ),
-                                                      ),
-                                                    ),
-                                                    Text(
-                                                      timeAgo,
-                                                      style: TextStyle(
-                                                        fontSize: 11,
-                                                        color: Colors.grey[500],
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
-                                                const SizedBox(height: 4),
-                                                Text(
-                                                  notification['body'] ?? '',
-                                                  style: TextStyle(
-                                                    fontSize: 13,
-                                                    color: Colors.grey[600],
-                                                    height: 1.3,
-                                                  ),
-                                                  maxLines: 2,
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-
-                                          // Unread indicator
-                                          if (isUnread)
-                                            Container(
-                                              width: 8,
-                                              height: 8,
-                                              decoration: const BoxDecoration(
-                                                color: Color(0xFFFF6B8B),
-                                                shape: BoxShape.circle,
-                                              ),
-                                            ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
-                  ),
-                ),
-              ],
+              ),
             ),
+          );
+        },
+      ),
     );
   }
 
-  Widget _buildFilterChip(String label, String value) {
+  Widget _buildFilterChip(String label, String value, bool isDark) {
+    final isSelected = _selectedFilter == value;
+    final appBarColor = _getAppBarColor();
+
     return FilterChip(
-      label: Text(label),
-      selected: _selectedFilter == value,
+      label: Text(
+        label,
+        style: TextStyle(
+          color: isSelected
+              ? appBarColor
+              : (isDark ? Colors.white60 : Colors.grey[600]),
+          fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+        ),
+      ),
+      selected: isSelected,
       onSelected: (selected) {
         setState(() {
           _selectedFilter = value;
-          // Reload notifications with filter
           _loadNotifications();
         });
       },
-      selectedColor: _getAppBarColor().withValues(alpha: 0.1),
-      checkmarkColor: _getAppBarColor(),
-      labelStyle: TextStyle(
-        color: _selectedFilter == value
-            ? _getAppBarColor()
-            : Colors.grey[600],
-        fontWeight: _selectedFilter == value
-            ? FontWeight.w600
-            : FontWeight.normal,
-      ),
+      selectedColor: appBarColor.withValues(alpha: 0.1),
+      checkmarkColor: appBarColor,
+      backgroundColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
       shape: StadiumBorder(
         side: BorderSide(
-          color: _selectedFilter == value
-              ? _getAppBarColor()
-              : Colors.grey[300]!,
+          color: isSelected
+              ? appBarColor
+              : (isDark ? Colors.grey[700]! : Colors.grey[300]!),
         ),
       ),
     );

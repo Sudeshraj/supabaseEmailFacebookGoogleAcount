@@ -5,6 +5,8 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/services/session_manager.dart';
+import 'package:flutter_application_1/theme/app_theme.dart';
+import 'package:flutter_application_1/extensions/context_extensions.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -15,11 +17,11 @@ import '../../services/profile_service.dart';
 // =====================================================
 class ProfileImagePicker extends StatelessWidget {
   final String? currentImageUrl;
-  final dynamic tempImage; // Temporary image for preview
+  final dynamic tempImage;
   final String? fullName;
   final bool isLoading;
-  final bool isEditing; // ✅ Added: Check if in edit mode
-  final Function(dynamic) onImageSelected; // File or Uint8List
+  final bool isEditing;
+  final Function(dynamic) onImageSelected;
   final Function() onRemoveImage;
 
   const ProfileImagePicker({
@@ -28,14 +30,17 @@ class ProfileImagePicker extends StatelessWidget {
     this.tempImage,
     this.fullName,
     this.isLoading = false,
-    this.isEditing = false, // ✅ Default false
+    this.isEditing = false,
     required this.onImageSelected,
     required this.onRemoveImage,
   });
 
   Future<void> _pickImage(BuildContext context) async {
+    final isDark = context.isDarkMode;
+
     await showModalBottomSheet(
       context: context,
+      backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -48,19 +53,26 @@ class ProfileImagePicker extends StatelessWidget {
               width: 40,
               height: 4,
               decoration: BoxDecoration(
-                color: Colors.grey[300],
+                color: isDark ? Colors.grey[700] : Colors.grey[300],
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
             const SizedBox(height: 16),
-            const Text(
+            Text(
               'Change Profile Photo',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
             ),
             const SizedBox(height: 16),
             ListTile(
               leading: const Icon(Icons.photo_library, color: Colors.blue),
-              title: const Text('Choose from Gallery'),
+              title: Text(
+                'Choose from Gallery',
+                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+              ),
               onTap: () async {
                 Navigator.pop(context);
                 final picker = ImagePicker();
@@ -82,7 +94,10 @@ class ProfileImagePicker extends StatelessWidget {
             ),
             ListTile(
               leading: const Icon(Icons.camera_alt, color: Colors.green),
-              title: const Text('Take a Photo'),
+              title: Text(
+                'Take a Photo',
+                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+              ),
               onTap: () async {
                 Navigator.pop(context);
                 final picker = ImagePicker();
@@ -121,9 +136,7 @@ class ProfileImagePicker extends StatelessWidget {
     );
   }
 
-  // Get image to display (priority: tempImage > currentImageUrl)
   ImageProvider? _getImageProvider() {
-    // If there's a temporary image (selected but not uploaded)
     if (tempImage != null) {
       if (kIsWeb && tempImage is Uint8List) {
         return MemoryImage(tempImage as Uint8List);
@@ -132,7 +145,6 @@ class ProfileImagePicker extends StatelessWidget {
       }
     }
 
-    // If there's a current image URL
     if (currentImageUrl != null && currentImageUrl!.isNotEmpty) {
       return NetworkImage(currentImageUrl!);
     }
@@ -142,6 +154,7 @@ class ProfileImagePicker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = context.isDarkMode;
     final imageProvider = _getImageProvider();
 
     return GestureDetector(
@@ -150,17 +163,17 @@ class ProfileImagePicker extends StatelessWidget {
         children: [
           CircleAvatar(
             radius: 60,
-            backgroundColor: Colors.grey[200],
+            backgroundColor: isDark ? Colors.grey[800] : Colors.grey[200],
             backgroundImage: imageProvider,
             child: imageProvider == null
                 ? Text(
                     fullName != null && fullName!.isNotEmpty
                         ? fullName![0].toUpperCase()
                         : '?',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 40,
                       fontWeight: FontWeight.bold,
-                      color: Colors.grey,
+                      color: isDark ? Colors.white54 : Colors.grey,
                     ),
                   )
                 : null,
@@ -182,14 +195,14 @@ class ProfileImagePicker extends StatelessWidget {
                 ),
               ),
             )
-          else if (isEditing) // ✅ Only show camera icon when editing
+          else if (isEditing)
             Positioned(
               bottom: 0,
               right: 0,
               child: Container(
                 padding: const EdgeInsets.all(4),
                 decoration: const BoxDecoration(
-                  color: Color(0xFFFF6B8B),
+                  color: AppTheme.primary,
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(
@@ -220,16 +233,21 @@ class RoleBadge extends StatelessWidget {
     final icon = service.getRoleIcon(role);
     final color = service.getRoleColor(role);
     final displayName = service.getRoleDisplayName(role);
+    final isDark = context.isDarkMode;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
         color: isSelected
             ? color.withValues(alpha: 0.15)
-            : Colors.grey.withValues(alpha: 0.1),
+            : (isDark ? Colors.grey[800] : Colors.grey.withValues(alpha: 0.1)),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
-          color: isSelected ? color : Colors.grey.withValues(alpha: 0.3),
+          color: isSelected
+              ? color
+              : (isDark
+                    ? Colors.grey[600]!
+                    : Colors.grey.withValues(alpha: 0.3)),
           width: isSelected ? 2 : 1,
         ),
       ),
@@ -243,7 +261,9 @@ class RoleBadge extends StatelessWidget {
             style: TextStyle(
               fontSize: 12,
               fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-              color: isSelected ? color : Colors.grey[600],
+              color: isSelected
+                  ? color
+                  : (isDark ? Colors.white70 : Colors.grey[600]),
             ),
           ),
         ],
@@ -290,7 +310,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String tempCity = '';
 
   // Temporary image data for preview
-  dynamic _tempSelectedImage; // File (mobile) or Uint8List (web)
+  dynamic _tempSelectedImage;
   bool _hasImageChanged = false;
   bool _isImageRemoved = false;
 
@@ -344,7 +364,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _userId = currentUser.id;
       _email = currentUser.email ?? '';
 
-      // Load profile
       final profile = await _profileService.getProfile(_userId);
       if (profile != null) {
         _fullName = profile['full_name'] ?? '';
@@ -355,14 +374,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _avatarUrl = profile['avatar_url'] ?? '';
         _joinedDate = _formatDate(profile['created_at']);
 
-        // Set controllers
         _fullNameController.text = _fullName;
         _phoneController.text = _phone;
         _bioController.text = _bio;
         _addressController.text = _address;
         _cityController.text = _city;
 
-        // Set temp values
         tempFullName = _fullName;
         tempPhone = _phone;
         tempBio = _bio;
@@ -370,7 +387,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
         tempCity = _city;
       }
 
-      // Load ALL user roles
       _roles = await _profileService.getUserRoles(_userId);
 
       if (mounted) {
@@ -401,7 +417,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   // =====================================================
-  // ✅ IMAGE HANDLING - STORE TEMPORARILY WITH PREVIEW
+  // ✅ IMAGE HANDLING
   // =====================================================
   void _handleImageSelected(dynamic image) {
     setState(() {
@@ -423,17 +439,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   // =====================================================
-  // ✅ PROFILE SAVE - OLD IMAGE AUTO REMOVED
+  // ✅ PROFILE SAVE
   // =====================================================
   Future<void> _saveProfile() async {
-    // Validate changes
     final newFullName = _fullNameController.text.trim();
     final newPhone = _phoneController.text.trim();
     final newBio = _bioController.text.trim();
     final newAddress = _addressController.text.trim();
     final newCity = _cityController.text.trim();
 
-    // Check if anything changed
     bool hasTextChanges = false;
     if (newFullName != _fullName) hasTextChanges = true;
     if (newPhone != _phone) hasTextChanges = true;
@@ -451,32 +465,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
     try {
       String? newAvatarUrl = _avatarUrl;
 
-      // Handle image changes
       if (_isImageRemoved) {
-        // Remove image
         if (_avatarUrl.isNotEmpty) {
           await _profileService.deleteOldImage(_avatarUrl);
         }
         newAvatarUrl = '';
         _showSnackBar('🔄 Removing old image...', Colors.orange);
       } else if (_hasImageChanged && _tempSelectedImage != null) {
-        // Upload new image (Old image will be auto-removed)
         _showSavingDialog();
 
-        // Get file name for web
         String? fileName;
         if (kIsWeb && _tempSelectedImage is Uint8List) {
           fileName = '${_userId}_${DateTime.now().millisecondsSinceEpoch}.jpg';
         }
 
-        // Upload new image (old image deletion handled inside uploadProfileImage)
         final imageUrl = await _profileService.uploadProfileImage(
           userId: _userId,
           imageFile: _tempSelectedImage!,
           fileName: fileName,
         );
 
-        // Close loading dialog
         if (mounted && Navigator.canPop(context)) {
           Navigator.pop(context);
         }
@@ -488,7 +496,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
         }
       }
 
-      // Update profile with all changes
       final success = await _profileService.updateProfile(
         userId: _userId,
         fullName: newFullName,
@@ -500,7 +507,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       );
 
       if (success && mounted) {
-        // Update state with new values
         setState(() {
           _fullName = newFullName;
           _phone = newPhone;
@@ -511,13 +517,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _isEditing = false;
           _isSaving = false;
 
-          // Reset temp values
           _tempSelectedImage = null;
           _hasImageChanged = false;
           _isImageRemoved = false;
         });
 
-        // Update SessionManager storage
         await SessionManager.updateProfileInStorage(
           email: _email,
           name: newFullName,
@@ -528,8 +532,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           city: newCity,
         );
 
-        // Force sync available profiles
-        await SessionManager.forceSyncAvailableProfiles();       
+        await SessionManager.forceSyncAvailableProfiles();
 
         _showSnackBar('✅ Profile updated successfully', Colors.green);
       } else {
@@ -540,7 +543,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       debugPrint('❌ Error saving profile: $e');
       setState(() => _isSaving = false);
 
-      // Close loading dialog if open
       if (mounted && Navigator.canPop(context)) {
         Navigator.pop(context);
       }
@@ -550,6 +552,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   void _showSavingDialog() {
+    final isDark = context.isDarkMode;
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -559,7 +563,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         child: Container(
           padding: const EdgeInsets.all(24),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
             borderRadius: BorderRadius.circular(20),
             boxShadow: [
               BoxShadow(
@@ -576,31 +580,34 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 height: 50,
                 width: 50,
                 child: CircularProgressIndicator(
-                  valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFFF6B8B)),
+                  valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primary),
                   strokeWidth: 4,
                 ),
               ),
               const SizedBox(height: 20),
-              const Text(
+              Text(
                 'Saving Profile',
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
-                  color: Color(0xFFFF6B8B),
+                  color: isDark ? Colors.white : AppTheme.primary,
                 ),
               ),
               const SizedBox(height: 8),
-              const Text(
+              Text(
                 'Please wait...',
-                style: TextStyle(fontSize: 14, color: Colors.grey),
+                style: TextStyle(
+                  fontSize: 14,
+                  color: isDark ? Colors.white60 : Colors.grey,
+                ),
               ),
               const SizedBox(height: 16),
               ClipRRect(
                 borderRadius: BorderRadius.circular(10),
                 child: LinearProgressIndicator(
                   minHeight: 4,
-                  backgroundColor: Colors.grey[200],
-                  color: const Color(0xFFFF6B8B),
+                  backgroundColor: isDark ? Colors.grey[800] : Colors.grey[200],
+                  color: AppTheme.primary,
                 ),
               ),
             ],
@@ -631,7 +638,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _addressController.text = _address;
       _cityController.text = _city;
 
-      // Reset temp image changes
       _tempSelectedImage = null;
       _hasImageChanged = false;
       _isImageRemoved = false;
@@ -642,6 +648,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   // UI BUILDERS
   // =====================================================
   Widget _buildInfoRow(String label, String value) {
+    final isDark = context.isDarkMode;
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
@@ -653,7 +661,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               label,
               style: TextStyle(
                 fontSize: 14,
-                color: Colors.grey[600],
+                color: isDark ? Colors.white60 : Colors.grey[600],
                 fontWeight: FontWeight.w500,
               ),
             ),
@@ -663,7 +671,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
               value.isEmpty ? 'Not provided' : value,
               style: TextStyle(
                 fontSize: 14,
-                color: value.isEmpty ? Colors.grey[400] : Colors.black87,
+                color: value.isEmpty
+                    ? (isDark ? Colors.white70 : Colors.grey[400])
+                    : (isDark ? Colors.white : Colors.black87),
               ),
             ),
           ),
@@ -679,27 +689,39 @@ class _ProfileScreenState extends State<ProfileScreen> {
     int maxLines = 1,
     TextInputType keyboardType = TextInputType.text,
   }) {
+    final isDark = context.isDarkMode;
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
       child: TextField(
         controller: controller,
         maxLines: maxLines,
         keyboardType: keyboardType,
+        style: TextStyle(color: isDark ? Colors.white : Colors.black87),
         decoration: InputDecoration(
           labelText: label,
-          prefixIcon: Icon(icon, color: const Color(0xFFFF6B8B)),
+          labelStyle: TextStyle(
+            color: isDark ? Colors.white60 : Colors.grey[600],
+          ),
+          prefixIcon: Icon(icon, color: AppTheme.primary),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: Colors.grey[300]!),
+            borderSide: BorderSide(
+              color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+            ),
           ),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: Colors.grey[300]!),
+            borderSide: BorderSide(
+              color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+            ),
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: Color(0xFFFF6B8B), width: 2),
+            borderSide: const BorderSide(color: AppTheme.primary, width: 2),
           ),
+          fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+          filled: true,
           contentPadding: const EdgeInsets.symmetric(
             horizontal: 16,
             vertical: 14,
@@ -714,19 +736,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
   // =====================================================
   @override
   Widget build(BuildContext context) {
+    final isDark = context.isDarkMode;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isWeb = screenWidth > 800;
+
     return Scaffold(
+      backgroundColor: isDark ? const Color(0xFF121212) : Colors.white,
       appBar: AppBar(
         title: const Text(
           'My Profile',
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
-        backgroundColor: const Color(0xFFFF6B8B),
+        backgroundColor: AppTheme.primary,
         foregroundColor: Colors.white,
         elevation: 0,
+        centerTitle: isWeb,
+        automaticallyImplyLeading: true,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+          tooltip: 'Back',
+        ),
         actions: [
           if (!_isLoading && !_isEditing)
             IconButton(
-              icon: const Icon(Icons.edit_outlined),
+              icon: const Icon(Icons.edit_outlined, color: Colors.white),
               onPressed: () => setState(() => _isEditing = true),
             ),
           if (_isEditing)
@@ -764,161 +798,167 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ],
       ),
       body: _isLoading
-          ? const Center(
-              child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
-            )
+          ? Center(child: CircularProgressIndicator(color: AppTheme.primary))
           : SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                children: [
-                  // ✅ Profile Image Section - Camera icon only in edit mode
-                  Center(
-                    child: Column(
-                      children: [
-                        ProfileImagePicker(
-                          currentImageUrl: _isImageRemoved ? null : _avatarUrl,
-                          tempImage: _tempSelectedImage,
-                          fullName: _fullName,
-                          isLoading: isUploadingImage || _isSaving,
-                          isEditing: _isEditing, // ✅ Pass edit mode
-                          onImageSelected: _handleImageSelected,
-                          onRemoveImage: _handleRemoveImage,
-                        ),
-                        const SizedBox(height: 12),
+              padding: EdgeInsets.all(isWeb ? 32 : 16),
+              child: isWeb
+                  ? Center(
+                      child: Container(
+                        constraints: const BoxConstraints(maxWidth: 800),
+                        child: _buildContent(),
+                      ),
+                    )
+                  : _buildContent(),
+            ),
+    );
+  }
 
-                        // Show preview status only in edit mode
-                        if (_isEditing && _hasImageChanged)
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 6,
-                            ),
-                            decoration: BoxDecoration(
-                              color: _isImageRemoved
-                                  ? Colors.red.withValues(alpha: 0.1)
-                                  : Colors.blue.withValues(alpha: 0.1),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: _isImageRemoved
-                                    ? Colors.red.withValues(alpha: 0.3)
-                                    : Colors.blue.withValues(alpha: 0.3),
-                              ),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  _isImageRemoved
-                                      ? Icons.warning_amber_rounded
-                                      : Icons.photo_library,
-                                  size: 16,
-                                  color: _isImageRemoved
-                                      ? Colors.red
-                                      : Colors.blue,
-                                ),
-                                const SizedBox(width: 6),
-                                Text(
-                                  _isImageRemoved
-                                      ? 'Image will be removed'
-                                      : 'New image selected (preview)',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: _isImageRemoved
-                                        ? Colors.red
-                                        : Colors.blue,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
+  Widget _buildContent() {
+    final isDark = context.isDarkMode;
 
-                        const SizedBox(height: 8),
-                        Text(
-                          _fullName.isEmpty ? 'Add your name' : _fullName,
-                          style: const TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          _email,
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Colors.grey[600],
-                          ),
-                        ),
-                        if (_joinedDate.isNotEmpty)
-                          Text(
-                            'Joined: $_joinedDate',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey[500],
-                            ),
-                          ),
+    return Column(
+      children: [
+        // ✅ Profile Image Section
+        Center(
+          child: Column(
+            children: [
+              ProfileImagePicker(
+                currentImageUrl: _isImageRemoved ? null : _avatarUrl,
+                tempImage: _tempSelectedImage,
+                fullName: _fullName,
+                isLoading: isUploadingImage || _isSaving,
+                isEditing: _isEditing,
+                onImageSelected: _handleImageSelected,
+                onRemoveImage: _handleRemoveImage,
+              ),
+              const SizedBox(height: 12),
 
-                        // ✅ Edit hint - only show when NOT in edit mode
-                        if (!_isEditing && !_isLoading)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 8),
-                            child: Text(
-                              'Tap ✏️ Edit to change your photo',
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: Colors.grey[500],
-                                fontStyle: FontStyle.italic,
-                              ),
-                            ),
-                          ),
-                      ],
+              if (_isEditing && _hasImageChanged)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: _isImageRemoved
+                        ? Colors.red.withValues(alpha: 0.1)
+                        : Colors.blue.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: _isImageRemoved
+                          ? Colors.red.withValues(alpha: 0.3)
+                          : Colors.blue.withValues(alpha: 0.3),
                     ),
                   ),
-                  const SizedBox(height: 16),
-
-                  // Role Badges - All roles from database
-                  if (_roles.isNotEmpty)
-                    Container(
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      child: Column(
-                        children: [
-                          const Text(
-                            'Your Roles',
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                              color: Colors.grey,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Wrap(
-                            alignment: WrapAlignment.center,
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: _roles.asMap().entries.map((entry) {
-                              final index = entry.key;
-                              final role = entry.value;
-                              return RoleBadge(
-                                role: role,
-                                isSelected: index == selectedRoleIndex,
-                              );
-                            }).toList(),
-                          ),
-                        ],
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        _isImageRemoved
+                            ? Icons.warning_amber_rounded
+                            : Icons.photo_library,
+                        size: 16,
+                        color: _isImageRemoved ? Colors.red : Colors.blue,
                       ),
-                    ),
+                      const SizedBox(width: 6),
+                      Text(
+                        _isImageRemoved
+                            ? 'Image will be removed'
+                            : 'New image selected (preview)',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: _isImageRemoved ? Colors.red : Colors.blue,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
 
-                  const SizedBox(height: 8),
-                  const Divider(),
-                  const SizedBox(height: 16),
-
-                  // Profile Details
-                  if (_isEditing) _buildEditForm() else _buildViewMode(),
-
-                  const SizedBox(height: 24),
-                ],
+              const SizedBox(height: 8),
+              Text(
+                _fullName.isEmpty ? 'Add your name' : _fullName,
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
               ),
+              const SizedBox(height: 8),
+              Text(
+                _email,
+                style: TextStyle(
+                  fontSize: 14,
+                  color: isDark ? Colors.white60 : Colors.grey[600],
+                ),
+              ),
+              if (_joinedDate.isNotEmpty)
+                Text(
+                  'Joined: $_joinedDate',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isDark ? Colors.white70 : Colors.grey[500],
+                  ),
+                ),
+
+              if (!_isEditing && !_isLoading)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    'Tap ✏️ Edit to change your photo',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: isDark ? Colors.white70 : Colors.grey[500],
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // Role Badges
+        if (_roles.isNotEmpty)
+          Container(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Column(
+              children: [
+                Text(
+                  'Your Roles',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                    color: isDark ? Colors.white60 : Colors.grey,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  alignment: WrapAlignment.center,
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: _roles.asMap().entries.map((entry) {
+                    final index = entry.key;
+                    final role = entry.value;
+                    return RoleBadge(
+                      role: role,
+                      isSelected: index == selectedRoleIndex,
+                    );
+                  }).toList(),
+                ),
+              ],
             ),
+          ),
+
+        const SizedBox(height: 8),
+        Divider(color: isDark ? Colors.white12 : Colors.grey[200], height: 1),
+        const SizedBox(height: 16),
+
+        // Profile Details
+        if (_isEditing) _buildEditForm() else _buildViewMode(),
+
+        const SizedBox(height: 24),
+      ],
     );
   }
 
@@ -926,24 +966,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
   // VIEW MODE
   // =====================================================
   Widget _buildViewMode() {
+    final isDark = context.isDarkMode;
+
     return Card(
       elevation: 2,
+      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(20),
         child: Column(
           children: [
             _buildInfoRow('Full Name', _fullName),
-            const Divider(),
+            Divider(color: isDark ? Colors.white12 : Colors.grey[200]),
             _buildInfoRow('Phone', _phone),
-            const Divider(),
+            Divider(color: isDark ? Colors.white12 : Colors.grey[200]),
             _buildInfoRow('Bio', _bio.isEmpty ? 'No bio added' : _bio),
-            const Divider(),
+            Divider(color: isDark ? Colors.white12 : Colors.grey[200]),
             _buildInfoRow(
               'Address',
               _address.isEmpty ? 'No address added' : _address,
             ),
-            const Divider(),
+            Divider(color: isDark ? Colors.white12 : Colors.grey[200]),
             _buildInfoRow('City', _city.isEmpty ? 'No city added' : _city),
           ],
         ),
@@ -955,20 +998,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
   // EDIT MODE
   // =====================================================
   Widget _buildEditForm() {
+    final isDark = context.isDarkMode;
+
     return Card(
       elevation: 2,
+      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'Edit Profile',
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
-                color: Color(0xFFFF6B8B),
+                color: isDark ? Colors.white : AppTheme.primary,
               ),
             ),
             const SizedBox(height: 16),
