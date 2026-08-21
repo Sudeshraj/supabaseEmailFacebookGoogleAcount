@@ -3,6 +3,8 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
+import '../../extensions/context_extensions.dart';
+import '../../theme/app_theme.dart';
 
 class AnalyticsScreen extends StatefulWidget {
   final String? salonId;
@@ -27,7 +29,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   String? _salonName;
 
   // Selected period
-  String _selectedPeriod = 'This Month'; // Today, This Week, This Month, This Year
+  String _selectedPeriod = 'This Month';
 
   // Analytics data
   Map<String, dynamic> _analyticsData = {};
@@ -37,10 +39,32 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   List<Map<String, dynamic>> _barberPerformance = [];
   List<Map<String, dynamic>> _peakHours = [];
 
+  // ✅ Responsive variables
+  late bool _isWeb;
+  late bool _isTablet;
+  late bool _isDark;
+
+  // ✅ Scroll Controller for web
+  final ScrollController _scrollController = ScrollController();
+
   @override
   void initState() {
     super.initState();
     _loadData();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _isWeb = context.isWeb;
+    _isTablet = context.isTablet;
+    _isDark = context.isDarkMode;
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadData() async {
@@ -122,9 +146,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
 
       final endDate = DateFormat('yyyy-MM-dd').format(now);
 
-      // Run all analytics queries in parallel
       final results = await Future.wait([
-        // 1. Total appointments and revenue
         supabase
             .from('appointments')
             .select('status, price')
@@ -132,7 +154,6 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             .gte('appointment_date', startDate)
             .lte('appointment_date', endDate),
 
-        // 2. Daily trend
         supabase
             .from('appointments')
             .select('appointment_date, status, price')
@@ -141,7 +162,6 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             .lte('appointment_date', endDate)
             .order('appointment_date', ascending: true),
 
-        // 3. Service distribution
         supabase
             .from('appointments')
             .select('''
@@ -155,7 +175,6 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             .gte('appointment_date', startDate)
             .lte('appointment_date', endDate),
 
-        // 4. Barber performance
         supabase
             .from('appointments')
             .select('''
@@ -171,7 +190,6 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             .gte('appointment_date', startDate)
             .lte('appointment_date', endDate),
 
-        // 5. Peak hours
         supabase
             .from('appointments')
             .select('start_time')
@@ -180,7 +198,6 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             .gte('appointment_date', startDate)
             .lte('appointment_date', endDate),
 
-        // 6. Customer retention (repeat customers)
         supabase
             .from('appointments')
             .select('customer_id')
@@ -197,7 +214,6 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       final hourData = results[4] as List;
       final customerData = results[5] as List;
 
-      // Process total stats
       int totalRevenue = 0;
       int completedCount = 0;
       int pendingCount = 0;
@@ -226,7 +242,6 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         }
       }
 
-      // Process daily trend
       final Map<String, Map<String, int>> dailyStats = {};
       for (var item in dailyData) {
         final date = item['appointment_date'] as String;
@@ -248,7 +263,6 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           .toList()
         ..sort((a, b) => (a['date'] as String).compareTo(b['date'] as String));
 
-      // Process service distribution
       final Map<String, int> serviceCounts = {};
       for (var item in serviceData) {
         final service = item['services'] as Map?;
@@ -264,7 +278,6 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           .toList()
         ..sort((a, b) => (b['count'] as int).compareTo(a['count'] as int));
 
-      // Process barber performance
       final Map<String, Map<String, dynamic>> barberStats = {};
       for (var item in barberData) {
         final barberId = item['barber_id'] as String;
@@ -293,7 +306,6 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           .toList()
         ..sort((a, b) => (b['count'] as int).compareTo(a['count'] as int));
 
-      // Process peak hours
       final Map<int, int> hourCounts = {};
       for (var item in hourData) {
         final time = item['start_time'] as String;
@@ -313,7 +325,6 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           .toList()
         ..sort((a, b) => (a['hour'] as int).compareTo(b['hour'] as int));
 
-      // Process customer retention
       final Map<String, int> customerCounts = {};
       for (var item in customerData) {
         final customerId = item['customer_id'] as String;
@@ -396,7 +407,6 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
 
       final response = await query.order('appointment_date', ascending: true);
 
-      // Process data
       int totalRevenue = 0;
       int completedCount = 0;
       int pendingCount = 0;
@@ -435,25 +445,21 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             break;
         }
 
-        // Daily stats
         if (!dailyStats.containsKey(date)) {
           dailyStats[date] = {'count': 0, 'revenue': 0};
         }
         dailyStats[date]!['count'] = (dailyStats[date]!['count'] ?? 0) + 1;
         dailyStats[date]!['revenue'] = (dailyStats[date]!['revenue'] ?? 0) + price;
 
-        // Service counts
         serviceCounts[serviceName] = (serviceCounts[serviceName] ?? 0) + 1;
 
-        // Peak hours
         try {
           final hour = int.parse(time.split(':')[0]);
           hourCounts[hour] = (hourCounts[hour] ?? 0) + 1;
         } catch (e) {
-          // Ignore malformed time strings, skip this entry
+          // Ignore malformed time strings
         }
 
-        // Customer retention
         customerCounts[customerId] = (customerCounts[customerId] ?? 0) + 1;
       }
 
@@ -515,116 +521,162 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   }
 
   // ============================================================
-  // BUILD METHODS
+  // BUILD METHODS - WITH DARK MODE & RESPONSIVE
   // ============================================================
 
   @override
   Widget build(BuildContext context) {
+    _isWeb = context.isWeb;
+    _isTablet = context.isTablet;
+    _isDark = context.isDarkMode;
+
     return Scaffold(
+      backgroundColor: _isDark ? const Color(0xFF121212) : Colors.white,
       appBar: AppBar(
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               widget.role == 'barber' ? 'My Analytics' : 'Analytics',
-              style: const TextStyle(
-                fontSize: 18,
+              style: TextStyle(
+                fontSize: _isWeb ? 20 : 18,
                 fontWeight: FontWeight.bold,
+                color: Colors.white,
               ),
             ),
             if (_salonName != null)
               Text(
                 _salonName!,
-                style: const TextStyle(
-                  fontSize: 12,
+                style: TextStyle(
+                  fontSize: _isWeb ? 13 : 12,
                   fontWeight: FontWeight.normal,
                   color: Colors.white70,
                 ),
               ),
           ],
         ),
-        backgroundColor: const Color(0xFFFF6B8B),
+        backgroundColor: AppTheme.primary,
         foregroundColor: Colors.white,
         elevation: 0,
+        centerTitle: _isWeb,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+          tooltip: 'Back',
+        ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh, color: Colors.white),
             onPressed: _loadData,
           ),
         ],
       ),
-      body: _isLoading
-          ? const Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  CircularProgressIndicator(color: Color(0xFFFF6B8B)),
-                  SizedBox(height: 16),
-                  Text('Loading analytics...'),
-                ],
-              ),
-            )
-          : _errorMessage != null
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.error_outline, size: 64, color: Colors.grey[400]),
-                      const SizedBox(height: 16),
-                      Text(
-                        _errorMessage!,
-                        style: TextStyle(color: Colors.grey[600]),
-                        textAlign: TextAlign.center,
+      body: SafeArea(
+        child: _isLoading
+            ? Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    CircularProgressIndicator(color: AppTheme.primary),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Loading analytics...',
+                      style: TextStyle(
+                        color: _isDark ? Colors.white60 : Colors.grey,
                       ),
-                      const SizedBox(height: 24),
-                      ElevatedButton(
-                        onPressed: _loadData,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFFF6B8B),
-                          foregroundColor: Colors.white,
-                        ),
-                        child: const Text('Retry'),
-                      ),
-                    ],
-                  ),
-                )
-              : SingleChildScrollView(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    children: [
-                      // Period Selector
-                      _buildPeriodSelector(),
-                      const SizedBox(height: 16),
-
-                      // KPI Cards
-                      _buildKPICards(),
-                      const SizedBox(height: 16),
-
-                      // Revenue Trend
-                      _buildRevenueTrend(),
-                      const SizedBox(height: 16),
-
-                      // Appointment Trend
-                      _buildAppointmentTrend(),
-                      const SizedBox(height: 16),
-
-                      // Service Distribution
-                      _buildServiceDistribution(),
-                      const SizedBox(height: 16),
-
-                      // Peak Hours
-                      _buildPeakHours(),
-                      const SizedBox(height: 16),
-
-                      // Customer Retention
-                      _buildCustomerRetention(),
-                      const SizedBox(height: 16),
-
-                      // Barber Performance (Owner only)
-                      if (widget.role == 'owner') _buildBarberPerformance(),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
+              )
+            : _errorMessage != null
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.error_outline,
+                          size: 64,
+                          color: _isDark ? Colors.white30 : Colors.grey[400],
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          _errorMessage!,
+                          style: TextStyle(
+                            color: _isDark ? Colors.white60 : Colors.grey[600],
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 24),
+                        ElevatedButton(
+                          onPressed: _loadData,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppTheme.primary,
+                            foregroundColor: Colors.white,
+                          ),
+                          child: const Text('Retry'),
+                        ),
+                      ],
+                    ),
+                  )
+                : _isWeb
+                    ? _buildWebLayout()
+                    : _buildMobileLayout(),
+      ),
+    );
+  }
+
+  // ✅ WEB LAYOUT
+  Widget _buildWebLayout() {
+    return Center(
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 1200),
+        child: Scrollbar(
+          controller: _scrollController,
+          thumbVisibility: true,
+          trackVisibility: true,
+          thickness: 8.0,
+          radius: const Radius.circular(10),
+          scrollbarOrientation: ScrollbarOrientation.right,
+          child: SingleChildScrollView(
+            controller: _scrollController,
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.all(24),
+            child: _buildContent(),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ✅ MOBILE LAYOUT
+  Widget _buildMobileLayout() {
+    return SingleChildScrollView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.all(16),
+      child: _buildContent(),
+    );
+  }
+
+  // ✅ CONTENT
+  Widget _buildContent() {
+    return Column(
+      children: [
+        _buildPeriodSelector(),
+        const SizedBox(height: 16),
+        _buildKPICards(),
+        const SizedBox(height: 16),
+        _buildRevenueTrend(),
+        const SizedBox(height: 16),
+        _buildAppointmentTrend(),
+        const SizedBox(height: 16),
+        _buildServiceDistribution(),
+        const SizedBox(height: 16),
+        _buildPeakHours(),
+        const SizedBox(height: 16),
+        _buildCustomerRetention(),
+        const SizedBox(height: 16),
+        if (widget.role == 'owner') _buildBarberPerformance(),
+      ],
     );
   }
 
@@ -637,8 +689,11 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     return Container(
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
-        color: Colors.grey[100],
+        color: _isDark ? const Color(0xFF1E1E1E) : Colors.grey[100],
         borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: _isDark ? Colors.grey[800]! : Colors.grey[200]!,
+        ),
       ),
       child: Row(
         children: periods.map((period) {
@@ -654,12 +709,14 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
               child: Container(
                 padding: const EdgeInsets.symmetric(vertical: 10),
                 decoration: BoxDecoration(
-                  color: isSelected ? Colors.white : Colors.transparent,
+                  color: isSelected
+                      ? (_isDark ? const Color(0xFF2A2A2A) : Colors.white)
+                      : Colors.transparent,
                   borderRadius: BorderRadius.circular(10),
                   boxShadow: isSelected
                       ? [
                           BoxShadow(
-                            color: Colors.grey.withValues(alpha: 0.15),
+                            color: Colors.black.withValues(alpha: _isDark ? 0.3 : 0.15),
                             blurRadius: 8,
                             offset: const Offset(0, 2),
                           ),
@@ -671,7 +728,9 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                     period,
                     style: TextStyle(
                       fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                      color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[600],
+                      color: isSelected
+                          ? AppTheme.primary
+                          : (_isDark ? Colors.white60 : Colors.grey[600]),
                     ),
                   ),
                 ),
@@ -695,52 +754,61 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     final noShow = data['no_show_count'] ?? 0;
     final avgRevenue = data['avg_revenue_per_appointment'] ?? 0;
 
+    final children = [
+      _buildKPICard(
+        title: 'Revenue',
+        value: 'Rs. $revenue',
+        icon: Icons.attach_money,
+        color: Colors.green,
+      ),
+      _buildKPICard(
+        title: 'Completed',
+        value: '$completed',
+        icon: Icons.check_circle,
+        color: Colors.green,
+      ),
+      _buildKPICard(
+        title: 'Pending',
+        value: '$pending',
+        icon: Icons.pending_actions,
+        color: Colors.orange,
+      ),
+      _buildKPICard(
+        title: 'Cancelled',
+        value: '$cancelled',
+        icon: Icons.cancel,
+        color: Colors.red,
+      ),
+    ];
+
+    if (noShow > 0) {
+      children.add(
+        _buildKPICard(
+          title: 'No Show',
+          value: '$noShow',
+          icon: Icons.person_off,
+          color: Colors.grey,
+        ),
+      );
+    }
+
+    children.add(
+      _buildKPICard(
+        title: 'Avg Revenue',
+        value: 'Rs. ${avgRevenue.toStringAsFixed(0)}',
+        icon: Icons.trending_up,
+        color: Colors.purple,
+      ),
+    );
+
     return GridView.count(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      crossAxisCount: 2,
+      crossAxisCount: _isTablet ? 4 : 2,
       crossAxisSpacing: 12,
       mainAxisSpacing: 12,
-      childAspectRatio: 1.4,
-      children: [
-        _buildKPICard(
-          title: 'Revenue',
-          value: 'Rs. $revenue',
-          icon: Icons.attach_money,
-          color: Colors.green,
-        ),
-        _buildKPICard(
-          title: 'Completed',
-          value: '$completed',
-          icon: Icons.check_circle,
-          color: Colors.green,
-        ),
-        _buildKPICard(
-          title: 'Pending',
-          value: '$pending',
-          icon: Icons.pending_actions,
-          color: Colors.orange,
-        ),
-        _buildKPICard(
-          title: 'Cancelled',
-          value: '$cancelled',
-          icon: Icons.cancel,
-          color: Colors.red,
-        ),
-        if (noShow > 0)
-          _buildKPICard(
-            title: 'No Show',
-            value: '$noShow',
-            icon: Icons.person_off,
-            color: Colors.grey,
-          ),
-        _buildKPICard(
-          title: 'Avg Revenue',
-          value: 'Rs. ${avgRevenue.toStringAsFixed(0)}',
-          icon: Icons.trending_up,
-          color: Colors.purple,
-        ),
-      ],
+      childAspectRatio: _isTablet ? 1.6 : 1.4,
+      children: children,
     );
   }
 
@@ -752,20 +820,24 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   }) {
     return Card(
       elevation: 2,
+      color: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
+        side: _isDark
+            ? BorderSide(color: Colors.grey[800]!, width: 0.5)
+            : BorderSide.none,
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: color, size: 28),
+            Icon(icon, color: color, size: _isTablet ? 32 : 28),
             const SizedBox(height: 4),
             Text(
               value,
               style: TextStyle(
-                fontSize: 16,
+                fontSize: _isTablet ? 18 : 16,
                 fontWeight: FontWeight.bold,
                 color: color,
               ),
@@ -775,8 +847,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             Text(
               title,
               style: TextStyle(
-                fontSize: 10,
-                color: Colors.grey[600],
+                fontSize: _isTablet ? 11 : 10,
+                color: _isDark ? Colors.white60 : Colors.grey[600],
               ),
               textAlign: TextAlign.center,
             ),
@@ -802,25 +874,28 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
 
     return Card(
       elevation: 2,
+      color: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
+        side: _isDark
+            ? BorderSide(color: Colors.grey[800]!, width: 0.5)
+            : BorderSide.none,
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ✅ FIXED: `const` removed — Text('${_revenueTrend.length} days')
-            // is a runtime value, so this Row can't be a compile-time constant.
             Row(
               children: [
-                const Icon(Icons.trending_up, color: Color(0xFFFF6B8B)),
+                const Icon(Icons.trending_up, color: AppTheme.primary),
                 const SizedBox(width: 8),
-                const Text(
+                Text(
                   'Revenue Trend',
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
+                    color: _isDark ? Colors.white : Colors.black87,
                   ),
                 ),
                 const Spacer(),
@@ -828,7 +903,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                   '${_revenueTrend.length} days',
                   style: TextStyle(
                     fontSize: 11,
-                    color: Colors.grey[500],
+                    color: _isDark ? Colors.white70 : Colors.grey[500],
                   ),
                 ),
               ],
@@ -849,9 +924,9 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                       children: [
                         Text(
                           'Rs.${(revenue / 1000).toStringAsFixed(0)}k',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 8,
-                            color: Colors.grey,
+                            color: _isDark ? Colors.white70 : Colors.grey,
                           ),
                         ),
                         const SizedBox(height: 2),
@@ -860,10 +935,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                           width: 16,
                           decoration: BoxDecoration(
                             gradient: const LinearGradient(
-                              colors: [
-                                Color(0xFFFF6B8B),
-                                Color(0xFFFF8A9F),
-                              ],
+                              colors: [AppTheme.primary, AppTheme.primaryLight],
                             ),
                             borderRadius: BorderRadius.circular(4),
                           ),
@@ -871,9 +943,9 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                         const SizedBox(height: 2),
                         Text(
                           _formatDateLabel(date),
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 8,
-                            color: Colors.grey,
+                            color: _isDark ? Colors.white70 : Colors.grey,
                           ),
                         ),
                       ],
@@ -904,25 +976,28 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
 
     return Card(
       elevation: 2,
+      color: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
+        side: _isDark
+            ? BorderSide(color: Colors.grey[800]!, width: 0.5)
+            : BorderSide.none,
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ✅ FIXED: `const` removed — Text('${_appointmentTrend.length} days')
-            // depends on a runtime value.
             Row(
               children: [
-                const Icon(Icons.calendar_today, color: Color(0xFFFF6B8B)),
+                const Icon(Icons.calendar_today, color: AppTheme.primary),
                 const SizedBox(width: 8),
-                const Text(
+                Text(
                   'Appointment Trend',
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
+                    color: _isDark ? Colors.white : Colors.black87,
                   ),
                 ),
                 const Spacer(),
@@ -930,7 +1005,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                   '${_appointmentTrend.length} days',
                   style: TextStyle(
                     fontSize: 11,
-                    color: Colors.grey[500],
+                    color: _isDark ? Colors.white70 : Colors.grey[500],
                   ),
                 ),
               ],
@@ -951,9 +1026,9 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                       children: [
                         Text(
                           '$count',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 9,
-                            color: Colors.grey,
+                            color: _isDark ? Colors.white70 : Colors.grey,
                           ),
                         ),
                         const SizedBox(height: 2),
@@ -962,10 +1037,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                           width: 16,
                           decoration: BoxDecoration(
                             gradient: const LinearGradient(
-                              colors: [
-                                Colors.blue,
-                                Colors.lightBlue,
-                              ],
+                              colors: [Colors.blue, Colors.lightBlue],
                             ),
                             borderRadius: BorderRadius.circular(4),
                           ),
@@ -973,9 +1045,9 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                         const SizedBox(height: 2),
                         Text(
                           _formatDateLabel(date),
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 8,
-                            color: Colors.grey,
+                            color: _isDark ? Colors.white70 : Colors.grey,
                           ),
                         ),
                       ],
@@ -1002,25 +1074,28 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
 
     return Card(
       elevation: 2,
+      color: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
+        side: _isDark
+            ? BorderSide(color: Colors.grey[800]!, width: 0.5)
+            : BorderSide.none,
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ✅ FIXED: `const` removed — Text('${_serviceDistribution.length} services')
-            // depends on a runtime value.
             Row(
               children: [
-                const Icon(Icons.pie_chart, color: Color(0xFFFF6B8B)),
+                const Icon(Icons.pie_chart, color: AppTheme.primary),
                 const SizedBox(width: 8),
-                const Text(
+                Text(
                   'Service Distribution',
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
+                    color: _isDark ? Colors.white : Colors.black87,
                   ),
                 ),
                 const Spacer(),
@@ -1028,7 +1103,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                   '${_serviceDistribution.length} services',
                   style: TextStyle(
                     fontSize: 11,
-                    color: Colors.grey[500],
+                    color: _isDark ? Colors.white70 : Colors.grey[500],
                   ),
                 ),
               ],
@@ -1047,9 +1122,10 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                       width: 80,
                       child: Text(
                         service,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w500,
+                          color: _isDark ? Colors.white : Colors.black87,
                         ),
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -1058,7 +1134,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                       child: Container(
                         height: 8,
                         decoration: BoxDecoration(
-                          color: Colors.grey[200],
+                          color: _isDark ? Colors.grey[800] : Colors.grey[200],
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: FractionallySizedBox(
@@ -1066,7 +1142,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                           child: Container(
                             decoration: BoxDecoration(
                               gradient: const LinearGradient(
-                                colors: [Color(0xFFFF6B8B), Color(0xFFFF8A9F)],
+                                colors: [AppTheme.primary, AppTheme.primaryLight],
                               ),
                               borderRadius: BorderRadius.circular(4),
                             ),
@@ -1079,7 +1155,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                       '$count ($percentage%)',
                       style: TextStyle(
                         fontSize: 11,
-                        color: Colors.grey[600],
+                        color: _isDark ? Colors.white60 : Colors.grey[600],
                       ),
                     ),
                   ],
@@ -1094,7 +1170,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                     '+ ${_serviceDistribution.length - 5} more services',
                     style: TextStyle(
                       fontSize: 11,
-                      color: Colors.grey[500],
+                      color: _isDark ? Colors.white70 : Colors.grey[500],
                       fontStyle: FontStyle.italic,
                     ),
                   ),
@@ -1122,25 +1198,28 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
 
     return Card(
       elevation: 2,
+      color: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
+        side: _isDark
+            ? BorderSide(color: Colors.grey[800]!, width: 0.5)
+            : BorderSide.none,
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ✅ FIXED: `const` removed — Text('${_peakHours.length} hours')
-            // depends on a runtime value.
             Row(
               children: [
-                const Icon(Icons.access_time, color: Color(0xFFFF6B8B)),
+                const Icon(Icons.access_time, color: AppTheme.primary),
                 const SizedBox(width: 8),
-                const Text(
+                Text(
                   'Peak Hours',
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
+                    color: _isDark ? Colors.white : Colors.black87,
                   ),
                 ),
                 const Spacer(),
@@ -1148,7 +1227,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                   '${_peakHours.length} hours',
                   style: TextStyle(
                     fontSize: 11,
-                    color: Colors.grey[500],
+                    color: _isDark ? Colors.white70 : Colors.grey[500],
                   ),
                 ),
               ],
@@ -1169,9 +1248,9 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                       children: [
                         Text(
                           '$count',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 9,
-                            color: Colors.grey,
+                            color: _isDark ? Colors.white70 : Colors.grey,
                           ),
                         ),
                         const SizedBox(height: 2),
@@ -1180,10 +1259,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                           width: 16,
                           decoration: BoxDecoration(
                             gradient: const LinearGradient(
-                              colors: [
-                                Colors.deepOrange,
-                                Colors.orange,
-                              ],
+                              colors: [Colors.deepOrange, Colors.orange],
                             ),
                             borderRadius: BorderRadius.circular(4),
                           ),
@@ -1191,9 +1267,9 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                         const SizedBox(height: 2),
                         Text(
                           _formatHour(hour),
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 8,
-                            color: Colors.grey,
+                            color: _isDark ? Colors.white70 : Colors.grey,
                           ),
                         ),
                       ],
@@ -1222,23 +1298,28 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
 
     return Card(
       elevation: 2,
+      color: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
+        side: _isDark
+            ? BorderSide(color: Colors.grey[800]!, width: 0.5)
+            : BorderSide.none,
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Row(
+            Row(
               children: [
-                Icon(Icons.people, color: Color(0xFFFF6B8B)),
-                SizedBox(width: 8),
+                const Icon(Icons.people, color: AppTheme.primary),
+                const SizedBox(width: 8),
                 Text(
                   'Customer Retention',
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
+                    color: _isDark ? Colors.white : Colors.black87,
                   ),
                 ),
               ],
@@ -1273,7 +1354,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             Container(
               height: 8,
               decoration: BoxDecoration(
-                color: Colors.grey[200],
+                color: _isDark ? Colors.grey[800] : Colors.grey[200],
                 borderRadius: BorderRadius.circular(4),
               ),
               child: FractionallySizedBox(
@@ -1304,7 +1385,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                     ? Colors.green
                     : retentionRate > 50
                         ? Colors.orange
-                        : Colors.grey,
+                        : (_isDark ? Colors.white70 : Colors.grey),
                 fontWeight: FontWeight.w500,
               ),
             ),
@@ -1324,7 +1405,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         Text(
           value,
           style: TextStyle(
-            fontSize: 18,
+            fontSize: _isTablet ? 20 : 18,
             fontWeight: FontWeight.bold,
             color: color,
           ),
@@ -1333,8 +1414,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         Text(
           label,
           style: TextStyle(
-            fontSize: 10,
-            color: Colors.grey[600],
+            fontSize: _isTablet ? 11 : 10,
+            color: _isDark ? Colors.white60 : Colors.grey[600],
           ),
           textAlign: TextAlign.center,
         ),
@@ -1352,25 +1433,28 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
 
     return Card(
       elevation: 2,
+      color: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
+        side: _isDark
+            ? BorderSide(color: Colors.grey[800]!, width: 0.5)
+            : BorderSide.none,
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ✅ FIXED: `const` removed — Text('${_barberPerformance.length} barbers')
-            // depends on a runtime value.
             Row(
               children: [
-                const Icon(Icons.people, color: Color(0xFFFF6B8B)),
+                const Icon(Icons.people, color: AppTheme.primary),
                 const SizedBox(width: 8),
-                const Text(
+                Text(
                   'Barber Performance',
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
+                    color: _isDark ? Colors.white : Colors.black87,
                   ),
                 ),
                 const Spacer(),
@@ -1378,7 +1462,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                   '${_barberPerformance.length} barbers',
                   style: TextStyle(
                     fontSize: 11,
-                    color: Colors.grey[500],
+                    color: _isDark ? Colors.white70 : Colors.grey[500],
                   ),
                 ),
               ],
@@ -1397,7 +1481,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                       width: 4,
                       height: 30,
                       decoration: BoxDecoration(
-                        color: const Color(0xFFFF6B8B),
+                        color: AppTheme.primary,
                         borderRadius: BorderRadius.circular(2),
                       ),
                     ),
@@ -1408,9 +1492,10 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                         children: [
                           Text(
                             name,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w500,
+                              color: _isDark ? Colors.white : Colors.black87,
                             ),
                           ),
                           Row(
@@ -1419,13 +1504,13 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                                 '$count appointments',
                                 style: TextStyle(
                                   fontSize: 11,
-                                  color: Colors.grey[500],
+                                  color: _isDark ? Colors.white60 : Colors.grey[500],
                                 ),
                               ),
                               const SizedBox(width: 8),
                               Text(
                                 'Rs. $revenue',
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 11,
                                   color: Colors.green,
                                   fontWeight: FontWeight.w500,
@@ -1442,7 +1527,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                         vertical: 4,
                       ),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                        color: AppTheme.primary.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Row(
@@ -1450,15 +1535,15 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                           const Icon(
                             Icons.star,
                             size: 12,
-                            color: Color(0xFFFF6B8B),
+                            color: AppTheme.primary,
                           ),
                           const SizedBox(width: 4),
                           Text(
                             '$count',
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.bold,
-                              color: Color(0xFFFF6B8B),
+                              color: AppTheme.primary,
                             ),
                           ),
                         ],
@@ -1480,8 +1565,12 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   Widget _buildEmptyChart(String message) {
     return Card(
       elevation: 2,
+      color: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
+        side: _isDark
+            ? BorderSide(color: Colors.grey[800]!, width: 0.5)
+            : BorderSide.none,
       ),
       child: Padding(
         padding: const EdgeInsets.all(20),
@@ -1490,13 +1579,13 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             Icon(
               Icons.insert_chart_outlined,
               size: 48,
-              color: Colors.grey[300],
+              color: _isDark ? Colors.white30 : Colors.grey[300],
             ),
             const SizedBox(height: 8),
             Text(
               message,
               style: TextStyle(
-                color: Colors.grey[500],
+                color: _isDark ? Colors.white60 : Colors.grey[500],
               ),
             ),
           ],

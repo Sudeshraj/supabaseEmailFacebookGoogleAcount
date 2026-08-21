@@ -3,16 +3,14 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
+import 'package:flutter_application_1/extensions/context_extensions.dart';
+import 'package:flutter_application_1/theme/app_theme.dart';
 
 class ReportsScreen extends StatefulWidget {
   final String? salonId;
-  final String role; // 'owner', 'barber'
+  final String role;
 
-  const ReportsScreen({
-    super.key,
-    this.salonId,
-    required this.role,
-  });
+  const ReportsScreen({super.key, this.salonId, required this.role});
 
   @override
   State<ReportsScreen> createState() => _ReportsScreenState();
@@ -25,11 +23,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
   bool _isLoading = true;
   String? _errorMessage;
   String? _salonName;
- 
+
   // Date range
   DateTime? _startDate;
   DateTime? _endDate;
-  String _dateRange = 'This Month'; // Today, This Week, This Month, Custom
+  String _dateRange = 'This Month';
 
   // Report data
   List<Map<String, dynamic>> _reportData = [];
@@ -39,13 +37,33 @@ class _ReportsScreenState extends State<ReportsScreen> {
   List<Map<String, dynamic>> _chartData = [];
 
   // Filter
-  String _selectedFilter = 'All'; // All, Completed, Pending, Cancelled
+  String _selectedFilter = 'All';
+
+  // Web Scroll Controller
+  final ScrollController _scrollController = ScrollController();
+
+  // Responsive
+  late bool _isWeb;
+  late bool _isDark;
 
   @override
   void initState() {
     super.initState();
     _initializeDateRange();
     _loadData();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _isWeb = context.isWeb;
+    _isDark = context.isDarkMode;
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
   }
 
   void _initializeDateRange() {
@@ -64,7 +82,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
         _endDate = now;
         break;
       case 'Custom':
-        // Keep existing or set default
         if (_startDate == null) {
           _startDate = now.subtract(const Duration(days: 30));
           _endDate = now;
@@ -89,7 +106,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
         return;
       }
 
-      // Get salon name
       if (widget.salonId != null) {
         final salonResponse = await supabase
             .from('salons')
@@ -120,7 +136,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
   // ============================================================
   Future<void> _loadOwnerReports(String ownerId) async {
     try {
-      final salonId = widget.salonId != null ? int.parse(widget.salonId!) : null;
+      final salonId = widget.salonId != null
+          ? int.parse(widget.salonId!)
+          : null;
 
       if (salonId == null) {
         setState(() {
@@ -133,7 +151,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
       final startStr = DateFormat('yyyy-MM-dd').format(_startDate!);
       final endStr = DateFormat('yyyy-MM-dd').format(_endDate!);
 
-      // Base query
       var query = supabase
           .from('appointments')
           .select('''
@@ -162,14 +179,12 @@ class _ReportsScreenState extends State<ReportsScreen> {
           .gte('appointment_date', startStr)
           .lte('appointment_date', endStr);
 
-      // Apply status filter
       if (_selectedFilter != 'All') {
         query = query.eq('status', _selectedFilter.toLowerCase());
       }
 
       final response = await query.order('appointment_date', ascending: false);
 
-      // Process data
       final List<Map<String, dynamic>> processedData = [];
       int totalRevenue = 0;
       int totalAppointments = 0;
@@ -192,7 +207,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
         totalAppointments++;
         totalRevenue += price;
 
-        // Status counts
         switch (status) {
           case 'completed':
             completedCount++;
@@ -209,14 +223,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
             break;
         }
 
-        // Daily data
         dailyData[date] = (dailyData[date] ?? 0) + 1;
 
-        // Service data
         final serviceName = service?['name']?.toString() ?? 'Unknown';
         serviceData[serviceName] = (serviceData[serviceName] ?? 0) + 1;
 
-        // Barber data
         final barberId = item['barber_id'] as String;
         barberData[barberId] = (barberData[barberId] ?? 0) + 1;
 
@@ -237,7 +248,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
         });
       }
 
-      // Get barber names
       final barberIds = barberData.keys.toList();
       Map<String, String> barberNames = {};
       if (barberIds.isNotEmpty) {
@@ -251,7 +261,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
         }
       }
 
-      // Update barber data with names
       final List<Map<String, dynamic>> barberStats = [];
       barberData.forEach((id, count) {
         barberStats.add({
@@ -260,25 +269,23 @@ class _ReportsScreenState extends State<ReportsScreen> {
           'count': count,
         });
       });
-      barberStats.sort((a, b) => (b['count'] as int).compareTo(a['count'] as int));
+      barberStats.sort(
+        (a, b) => (b['count'] as int).compareTo(a['count'] as int),
+      );
 
-      // Prepare chart data
-      final chartData = dailyData.entries
-          .map((e) => <String, dynamic>{
-                'date': e.key,
-                'count': e.value,
-              })
-          .toList()
-        ..sort((a, b) => (a['date'] as String).compareTo(b['date'] as String));
+      final chartData =
+          dailyData.entries
+              .map((e) => <String, dynamic>{'date': e.key, 'count': e.value})
+              .toList()
+            ..sort(
+              (a, b) => (a['date'] as String).compareTo(b['date'] as String),
+            );
 
-      // Service stats
-      final serviceStats = serviceData.entries
-          .map((e) => <String, dynamic>{
-                'service': e.key,
-                'count': e.value,
-              })
-          .toList()
-        ..sort((a, b) => (b['count'] as int).compareTo(a['count'] as int));
+      final serviceStats =
+          serviceData.entries
+              .map((e) => <String, dynamic>{'service': e.key, 'count': e.value})
+              .toList()
+            ..sort((a, b) => (b['count'] as int).compareTo(a['count'] as int));
 
       setState(() {
         _reportData = processedData;
@@ -296,7 +303,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
         };
         _isLoading = false;
       });
-
     } catch (e) {
       setState(() {
         _errorMessage = 'Error loading reports: ${e.toString()}';
@@ -310,7 +316,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
   // ============================================================
   Future<void> _loadBarberReports(String barberId) async {
     try {
-      final salonId = widget.salonId != null ? int.parse(widget.salonId!) : null;
+      final salonId = widget.salonId != null
+          ? int.parse(widget.salonId!)
+          : null;
 
       final startStr = DateFormat('yyyy-MM-dd').format(_startDate!);
       final endStr = DateFormat('yyyy-MM-dd').format(_endDate!);
@@ -353,7 +361,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
       final response = await query.order('appointment_date', ascending: false);
 
-      // Process data
       final List<Map<String, dynamic>> processedData = [];
       int totalRevenue = 0;
       int totalAppointments = 0;
@@ -412,21 +419,19 @@ class _ReportsScreenState extends State<ReportsScreen> {
         });
       }
 
-      final chartData = dailyData.entries
-          .map((e) => <String, dynamic>{
-                'date': e.key,
-                'count': e.value,
-              })
-          .toList()
-        ..sort((a, b) => (a['date'] as String).compareTo(b['date'] as String));
+      final chartData =
+          dailyData.entries
+              .map((e) => <String, dynamic>{'date': e.key, 'count': e.value})
+              .toList()
+            ..sort(
+              (a, b) => (a['date'] as String).compareTo(b['date'] as String),
+            );
 
-      final serviceStats = serviceData.entries
-          .map((e) => <String, dynamic>{
-                'service': e.key,
-                'count': e.value,
-              })
-          .toList()
-        ..sort((a, b) => (b['count'] as int).compareTo(a['count'] as int));
+      final serviceStats =
+          serviceData.entries
+              .map((e) => <String, dynamic>{'service': e.key, 'count': e.value})
+              .toList()
+            ..sort((a, b) => (b['count'] as int).compareTo(a['count'] as int));
 
       setState(() {
         _reportData = processedData;
@@ -443,7 +448,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
         };
         _isLoading = false;
       });
-
     } catch (e) {
       setState(() {
         _errorMessage = 'Error loading reports: ${e.toString()}';
@@ -460,10 +464,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
       context: context,
       firstDate: DateTime(2020, 1, 1),
       lastDate: DateTime.now(),
-      initialDateRange: DateTimeRange(
-        start: _startDate!,
-        end: _endDate!,
-      ),
+      initialDateRange: DateTimeRange(start: _startDate!, end: _endDate!),
     );
 
     if (picked != null) {
@@ -482,16 +483,21 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    _isWeb = context.isWeb;
+    _isDark = context.isDarkMode;
+
     return Scaffold(
+      backgroundColor: _isDark ? const Color(0xFF121212) : Colors.white,
       appBar: AppBar(
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               widget.role == 'barber' ? 'My Reports' : 'Reports',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
+                color: Colors.white,
               ),
             ),
             if (_salonName != null)
@@ -505,84 +511,139 @@ class _ReportsScreenState extends State<ReportsScreen> {
               ),
           ],
         ),
-        backgroundColor: const Color(0xFFFF6B8B),
+        backgroundColor: AppTheme.primary,
         foregroundColor: Colors.white,
         elevation: 0,
+        centerTitle: _isWeb,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+          tooltip: 'Back',
+        ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: Icon(Icons.refresh, color: Colors.white),
             onPressed: _loadData,
           ),
         ],
       ),
       body: _isLoading
-          ? const Center(
+          ? Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  CircularProgressIndicator(color: Color(0xFFFF6B8B)),
-                  SizedBox(height: 16),
-                  Text('Loading reports...'),
+                  CircularProgressIndicator(color: AppTheme.primary),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Loading reports...',
+                    style: TextStyle(
+                      color: _isDark ? Colors.white60 : Colors.grey,
+                    ),
+                  ),
                 ],
               ),
             )
           : _errorMessage != null
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.error_outline, size: 64, color: Colors.grey[400]),
-                      const SizedBox(height: 16),
-                      Text(
-                        _errorMessage!,
-                        style: TextStyle(color: Colors.grey[600]),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 24),
-                      ElevatedButton(
-                        onPressed: _loadData,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFFF6B8B),
-                          foregroundColor: Colors.white,
-                        ),
-                        child: const Text('Retry'),
-                      ),
-                    ],
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.error_outline,
+                    size: 64,
+                    color: _isDark ? Colors.white30 : Colors.grey[400],
                   ),
-                )
-              : Column(
-                  children: [
-                    // Filters
-                    _buildFilters(),
-                    Expanded(
-                      child: SingleChildScrollView(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          children: [
-                            // Summary Cards
-                            _buildSummaryCards(),
-                            const SizedBox(height: 16),
-
-                            // Chart
-                            _buildChart(),
-                            const SizedBox(height: 16),
-
-                            // Service Stats
-                            _buildServiceStats(),
-                            const SizedBox(height: 16),
-
-                            // Barber Stats (Owner only)
-                            if (widget.role == 'owner') _buildBarberStats(),
-                            const SizedBox(height: 16),
-
-                            // Report Table
-                            _buildReportTable(),
-                          ],
-                        ),
-                      ),
+                  const SizedBox(height: 16),
+                  Text(
+                    _errorMessage!,
+                    style: TextStyle(
+                      color: _isDark ? Colors.white60 : Colors.grey[600],
                     ),
-                  ],
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 24),
+                  ElevatedButton(
+                    onPressed: _loadData,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.primary,
+                      foregroundColor: Colors.white,
+                    ),
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
+            )
+          : SafeArea(child: _isWeb ? _buildWebLayout() : _buildMobileLayout()),
+    );
+  }
+
+  // ============================================================
+  // WEB LAYOUT
+  // ============================================================
+  Widget _buildWebLayout() {
+    return Center(
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 1200),
+        child: Column(
+          children: [
+            _buildFilters(),
+            Expanded(
+              child: Scrollbar(
+                controller: _scrollController,
+                thumbVisibility: true,
+                trackVisibility: true,
+                thickness: 8.0,
+                radius: const Radius.circular(10),
+                scrollbarOrientation: ScrollbarOrientation.right,
+                child: SingleChildScrollView(
+                  controller: _scrollController,
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.all(16),
+                  child: _buildContent(),
                 ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ============================================================
+  // MOBILE LAYOUT
+  // ============================================================
+  Widget _buildMobileLayout() {
+    return Column(
+      children: [
+        _buildFilters(),
+        Expanded(
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.all(16),
+            child: _buildContent(),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ============================================================
+  // CONTENT
+  // ============================================================
+  Widget _buildContent() {
+    return Column(
+      children: [
+        _buildSummaryCards(),
+        const SizedBox(height: 16),
+        _buildChart(),
+        const SizedBox(height: 16),
+        _buildServiceStats(),
+        const SizedBox(height: 16),
+        if (widget.role == 'owner') _buildBarberStats(),
+        const SizedBox(height: 16),
+        _buildReportTable(),
+        const SizedBox(height: 20),
+      ],
     );
   }
 
@@ -590,20 +651,23 @@ class _ReportsScreenState extends State<ReportsScreen> {
   // BUILD FILTERS
   // ============================================================
   Widget _buildFilters() {
+    final isDark = _isDark;
     final dateRanges = ['Today', 'This Week', 'This Month', 'Custom'];
     final statuses = ['All', 'Completed', 'Pending', 'Cancelled', 'No Show'];
 
     return Container(
       padding: const EdgeInsets.all(12),
-      color: Colors.white,
+      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       child: Column(
         children: [
-          // Date range selector
           Row(
             children: [
-              const Text(
+              Text(
                 'Date:',
-                style: TextStyle(fontWeight: FontWeight.w500),
+                style: TextStyle(
+                  fontWeight: FontWeight.w500,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
               ),
               const SizedBox(width: 8),
               Expanded(
@@ -619,7 +683,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
                             range,
                             style: TextStyle(
                               fontSize: 11,
-                              color: isSelected ? Colors.white : Colors.grey[700],
+                              color: isSelected
+                                  ? Colors.white
+                                  : (isDark
+                                        ? Colors.white70
+                                        : Colors.grey[700]),
                             ),
                           ),
                           selected: isSelected,
@@ -634,8 +702,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
                               }
                             });
                           },
-                          backgroundColor: Colors.grey[100],
-                          selectedColor: const Color(0xFFFF6B8B),
+                          backgroundColor: isDark
+                              ? const Color(0xFF2A2A2A)
+                              : Colors.grey[100],
+                          selectedColor: AppTheme.primary,
                           checkmarkColor: Colors.white,
                           padding: const EdgeInsets.symmetric(horizontal: 8),
                         ),
@@ -648,12 +718,14 @@ class _ReportsScreenState extends State<ReportsScreen> {
           ),
           const SizedBox(height: 8),
 
-          // Status filter
           Row(
             children: [
-              const Text(
+              Text(
                 'Status:',
-                style: TextStyle(fontWeight: FontWeight.w500),
+                style: TextStyle(
+                  fontWeight: FontWeight.w500,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
               ),
               const SizedBox(width: 8),
               Expanded(
@@ -669,7 +741,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
                             status,
                             style: TextStyle(
                               fontSize: 11,
-                              color: isSelected ? Colors.white : Colors.grey[700],
+                              color: isSelected
+                                  ? Colors.white
+                                  : (isDark
+                                        ? Colors.white70
+                                        : Colors.grey[700]),
                             ),
                           ),
                           selected: isSelected,
@@ -679,8 +755,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
                             });
                             _loadData();
                           },
-                          backgroundColor: Colors.grey[100],
-                          selectedColor: const Color(0xFFFF6B8B),
+                          backgroundColor: isDark
+                              ? const Color(0xFF2A2A2A)
+                              : Colors.grey[100],
+                          selectedColor: AppTheme.primary,
                           checkmarkColor: Colors.white,
                           padding: const EdgeInsets.symmetric(horizontal: 8),
                         ),
@@ -692,7 +770,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
             ],
           ),
 
-          // Date range display for custom
           if (_dateRange == 'Custom')
             Padding(
               padding: const EdgeInsets.only(top: 8),
@@ -701,9 +778,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
                 children: [
                   Text(
                     '${DateFormat('MMM dd, yyyy').format(_startDate!)} - ${DateFormat('MMM dd, yyyy').format(_endDate!)}',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 12,
-                      color: Color(0xFFFF6B8B),
+                      color: AppTheme.primary,
                       fontWeight: FontWeight.w500,
                     ),
                   ),
@@ -726,53 +803,62 @@ class _ReportsScreenState extends State<ReportsScreen> {
     final cancelled = _summaryData['cancelled'] ?? 0;
     final noShow = _summaryData['no_show'] ?? 0;
 
+    final cards = [
+      _buildSummaryCard(
+        title: 'Total Appointments',
+        value: '$total',
+        icon: Icons.calendar_today,
+        color: Colors.blue,
+      ),
+      _buildSummaryCard(
+        title: 'Revenue',
+        value: 'Rs. $revenue',
+        icon: Icons.attach_money,
+        color: Colors.green,
+      ),
+      _buildSummaryCard(
+        title: 'Completed',
+        value: '$completed',
+        icon: Icons.check_circle,
+        color: Colors.green,
+      ),
+      _buildSummaryCard(
+        title: 'Pending',
+        value: '$pending',
+        icon: Icons.pending_actions,
+        color: Colors.orange,
+      ),
+    ];
+
+    if (cancelled > 0) {
+      cards.add(
+        _buildSummaryCard(
+          title: 'Cancelled',
+          value: '$cancelled',
+          icon: Icons.cancel,
+          color: Colors.red,
+        ),
+      );
+    }
+    if (noShow > 0) {
+      cards.add(
+        _buildSummaryCard(
+          title: 'No Show',
+          value: '$noShow',
+          icon: Icons.person_off,
+          color: Colors.grey,
+        ),
+      );
+    }
+
     return GridView.count(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      crossAxisCount: 2,
+      crossAxisCount: _isWeb ? 4 : 2,
       crossAxisSpacing: 12,
       mainAxisSpacing: 12,
       childAspectRatio: 1.5,
-      children: [
-        _buildSummaryCard(
-          title: 'Total Appointments',
-          value: '$total',
-          icon: Icons.calendar_today,
-          color: Colors.blue,
-        ),
-        _buildSummaryCard(
-          title: 'Revenue',
-          value: 'Rs. $revenue',
-          icon: Icons.attach_money,
-          color: Colors.green,
-        ),
-        _buildSummaryCard(
-          title: 'Completed',
-          value: '$completed',
-          icon: Icons.check_circle,
-          color: Colors.green,
-        ),
-        _buildSummaryCard(
-          title: 'Pending',
-          value: '$pending',
-          icon: Icons.pending_actions,
-          color: Colors.orange,
-        ),
-        if (cancelled > 0)
-          _buildSummaryCard(
-            title: 'Cancelled',
-            value: '$cancelled',
-            icon: Icons.cancel,
-            color: Colors.red,
-          ),
-        if (noShow > 0)
-          _buildSummaryCard(
-            title: 'No Show',
-            value: '$noShow',
-            icon: Icons.person_off,
-            color: Colors.grey,
-          ),
-      ],
+      children: cards,
     );
   }
 
@@ -782,10 +868,17 @@ class _ReportsScreenState extends State<ReportsScreen> {
     required IconData icon,
     required Color color,
   }) {
+    final isDark = _isDark;
+
     return Card(
       elevation: 2,
+      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: isDark ? Colors.grey[800]! : Colors.grey[200]!,
+          width: 1,
+        ),
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -799,7 +892,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
-                color: color,
+                color: isDark ? color : color,
               ),
             ),
             const SizedBox(height: 2),
@@ -807,7 +900,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
               title,
               style: TextStyle(
                 fontSize: 10,
-                color: Colors.grey[600],
+                color: isDark ? Colors.white60 : Colors.grey[600],
               ),
               textAlign: TextAlign.center,
             ),
@@ -821,25 +914,33 @@ class _ReportsScreenState extends State<ReportsScreen> {
   // BUILD CHART
   // ============================================================
   Widget _buildChart() {
+    final isDark = _isDark;
+
     if (_chartData.isEmpty) {
       return Card(
         elevation: 2,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
+        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: isDark ? Colors.grey[800]! : Colors.grey[200]!,
+          width: 1,
         ),
+      ),
         child: Padding(
           padding: const EdgeInsets.all(20),
           child: Column(
             children: [
-              const Row(
+              Row(
                 children: [
-                  Icon(Icons.show_chart, color: Color(0xFFFF6B8B)),
-                  SizedBox(width: 8),
+                  const Icon(Icons.show_chart, color: AppTheme.primary),
+                  const SizedBox(width: 8),
                   Text(
                     'Appointments Trend',
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
+                      color: isDark ? Colors.white : Colors.black87,
                     ),
                   ),
                 ],
@@ -854,13 +955,13 @@ class _ReportsScreenState extends State<ReportsScreen> {
                     Icon(
                       Icons.insert_chart_outlined,
                       size: 48,
-                      color: Colors.grey[300],
+                      color: isDark ? Colors.white70 : Colors.grey[300],
                     ),
                     const SizedBox(height: 8),
                     Text(
                       'No data available for chart',
                       style: TextStyle(
-                        color: Colors.grey[500],
+                        color: isDark ? Colors.white70 : Colors.grey[500],
                       ),
                     ),
                   ],
@@ -872,7 +973,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
       );
     }
 
-    final maxValue = _chartData.fold(0, (max, item) {
+    final maxValue =
+        _chartData.fold(0, (max, item) {
           final val = item['count'] as int? ?? 0;
           return val > max ? val : max;
         }) +
@@ -880,25 +982,29 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
     return Card(
       elevation: 2,
+      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: isDark ? Colors.grey[800]! : Colors.grey[200]!,
+          width: 1,
+        ),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ✅ FIXED: removed `const` — this Row contains a dynamic
-            // Text('${_chartData.length} days') which is not a compile-time constant.
             Row(
               children: [
-                const Icon(Icons.show_chart, color: Color(0xFFFF6B8B)),
+                const Icon(Icons.show_chart, color: AppTheme.primary),
                 const SizedBox(width: 8),
-                const Text(
+                Text(
                   'Appointments Trend',
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : Colors.black87,
                   ),
                 ),
                 const Spacer(),
@@ -906,7 +1012,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                   '${_chartData.length} days',
                   style: TextStyle(
                     fontSize: 11,
-                    color: Colors.grey[500],
+                    color: isDark ? Colors.white70 : Colors.grey[500],
                   ),
                 ),
               ],
@@ -927,9 +1033,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
                       children: [
                         Text(
                           '$count',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 9,
-                            color: Colors.grey,
+                            color: isDark ? Colors.white60 : Colors.grey,
                           ),
                         ),
                         const SizedBox(height: 2),
@@ -938,10 +1044,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                           width: 16,
                           decoration: BoxDecoration(
                             gradient: const LinearGradient(
-                              colors: [
-                                Color(0xFFFF6B8B),
-                                Color(0xFFFF8A9F),
-                              ],
+                              colors: [AppTheme.primary, AppTheme.primaryLight],
                             ),
                             borderRadius: BorderRadius.circular(4),
                           ),
@@ -949,9 +1052,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
                         const SizedBox(height: 2),
                         Text(
                           _formatDateLabel(date),
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 8,
-                            color: Colors.grey,
+                            color: isDark ? Colors.white70 : Colors.grey,
                           ),
                         ),
                       ],
@@ -982,6 +1085,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
   // BUILD SERVICE STATS
   // ============================================================
   Widget _buildServiceStats() {
+    final isDark = _isDark;
     final serviceStats = _summaryData['service_stats'] as List? ?? [];
 
     if (serviceStats.isEmpty) {
@@ -990,25 +1094,29 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
     return Card(
       elevation: 2,
+      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: isDark ? Colors.grey[800]! : Colors.grey[200]!,
+          width: 1,
+        ),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ✅ FIXED: removed `const` — Text('${serviceStats.length} services')
-            // depends on a runtime value, so the Row can't be const.
             Row(
               children: [
-                const Icon(Icons.content_cut, color: Color(0xFFFF6B8B)),
+                const Icon(Icons.content_cut, color: AppTheme.primary),
                 const SizedBox(width: 8),
-                const Text(
+                Text(
                   'Service Statistics',
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : Colors.black87,
                   ),
                 ),
                 const Spacer(),
@@ -1016,7 +1124,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                   '${serviceStats.length} services',
                   style: TextStyle(
                     fontSize: 11,
-                    color: Colors.grey[500],
+                    color: isDark ? Colors.white70 : Colors.grey[500],
                   ),
                 ),
               ],
@@ -1037,9 +1145,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
                       width: 80,
                       child: Text(
                         service,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w500,
+                          color: isDark ? Colors.white : Colors.black87,
                         ),
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -1048,15 +1157,20 @@ class _ReportsScreenState extends State<ReportsScreen> {
                       child: Container(
                         height: 8,
                         decoration: BoxDecoration(
-                          color: Colors.grey[200],
+                          color: isDark ? Colors.grey[800] : Colors.grey[200],
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: FractionallySizedBox(
-                          widthFactor: count / (_reportData.isNotEmpty ? _reportData.length : 1),
+                          widthFactor:
+                              count /
+                              (_reportData.isNotEmpty ? _reportData.length : 1),
                           child: Container(
                             decoration: BoxDecoration(
                               gradient: const LinearGradient(
-                                colors: [Color(0xFFFF6B8B), Color(0xFFFF8A9F)],
+                                colors: [
+                                  AppTheme.primary,
+                                  AppTheme.primaryLight,
+                                ],
                               ),
                               borderRadius: BorderRadius.circular(4),
                             ),
@@ -1069,7 +1183,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                       '$count ($percentage%)',
                       style: TextStyle(
                         fontSize: 11,
-                        color: Colors.grey[600],
+                        color: isDark ? Colors.white60 : Colors.grey[600],
                       ),
                     ),
                   ],
@@ -1084,7 +1198,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                     '+ ${serviceStats.length - 5} more services',
                     style: TextStyle(
                       fontSize: 11,
-                      color: Colors.grey[500],
+                      color: isDark ? Colors.white70 : Colors.grey[500],
                       fontStyle: FontStyle.italic,
                     ),
                   ),
@@ -1100,6 +1214,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
   // BUILD BARBER STATS (Owner only)
   // ============================================================
   Widget _buildBarberStats() {
+    final isDark = _isDark;
     final barberStats = _summaryData['barber_stats'] as List? ?? [];
 
     if (barberStats.isEmpty) {
@@ -1108,25 +1223,29 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
     return Card(
       elevation: 2,
+      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: isDark ? Colors.grey[800]! : Colors.grey[200]!,
+          width: 1,
+        ),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ✅ FIXED: removed `const` — Text('${barberStats.length} barbers')
-            // depends on a runtime value, so the Row can't be const.
             Row(
               children: [
-                const Icon(Icons.people, color: Color(0xFFFF6B8B)),
+                const Icon(Icons.people, color: AppTheme.primary),
                 const SizedBox(width: 8),
-                const Text(
+                Text(
                   'Barber Performance',
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : Colors.black87,
                   ),
                 ),
                 const Spacer(),
@@ -1134,7 +1253,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                   '${barberStats.length} barbers',
                   style: TextStyle(
                     fontSize: 11,
-                    color: Colors.grey[500],
+                    color: isDark ? Colors.white70 : Colors.grey[500],
                   ),
                 ),
               ],
@@ -1152,7 +1271,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                       width: 4,
                       height: 30,
                       decoration: BoxDecoration(
-                        color: const Color(0xFFFF6B8B),
+                        color: AppTheme.primary,
                         borderRadius: BorderRadius.circular(2),
                       ),
                     ),
@@ -1163,16 +1282,17 @@ class _ReportsScreenState extends State<ReportsScreen> {
                         children: [
                           Text(
                             name,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w500,
+                              color: isDark ? Colors.white : Colors.black87,
                             ),
                           ),
                           Text(
                             '$count appointments',
                             style: TextStyle(
                               fontSize: 11,
-                              color: Colors.grey[500],
+                              color: isDark ? Colors.white70 : Colors.grey[500],
                             ),
                           ),
                         ],
@@ -1184,15 +1304,15 @@ class _ReportsScreenState extends State<ReportsScreen> {
                         vertical: 4,
                       ),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                        color: AppTheme.primary.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Text(
                         '$count',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.bold,
-                          color: Color(0xFFFF6B8B),
+                          color: AppTheme.primary,
                         ),
                       ),
                     ),
@@ -1210,12 +1330,19 @@ class _ReportsScreenState extends State<ReportsScreen> {
   // BUILD REPORT TABLE
   // ============================================================
   Widget _buildReportTable() {
+    final isDark = _isDark;
+
     if (_reportData.isEmpty) {
       return Card(
         elevation: 2,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
+        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: isDark ? Colors.grey[800]! : Colors.grey[200]!,
+          width: 1,
         ),
+      ),
         child: Padding(
           padding: const EdgeInsets.all(32),
           child: Column(
@@ -1223,13 +1350,13 @@ class _ReportsScreenState extends State<ReportsScreen> {
               Icon(
                 Icons.assignment_outlined,
                 size: 48,
-                color: Colors.grey[300],
+                color: isDark ? Colors.white70 : Colors.grey[300],
               ),
               const SizedBox(height: 8),
               Text(
                 'No appointments found',
                 style: TextStyle(
-                  color: Colors.grey[500],
+                  color: isDark ? Colors.white70 : Colors.grey[500],
                 ),
               ),
             ],
@@ -1240,25 +1367,29 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
     return Card(
       elevation: 2,
+      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: isDark ? Colors.grey[800]! : Colors.grey[200]!,
+          width: 1,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ✅ FIXED: removed `const` from Padding — its child Row contains
-          // Text('${_reportData.length} records'), a runtime value.
           Padding(
             padding: const EdgeInsets.all(16),
             child: Row(
               children: [
-                const Icon(Icons.table_chart, color: Color(0xFFFF6B8B)),
+                const Icon(Icons.table_chart, color: AppTheme.primary),
                 const SizedBox(width: 8),
-                const Text(
+                Text(
                   'Appointment Details',
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : Colors.black87,
                   ),
                 ),
                 const Spacer(),
@@ -1266,7 +1397,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                   '${_reportData.length} records',
                   style: TextStyle(
                     fontSize: 11,
-                    color: Colors.grey[500],
+                    color: isDark ? Colors.white70 : Colors.grey[500],
                   ),
                 ),
               ],
@@ -1300,61 +1431,68 @@ class _ReportsScreenState extends State<ReportsScreen> {
                 }
 
                 return Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
                   child: Column(
                     children: [
                       Row(
                         children: [
-                          // Date
                           SizedBox(
                             width: 70,
                             child: Text(
                               item['appointment_date']?.toString() ?? '',
                               style: TextStyle(
                                 fontSize: 11,
-                                color: Colors.grey[600],
+                                color: isDark
+                                    ? Colors.white60
+                                    : Colors.grey[600],
                               ),
                             ),
                           ),
                           const SizedBox(width: 8),
-                          // Customer
                           Expanded(
                             flex: 2,
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  item['customer_name']?.toString() ?? 'Unknown',
-                                  style: const TextStyle(
+                                  item['customer_name']?.toString() ??
+                                      'Unknown',
+                                  style: TextStyle(
                                     fontSize: 13,
                                     fontWeight: FontWeight.w500,
+                                    color: isDark
+                                        ? Colors.white
+                                        : Colors.black87,
                                   ),
                                 ),
                                 Text(
                                   item['service_name']?.toString() ?? '',
                                   style: TextStyle(
                                     fontSize: 10,
-                                    color: Colors.grey[500],
+                                    color: isDark
+                                        ? Colors.white70
+                                        : Colors.grey[500],
                                   ),
                                 ),
                               ],
                             ),
                           ),
                           const SizedBox(width: 8),
-                          // Price
                           SizedBox(
                             width: 60,
                             child: Text(
                               'Rs. ${item['price'] ?? 0}',
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 12,
                                 fontWeight: FontWeight.w600,
-                                color: Color(0xFFFF6B8B),
+                                color: AppTheme.primary,
                               ),
                             ),
                           ),
                           const SizedBox(width: 8),
-                          // Status
                           Container(
                             padding: const EdgeInsets.symmetric(
                               horizontal: 8,

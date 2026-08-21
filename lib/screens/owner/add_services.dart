@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
+import 'package:flutter_application_1/extensions/context_extensions.dart';
+import 'package:flutter_application_1/theme/app_theme.dart';
 
 class AddServiceScreen extends StatefulWidget {
   final int salonId;
@@ -59,6 +61,10 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   String? _priceError;
   String? _durationError;
   String? _serviceNameError;
+
+  // ✅ Responsive variables
+  bool _isWeb = false;
+  bool _isDark = false;
 
   // Icon suggestions
   final List<Map<String, dynamic>> _iconSuggestions = [
@@ -138,10 +144,16 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       _loadServiceDataForEdit();
     }
 
-    // Add listeners for real-time validation
     _variantPriceController.addListener(_validatePrice);
     _variantDurationController.addListener(_validateDuration);
     _serviceNameController.addListener(_validateServiceName);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _isWeb = context.isWeb;
+    _isDark = context.isDarkMode;
   }
 
   @override
@@ -166,7 +178,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       return;
     }
 
-    // Check if service name already exists (only for new services, not for editing)
     if (!widget.isEditing && _mode == 'new_service') {
       final bool exists = _existingServices.any(
         (service) =>
@@ -183,7 +194,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         });
       }
     } else if (widget.isEditing) {
-      // For editing, check if name exists for other services
       final bool exists = _existingServices.any(
         (service) =>
             service['id'] != widget.serviceId &&
@@ -404,7 +414,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   // ============================================
 
   void _saveVariant() {
-    // Clear previous errors
     _validatePrice();
     _validateDuration();
 
@@ -497,245 +506,241 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   // CREATE/UPDATE SERVICE
   // ============================================
 
-Future<void> _createAndAddService() async {
-  // Validation
-  if (_mode == 'new_service' || widget.isEditing) {
-    final serviceName = _serviceNameController.text.trim();
-    if (serviceName.isEmpty) {
-      _showSnackBar('Service name is required', Colors.orange);
-      return;
-    }
+  Future<void> _createAndAddService() async {
+    if (_mode == 'new_service' || widget.isEditing) {
+      final serviceName = _serviceNameController.text.trim();
+      if (serviceName.isEmpty) {
+        _showSnackBar('Service name is required', Colors.orange);
+        return;
+      }
 
-    // Check for duplicate service name
-    if (_serviceNameError != null) {
-      _showSnackBar(_serviceNameError!, Colors.orange);
-      return;
-    }
-  } else {
-    if (_selectedExistingServiceId == null) {
-      _showSnackBar('Please select a service', Colors.orange);
-      return;
-    }
-  }
-
-  setState(() => _isLoading = true);
-
-  try {
-    // ✅ STEP 1: Check if barber is active (if adding to a specific barber)
-    if (widget.salonBarberId != null && !widget.isEditing) {
-      final barberStatusCheck = await supabase
-          .from('user_roles')
-          .select('status')
-          .eq('user_id', widget.salonBarberId!)
-          .eq('role_id', 2)  // barber role ID
-          .maybeSingle();
-
-      if (barberStatusCheck == null || barberStatusCheck['status'] != 'active') {
-        _showSnackBar(
-          'This barber account is not active. Please reactivate the barber first.',
-          Colors.orange,
-        );
-        setState(() => _isLoading = false);
+      if (_serviceNameError != null) {
+        _showSnackBar(_serviceNameError!, Colors.orange);
+        return;
+      }
+    } else {
+      if (_selectedExistingServiceId == null) {
+        _showSnackBar('Please select a service', Colors.orange);
         return;
       }
     }
 
-    int serviceId;
+    setState(() => _isLoading = true);
 
-    if (_mode == 'new_service' || widget.isEditing) {
-      if (widget.isEditing && widget.serviceId != null) {
-        serviceId = widget.serviceId!;
+    try {
+      if (widget.salonBarberId != null && !widget.isEditing) {
+        final barberStatusCheck = await supabase
+            .from('user_roles')
+            .select('status')
+            .eq('user_id', widget.salonBarberId!)
+            .eq('role_id', 2)
+            .maybeSingle();
 
-        final updateData = {
-          'name': _serviceNameController.text.trim(),
-          'description': _serviceDescriptionController.text.trim().isNotEmpty
-              ? _serviceDescriptionController.text.trim()
-              : null,
-          'category_id': _selectedCategoryId,
-          'icon_name': _selectedIcon,
-          'updated_at': DateTime.now().toIso8601String(),
-        };
+        if (barberStatusCheck == null ||
+            barberStatusCheck['status'] != 'active') {
+          _showSnackBar(
+            'This barber account is not active. Please reactivate the barber first.',
+            Colors.orange,
+          );
+          setState(() => _isLoading = false);
+          return;
+        }
+      }
 
-        await supabase
-            .from('services')
-            .update(updateData)
-            .eq('id', serviceId);
+      int serviceId;
 
-        // Delete existing variants if any
+      if (_mode == 'new_service' || widget.isEditing) {
+        if (widget.isEditing && widget.serviceId != null) {
+          serviceId = widget.serviceId!;
+
+          final updateData = {
+            'name': _serviceNameController.text.trim(),
+            'description': _serviceDescriptionController.text.trim().isNotEmpty
+                ? _serviceDescriptionController.text.trim()
+                : null,
+            'category_id': _selectedCategoryId,
+            'icon_name': _selectedIcon,
+            'updated_at': DateTime.now().toIso8601String(),
+          };
+
+          await supabase
+              .from('services')
+              .update(updateData)
+              .eq('id', serviceId);
+
+          if (_variants.isNotEmpty) {
+            await supabase
+                .from('service_variants')
+                .delete()
+                .eq('service_id', serviceId);
+          }
+        } else {
+          final exists = _existingServices.any(
+            (service) =>
+                service['name'].toString().toLowerCase() ==
+                _serviceNameController.text.trim().toLowerCase(),
+          );
+
+          if (exists) {
+            setState(() {
+              _serviceNameError = 'A service with this name already exists';
+              _isLoading = false;
+            });
+            _showSnackBar(
+              'A service with this name already exists',
+              Colors.orange,
+            );
+            return;
+          }
+
+          final serviceData = {
+            'salon_id': widget.salonId,
+            'name': _serviceNameController.text.trim(),
+            'description': _serviceDescriptionController.text.trim().isNotEmpty
+                ? _serviceDescriptionController.text.trim()
+                : null,
+            'category_id': _selectedCategoryId,
+            'icon_name': _selectedIcon,
+            'is_active': true,
+            'created_by': supabase.auth.currentUser?.id,
+          };
+
+          final serviceResponse = await supabase
+              .from('services')
+              .insert(serviceData)
+              .select()
+              .single();
+
+          serviceId = serviceResponse['id'];
+        }
+      } else {
+        serviceId = _selectedExistingServiceId!;
+
         if (_variants.isNotEmpty) {
           await supabase
               .from('service_variants')
               .delete()
               .eq('service_id', serviceId);
         }
-      } else {
-        // Check again for duplicate before inserting
-        final exists = _existingServices.any(
-          (service) =>
-              service['name'].toString().toLowerCase() ==
-              _serviceNameController.text.trim().toLowerCase(),
-        );
-
-        if (exists) {
-          setState(() {
-            _serviceNameError = 'A service with this name already exists';
-            _isLoading = false;
-          });
-          _showSnackBar(
-            'A service with this name already exists',
-            Colors.orange,
-          );
-          return;
-        }
-
-        final serviceData = {
-          'salon_id': widget.salonId,
-          'name': _serviceNameController.text.trim(),
-          'description': _serviceDescriptionController.text.trim().isNotEmpty
-              ? _serviceDescriptionController.text.trim()
-              : null,
-          'category_id': _selectedCategoryId,
-          'icon_name': _selectedIcon,
-          'is_active': true,
-          'created_by': supabase.auth.currentUser?.id,
-        };
-
-        final serviceResponse = await supabase
-            .from('services')
-            .insert(serviceData)
-            .select()
-            .single();
-
-        serviceId = serviceResponse['id'];
       }
-    } else {
-      serviceId = _selectedExistingServiceId!;
 
-      // Delete existing variants for this service
       if (_variants.isNotEmpty) {
-        await supabase
-            .from('service_variants')
-            .delete()
-            .eq('service_id', serviceId);
-      }
-    }
+        for (var variant in _variants) {
+          final variantData = {
+            'service_id': serviceId,
+            'salon_gender_id': variant['gender_id'],
+            'salon_age_category_id': variant['age_category_id'],
+            'price': variant['price'],
+            'duration': variant['duration'],
+            'is_active': true,
+          };
 
-    // Create variants if any
-    if (_variants.isNotEmpty) {
-      for (var variant in _variants) {
-        final variantData = {
-          'service_id': serviceId,
-          'salon_gender_id': variant['gender_id'],
-          'salon_age_category_id': variant['age_category_id'],
-          'price': variant['price'],
-          'duration': variant['duration'],
-          'is_active': true,
-        };
-
-        final variantResponse = await supabase
-            .from('service_variants')
-            .insert(variantData)
-            .select()
-            .single();
-
-        final variantId = variantResponse['id'];
-
-        // ✅ STEP 2: Assign to barber with status check (already checked above)
-        if (widget.salonBarberId != null) {
-          final existingBarberService = await supabase
-              .from('barber_services')
+          final variantResponse = await supabase
+              .from('service_variants')
+              .insert(variantData)
               .select()
-              .eq('salon_barber_id', widget.salonBarberId!)
-              .eq('service_id', serviceId)
-              .eq('variant_id', variantId)
-              .maybeSingle();
+              .single();
 
-          if (existingBarberService == null) {
-            await supabase.from('barber_services').insert({
-              'salon_barber_id': widget.salonBarberId!,
-              'service_id': serviceId,
-              'variant_id': variantId,
-              'custom_price': variant['price'],
-            });
+          final variantId = variantResponse['id'];
+
+          if (widget.salonBarberId != null) {
+            final existingBarberService = await supabase
+                .from('barber_services')
+                .select()
+                .eq('salon_barber_id', widget.salonBarberId!)
+                .eq('service_id', serviceId)
+                .eq('variant_id', variantId)
+                .maybeSingle();
+
+            if (existingBarberService == null) {
+              await supabase.from('barber_services').insert({
+                'salon_barber_id': widget.salonBarberId!,
+                'service_id': serviceId,
+                'variant_id': variantId,
+                'custom_price': variant['price'],
+              });
+            }
           }
         }
+      } else if (widget.salonBarberId != null) {
+        final existingBarberService = await supabase
+            .from('barber_services')
+            .select()
+            .eq('salon_barber_id', widget.salonBarberId!)
+            .eq('service_id', serviceId)
+            .maybeSingle();
+
+        if (existingBarberService == null) {
+          final Map<String, dynamic> barberServiceData = {
+            'salon_barber_id': widget.salonBarberId!,
+            'service_id': serviceId,
+          };
+
+          await supabase.from('barber_services').insert(barberServiceData);
+        }
       }
-    } else if (widget.salonBarberId != null) {
-      // For services without variants, add to barber_services without variant_id
-      final existingBarberService = await supabase
-          .from('barber_services')
-          .select()
-          .eq('salon_barber_id', widget.salonBarberId!)
-          .eq('service_id', serviceId)
-          .maybeSingle();
 
-      if (existingBarberService == null) {
-        final Map<String, dynamic> barberServiceData = {
-          'salon_barber_id': widget.salonBarberId!,
-          'service_id': serviceId,
-        };
+      if (!mounted) return;
 
-        await supabase.from('barber_services').insert(barberServiceData);
-      }
-    }
-
-    if (!mounted) return;
-
-    String successMessage;
-    if (_mode == 'new_service' || widget.isEditing) {
-      if (_variants.isNotEmpty) {
-        successMessage =
-            "${_serviceNameController.text.trim()} has been ${widget.isEditing ? 'updated' : 'added'} successfully.\n\n✅ ${_variants.length} variant${_variants.length > 1 ? 's' : ''} ${widget.isEditing ? 'updated' : 'added'}";
+      String successMessage;
+      if (_mode == 'new_service' || widget.isEditing) {
+        if (_variants.isNotEmpty) {
+          successMessage =
+              "${_serviceNameController.text.trim()} has been ${widget.isEditing ? 'updated' : 'added'} successfully.\n\n✅ ${_variants.length} variant${_variants.length > 1 ? 's' : ''} ${widget.isEditing ? 'updated' : 'added'}";
+        } else {
+          successMessage =
+              "${_serviceNameController.text.trim()} has been ${widget.isEditing ? 'updated' : 'added'} successfully.";
+        }
       } else {
-        successMessage =
-            "${_serviceNameController.text.trim()} has been ${widget.isEditing ? 'updated' : 'added'} successfully.";
+        if (_variants.isNotEmpty) {
+          successMessage =
+              "${_getServiceName(serviceId)} variants added successfully.\n\n✅ ${_variants.length} variant${_variants.length > 1 ? 's' : ''} added";
+        } else {
+          successMessage =
+              "${_getServiceName(serviceId)} has been added successfully.";
+        }
       }
-    } else {
-      if (_variants.isNotEmpty) {
-        successMessage =
-            "${_getServiceName(serviceId)} variants added successfully.\n\n✅ ${_variants.length} variant${_variants.length > 1 ? 's' : ''} added";
-      } else {
-        successMessage =
-            "${_getServiceName(serviceId)} has been added successfully.";
-      }
-    }
 
-    await showCustomAlert(
-      context: context,
-      title: widget.isEditing ? "✅ Service Updated!" : "🎉 Service Added!",
-      message: successMessage,
-      isError: false,
-    );
+      await showCustomAlert(
+        context: context,
+        title: widget.isEditing ? "✅ Service Updated!" : "🎉 Service Added!",
+        message: successMessage,
+        isError: false,
+      );
 
-    if (!mounted) return;
-    Navigator.pop(context, true);
-  } catch (e) {
-    if (mounted) {
-      // Handle duplicate key error specifically
-      if (e.toString().contains(
-        'duplicate key value violates unique constraint',
-      )) {
-        _showSnackBar(
-          'A service with this name already exists. Please use a different name.',
-          Colors.orange,
-        );
-        setState(() {
-          _serviceNameError = 'A service with this name already exists';
-        });
-      } else {
-        _showSnackBar('Error: $e', Colors.red);
+      if (!mounted) return;
+      Navigator.pop(context, true);
+    } catch (e) {
+      if (mounted) {
+        if (e.toString().contains(
+          'duplicate key value violates unique constraint',
+        )) {
+          _showSnackBar(
+            'A service with this name already exists. Please use a different name.',
+            Colors.orange,
+          );
+          setState(() {
+            _serviceNameError = 'A service with this name already exists';
+          });
+        } else {
+          _showSnackBar('Error: $e', Colors.red);
+        }
       }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
-  } finally {
-    if (mounted) setState(() => _isLoading = false);
   }
-}
 
   void _showSnackBar(String message, Color color) {
+    if (!mounted) return;
+    final isDark = _isDark;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(message),
-        backgroundColor: color,
+        content: Text(
+          message,
+          style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+        ),
+        backgroundColor: isDark ? color.withValues(alpha: 0.8) : color,
         behavior: SnackBarBehavior.floating,
         duration: const Duration(seconds: 3),
       ),
@@ -747,25 +752,32 @@ Future<void> _createAndAddService() async {
   // ============================================
 
   Widget _buildHeader() {
+    final isDark = _isDark;
+    final accentColor = AppTheme.primary;
+
     return Center(
       child: Column(
         children: [
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+              color: accentColor.withValues(alpha: 0.1),
               shape: BoxShape.circle,
             ),
             child: Icon(
               widget.isEditing ? Icons.edit : Icons.build,
-              color: const Color(0xFFFF6B8B),
+              color: accentColor,
               size: 48,
             ),
           ),
           const SizedBox(height: 16),
           Text(
             widget.isEditing ? 'Edit Service' : 'Add Service',
-            style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+            style: TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+              color: isDark ? Colors.white : Colors.black87,
+            ),
           ),
           const SizedBox(height: 8),
           Text(
@@ -774,7 +786,10 @@ Future<void> _createAndAddService() async {
                 : widget.isEditing
                 ? 'Update service details'
                 : 'Create a new service',
-            style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+            style: TextStyle(
+              fontSize: 14,
+              color: isDark ? Colors.white60 : Colors.grey[600],
+            ),
           ),
         ],
       ),
@@ -785,26 +800,42 @@ Future<void> _createAndAddService() async {
     if (widget.salonBarberId == null) return const SizedBox();
     if (widget.isEditing) return const SizedBox();
 
+    final isDark = _isDark;
+    final accentColor = AppTheme.primary;
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.grey[50],
+        color: isDark ? const Color(0xFF1E1E1E) : Colors.grey[50],
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[200]!),
+        border: Border.all(
+          color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'Service Type',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: isDark ? Colors.white : Colors.black87,
+            ),
           ),
           const SizedBox(height: 12),
           Row(
             children: [
               Expanded(
                 child: ChoiceChip(
-                  label: const Text('New Service'),
+                  label: Text(
+                    'New Service',
+                    style: TextStyle(
+                      color: _mode == 'new_service'
+                          ? accentColor
+                          : (isDark ? Colors.white70 : Colors.grey[700]),
+                    ),
+                  ),
                   selected: _mode == 'new_service',
                   onSelected: (selected) {
                     if (selected) {
@@ -815,18 +846,23 @@ Future<void> _createAndAddService() async {
                       });
                     }
                   },
-                  selectedColor: const Color(0xFFFF6B8B).withValues(alpha: 0.2),
-                  labelStyle: TextStyle(
-                    color: _mode == 'new_service'
-                        ? const Color(0xFFFF6B8B)
-                        : Colors.grey[700],
-                  ),
+                  selectedColor: accentColor.withValues(alpha: 0.2),
+                  backgroundColor: isDark
+                      ? const Color(0xFF2A2A2A)
+                      : Colors.grey[100],
                 ),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: ChoiceChip(
-                  label: const Text('Add to Existing'),
+                  label: Text(
+                    'Add to Existing',
+                    style: TextStyle(
+                      color: _mode == 'add_to_existing'
+                          ? accentColor
+                          : (isDark ? Colors.white70 : Colors.grey[700]),
+                    ),
+                  ),
                   selected: _mode == 'add_to_existing',
                   onSelected: (selected) {
                     if (selected) {
@@ -835,12 +871,10 @@ Future<void> _createAndAddService() async {
                       });
                     }
                   },
-                  selectedColor: const Color(0xFFFF6B8B).withValues(alpha: 0.2),
-                  labelStyle: TextStyle(
-                    color: _mode == 'add_to_existing'
-                        ? const Color(0xFFFF6B8B)
-                        : Colors.grey[700],
-                  ),
+                  selectedColor: accentColor.withValues(alpha: 0.2),
+                  backgroundColor: isDark
+                      ? const Color(0xFF2A2A2A)
+                      : Colors.grey[100],
                 ),
               ),
             ],
@@ -850,13 +884,33 @@ Future<void> _createAndAddService() async {
             DropdownButtonFormField<int>(
               initialValue: _selectedExistingServiceId,
               isExpanded: true,
+              style: TextStyle(color: isDark ? Colors.white : Colors.black87),
               decoration: InputDecoration(
                 labelText: 'Select Service',
+                labelStyle: TextStyle(
+                  color: isDark ? Colors.white60 : Colors.grey[600],
+                ),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(
+                    color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                  ),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(
+                    color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                  ),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(
+                    color: AppTheme.primary,
+                    width: 2,
+                  ),
                 ),
                 filled: true,
-                fillColor: Colors.white,
+                fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
                 contentPadding: const EdgeInsets.symmetric(
                   horizontal: 12,
                   vertical: 12,
@@ -865,7 +919,13 @@ Future<void> _createAndAddService() async {
               items: _existingServices.map((service) {
                 return DropdownMenuItem<int>(
                   value: service['id'] as int,
-                  child: Text(service['name'], overflow: TextOverflow.ellipsis),
+                  child: Text(
+                    service['name'],
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
+                  ),
                 );
               }).toList(),
               onChanged: (value) {
@@ -882,32 +942,47 @@ Future<void> _createAndAddService() async {
 
   Widget _buildCategorySection() {
     if (_categories.isEmpty) {
+      final isDark = _isDark;
       return Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: Colors.grey[50],
+          color: isDark ? const Color(0xFF1E1E1E) : Colors.grey[50],
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.grey[200]!),
+          border: Border.all(
+            color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
+          ),
         ),
-        child: const Center(
-          child: Text('No categories available. Please add categories first.'),
+        child: Center(
+          child: Text(
+            'No categories available. Please add categories first.',
+            style: TextStyle(color: isDark ? Colors.white60 : Colors.grey[600]),
+          ),
         ),
       );
     }
 
+    final isDark = _isDark;
+    final accentColor = AppTheme.primary;
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.grey[50],
+        color: isDark ? const Color(0xFF1E1E1E) : Colors.grey[50],
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[200]!),
+        border: Border.all(
+          color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'Category',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: isDark ? Colors.white : Colors.black87,
+            ),
           ),
           const SizedBox(height: 12),
           Wrap(
@@ -917,7 +992,14 @@ Future<void> _createAndAddService() async {
               final isSelected = _selectedCategoryId == category['id'];
               final displayName = _getCategoryDisplayName(category);
               return FilterChip(
-                label: Text(displayName),
+                label: Text(
+                  displayName,
+                  style: TextStyle(
+                    color: isSelected
+                        ? accentColor
+                        : (isDark ? Colors.white70 : Colors.grey[700]),
+                  ),
+                ),
                 selected: isSelected,
                 onSelected: (selected) {
                   setState(() {
@@ -926,20 +1008,16 @@ Future<void> _createAndAddService() async {
                     }
                   });
                 },
-                backgroundColor: Colors.white,
-                selectedColor: const Color(0xFFFF6B8B).withValues(alpha: 0.2),
-                checkmarkColor: const Color(0xFFFF6B8B),
-                labelStyle: TextStyle(
-                  color: isSelected
-                      ? const Color(0xFFFF6B8B)
-                      : Colors.grey[700],
-                  fontWeight: isSelected ? FontWeight.w500 : FontWeight.normal,
-                ),
+                backgroundColor: isDark
+                    ? const Color(0xFF2A2A2A)
+                    : Colors.white,
+                selectedColor: accentColor.withValues(alpha: 0.2),
+                checkmarkColor: accentColor,
                 shape: StadiumBorder(
                   side: BorderSide(
                     color: isSelected
-                        ? const Color(0xFFFF6B8B)
-                        : Colors.grey[300]!,
+                        ? accentColor
+                        : (isDark ? Colors.grey[700]! : Colors.grey[300]!),
                   ),
                 ),
               );
@@ -951,42 +1029,79 @@ Future<void> _createAndAddService() async {
   }
 
   Widget _buildServiceInfoForm() {
+    final isDark = _isDark;
+    final accentColor = AppTheme.primary;
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.grey[50],
+        color: isDark ? const Color(0xFF1E1E1E) : Colors.grey[50],
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[200]!),
+        border: Border.all(
+          color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'Service Details',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: isDark ? Colors.white : Colors.black87,
+            ),
           ),
           const SizedBox(height: 16),
 
-          const Text(
+          Text(
             'Service Name *',
-            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: isDark ? Colors.white : Colors.black87,
+            ),
           ),
           const SizedBox(height: 8),
           TextFormField(
             controller: _serviceNameController,
+            style: TextStyle(color: isDark ? Colors.white : Colors.black87),
             decoration: InputDecoration(
               hintText: 'e.g., Hair Cut, Facial, Massage',
-              prefixIcon: const Icon(Icons.build, color: Colors.grey),
+              hintStyle: TextStyle(
+                color: isDark ? Colors.white70 : Colors.grey,
+              ),
+              prefixIcon: Icon(
+                Icons.build,
+                color: isDark ? Colors.white70 : Colors.grey,
+              ),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(
+                  color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                ),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(
+                  color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                ),
+              ),
+              // ✅ Use accentColor here
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: accentColor, width: 2),
               ),
               filled: true,
-              fillColor: Colors.white,
+              fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
               contentPadding: const EdgeInsets.symmetric(
                 horizontal: 12,
                 vertical: 12,
               ),
               errorText: _serviceNameError,
+              errorStyle: TextStyle(
+                color: isDark ? Colors.red[300] : Colors.red,
+              ),
               errorMaxLines: 2,
             ),
             onChanged: (value) {
@@ -996,21 +1111,43 @@ Future<void> _createAndAddService() async {
           ),
           const SizedBox(height: 16),
 
-          const Text(
+          Text(
             'Description',
-            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: isDark ? Colors.white : Colors.black87,
+            ),
           ),
           const SizedBox(height: 8),
           TextFormField(
             controller: _serviceDescriptionController,
             maxLines: 2,
+            style: TextStyle(color: isDark ? Colors.white : Colors.black87),
             decoration: InputDecoration(
               hintText: 'Describe what this service includes...',
+              hintStyle: TextStyle(
+                color: isDark ? Colors.white70 : Colors.grey,
+              ),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(
+                  color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                ),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(
+                  color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                ),
+              ),
+              // ✅ Use accentColor here
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: accentColor, width: 2),
               ),
               filled: true,
-              fillColor: Colors.white,
+              fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
               contentPadding: const EdgeInsets.symmetric(
                 horizontal: 12,
                 vertical: 12,
@@ -1019,16 +1156,22 @@ Future<void> _createAndAddService() async {
           ),
           const SizedBox(height: 16),
 
-          const Text(
+          Text(
             'Service Icon',
-            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: isDark ? Colors.white : Colors.black87,
+            ),
           ),
           const SizedBox(height: 8),
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: Colors.white,
-              border: Border.all(color: Colors.grey[300]!),
+              color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+              border: Border.all(
+                color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+              ),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Wrap(
@@ -1037,6 +1180,7 @@ Future<void> _createAndAddService() async {
               alignment: WrapAlignment.start,
               children: _iconSuggestions.map((iconData) {
                 final isSelected = _selectedIcon == iconData['name'];
+                final color = Color(iconData['color']);
                 return GestureDetector(
                   onTap: () {
                     setState(() {
@@ -1047,13 +1191,13 @@ Future<void> _createAndAddService() async {
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
                       color: isSelected
-                          ? Color(iconData['color']).withValues(alpha: 0.1)
+                          ? color.withValues(alpha: 0.1)
                           : Colors.transparent,
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
                         color: isSelected
-                            ? Color(iconData['color'])
-                            : Colors.grey[300]!,
+                            ? color
+                            : (isDark ? Colors.grey[700]! : Colors.grey[300]!),
                         width: isSelected ? 2 : 1,
                       ),
                     ),
@@ -1063,8 +1207,8 @@ Future<void> _createAndAddService() async {
                           iconData['icon'],
                           size: 24,
                           color: isSelected
-                              ? Color(iconData['color'])
-                              : Colors.grey[600],
+                              ? color
+                              : (isDark ? Colors.white70 : Colors.grey[600]),
                         ),
                         const SizedBox(height: 2),
                         Text(
@@ -1072,8 +1216,8 @@ Future<void> _createAndAddService() async {
                           style: TextStyle(
                             fontSize: 9,
                             color: isSelected
-                                ? Color(iconData['color'])
-                                : Colors.grey[600],
+                                ? color
+                                : (isDark ? Colors.white70 : Colors.grey[600]),
                           ),
                         ),
                       ],
@@ -1093,21 +1237,30 @@ Future<void> _createAndAddService() async {
       return const SizedBox();
     }
 
+    final isDark = _isDark;
+    final accentColor = AppTheme.primary;
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.grey[50],
+        color: isDark ? const Color(0xFF1E1E1E) : Colors.grey[50],
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[200]!),
+        border: Border.all(
+          color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Text(
+              Text(
                 'Add Variants (Optional)',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
               ),
               const Spacer(),
               if (_editingVariantIndex >= 0)
@@ -1123,58 +1276,99 @@ Future<void> _createAndAddService() async {
                       _durationError = null;
                     });
                   },
-                  child: const Text('Cancel Edit'),
+                  child: Text(
+                    'Cancel Edit',
+                    style: TextStyle(
+                      color: isDark ? Colors.white60 : Colors.grey,
+                    ),
+                  ),
                 ),
             ],
           ),
           const SizedBox(height: 8),
-          const Text(
+          Text(
             'Add different pricing options for gender and age combinations',
-            style: TextStyle(fontSize: 12, color: Colors.grey),
+            style: TextStyle(
+              fontSize: 12,
+              color: isDark ? Colors.white70 : Colors.grey,
+            ),
           ),
           const SizedBox(height: 16),
 
-          // Gender and Age Category Row
           Row(
             children: [
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'Gender',
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
+                        color: isDark ? Colors.white : Colors.black87,
                       ),
                     ),
                     const SizedBox(height: 8),
                     DropdownButtonFormField<int>(
                       initialValue: _selectedGenderId,
                       isExpanded: true,
+                      style: TextStyle(
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
                       decoration: InputDecoration(
-                        prefixIcon: const Icon(
+                        prefixIcon: Icon(
                           Icons.wc,
-                          color: Colors.grey,
+                          color: isDark ? Colors.white70 : Colors.grey,
                           size: 20,
                         ),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: isDark
+                                ? Colors.grey[700]!
+                                : Colors.grey[300]!,
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: isDark
+                                ? Colors.grey[700]!
+                                : Colors.grey[300]!,
+                          ),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(
+                            color: AppTheme.primary,
+                            width: 2,
+                          ),
                         ),
                         filled: true,
-                        fillColor: Colors.white,
+                        fillColor: isDark
+                            ? const Color(0xFF2A2A2A)
+                            : Colors.white,
                         contentPadding: const EdgeInsets.symmetric(
                           horizontal: 12,
                           vertical: 12,
                         ),
                       ),
-                      hint: const Text('Select gender'),
+                      hint: Text(
+                        'Select gender',
+                        style: TextStyle(
+                          color: isDark ? Colors.white70 : Colors.grey,
+                        ),
+                      ),
                       items: _genders.map((gender) {
                         return DropdownMenuItem<int>(
                           value: gender['id'] as int,
                           child: Text(
                             _getGenderDisplayName(gender),
                             overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: isDark ? Colors.white : Colors.black87,
+                            ),
                           ),
                         );
                       }).toList(),
@@ -1192,40 +1386,74 @@ Future<void> _createAndAddService() async {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'Age Category',
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
+                        color: isDark ? Colors.white : Colors.black87,
                       ),
                     ),
                     const SizedBox(height: 8),
                     DropdownButtonFormField<int>(
                       initialValue: _selectedAgeCategoryId,
                       isExpanded: true,
+                      style: TextStyle(
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
                       decoration: InputDecoration(
-                        prefixIcon: const Icon(
+                        prefixIcon: Icon(
                           Icons.timeline,
-                          color: Colors.grey,
+                          color: isDark ? Colors.white70 : Colors.grey,
                           size: 20,
                         ),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: isDark
+                                ? Colors.grey[700]!
+                                : Colors.grey[300]!,
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: isDark
+                                ? Colors.grey[700]!
+                                : Colors.grey[300]!,
+                          ),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(
+                            color: AppTheme.primary,
+                            width: 2,
+                          ),
                         ),
                         filled: true,
-                        fillColor: Colors.white,
+                        fillColor: isDark
+                            ? const Color(0xFF2A2A2A)
+                            : Colors.white,
                         contentPadding: const EdgeInsets.symmetric(
                           horizontal: 12,
                           vertical: 12,
                         ),
                       ),
-                      hint: const Text('Select age'),
+                      hint: Text(
+                        'Select age',
+                        style: TextStyle(
+                          color: isDark ? Colors.white70 : Colors.grey,
+                        ),
+                      ),
                       items: _ageCategories.map((ageCat) {
                         return DropdownMenuItem<int>(
                           value: ageCat['id'] as int,
                           child: Text(
                             _getAgeCategoryDisplayName(ageCat),
                             overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: isDark ? Colors.white : Colors.black87,
+                            ),
                           ),
                         );
                       }).toList(),
@@ -1242,41 +1470,72 @@ Future<void> _createAndAddService() async {
           ),
           const SizedBox(height: 12),
 
-          // Price and Duration Row with Validation
           Row(
             children: [
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'Price (Rs.) *',
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
+                        color: isDark ? Colors.white : Colors.black87,
                       ),
                     ),
                     const SizedBox(height: 8),
                     TextFormField(
                       controller: _variantPriceController,
                       keyboardType: TextInputType.number,
+                      style: TextStyle(
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
                       decoration: InputDecoration(
                         hintText: 'e.g., 1500',
-                        prefixIcon: const Icon(
+                        hintStyle: TextStyle(
+                          color: isDark ? Colors.white70 : Colors.grey,
+                        ),
+                        prefixIcon: Icon(
                           Icons.currency_rupee,
-                          color: Colors.grey,
+                          color: isDark ? Colors.white70 : Colors.grey,
                           size: 20,
                         ),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: isDark
+                                ? Colors.grey[700]!
+                                : Colors.grey[300]!,
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: isDark
+                                ? Colors.grey[700]!
+                                : Colors.grey[300]!,
+                          ),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(
+                            color: AppTheme.primary,
+                            width: 2,
+                          ),
                         ),
                         filled: true,
-                        fillColor: Colors.white,
+                        fillColor: isDark
+                            ? const Color(0xFF2A2A2A)
+                            : Colors.white,
                         contentPadding: const EdgeInsets.symmetric(
                           horizontal: 12,
                           vertical: 12,
                         ),
                         errorText: _priceError,
+                        errorStyle: TextStyle(
+                          color: isDark ? Colors.red[300] : Colors.red,
+                        ),
                         errorMaxLines: 2,
                       ),
                       onChanged: (value) {
@@ -1292,34 +1551,66 @@ Future<void> _createAndAddService() async {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'Duration (mins) *',
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
+                        color: isDark ? Colors.white : Colors.black87,
                       ),
                     ),
                     const SizedBox(height: 8),
                     TextFormField(
                       controller: _variantDurationController,
                       keyboardType: TextInputType.number,
+                      style: TextStyle(
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
                       decoration: InputDecoration(
                         hintText: 'e.g., 30',
-                        prefixIcon: const Icon(
+                        hintStyle: TextStyle(
+                          color: isDark ? Colors.white70 : Colors.grey,
+                        ),
+                        prefixIcon: Icon(
                           Icons.timer,
-                          color: Colors.grey,
+                          color: isDark ? Colors.white70 : Colors.grey,
                           size: 20,
                         ),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: isDark
+                                ? Colors.grey[700]!
+                                : Colors.grey[300]!,
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: isDark
+                                ? Colors.grey[700]!
+                                : Colors.grey[300]!,
+                          ),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(
+                            color: AppTheme.primary,
+                            width: 2,
+                          ),
                         ),
                         filled: true,
-                        fillColor: Colors.white,
+                        fillColor: isDark
+                            ? const Color(0xFF2A2A2A)
+                            : Colors.white,
                         contentPadding: const EdgeInsets.symmetric(
                           horizontal: 12,
                           vertical: 12,
                         ),
                         errorText: _durationError,
+                        errorStyle: TextStyle(
+                          color: isDark ? Colors.red[300] : Colors.red,
+                        ),
                         errorMaxLines: 2,
                       ),
                       onChanged: (value) {
@@ -1341,7 +1632,7 @@ Future<void> _createAndAddService() async {
               style: ElevatedButton.styleFrom(
                 backgroundColor: _editingVariantIndex >= 0
                     ? Colors.orange
-                    : const Color(0xFFFF6B8B),
+                    : accentColor,
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 shape: RoundedRectangleBorder(
@@ -1364,13 +1655,20 @@ Future<void> _createAndAddService() async {
       return const SizedBox();
     }
 
+    final isDark = _isDark;
+    final accentColor = AppTheme.primary;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const SizedBox(height: 16),
-        const Text(
+        Text(
           'Added Variants',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+            color: isDark ? Colors.white : Colors.black87,
+          ),
         ),
         const SizedBox(height: 12),
         ListView.separated(
@@ -1382,26 +1680,31 @@ Future<void> _createAndAddService() async {
             final variant = _variants[index];
             return Card(
               elevation: 1,
+              color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
               child: ListTile(
                 leading: CircleAvatar(
-                  backgroundColor: const Color(
-                    0xFFFF6B8B,
-                  ).withValues(alpha: 0.1),
+                  backgroundColor: accentColor.withValues(alpha: 0.1),
                   child: Text(
                     '${index + 1}',
-                    style: const TextStyle(color: Color(0xFFFF6B8B)),
+                    style: TextStyle(color: accentColor),
                   ),
                 ),
                 title: Text(
                   '${variant['gender_name']} - ${variant['age_category_name']}',
-                  style: const TextStyle(fontWeight: FontWeight.w500),
+                  style: TextStyle(
+                    fontWeight: FontWeight.w500,
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
                   overflow: TextOverflow.ellipsis,
                 ),
                 subtitle: Text(
                   'Rs. ${variant['price']} | ${variant['duration']} mins',
+                  style: TextStyle(
+                    color: isDark ? Colors.white60 : Colors.grey[600],
+                  ),
                 ),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -1433,15 +1736,16 @@ Future<void> _createAndAddService() async {
   }
 
   Widget _buildCreateButton() {
+    final isDark = _isDark;
+    final accentColor = AppTheme.primary;
+
     bool isEnabled = false;
 
     if (_mode == 'new_service' || widget.isEditing) {
-      // For new service or edit mode - need service name and no error
       isEnabled =
           _serviceNameController.text.trim().isNotEmpty &&
           _serviceNameError == null;
     } else {
-      // For add to existing mode - need to select a service
       isEnabled = _selectedExistingServiceId != null;
     }
 
@@ -1451,7 +1755,9 @@ Future<void> _createAndAddService() async {
       child: ElevatedButton(
         onPressed: (_isLoading || !isEnabled) ? null : _createAndAddService,
         style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFFFF6B8B),
+          backgroundColor: isEnabled
+              ? accentColor
+              : (isDark ? Colors.grey[800] : Colors.grey[300]),
           foregroundColor: Colors.white,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
@@ -1470,13 +1776,22 @@ Future<void> _createAndAddService() async {
             : Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(widget.isEditing ? Icons.save : Icons.add, size: 20),
+                  Icon(
+                    widget.isEditing ? Icons.save : Icons.add,
+                    size: 20,
+                    color: isEnabled
+                        ? Colors.white
+                        : (isDark ? Colors.white60 : Colors.white70),
+                  ),
                   const SizedBox(width: 8),
                   Text(
                     widget.isEditing ? 'Update Service' : 'Add Service',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
+                      color: isEnabled
+                          ? Colors.white
+                          : (isDark ? Colors.white60 : Colors.white70),
                     ),
                   ),
                 ],
@@ -1485,9 +1800,19 @@ Future<void> _createAndAddService() async {
     );
   }
 
+  // ============================================
+  // ✅ BUILD METHOD
+  // ============================================
   @override
   Widget build(BuildContext context) {
+    _isWeb = context.isWeb;
+    _isDark = context.isDarkMode;
+
+    final accentColor = AppTheme.primary;
+    final double padding = _isWeb ? 24.0 : 16.0; // ✅ Used
+
     return Scaffold(
+      backgroundColor: _isDark ? const Color(0xFF121212) : Colors.grey[50],
       appBar: AppBar(
         title: Text(
           widget.barberName != null
@@ -1495,54 +1820,58 @@ Future<void> _createAndAddService() async {
               : widget.isEditing
               ? 'Edit Service'
               : 'Add New Service',
+          style: const TextStyle(color: Colors.white),
         ),
-        backgroundColor: const Color(0xFFFF6B8B),
+        backgroundColor: accentColor,
         foregroundColor: Colors.white,
         elevation: 0,
+        centerTitle: _isWeb, // ✅ Used
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+          tooltip: 'Back',
+        ),
       ),
       body: _isLoadingData
-          ? const Center(
-              child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
-            )
-          : Container(
-              color: Colors.grey[50],
-              child: SafeArea(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(16),
-                  child: Center(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 800),
-                      child: Card(
-                        elevation: 2,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.all(20),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              _buildHeader(),
+          ? Center(child: CircularProgressIndicator(color: accentColor))
+          : SafeArea(
+              child: SingleChildScrollView(
+                padding: EdgeInsets.all(padding), // ✅ Used
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxWidth: _isWeb ? 800 : double.infinity, // ✅ Used
+                    ),
+                    child: Card(
+                      elevation: 2,
+                      color: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Padding(
+                        padding: EdgeInsets.all(padding), // ✅ Used
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _buildHeader(),
+                            const SizedBox(height: 24),
+                            if (widget.salonBarberId != null &&
+                                !widget.isEditing)
+                              _buildModeSelector(),
+                            if (widget.salonBarberId != null &&
+                                !widget.isEditing)
                               const SizedBox(height: 24),
-                              if (widget.salonBarberId != null &&
-                                  !widget.isEditing)
-                                _buildModeSelector(),
-                              if (widget.salonBarberId != null &&
-                                  !widget.isEditing)
-                                const SizedBox(height: 24),
-                              _buildCategorySection(),
+                            _buildCategorySection(),
+                            const SizedBox(height: 24),
+                            if (_mode == 'new_service' || widget.isEditing) ...[
+                              _buildServiceInfoForm(),
                               const SizedBox(height: 24),
-                              if (_mode == 'new_service' ||
-                                  widget.isEditing) ...[
-                                _buildServiceInfoForm(),
-                                const SizedBox(height: 24),
-                              ],
-                              _buildVariantForm(),
-                              _buildVariantsList(),
-                              const SizedBox(height: 32),
-                              _buildCreateButton(),
                             ],
-                          ),
+                            _buildVariantForm(),
+                            _buildVariantsList(),
+                            const SizedBox(height: 32),
+                            _buildCreateButton(),
+                          ],
                         ),
                       ),
                     ),

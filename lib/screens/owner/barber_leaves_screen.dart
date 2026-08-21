@@ -5,6 +5,8 @@ import 'package:intl/intl.dart';
 import '../../services/notification_service.dart';
 import '../../services/timezone_service.dart';
 import '../../widgets/customer_choice_dialog.dart';
+import '../../extensions/context_extensions.dart';
+import '../../theme/app_theme.dart';
 
 class BarberLeavesScreen extends StatefulWidget {
   final String? salonId;
@@ -35,10 +37,30 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
   String _selectedStatus = 'all';
   String _selectedType = 'all';
 
+  // ✅ Responsive variables
+  late bool _isWeb;
+  late bool _isDark;
+
+  // ✅ Scroll Controller for web
+  final ScrollController _scrollController = ScrollController();
+
   @override
   void initState() {
     super.initState();
     _initializeAndLoad();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _isWeb = context.isWeb;
+    _isDark = context.isDarkMode;
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
   }
 
   Future<void> _initializeAndLoad() async {
@@ -46,14 +68,8 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     await _loadData();
   }
 
-  @override
-  void dispose() {
-    super.dispose();
-  }
+  // ==================== CORRECT TIMEZONE HELPER METHODS ====================
 
-  // ==================== CORRECT TIMEZONE HELPER METHODS (USING TimezoneService) ====================
-
-  /// Convert local date to UTC date string for DB storage
   String _localDateToUtcDateString(DateTime localDate) {
     try {
       final utcDateTime = DateTime.utc(
@@ -68,11 +84,9 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     }
   }
 
-  /// Convert UTC date string from DB to local date for display
   DateTime _utcDateStringToLocalDate(String utcDateStr) {
     try {
       final utcDateTime = DateTime.parse(utcDateStr);
-      // Use TimezoneService to convert UTC to local
       final localDateTime = TimezoneService.utcToLocalDateTimeForDate(
         '12:00:00',
         utcDateTime,
@@ -88,12 +102,10 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     }
   }
 
-  /// Format date for database storage (YYYY-MM-DD)
   String _formatDateForDb(DateTime date) {
     return '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
   }
 
-  /// Get display time from UTC time string using TimezoneService
   String _getDisplayTime(String? utcTimeStr) {
     if (utcTimeStr == null || utcTimeStr.isEmpty) return '';
     try {
@@ -104,7 +116,6 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     }
   }
 
-  /// Format date for display (e.g., "Jan 15, 2024")
   String _formatDateForDisplay(DateTime date) {
     final months = [
       'Jan',
@@ -123,12 +134,10 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     return '${months[date.month - 1]} ${date.day}, ${date.year}';
   }
 
-  /// Format date for picker (e.g., "Monday, Jan 15, 2024")
   String _formatDateForPicker(DateTime date) {
     return DateFormat('EEEE, MMM d, yyyy').format(date);
   }
 
-  /// Format date from UTC string for display
   String _formatDateForDisplayFromUtc(String? utcDateStr) {
     if (utcDateStr == null) return 'Unknown';
     try {
@@ -140,7 +149,6 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     }
   }
 
-  /// Format time from UTC string for display using TimezoneService
   String _formatTimeForDisplayFromUtc(String? timeStr) {
     if (timeStr == null) return '';
     try {
@@ -151,12 +159,10 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     }
   }
 
-  /// Get current timezone flag for display
   String _getTimezoneFlag() {
     return TimezoneService.getCurrentFlag();
   }
 
-  /// Check if a UTC date string is a holiday
   bool _isHoliday(String utcDateStr) {
     final localDate = _utcDateStringToLocalDate(utcDateStr);
     final localDateStr = _formatDateForDb(localDate);
@@ -168,7 +174,6 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     });
   }
 
-  /// Get holiday name for a UTC date string
   String? _getHolidayName(String utcDateStr) {
     final localDate = _utcDateStringToLocalDate(utcDateStr);
     final localDateStr = _formatDateForDb(localDate);
@@ -206,7 +211,6 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
 
       _holidays = List<Map<String, dynamic>>.from(holidaysResponse);
 
-      // ✅ Updated: Get barbers with user_roles.status check
       final salonBarbersResponse = await supabase
           .from('salon_barbers')
           .select('''
@@ -223,15 +227,13 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
         ''')
           .eq('salon_id', int.parse(widget.salonId!))
           .eq('status', 'active')  
-          .eq('profiles.user_roles.role_id', 2) // barber role
-          .eq('profiles.user_roles.status', 'active'); // ✅ Added
+          .eq('profiles.user_roles.role_id', 2)
+          .eq('profiles.user_roles.status', 'active');
 
-      // ✅ FIX: Convert Map<dynamic, dynamic> to Map<String, dynamic>
       final List<Map<String, dynamic>> allProfiles = [];
       for (var entry in salonBarbersResponse) {
         final dynamic profileData = entry['profiles'];
         if (profileData != null) {
-          // Convert to Map<String, dynamic>
           final Map<String, dynamic> profile = Map<String, dynamic>.from(
             profileData,
           );
@@ -267,7 +269,10 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       debugPrint('❌ Error loading data: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: _isDark ? Colors.red[800] : Colors.red,
+          ),
         );
       }
     } finally {
@@ -327,7 +332,6 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
   Future<void> _applyFilters() async {
     setState(() => _isLoading = true);
 
-    // ✅ Updated: Get barbers with user_roles.status check
     final salonBarbersResponse = await supabase
         .from('salon_barbers')
         .select('''
@@ -339,11 +343,10 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
           )
       ''')
         .eq('salon_id', int.parse(widget.salonId!))
-        .eq('salon_barbers.status', 'active')
+        .eq('status', 'active')
         .eq('profiles.user_roles.role_id', 2)
         .eq('profiles.user_roles.status', 'active');
 
-    // ✅ FIX: Extract barber IDs safely
     final List<String> barberIds = [];
     for (var entry in salonBarbersResponse) {
       final dynamic profileData = entry['profiles'];
@@ -351,7 +354,6 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
         final Map<String, dynamic> profile = Map<String, dynamic>.from(
           profileData,
         );
-        // Check if user_roles status is active (already filtered)
         final userRoles = profile['user_roles'] as List? ?? [];
         bool isActive = false;
         for (var role in userRoles) {
@@ -438,7 +440,6 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
         case 'accept':
           if (availableBarber != null) {
             await _reassignToBarber(appointment, availableBarber, barberId);
-            // ✅ Use customer-specific method
             await _notificationService.sendAppointmentReassigned(
               customerId: customerId,
               newBarberName: availableBarber['name'],
@@ -453,7 +454,6 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
         case 'next_day':
           final newDate = await _moveToNextDay(appointment);
           final newLocalDate = _utcDateStringToLocalDate(newDate);
-          // ✅ Use customer-specific method
           await _notificationService.sendAppointmentMoved(
             customerId: customerId,
             newDate: _formatDateForDisplay(newLocalDate),
@@ -469,7 +469,6 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
             appointment['id'],
             'Customer cancelled due to barber leave',
           );
-          // ✅ Use customer-specific method
           await _notificationService.sendAppointmentCancelled(
             customerId: customerId,
             reason: 'Customer cancelled due to barber leave',
@@ -520,7 +519,6 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     required int appointmentPriority,
   }) async {
     try {
-      // ✅ Updated: Get barbers with user_roles.status check
       final salonBarbers = await supabase
           .from('salon_barbers')
           .select('''
@@ -532,11 +530,10 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
             )
         ''')
           .eq('salon_id', int.parse(salonId))
-          .eq('salon_barbers.status', 'active')
+          .eq('status', 'active')
           .eq('profiles.user_roles.role_id', 2)
           .eq('profiles.user_roles.status', 'active');
 
-      // ✅ FIX: Extract barber IDs safely
       final List<String> barberIds = [];
       for (var entry in salonBarbers) {
         final dynamic profileData = entry['profiles'];
@@ -601,16 +598,15 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     String endTime,
   ) async {
     try {
-      // ✅ STEP 1: Check if barber has active role
       final roleCheck = await supabase
           .from('user_roles')
           .select('status')
           .eq('user_id', barberId)
-          .eq('role_id', 2) // barber role ID
+          .eq('role_id', 2)
           .maybeSingle();
 
       if (roleCheck == null || roleCheck['status'] != 'active') {
-        return false; // Barber not active
+        return false;
       }
 
       final localDate = _utcDateStringToLocalDate(appointmentDate);
@@ -885,8 +881,8 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       showDialog(
         context: context,
         barrierDismissible: false,
-        builder: (context) => const Center(
-          child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+        builder: (context) => Center(
+          child: CircularProgressIndicator(color: AppTheme.primary),
         ),
       );
 
@@ -946,7 +942,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Leave approved. No appointments affected.'),
-            backgroundColor: Colors.green,
+            backgroundColor: _isDark ? Colors.green[800] : Colors.green,
           ),
         );
         await _loadData();
@@ -979,7 +975,9 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(message),
-          backgroundColor: failedCount > 0 ? Colors.orange : Colors.green,
+          backgroundColor: failedCount > 0
+              ? (_isDark ? Colors.orange[800] : Colors.orange)
+              : (_isDark ? Colors.green[800] : Colors.green),
         ),
       );
 
@@ -989,7 +987,10 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       if (mounted) {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: _isDark ? Colors.red[800] : Colors.red,
+          ),
         );
       }
     }
@@ -1004,32 +1005,51 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     final result = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
+        backgroundColor: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Reject Leave'),
+        title: Text(
+          'Reject Leave',
+          style: context.titleLarge.copyWith(
+            color: _isDark ? Colors.white : Colors.black87,
+          ),
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'Please provide a reason for rejecting this leave request:',
-              style: TextStyle(fontSize: 14),
+              style: context.bodyMedium.copyWith(
+                color: _isDark ? Colors.white70 : Colors.black87,
+              ),
             ),
             const SizedBox(height: 16),
             TextField(
               controller: reasonController,
               maxLines: 3,
+              style: TextStyle(
+                color: _isDark ? Colors.white : Colors.black87,
+              ),
               decoration: InputDecoration(
                 hintText: 'Enter reason...',
+                hintStyle: TextStyle(
+                  color: _isDark ? Colors.white70 : Colors.grey[500],
+                ),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide(
+                    color: _isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                  ),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
                   borderSide: const BorderSide(
-                    color: Color(0xFFFF6B8B),
+                    color: AppTheme.primary,
                     width: 2,
                   ),
                 ),
+                fillColor: _isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                filled: true,
               ),
               autofocus: true,
             ),
@@ -1038,7 +1058,12 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+            child: Text(
+              'Cancel',
+              style: TextStyle(
+                color: _isDark ? Colors.white60 : Colors.grey[600],
+              ),
+            ),
           ),
           ElevatedButton(
             onPressed: () {
@@ -1053,7 +1078,10 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
               }
               Navigator.pop(context, true);
             },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
             child: const Text('Reject'),
           ),
         ],
@@ -1098,7 +1126,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Leave rejected: $reason'),
-            backgroundColor: Colors.red,
+            backgroundColor: _isDark ? Colors.red[800] : Colors.red,
           ),
         );
       }
@@ -1106,7 +1134,10 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       debugPrint('❌ Error rejecting leave: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: _isDark ? Colors.red[800] : Colors.red,
+          ),
         );
       }
     } finally {
@@ -1162,6 +1193,8 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
   // ==================== FILTER WIDGETS ====================
 
   Widget _buildBarberFilter() {
+    final isDark = _isDark;
+
     return SizedBox(
       height: 50,
       child: DropdownButtonFormField<String>(
@@ -1171,18 +1204,54 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
             horizontal: 12,
             vertical: 8,
           ),
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(
+              color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+            ),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(
+              color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+            ),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: AppTheme.primary, width: 2),
+          ),
+          fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+          filled: true,
         ),
-        hint: const Text('All Barbers'),
+        hint: Text(
+          'All Barbers',
+          style: TextStyle(
+            color: isDark ? Colors.white60 : Colors.grey[600],
+          ),
+        ),
+        dropdownColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+        style: TextStyle(
+          color: isDark ? Colors.white : Colors.black87,
+        ),
         items: [
-          const DropdownMenuItem<String>(
+          DropdownMenuItem<String>(
             value: null,
-            child: Text('All Barbers'),
+            child: Text(
+              'All Barbers',
+              style: TextStyle(
+                color: isDark ? Colors.white : Colors.black87,
+              ),
+            ),
           ),
           ..._barbers.map<DropdownMenuItem<String>>((b) {
             return DropdownMenuItem<String>(
               value: b['id'] as String,
-              child: Text(b['name'] as String),
+              child: Text(
+                b['name'] as String,
+                style: TextStyle(
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
+              ),
             );
           }),
         ],
@@ -1195,18 +1264,38 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     );
   }
 
-  // ==================== DATE FILTER (FIXED: Only future dates) ====================
   Widget _buildDateFilter() {
+    final isDark = _isDark;
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+
     return GestureDetector(
       onTap: () async {
-        final now = DateTime.now();
-        final today = DateTime(now.year, now.month, now.day);
-
         final date = await showDatePicker(
           context: context,
           initialDate: _selectedLocalDate ?? today,
-          firstDate: today, // ✅ FIXED: Cannot select past dates
+          firstDate: today,
           lastDate: now.add(const Duration(days: 365)),
+          builder: (context, child) {
+            return Theme(
+              data: Theme.of(context).copyWith(
+                colorScheme: ColorScheme(
+                  brightness: isDark ? Brightness.dark : Brightness.light,
+                  primary: AppTheme.primary,
+                  onPrimary: Colors.white,
+                  secondary: AppTheme.primary,
+                  onSecondary: Colors.white,
+                  error: Colors.red,
+                  onError: Colors.white,
+                  surface: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                  onSurface: isDark ? Colors.white : Colors.black87,
+                ), dialogTheme: DialogThemeData(backgroundColor: isDark
+                    ? const Color(0xFF1E1E1E)
+                    : Colors.white),
+              ),
+              child: child!,
+            );
+          },
         );
         if (date != null && mounted) {
           setState(() => _selectedLocalDate = date);
@@ -1216,12 +1305,19 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
         height: 50,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          border: Border.all(color: Colors.grey[300]!),
+          border: Border.all(
+            color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+          ),
           borderRadius: BorderRadius.circular(8),
+          color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
         ),
         child: Row(
           children: [
-            const Icon(Icons.calendar_today, size: 16),
+            Icon(
+              Icons.calendar_today,
+              size: 16,
+              color: isDark ? Colors.white60 : Colors.grey[600],
+            ),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
@@ -1230,14 +1326,18 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
                     : 'Select Date',
                 style: TextStyle(
                   color: _selectedLocalDate != null
-                      ? Colors.black
-                      : Colors.grey[500],
+                      ? (isDark ? Colors.white : Colors.black)
+                      : (isDark ? Colors.white70 : Colors.grey[500]),
                 ),
               ),
             ),
             if (_selectedLocalDate != null)
               IconButton(
-                icon: const Icon(Icons.close, size: 16),
+                icon: Icon(
+                  Icons.close,
+                  size: 16,
+                  color: isDark ? Colors.white60 : Colors.grey[500],
+                ),
                 onPressed: () {
                   if (mounted) {
                     setState(() => _selectedLocalDate = null);
@@ -1253,6 +1353,8 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
   }
 
   Widget _buildTypeFilter() {
+    final isDark = _isDark;
+
     return SizedBox(
       height: 50,
       child: DropdownButtonFormField<String>(
@@ -1262,7 +1364,28 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
             horizontal: 12,
             vertical: 8,
           ),
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(
+              color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+            ),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(
+              color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+            ),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: AppTheme.primary, width: 2),
+          ),
+          fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+          filled: true,
+        ),
+        dropdownColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+        style: TextStyle(
+          color: isDark ? Colors.white : Colors.black87,
         ),
         items: const [
           DropdownMenuItem<String>(value: 'all', child: Text('All Types')),
@@ -1289,6 +1412,8 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
   }
 
   Widget _buildStatusFilter() {
+    final isDark = _isDark;
+
     return SizedBox(
       height: 50,
       child: DropdownButtonFormField<String>(
@@ -1298,7 +1423,28 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
             horizontal: 12,
             vertical: 8,
           ),
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(
+              color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+            ),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(
+              color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+            ),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: AppTheme.primary, width: 2),
+          ),
+          fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+          filled: true,
+        ),
+        dropdownColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+        style: TextStyle(
+          color: isDark ? Colors.white : Colors.black87,
         ),
         items: const [
           DropdownMenuItem<String>(value: 'all', child: Text('All Status')),
@@ -1319,6 +1465,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
 
   Widget _buildStatusCell(Map<String, dynamic> leave, String status) {
     final Color statusColor = _getStatusColor(status);
+    final isDark = _isDark;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -1337,7 +1484,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
           color: statusColor,
         ),
         underline: Container(),
-        dropdownColor: Colors.white,
+        dropdownColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
         onChanged: (String? newValue) {
           if (newValue != null && newValue != leave['status']) {
             if (newValue == 'rejected') {
@@ -1368,7 +1515,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
                   ),
                 ),
                 const SizedBox(width: 4),
-                const Text('Pending', style: TextStyle(fontSize: 11)),
+                Text('Pending', style: TextStyle(fontSize: 11)),
               ],
             ),
           ),
@@ -1385,7 +1532,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
                   ),
                 ),
                 const SizedBox(width: 4),
-                const Text('Approved', style: TextStyle(fontSize: 11)),
+                Text('Approved', style: TextStyle(fontSize: 11)),
               ],
             ),
           ),
@@ -1402,7 +1549,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
                   ),
                 ),
                 const SizedBox(width: 4),
-                const Text('Rejected', style: TextStyle(fontSize: 11)),
+                Text('Rejected', style: TextStyle(fontSize: 11)),
               ],
             ),
           ),
@@ -1420,14 +1567,28 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          title: const Text('Update Status'),
+          backgroundColor: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
+          title: Text(
+            'Update Status',
+            style: context.titleLarge.copyWith(
+              color: _isDark ? Colors.white : Colors.black87,
+            ),
+          ),
           content: Text(
             'Are you sure you want to change status to ${status.toUpperCase()}?',
+            style: context.bodyMedium.copyWith(
+              color: _isDark ? Colors.white70 : Colors.black87,
+            ),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Cancel'),
+              child: Text(
+                'Cancel',
+                style: TextStyle(
+                  color: _isDark ? Colors.white60 : Colors.grey[600],
+                ),
+              ),
             ),
             ElevatedButton(
               onPressed: () => Navigator.of(context).pop(true),
@@ -1457,7 +1618,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('Status updated to ${status.toUpperCase()}'),
-              backgroundColor: Colors.orange,
+              backgroundColor: _isDark ? Colors.orange[800] : Colors.orange,
             ),
           );
         }
@@ -1467,7 +1628,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('Error updating leave: $e'),
-              backgroundColor: Colors.red,
+              backgroundColor: _isDark ? Colors.red[800] : Colors.red,
             ),
           );
         }
@@ -1540,14 +1701,28 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          title: const Text('Delete Leave'),
-          content: const Text(
+          backgroundColor: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
+          title: Text(
+            'Delete Leave',
+            style: context.titleLarge.copyWith(
+              color: _isDark ? Colors.white : Colors.black87,
+            ),
+          ),
+          content: Text(
             'Are you sure you want to delete this leave request? This action cannot be undone.',
+            style: context.bodyMedium.copyWith(
+              color: _isDark ? Colors.white70 : Colors.black87,
+            ),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Cancel'),
+              child: Text(
+                'Cancel',
+                style: TextStyle(
+                  color: _isDark ? Colors.white60 : Colors.grey[600],
+                ),
+              ),
             ),
             ElevatedButton(
               onPressed: () => Navigator.of(context).pop(true),
@@ -1584,7 +1759,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('Error deleting leave: $e'),
-              backgroundColor: Colors.red,
+              backgroundColor: _isDark ? Colors.red[800] : Colors.red,
             ),
           );
         }
@@ -1594,70 +1769,129 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
 
   // ==================== MAIN BUILD ====================
 
-  @override
-  Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final bool isWeb = screenWidth > 800;
-    final double padding = isWeb ? 24.0 : 16.0;
+@override
+Widget build(BuildContext context) {
+  final screenWidth = MediaQuery.of(context).size.width;
+  _isWeb = screenWidth > 800;
+  _isDark = context.isDarkMode;
+  final double padding = _isWeb ? 24.0 : 16.0;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Row(
-          children: [
-            const Text('Barber Leaves'),
-            const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Text(
-                _getTimezoneFlag(),
-                style: const TextStyle(fontSize: 12),
-              ),
-            ),
-          ],
-        ),
-        backgroundColor: const Color(0xFFFF6B8B),
-        foregroundColor: Colors.white,
-        centerTitle: isWeb,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadData,
-            tooltip: 'Refresh',
-          ),
-          IconButton(
-            icon: const Icon(Icons.calendar_today),
-            onPressed: () {
-              context.push('/owner/salon/holidays?salonId=${widget.salonId}');
-            },
-            tooltip: 'Manage Holidays',
-          ),
-        ],
-      ),
-      body: Column(
+  return Scaffold(
+    backgroundColor: _isDark ? const Color(0xFF121212) : Colors.white,
+    appBar: AppBar(
+      title: Row(
         children: [
-          _buildFiltersSection(isWeb, padding),
-          Expanded(child: _buildMainContent(isWeb, padding)),
+          Text(
+            'Barber Leaves',
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.2),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Text(
+              _getTimezoneFlag(),
+              style: const TextStyle(fontSize: 12, color: Colors.white),
+            ),
+          ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _addLeave,
-        backgroundColor: const Color(0xFFFF6B8B),
-        foregroundColor: Colors.white,
-        child: const Icon(Icons.add),
+      backgroundColor: AppTheme.primary,
+      foregroundColor: Colors.white,
+      centerTitle: _isWeb,
+      leading: IconButton(
+        icon: const Icon(Icons.arrow_back, color: Colors.white),
+        onPressed: () => Navigator.pop(context),
+        tooltip: 'Back',
       ),
+      actions: [
+        IconButton(
+          icon: Icon(Icons.refresh, color: Colors.white),
+          onPressed: _loadData,
+          tooltip: 'Refresh',
+        ),
+        IconButton(
+          icon: Icon(Icons.calendar_today, color: Colors.white),
+          onPressed: () {
+            context.push('/owner/salon/holidays?salonId=${widget.salonId}');
+          },
+          tooltip: 'Manage Holidays',
+        ),
+      ],
+    ),
+    
+    floatingActionButton: FloatingActionButton(
+      onPressed: _addLeave,
+      backgroundColor: AppTheme.primary,
+      foregroundColor: Colors.white,
+      child: const Icon(Icons.add),
+    ),
+    // ✅ Edge-to-Edge with SafeArea
+    body: SafeArea(
+      child: _isWeb ? _buildWebLayout(padding) : _buildMobileLayout(padding),
+    ),
+  );
+}
+
+  // ==================== WEB LAYOUT ====================
+
+  Widget _buildWebLayout(double padding) {
+    return Column(
+      children: [
+        _buildFiltersSection(true, padding),
+        Expanded(
+          child: Scrollbar(
+            controller: _scrollController,
+            thumbVisibility: true,
+            trackVisibility: true,
+            thickness: 8.0,
+            radius: const Radius.circular(10),
+            scrollbarOrientation: ScrollbarOrientation.right,
+            child: SingleChildScrollView(
+              controller: _scrollController,
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: EdgeInsets.all(padding),
+              child: _buildMainContent(true, padding),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
+  // ==================== MOBILE LAYOUT ====================
+
+  Widget _buildMobileLayout(double padding) {
+    return Column(
+      children: [
+        _buildFiltersSection(false, padding),
+        Expanded(
+          child: _buildMainContent(false, padding),
+        ),
+      ],
+    );
+  }
+
+  // ==================== FILTERS SECTION ====================
+
   Widget _buildFiltersSection(bool isWeb, double padding) {
+    final isDark = _isDark;
+
     return Container(
       padding: EdgeInsets.all(padding),
       decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(bottom: BorderSide(color: Colors.grey[300]!)),
+        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+        border: Border(
+          bottom: BorderSide(
+            color: isDark ? Colors.grey[800]! : Colors.grey[300]!,
+          ),
+        ),
       ),
       child: isWeb
           ? Row(
@@ -1675,7 +1909,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
                   icon: const Icon(Icons.filter_alt),
                   label: const Text('Apply Filters'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFFF6B8B),
+                    backgroundColor: AppTheme.primary,
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(
                       horizontal: 24,
@@ -1707,7 +1941,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
                         icon: const Icon(Icons.filter_alt),
                         label: const Text('Apply'),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFFF6B8B),
+                          backgroundColor: AppTheme.primary,
                           foregroundColor: Colors.white,
                         ),
                       ),
@@ -1719,10 +1953,14 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     );
   }
 
+  // ==================== MAIN CONTENT ====================
+
   Widget _buildMainContent(bool isWeb, double padding) {
+    final isDark = _isDark;
+
     if (_isLoading) {
-      return const Center(
-        child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+      return Center(
+        child: CircularProgressIndicator(color: AppTheme.primary),
       );
     }
 
@@ -1736,23 +1974,28 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
               Icon(
                 Icons.person_off,
                 size: isWeb ? 80 : 64,
-                color: Colors.grey[400],
+                color: isDark ? Colors.white30 : Colors.grey[400],
               ),
               const SizedBox(height: 16),
-              const Text(
+              Text(
                 'No barbers found',
-                style: TextStyle(fontSize: 18, color: Colors.grey),
+                style: TextStyle(
+                  fontSize: isWeb ? 18 : 16,
+                  color: isDark ? Colors.white60 : Colors.grey,
+                ),
               ),
               const SizedBox(height: 8),
               Text(
                 'Add barbers first to manage leaves',
-                style: TextStyle(color: Colors.grey[600]),
+                style: TextStyle(
+                  color: isDark ? Colors.white70 : Colors.grey[600],
+                ),
               ),
               const SizedBox(height: 16),
               ElevatedButton(
                 onPressed: () => context.pop(),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFFF6B8B),
+                  backgroundColor: AppTheme.primary,
                   foregroundColor: Colors.white,
                 ),
                 child: const Text('Go Back'),
@@ -1773,17 +2016,22 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
               Icon(
                 Icons.beach_access,
                 size: isWeb ? 80 : 64,
-                color: Colors.grey[400],
+                color: isDark ? Colors.white30 : Colors.grey[400],
               ),
               const SizedBox(height: 16),
-              const Text(
+              Text(
                 'No leave records',
-                style: TextStyle(fontSize: 18, color: Colors.grey),
+                style: TextStyle(
+                  fontSize: isWeb ? 18 : 16,
+                  color: isDark ? Colors.white60 : Colors.grey,
+                ),
               ),
               const SizedBox(height: 8),
               Text(
                 'Use + button to add leave for barbers',
-                style: TextStyle(color: Colors.grey[600]),
+                style: TextStyle(
+                  color: isDark ? Colors.white70 : Colors.grey[600],
+                ),
               ),
             ],
           ),
@@ -1791,28 +2039,46 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       );
     }
 
-    return isWeb ? _buildWebView(padding) : _buildMobileView(padding);
+    return isWeb
+        ? _buildWebContent()
+        : _buildMobileContent();
   }
 
-  // ==================== WEB VIEW ====================
+  // ==================== WEB CONTENT ====================
 
-  Widget _buildWebView(double padding) {
-    return SingleChildScrollView(
-      padding: EdgeInsets.all(padding),
-      child: Column(
-        children: [
-          _buildStatsCard(),
-          const SizedBox(height: 16),
-          _buildWebTableHeader(),
-          const SizedBox(height: 8),
-          ..._leaves.map((leave) => _buildWebLeaveRow(leave)),
-        ],
-      ),
+  Widget _buildWebContent() {
+    return Column(
+      children: [
+        _buildStatsCard(),
+        const SizedBox(height: 16),
+        _buildWebTableHeader(),
+        const SizedBox(height: 8),
+        ..._leaves.map((leave) => _buildWebLeaveRow(leave)),
+        const SizedBox(height: 20),
+      ],
     );
   }
 
+  // ==================== MOBILE CONTENT ====================
+
+  Widget _buildMobileContent() {
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: _leaves.length,
+      itemBuilder: (context, index) {
+        final leave = _leaves[index];
+        return _buildMobileLeaveCard(leave);
+      },
+    );
+  }
+
+  // ==================== STATS CARD ====================
+
   Widget _buildStatsCard() {
+    final isDark = _isDark;
+
     return Card(
+      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Row(
@@ -1822,21 +2088,33 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
               _leaves.length.toString(),
               Icons.event_note,
             ),
-            Container(width: 1, height: 40, color: Colors.grey[300]),
+            Container(
+              width: 1,
+              height: 40,
+              color: isDark ? Colors.grey[800]! : Colors.grey[300],
+            ),
             _buildStatItem(
               'Pending',
               _leaves.where((l) => l['status'] == 'pending').length.toString(),
               Icons.pending,
               Colors.orange,
             ),
-            Container(width: 1, height: 40, color: Colors.grey[300]),
+            Container(
+              width: 1,
+              height: 40,
+              color: isDark ? Colors.grey[800]! : Colors.grey[300],
+            ),
             _buildStatItem(
               'Approved',
               _leaves.where((l) => l['status'] == 'approved').length.toString(),
               Icons.check_circle,
               Colors.green,
             ),
-            Container(width: 1, height: 40, color: Colors.grey[300]),
+            Container(
+              width: 1,
+              height: 40,
+              color: isDark ? Colors.grey[800]! : Colors.grey[300],
+            ),
             _buildStatItem(
               'Rejected',
               _leaves.where((l) => l['status'] == 'rejected').length.toString(),
@@ -1849,46 +2127,116 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     );
   }
 
+  Widget _buildStatItem(
+    String label,
+    String value,
+    IconData icon, [
+    Color? color,
+  ]) {
+    final isDark = _isDark;
+    final accentColor = color ?? AppTheme.primary;
+
+    return Expanded(
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, size: 20, color: accentColor),
+          const SizedBox(width: 8),
+          Column(
+            children: [
+              Text(
+                value,
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
+              ),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 11,
+                  color: isDark ? Colors.white60 : Colors.grey[600],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ==================== WEB TABLE ====================
+
   Widget _buildWebTableHeader() {
+    final isDark = _isDark;
+
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+        color: AppTheme.primary.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(8),
       ),
-      child: const Row(
+      child: Row(
         children: [
           Expanded(
             flex: 2,
             child: Text(
               'Barber',
-              style: TextStyle(fontWeight: FontWeight.bold),
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
             ),
           ),
           Expanded(
             flex: 2,
-            child: Text('Date', style: TextStyle(fontWeight: FontWeight.bold)),
+            child: Text(
+              'Date',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
+            ),
           ),
           Expanded(
             flex: 2,
-            child: Text('Type', style: TextStyle(fontWeight: FontWeight.bold)),
+            child: Text(
+              'Type',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
+            ),
           ),
           Expanded(
             flex: 2,
-            child: Text('Time', style: TextStyle(fontWeight: FontWeight.bold)),
+            child: Text(
+              'Time',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
+            ),
           ),
           Expanded(
             flex: 3,
             child: Text(
               'Reason',
-              style: TextStyle(fontWeight: FontWeight.bold),
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
             ),
           ),
           Expanded(
             flex: 1,
             child: Text(
               'Status',
-              style: TextStyle(fontWeight: FontWeight.bold),
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
               textAlign: TextAlign.center,
             ),
           ),
@@ -1896,7 +2244,10 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
             flex: 3,
             child: Text(
               'Actions',
-              style: TextStyle(fontWeight: FontWeight.bold),
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
               textAlign: TextAlign.center,
             ),
           ),
@@ -1906,6 +2257,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
   }
 
   Widget _buildWebLeaveRow(Map<String, dynamic> leave) {
+    final isDark = _isDark;
     final barberId = leave['barber_id'] as String;
     final profile = _barberProfiles[barberId] ?? {};
     final barberName = profile['full_name'] ?? 'Unknown';
@@ -1932,10 +2284,14 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       margin: const EdgeInsets.only(bottom: 4),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: isHoliday ? Colors.orange.withValues(alpha: 0.05) : Colors.white,
+        color: isHoliday
+            ? Colors.orange.withValues(alpha: 0.05)
+            : (isDark ? const Color(0xFF1E1E1E) : Colors.white),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
-          color: isHoliday ? Colors.orange : Colors.grey[200]!,
+          color: isHoliday
+              ? Colors.orange
+              : (isDark ? Colors.grey[700]! : Colors.grey[200]!),
         ),
       ),
       child: Row(
@@ -1946,17 +2302,15 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
               children: [
                 CircleAvatar(
                   radius: 16,
-                  backgroundColor: const Color(
-                    0xFFFF6B8B,
-                  ).withValues(alpha: 0.1),
+                  backgroundColor: AppTheme.primary.withValues(alpha: 0.1),
                   backgroundImage: profile['avatar_url'] != null
                       ? NetworkImage(profile['avatar_url'])
                       : null,
                   child: profile['avatar_url'] == null
                       ? Text(
                           barberName[0].toUpperCase(),
-                          style: const TextStyle(
-                            color: Color(0xFFFF6B8B),
+                          style: TextStyle(
+                            color: AppTheme.primary,
                             fontWeight: FontWeight.bold,
                             fontSize: 12,
                           ),
@@ -1967,7 +2321,10 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
                 Expanded(
                   child: Text(
                     barberName,
-                    style: const TextStyle(fontWeight: FontWeight.w500),
+                    style: TextStyle(
+                      fontWeight: FontWeight.w500,
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -1980,7 +2337,12 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(leaveDate),
+                Text(
+                  leaveDate,
+                  style: TextStyle(
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
+                ),
                 if (isHoliday && holidayName != null)
                   Text(
                     '⚠️ $holidayName',
@@ -2004,14 +2366,23 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
                 const SizedBox(width: 4),
                 Text(
                   _getLeaveTypeName(leaveType),
-                  style: const TextStyle(fontSize: 12),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
                 ),
               ],
             ),
           ),
           Expanded(
             flex: 2,
-            child: Text(timeDisplay, style: const TextStyle(fontSize: 12)),
+            child: Text(
+              timeDisplay,
+              style: TextStyle(
+                fontSize: 12,
+                color: isDark ? Colors.white70 : Colors.black87,
+              ),
+            ),
           ),
           Expanded(
             flex: 3,
@@ -2020,7 +2391,10 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
               children: [
                 Text(
                   reason,
-                  style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isDark ? Colors.white70 : Colors.grey[700],
+                  ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -2058,12 +2432,12 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 IconButton(
-                  icon: const Icon(Icons.edit, color: Colors.blue),
+                  icon: Icon(Icons.edit, color: isDark ? Colors.blue[300] : Colors.blue),
                   onPressed: () => _editLeave(leave),
                   tooltip: 'Edit',
                 ),
                 IconButton(
-                  icon: const Icon(Icons.delete, color: Colors.red),
+                  icon: Icon(Icons.delete, color: isDark ? Colors.red[300] : Colors.red),
                   onPressed: () => _deleteLeave(leave),
                   tooltip: 'Delete',
                 ),
@@ -2075,20 +2449,10 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     );
   }
 
-  // ==================== MOBILE VIEW ====================
-
-  Widget _buildMobileView(double padding) {
-    return ListView.builder(
-      padding: EdgeInsets.all(padding),
-      itemCount: _leaves.length,
-      itemBuilder: (context, index) {
-        final leave = _leaves[index];
-        return _buildMobileLeaveCard(leave);
-      },
-    );
-  }
+  // ==================== MOBILE LEAVE CARD ====================
 
   Widget _buildMobileLeaveCard(Map<String, dynamic> leave) {
+    final isDark = _isDark;
     final barberId = leave['barber_id'] as String;
     final profile = _barberProfiles[barberId] ?? {};
     final barberName = profile['full_name'] ?? 'Unknown';
@@ -2113,6 +2477,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
+      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Column(
         children: [
@@ -2120,15 +2485,15 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
             contentPadding: const EdgeInsets.all(12),
             leading: CircleAvatar(
               radius: 24,
-              backgroundColor: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+              backgroundColor: AppTheme.primary.withValues(alpha: 0.1),
               backgroundImage: profile['avatar_url'] != null
                   ? NetworkImage(profile['avatar_url'])
                   : null,
               child: profile['avatar_url'] == null
                   ? Text(
                       barberName[0].toUpperCase(),
-                      style: const TextStyle(
-                        color: Color(0xFFFF6B8B),
+                      style: TextStyle(
+                        color: AppTheme.primary,
                         fontWeight: FontWeight.bold,
                         fontSize: 16,
                       ),
@@ -2140,9 +2505,10 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
                 Expanded(
                   child: Text(
                     barberName,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 16,
+                      color: isDark ? Colors.white : Colors.black87,
                     ),
                   ),
                 ),
@@ -2158,12 +2524,15 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
                     Icon(
                       Icons.calendar_today,
                       size: 14,
-                      color: Colors.grey[600],
+                      color: isDark ? Colors.white60 : Colors.grey[600],
                     ),
                     const SizedBox(width: 4),
                     Text(
                       leaveDate,
-                      style: TextStyle(fontSize: 13, color: Colors.grey[800]),
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: isDark ? Colors.white70 : Colors.grey[800],
+                      ),
                     ),
                   ],
                 ),
@@ -2188,7 +2557,10 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
                     const SizedBox(width: 4),
                     Text(
                       _getLeaveTypeName(leaveType),
-                      style: TextStyle(fontSize: 13, color: Colors.grey[800]),
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: isDark ? Colors.white70 : Colors.grey[800],
+                      ),
                     ),
                     const SizedBox(width: 8),
                     if (timeDisplay.isNotEmpty)
@@ -2197,7 +2569,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
                           '• $timeDisplay',
                           style: TextStyle(
                             fontSize: 12,
-                            color: Colors.grey[600],
+                            color: isDark ? Colors.white60 : Colors.grey[600],
                           ),
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -2206,7 +2578,10 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
                 ),
                 Text(
                   reason,
-                  style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isDark ? Colors.white70 : Colors.grey[700],
+                  ),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -2237,7 +2612,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             decoration: BoxDecoration(
-              color: Colors.grey[50],
+              color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
               borderRadius: const BorderRadius.only(
                 bottomLeft: Radius.circular(12),
                 bottomRight: Radius.circular(12),
@@ -2247,49 +2622,17 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
                 IconButton(
-                  icon: const Icon(Icons.edit, color: Colors.blue),
+                  icon: Icon(Icons.edit, color: isDark ? Colors.blue[300] : Colors.blue),
                   onPressed: () => _editLeave(leave),
                   tooltip: 'Edit',
                 ),
                 IconButton(
-                  icon: const Icon(Icons.delete, color: Colors.red),
+                  icon: Icon(Icons.delete, color: isDark ? Colors.red[300] : Colors.red),
                   onPressed: () => _deleteLeave(leave),
                   tooltip: 'Delete',
                 ),
               ],
             ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStatItem(
-    String label,
-    String value,
-    IconData icon, [
-    Color? color,
-  ]) {
-    return Expanded(
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, size: 20, color: color ?? const Color(0xFFFF6B8B)),
-          const SizedBox(width: 8),
-          Column(
-            children: [
-              Text(
-                value,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              Text(
-                label,
-                style: TextStyle(fontSize: 11, color: Colors.grey[600]),
-              ),
-            ],
           ),
         ],
       ),
@@ -2342,6 +2685,10 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
   bool _isHoliday = false;
   String? _holidayName;
 
+  // ✅ Responsive
+  late bool _isWeb;
+  late bool _isDark;
+
   @override
   void initState() {
     super.initState();
@@ -2351,6 +2698,13 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
       _isEditMode = true;
       _loadLeaveData();
     }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _isWeb = context.isWeb;
+    _isDark = context.isDarkMode;
   }
 
   @override
@@ -2479,7 +2833,7 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('⚠️ $_holidayName - Salon is closed on this day!'),
-          backgroundColor: Colors.orange,
+          backgroundColor: _isDark ? Colors.orange[800] : Colors.orange,
           duration: const Duration(seconds: 3),
         ),
       );
@@ -2532,12 +2886,14 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
-    final bool isWeb = screenWidth > 800;
+    _isWeb = screenWidth > 800;
+    _isDark = context.isDarkMode;
 
     return Dialog(
+      backgroundColor: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Container(
-        width: isWeb ? 600 : screenWidth * 0.95,
+        width: _isWeb ? 600 : screenWidth * 0.95,
         constraints: BoxConstraints(
           maxHeight: MediaQuery.of(context).size.height * 0.9,
         ),
@@ -2547,7 +2903,7 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
             _buildDialogHeader(),
             Expanded(
               child: SingleChildScrollView(
-                padding: EdgeInsets.all(isWeb ? 24 : 16),
+                padding: EdgeInsets.all(_isWeb ? 24 : 16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -2577,7 +2933,7 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: const BoxDecoration(
-        color: Color(0xFFFF6B8B),
+        color: AppTheme.primary,
         borderRadius: BorderRadius.only(
           topLeft: Radius.circular(16),
           topRight: Radius.circular(16),
@@ -2607,7 +2963,7 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
             ),
             child: Text(
               TimezoneService.getCurrentFlag(),
-              style: const TextStyle(fontSize: 10),
+              style: const TextStyle(fontSize: 10, color: Colors.white),
             ),
           ),
         ],
@@ -2638,29 +2994,68 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
     );
   }
 
+  // ==================== CONTINUE WITH REST OF DIALOG BUILDERS ====================
+  // (Same as before but with dark mode support - keeping it concise)
+
   Widget _buildBarberSelector() {
+    final isDark = _isDark;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
+        Text(
           'Select Barber',
-          style: TextStyle(fontWeight: FontWeight.bold),
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            color: isDark ? Colors.white : Colors.black87,
+          ),
         ),
         const SizedBox(height: 8),
         DropdownButtonFormField<String>(
           initialValue: _selectedBarberId,
           decoration: InputDecoration(
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(
+                color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+              ),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(
+                color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+              ),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(color: AppTheme.primary, width: 2),
+            ),
+            fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+            filled: true,
             contentPadding: const EdgeInsets.symmetric(
               horizontal: 12,
               vertical: 8,
             ),
           ),
-          hint: const Text('Choose barber'),
+          hint: Text(
+            'Choose barber',
+            style: TextStyle(
+              color: isDark ? Colors.white60 : Colors.grey[600],
+            ),
+          ),
+          dropdownColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+          style: TextStyle(
+            color: isDark ? Colors.white : Colors.black87,
+          ),
           items: widget.barbers.map<DropdownMenuItem<String>>((b) {
             return DropdownMenuItem<String>(
               value: b['id'] as String,
-              child: Text(b['name'] as String),
+              child: Text(
+                b['name'] as String,
+                style: TextStyle(
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
+              ),
             );
           }).toList(),
           onChanged: _isEditMode
@@ -2676,24 +3071,49 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
     );
   }
 
-  // ==================== DATE SELECTOR (FIXED: Only future dates) ====================
   Widget _buildDateSelector() {
+    final isDark = _isDark;
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('Date', style: TextStyle(fontWeight: FontWeight.bold)),
+        Text(
+          'Date',
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            color: isDark ? Colors.white : Colors.black87,
+          ),
+        ),
         const SizedBox(height: 8),
         GestureDetector(
           onTap: () async {
-            // ✅ FIX: Get today's date (without time)
-            final now = DateTime.now();
-            final today = DateTime(now.year, now.month, now.day);
-
             final date = await showDatePicker(
               context: context,
               initialDate: _selectedLocalDate ?? today,
-              firstDate: today, // ✅ Cannot select past dates
+              firstDate: today,
               lastDate: now.add(const Duration(days: 365)),
+              builder: (context, child) {
+                return Theme(
+                  data: Theme.of(context).copyWith(
+                    colorScheme: ColorScheme(
+                      brightness: isDark ? Brightness.dark : Brightness.light,
+                      primary: AppTheme.primary,
+                      onPrimary: Colors.white,
+                      secondary: AppTheme.primary,
+                      onSecondary: Colors.white,
+                      error: Colors.red,
+                      onError: Colors.white,
+                      surface: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                      onSurface: isDark ? Colors.white : Colors.black87,
+                    ), dialogTheme: DialogThemeData(backgroundColor: isDark
+                        ? const Color(0xFF1E1E1E)
+                        : Colors.white),
+                  ),
+                  child: child!,
+                );
+              },
             );
             if (date != null && mounted) {
               setState(() {
@@ -2709,13 +3129,13 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
               border: Border.all(
                 color: _isHoliday && !_isEditMode
                     ? Colors.orange
-                    : Colors.grey[300]!,
+                    : (isDark ? Colors.grey[700]! : Colors.grey[300]!),
                 width: _isHoliday && !_isEditMode ? 2 : 1,
               ),
               borderRadius: BorderRadius.circular(8),
               color: _isHoliday && !_isEditMode
                   ? Colors.orange.withValues(alpha: 0.05)
-                  : null,
+                  : (isDark ? const Color(0xFF2A2A2A) : null),
             ),
             child: Row(
               children: [
@@ -2724,7 +3144,7 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
                   size: 16,
                   color: _isHoliday && !_isEditMode
                       ? Colors.orange
-                      : Colors.grey[600],
+                      : (isDark ? Colors.white60 : Colors.grey[600]),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
@@ -2739,8 +3159,8 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
                             : 'Select date',
                         style: TextStyle(
                           color: _selectedLocalDate != null
-                              ? Colors.black
-                              : Colors.grey[500],
+                              ? (isDark ? Colors.white : Colors.black)
+                              : (isDark ? Colors.white70 : Colors.grey[500]),
                           fontWeight: _isHoliday && !_isEditMode
                               ? FontWeight.w500
                               : FontWeight.normal,
@@ -2797,10 +3217,18 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
   }
 
   Widget _buildLeaveTypeSelector() {
+    final isDark = _isDark;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('Leave Type', style: TextStyle(fontWeight: FontWeight.bold)),
+        Text(
+          'Leave Type',
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            color: isDark ? Colors.white : Colors.black87,
+          ),
+        ),
         const SizedBox(height: 8),
         Wrap(
           spacing: 8,
@@ -2837,7 +3265,9 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
     IconData icon,
     Color color,
   ) {
+    final isDark = _isDark;
     final isSelected = _leaveType == value;
+
     return FilterChip(
       label: Row(
         mainAxisSize: MainAxisSize.min,
@@ -2848,7 +3278,9 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
             label,
             style: TextStyle(
               fontSize: 12,
-              color: isSelected ? Colors.white : Colors.black87,
+              color: isSelected
+                  ? Colors.white
+                  : (isDark ? Colors.white : Colors.black87),
             ),
           ),
         ],
@@ -2860,7 +3292,7 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
           _errorMessage = null;
         });
       },
-      backgroundColor: Colors.grey[100],
+      backgroundColor: isDark ? const Color(0xFF2A2A2A) : Colors.grey[100],
       selectedColor: color,
       checkmarkColor: Colors.white,
       showCheckmark: false,
@@ -2868,13 +3300,18 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
   }
 
   Widget _buildTimeSection() {
+    final isDark = _isDark;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const SizedBox(height: 16),
-        const Text(
+        Text(
           'Select Time',
-          style: TextStyle(fontWeight: FontWeight.bold),
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            color: isDark ? Colors.white : Colors.black87,
+          ),
         ),
         const SizedBox(height: 8),
         if (_minLocalTime != null && _maxLocalTime != null)
@@ -2960,7 +3397,10 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
           Icon(icon, size: 16, color: color),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(message, style: TextStyle(fontSize: 12, color: color)),
+            child: Text(
+              message,
+              style: TextStyle(fontSize: 12, color: color),
+            ),
           ),
         ],
       ),
@@ -2972,6 +3412,8 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
     required TimeOfDay time,
     required Function(TimeOfDay) onTimeSelected,
   }) {
+    final isDark = _isDark;
+
     return GestureDetector(
       onTap: () async {
         final TimeOfDay? picked = await showTimePicker(
@@ -2993,20 +3435,29 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         decoration: BoxDecoration(
-          border: Border.all(color: Colors.grey[300]!),
+          border: Border.all(
+            color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+          ),
           borderRadius: BorderRadius.circular(8),
+          color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               label,
-              style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+              style: TextStyle(
+                fontSize: 11,
+                color: isDark ? Colors.white60 : Colors.grey[600],
+              ),
             ),
             const SizedBox(height: 4),
             Text(
               _formatTimeOfDay(time),
-              style: const TextStyle(fontWeight: FontWeight.w500),
+              style: TextStyle(
+                fontWeight: FontWeight.w500,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
             ),
           ],
         ),
@@ -3015,17 +3466,48 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
   }
 
   Widget _buildReasonField() {
+    final isDark = _isDark;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('Reason', style: TextStyle(fontWeight: FontWeight.bold)),
+        Text(
+          'Reason',
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            color: isDark ? Colors.white : Colors.black87,
+          ),
+        ),
         const SizedBox(height: 8),
         TextField(
           controller: _reasonController,
           maxLines: 3,
+          style: TextStyle(
+            color: isDark ? Colors.white : Colors.black87,
+          ),
           decoration: InputDecoration(
             hintText: 'Enter reason for leave',
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+            hintStyle: TextStyle(
+              color: isDark ? Colors.white70 : Colors.grey[500],
+            ),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(
+                color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+              ),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(
+                color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+              ),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(color: AppTheme.primary, width: 2),
+            ),
+            fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+            filled: true,
           ),
         ),
       ],
@@ -3033,22 +3515,33 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
   }
 
   Widget _buildDialogActions() {
+    final isDark = _isDark;
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.grey[50],
+        color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
         borderRadius: const BorderRadius.only(
           bottomLeft: Radius.circular(16),
           bottomRight: Radius.circular(16),
         ),
-        border: Border(top: BorderSide(color: Colors.grey[300]!)),
+        border: Border(
+          top: BorderSide(
+            color: isDark ? Colors.grey[800]! : Colors.grey[300]!,
+          ),
+        ),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.end,
         children: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
+            child: Text(
+              'Cancel',
+              style: TextStyle(
+                color: isDark ? Colors.white60 : Colors.grey[600],
+              ),
+            ),
           ),
           const SizedBox(width: 12),
           ElevatedButton(
@@ -3060,7 +3553,7 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
                 ? _saveLeave
                 : null,
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFFF6B8B),
+              backgroundColor: AppTheme.primary,
               foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
             ),

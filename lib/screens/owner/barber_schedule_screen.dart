@@ -4,6 +4,8 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/timezone_service.dart';
+import '../../extensions/context_extensions.dart';
+import '../../theme/app_theme.dart';
 
 class BarberScheduleScreen extends StatefulWidget {
   final String? salonId;
@@ -37,6 +39,12 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   TimeOfDay? _salonOpenTimeLocal;
   TimeOfDay? _salonCloseTimeLocal;
 
+  // ============================================
+  // RESPONSIVE VARIABLES
+  // ============================================
+  bool _isWeb = false;
+  bool _isDark = false;
+
   // Days of week mapping
   final Map<int, String> _dayNames = {
     1: 'Monday',
@@ -55,10 +63,28 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     {'id': 'custom', 'name': '📝 Custom Break', 'icon': Icons.free_breakfast},
   ];
 
+  // ============================================
+  // SCROLL CONTROLLER FOR WEB
+  // ============================================
+  final ScrollController _scrollController = ScrollController();
+
   @override
   void initState() {
     super.initState();
     _initializeTimezones();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _isWeb = context.isWeb;
+    _isDark = context.isDarkMode;
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
   }
 
   // ============================================
@@ -79,17 +105,14 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   }
 
   // ============================================
-  // TIMEZONE CONVERSION USING TimezoneService ONLY
+  // TIMEZONE CONVERSION
   // ============================================
 
-  /// Convert UTC time string to Local display string
   String _formatUtcToLocalTime(String? utcTime) {
     if (utcTime == null || utcTime.isEmpty) return '--:--';
     try {
       return TimezoneService.utcToLocalTimeRecurring(utcTime);
     } catch (e) {
-      debugPrint('Error formatting time: $e');
-      // Simple fallback
       final parts = utcTime.split(':');
       final hour = int.parse(parts[0]);
       final minute = int.parse(parts[1]);
@@ -99,7 +122,6 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     }
   }
 
-  /// Convert UTC time string to Local TimeOfDay
   TimeOfDay _utcToLocalTimeOfDay(String utcTime) {
     return TimezoneService.utcToTimeOfDayWithTimezone(utcTime, _salonTimezone);
   }
@@ -124,7 +146,6 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
           .maybeSingle();
 
       if (salonResponse != null) {
-        // Load salon timezone
         _salonTimezone =
             salonResponse['timezone'] ?? TimezoneService.getCurrentTimezone();
 
@@ -159,7 +180,6 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
       final salonIdInt = int.parse(widget.salonId!);
       await _loadSalonTimes();
 
-      // ✅ Updated: Get barbers with user_roles.status check
       final salonBarbersResponse = await supabase
           .from('salon_barbers')
           .select('''
@@ -177,9 +197,9 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
           )
         ''')
           .eq('salon_id', salonIdInt)
-          .eq('status', 'active')  
-          .eq('profiles.user_roles.role_id', 2) // barber role
-          .eq('profiles.user_roles.status', 'active'); // ✅ Added status check
+          .eq('status', 'active')
+          .eq('profiles.user_roles.role_id', 2)
+          .eq('profiles.user_roles.status', 'active');
 
       if (salonBarbersResponse.isEmpty) {
         setState(() {
@@ -190,13 +210,11 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
         return;
       }
 
-      // ✅ Process response - build barber list from profile data
       final List<Map<String, dynamic>> barbersList = [];
       for (var sb in salonBarbersResponse) {
         final profile = sb['profiles'] as Map?;
         if (profile == null) continue;
 
-        // Additional check: ensure user_roles status is active
         final userRoles = profile['user_roles'] as List? ?? [];
         bool isActive = false;
         for (var role in userRoles) {
@@ -206,7 +224,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
           }
         }
 
-        if (!isActive) continue; // Skip inactive barbers
+        if (!isActive) continue;
 
         barbersList.add({
           'id': profile['id'],
@@ -227,7 +245,10 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
       debugPrint('Error loading schedules: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: _isDark ? Colors.red[700] : Colors.red,
+          ),
         );
       }
     } finally {
@@ -236,7 +257,6 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   }
 
   Future<void> _loadAllDataForBarbers(int salonIdInt) async {
-    // Load regular schedules
     final schedulesResponse = await supabase
         .from('barber_schedules')
         .select()
@@ -253,7 +273,6 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
       _groupedSchedules[barberId]!.add(schedule);
     }
 
-    // Load regular breaks
     final breaksResponse = await supabase
         .from('barber_breaks')
         .select()
@@ -269,7 +288,6 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
       _groupedBreaks[barberId]!.add(breakItem);
     }
 
-    // Load special schedules
     final specialSchedulesResponse = await supabase
         .from('barber_special_schedules')
         .select()
@@ -288,7 +306,6 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
       _groupedSpecialSchedules[barberId]!.add(ss);
     }
 
-    // Load special breaks
     final specialBreaksResponse = await supabase
         .from('barber_special_breaks')
         .select()
@@ -395,6 +412,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
         existingSchedules: _groupedSchedules[barberId] ?? [],
         defaultOpenTime: _salonOpenTimeLocal,
         defaultCloseTime: _salonCloseTimeLocal,
+        isDark: _isDark,
       ),
     );
 
@@ -424,6 +442,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
         breakTypes: _breakTypes,
         defaultOpenTime: _salonOpenTimeLocal,
         defaultCloseTime: _salonCloseTimeLocal,
+        isDark: _isDark,
       ),
     );
 
@@ -450,6 +469,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
         salonTimezone: _salonTimezone,
         defaultOpenTime: _salonOpenTimeLocal,
         defaultCloseTime: _salonCloseTimeLocal,
+        isDark: _isDark,
       ),
     );
 
@@ -477,6 +497,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
         breakTypes: _breakTypes,
         defaultOpenTime: _salonOpenTimeLocal,
         defaultCloseTime: _salonCloseTimeLocal,
+        isDark: _isDark,
       ),
     );
 
@@ -540,17 +561,31 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
+        backgroundColor: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Delete Schedule'),
-        content: const Text('Are you sure you want to delete this schedule?'),
+        title: Text(
+          'Delete Schedule',
+          style: TextStyle(color: _isDark ? Colors.white : Colors.black87),
+        ),
+        content: Text(
+          'Are you sure you want to delete this schedule?',
+          style: TextStyle(color: _isDark ? Colors.white70 : Colors.black87),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+            child: Text(
+              'Cancel',
+              style: TextStyle(
+                color: _isDark ? Colors.white60 : Colors.black87,
+              ),
+            ),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            style: TextButton.styleFrom(
+              foregroundColor: _isDark ? Colors.red[300] : Colors.red,
+            ),
             child: const Text('Delete'),
           ),
         ],
@@ -588,17 +623,31 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
+        backgroundColor: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Delete Break'),
-        content: const Text('Are you sure you want to delete this break?'),
+        title: Text(
+          'Delete Break',
+          style: TextStyle(color: _isDark ? Colors.white : Colors.black87),
+        ),
+        content: Text(
+          'Are you sure you want to delete this break?',
+          style: TextStyle(color: _isDark ? Colors.white70 : Colors.black87),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+            child: Text(
+              'Cancel',
+              style: TextStyle(
+                color: _isDark ? Colors.white60 : Colors.black87,
+              ),
+            ),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            style: TextButton.styleFrom(
+              foregroundColor: _isDark ? Colors.red[300] : Colors.red,
+            ),
             child: const Text('Delete'),
           ),
         ],
@@ -641,6 +690,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
         salonTimezone: _salonTimezone,
         defaultOpenTime: _salonOpenTimeLocal,
         defaultCloseTime: _salonCloseTimeLocal,
+        isDark: _isDark,
       ),
     );
 
@@ -669,6 +719,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
         breakTypes: _breakTypes,
         defaultOpenTime: _salonOpenTimeLocal,
         defaultCloseTime: _salonCloseTimeLocal,
+        isDark: _isDark,
       ),
     );
 
@@ -695,6 +746,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
         salonTimezone: _salonTimezone,
         defaultOpenTime: _salonOpenTimeLocal,
         defaultCloseTime: _salonCloseTimeLocal,
+        isDark: _isDark,
       ),
     );
 
@@ -722,6 +774,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
         breakTypes: _breakTypes,
         defaultOpenTime: _salonOpenTimeLocal,
         defaultCloseTime: _salonCloseTimeLocal,
+        isDark: _isDark,
       ),
     );
 
@@ -744,19 +797,31 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
+        backgroundColor: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Delete Special Schedule'),
+        title: Text(
+          'Delete Special Schedule',
+          style: TextStyle(color: _isDark ? Colors.white : Colors.black87),
+        ),
         content: Text(
           'Delete special schedule for ${DateFormat('yyyy-MM-dd').format(date)}?',
+          style: TextStyle(color: _isDark ? Colors.white70 : Colors.black87),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+            child: Text(
+              'Cancel',
+              style: TextStyle(
+                color: _isDark ? Colors.white60 : Colors.black87,
+              ),
+            ),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            style: TextButton.styleFrom(
+              foregroundColor: _isDark ? Colors.red[300] : Colors.red,
+            ),
             child: const Text('Delete'),
           ),
         ],
@@ -795,19 +860,31 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
+        backgroundColor: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Delete Special Break'),
+        title: Text(
+          'Delete Special Break',
+          style: TextStyle(color: _isDark ? Colors.white : Colors.black87),
+        ),
         content: Text(
           'Delete special break for ${DateFormat('yyyy-MM-dd').format(date)}?',
+          style: TextStyle(color: _isDark ? Colors.white70 : Colors.black87),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+            child: Text(
+              'Cancel',
+              style: TextStyle(
+                color: _isDark ? Colors.white60 : Colors.black87,
+              ),
+            ),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            style: TextButton.styleFrom(
+              foregroundColor: _isDark ? Colors.red[300] : Colors.red,
+            ),
             child: const Text('Delete'),
           ),
         ],
@@ -851,37 +928,61 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
 
   @override
   Widget build(BuildContext context) {
+    _isWeb = context.isWeb;
+    _isDark = context.isDarkMode;
     final screenWidth = MediaQuery.of(context).size.width;
-    final bool isWeb = screenWidth > 800;
-    final double padding = isWeb ? 24.0 : 0.0;
+    final double padding = _isWeb ? 24.0 : 0.0;
 
     return Scaffold(
+      backgroundColor: _isDark ? const Color(0xFF121212) : Colors.white,
       appBar: AppBar(
-        title: const Text('Barber Schedules'),
-        backgroundColor: const Color(0xFFFF6B8B),
+        title: Text(
+          'Barber Schedules',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
+        backgroundColor: AppTheme.primary,
         foregroundColor: Colors.white,
-        centerTitle: isWeb,
+        centerTitle: _isWeb,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+          tooltip: 'Back',
+        ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh, color: Colors.white),
             onPressed: _loadData,
             tooltip: 'Refresh',
           ),
         ],
       ),
       body: _isLoading
-          ? const Center(
-              child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const CircularProgressIndicator(color: AppTheme.primary),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Loading schedules...',
+                    style: TextStyle(
+                      color: _isDark ? Colors.white60 : Colors.grey,
+                    ),
+                  ),
+                ],
+              ),
             )
           : _barbers.isEmpty
-          ? _buildEmptyState(isWeb, padding)
-          : isWeb
-          ? _buildWebView(padding, screenWidth)
-          : _buildMobileView(),
+          ? _buildEmptyState(padding)
+          : SafeArea(
+              child: _isWeb
+                  ? _buildWebView(padding, screenWidth)
+                  : _buildMobileView(),
+            ),
     );
   }
 
-  Widget _buildEmptyState(bool isWeb, double padding) {
+  Widget _buildEmptyState(double padding) {
     return Center(
       child: Padding(
         padding: EdgeInsets.all(padding),
@@ -890,22 +991,31 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
           children: [
             Icon(
               Icons.person_off,
-              size: isWeb ? 80 : 64,
-              color: Colors.grey[400],
+              size: _isWeb ? 80 : 64,
+              color: _isDark ? Colors.white30 : Colors.grey[400],
             ),
             const SizedBox(height: 16),
-            const Text(
+            Text(
               'No barbers found',
-              style: TextStyle(fontSize: 18, color: Colors.grey),
+              style: TextStyle(
+                fontSize: 18,
+                color: _isDark ? Colors.white60 : Colors.grey,
+              ),
             ),
             const SizedBox(height: 8),
             Text(
               'Add barbers first to manage schedules',
-              style: TextStyle(color: Colors.grey[600]),
+              style: TextStyle(
+                color: _isDark ? Colors.white70 : Colors.grey[600],
+              ),
             ),
             const SizedBox(height: 16),
             ElevatedButton(
               onPressed: () => context.pop(),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primary,
+                foregroundColor: Colors.white,
+              ),
               child: const Text('Go Back'),
             ),
           ],
@@ -917,17 +1027,25 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   Widget _buildTimezoneInfoCard() {
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
+      color: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Row(
           children: [
-            const Icon(Icons.access_time, size: 16, color: Colors.grey),
+            Icon(
+              Icons.access_time,
+              size: 16,
+              color: _isDark ? Colors.white70 : Colors.grey,
+            ),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
                 '⏰ Times shown in: ${_getTimezoneDisplay()}',
-                style: const TextStyle(fontSize: 12, color: Colors.grey),
+                style: TextStyle(
+                  fontSize: 12,
+                  color: _isDark ? Colors.white60 : Colors.grey,
+                ),
               ),
             ),
             if (_salonTimezone.isNotEmpty && _salonTimezone != _userTimezone)
@@ -950,13 +1068,14 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
 
   Widget _buildWebView(double padding, double screenWidth) {
     return SingleChildScrollView(
+      controller: _scrollController,
       padding: EdgeInsets.all(padding),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _buildTimezoneInfoCard(),
-
           Card(
+            color: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
             ),
@@ -970,7 +1089,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
                     Icons.people,
                     'Barbers',
                     _barbers.length,
-                    const Color(0xFFFF6B8B),
+                    AppTheme.primary,
                   ),
                   _buildStatItem(
                     Icons.schedule,
@@ -1001,7 +1120,6 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
             ),
           ),
           const SizedBox(height: 24),
-
           GridView.builder(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
@@ -1043,7 +1161,10 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
         const SizedBox(width: 8),
         Text(
           '$label: ',
-          style: const TextStyle(fontSize: 14, color: Colors.grey),
+          style: TextStyle(
+            fontSize: 14,
+            color: _isDark ? Colors.white60 : Colors.grey,
+          ),
         ),
         Text(
           '$value',
@@ -1088,6 +1209,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   ) {
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
+      color: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: isWeb
           ? _buildWebBarberCard(
@@ -1117,15 +1239,15 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
             children: [
               CircleAvatar(
                 radius: 24,
-                backgroundColor: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                backgroundColor: AppTheme.primary.withValues(alpha: 0.1),
                 backgroundImage: barber['avatar'] != null
                     ? NetworkImage(barber['avatar'])
                     : null,
                 child: barber['avatar'] == null
                     ? Text(
                         barber['name'][0].toUpperCase(),
-                        style: const TextStyle(
-                          color: Color(0xFFFF6B8B),
+                        style: TextStyle(
+                          color: AppTheme.primary,
                           fontWeight: FontWeight.bold,
                           fontSize: 16,
                         ),
@@ -1139,14 +1261,18 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
                   children: [
                     Text(
                       barber['name'],
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 16,
+                        color: _isDark ? Colors.white : Colors.black87,
                       ),
                     ),
                     Text(
                       '${schedules.where((s) => s['is_working'] == true).length} Working / ${schedules.length} Regular',
-                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: _isDark ? Colors.white60 : Colors.grey[600],
+                      ),
                     ),
                   ],
                 ),
@@ -1156,7 +1282,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
                   Tooltip(
                     message: 'Add Special Break',
                     child: IconButton(
-                      icon: const Icon(Icons.event_busy, color: Colors.teal),
+                      icon: Icon(Icons.event_busy, color: Colors.teal),
                       onPressed: () => _addSpecialBreak(barber['id']),
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
@@ -1165,7 +1291,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
                   Tooltip(
                     message: 'Add Special Schedule',
                     child: IconButton(
-                      icon: const Icon(Icons.event, color: Colors.purple),
+                      icon: Icon(Icons.event, color: Colors.purple),
                       onPressed: () => _addSpecialSchedule(barber['id']),
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
@@ -1174,10 +1300,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
                   Tooltip(
                     message: 'Add Break',
                     child: IconButton(
-                      icon: const Icon(
-                        Icons.free_breakfast,
-                        color: Colors.orange,
-                      ),
+                      icon: Icon(Icons.free_breakfast, color: Colors.orange),
                       onPressed: () => _addBreak(barber['id']),
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
@@ -1186,7 +1309,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
                   Tooltip(
                     message: 'Add Schedule',
                     child: IconButton(
-                      icon: const Icon(Icons.add_circle, color: Colors.green),
+                      icon: Icon(Icons.add_circle, color: Colors.green),
                       onPressed: () => _addSchedule(barber['id']),
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
@@ -1297,9 +1420,10 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
               children: [
                 Text(
                   DateFormat('MMM dd, yyyy').format(date),
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontWeight: FontWeight.w600,
                     fontSize: 11,
+                    color: _isDark ? Colors.white : Colors.black87,
                   ),
                 ),
                 Text(
@@ -1313,7 +1437,10 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
             flex: 2,
             child: Text(
               '$startTime - $endTime',
-              style: const TextStyle(fontSize: 11),
+              style: TextStyle(
+                fontSize: 11,
+                color: _isDark ? Colors.white70 : Colors.black87,
+              ),
             ),
           ),
           if (!isWorking)
@@ -1329,13 +1456,17 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
               ),
             ),
           IconButton(
-            icon: const Icon(Icons.edit, size: 14),
+            icon: Icon(
+              Icons.edit,
+              size: 14,
+              color: _isDark ? Colors.white60 : Colors.grey,
+            ),
             onPressed: () => _editSpecialSchedule(schedule),
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(),
           ),
           IconButton(
-            icon: const Icon(Icons.delete, size: 14, color: Colors.red),
+            icon: Icon(Icons.delete, size: 14, color: Colors.red),
             onPressed: () => _deleteSpecialSchedule(schedule),
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(),
@@ -1375,9 +1506,10 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
               children: [
                 Text(
                   DateFormat('MMM dd, yyyy').format(date),
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontWeight: FontWeight.w600,
                     fontSize: 11,
+                    color: _isDark ? Colors.white : Colors.black87,
                   ),
                 ),
                 Text(
@@ -1391,17 +1523,24 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
             flex: 2,
             child: Text(
               '$startTime - $endTime',
-              style: const TextStyle(fontSize: 11),
+              style: TextStyle(
+                fontSize: 11,
+                color: _isDark ? Colors.white70 : Colors.black87,
+              ),
             ),
           ),
           IconButton(
-            icon: const Icon(Icons.edit, size: 14),
+            icon: Icon(
+              Icons.edit,
+              size: 14,
+              color: _isDark ? Colors.white60 : Colors.grey,
+            ),
             onPressed: () => _editSpecialBreak(breakItem),
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(),
           ),
           IconButton(
-            icon: const Icon(Icons.delete, size: 14, color: Colors.red),
+            icon: Icon(Icons.delete, size: 14, color: Colors.red),
             onPressed: () => _deleteSpecialBreak(breakItem),
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(),
@@ -1447,11 +1586,13 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
                 ),
                 const SizedBox(width: 4),
                 Text(
-                  isMobile ? dayName.substring(0, 3) : dayName.substring(0, 3),
+                  isMobile ? dayName.substring(0, 3) : dayName,
                   style: TextStyle(
                     fontWeight: FontWeight.w600,
                     fontSize: isMobile ? 11 : 12,
-                    color: isWorking ? Colors.black87 : Colors.grey[600],
+                    color: isWorking
+                        ? (_isDark ? Colors.white : Colors.black87)
+                        : (_isDark ? Colors.white70 : Colors.grey[600]),
                   ),
                 ),
               ],
@@ -1464,7 +1605,9 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
                 '$startTime - $endTime',
                 style: TextStyle(
                   fontSize: 11,
-                  color: isWorking ? Colors.grey[700] : Colors.grey[500],
+                  color: isWorking
+                      ? (_isDark ? Colors.white70 : Colors.grey[700])
+                      : (_isDark ? Colors.white70 : Colors.grey[500]),
                   decoration: isWorking ? null : TextDecoration.lineThrough,
                 ),
               ),
@@ -1476,7 +1619,9 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
                 '$startTime - $endTime',
                 style: TextStyle(
                   fontSize: 10,
-                  color: isWorking ? Colors.grey[700] : Colors.grey[500],
+                  color: isWorking
+                      ? (_isDark ? Colors.white70 : Colors.grey[700])
+                      : (_isDark ? Colors.white70 : Colors.grey[500]),
                   decoration: isWorking ? null : TextDecoration.lineThrough,
                 ),
               ),
@@ -1496,7 +1641,11 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
             ),
           ),
           IconButton(
-            icon: Icon(Icons.edit, size: isMobile ? 16 : 18),
+            icon: Icon(
+              Icons.edit,
+              size: isMobile ? 16 : 18,
+              color: _isDark ? Colors.white60 : Colors.grey,
+            ),
             onPressed: () => _editSchedule(schedule),
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(),
@@ -1552,10 +1701,11 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
                 ),
                 const SizedBox(width: 4),
                 Text(
-                  isMobile ? dayName.substring(0, 3) : dayName.substring(0, 3),
+                  isMobile ? dayName.substring(0, 3) : dayName,
                   style: TextStyle(
                     fontWeight: FontWeight.w600,
                     fontSize: isMobile ? 11 : 12,
+                    color: _isDark ? Colors.white : Colors.black87,
                   ),
                 ),
               ],
@@ -1569,11 +1719,14 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
                 children: [
                   Text(
                     '$startTime - $endTime',
-                    style: const TextStyle(fontSize: 11, color: Colors.grey),
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: _isDark ? Colors.white70 : Colors.grey,
+                    ),
                   ),
                   Text(
                     breakTypeData['name'],
-                    style: const TextStyle(fontSize: 10, color: Colors.orange),
+                    style: TextStyle(fontSize: 10, color: Colors.orange),
                   ),
                 ],
               ),
@@ -1586,7 +1739,10 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
                 children: [
                   Text(
                     '$startTime - $endTime',
-                    style: TextStyle(fontSize: 10, color: Colors.grey[600]),
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: _isDark ? Colors.white70 : Colors.grey[600],
+                    ),
                   ),
                   Text(
                     breakTypeData['name'],
@@ -1596,7 +1752,11 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
               ),
             ),
           IconButton(
-            icon: Icon(Icons.edit, size: isMobile ? 16 : 18),
+            icon: Icon(
+              Icons.edit,
+              size: isMobile ? 16 : 18,
+              color: _isDark ? Colors.white60 : Colors.grey,
+            ),
             onPressed: () => _editBreak(breakItem),
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(),
@@ -1624,6 +1784,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
 
     return Card(
       margin: const EdgeInsets.all(0),
+      color: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
       child: InkWell(
         onTap: () {
@@ -1637,7 +1798,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
             children: [
               CircleAvatar(
                 radius: screenWidth < 400 ? 40 : 50,
-                backgroundColor: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                backgroundColor: AppTheme.primary.withValues(alpha: 0.1),
                 backgroundImage: barber['avatar'] != null
                     ? NetworkImage(barber['avatar'])
                     : null,
@@ -1645,7 +1806,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
                     ? Text(
                         barber['name'][0].toUpperCase(),
                         style: TextStyle(
-                          color: const Color(0xFFFF6B8B),
+                          color: AppTheme.primary,
                           fontWeight: FontWeight.bold,
                           fontSize: fontSize + 8,
                         ),
@@ -1658,6 +1819,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: fontSize,
+                  color: _isDark ? Colors.white : Colors.black87,
                 ),
                 textAlign: TextAlign.center,
               ),
@@ -1668,12 +1830,12 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
                   vertical: 8,
                 ),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                  color: AppTheme.primary.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(20),
                 ),
-                child: const Icon(
+                child: Icon(
                   Icons.arrow_forward,
-                  color: Color(0xFFFF6B8B),
+                  color: AppTheme.primary,
                   size: 20,
                 ),
               ),
@@ -1685,6 +1847,11 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   }
 
   void _showBarberScheduleDialog(Map<String, dynamic> barber) {
+    final schedules = _groupedSchedules[barber['id']] ?? [];
+    final breaks = _groupedBreaks[barber['id']] ?? [];
+    final specialSchedules = _groupedSpecialSchedules[barber['id']] ?? [];
+    final specialBreaks = _groupedSpecialBreaks[barber['id']] ?? [];
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -1694,40 +1861,40 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
         minChildSize: 0.5,
         maxChildSize: 0.95,
         builder: (context, scrollController) {
-          final schedules = _groupedSchedules[barber['id']] ?? [];
-          final breaks = _groupedBreaks[barber['id']] ?? [];
-          final specialSchedules = _groupedSpecialSchedules[barber['id']] ?? [];
-          final specialBreaks = _groupedSpecialBreaks[barber['id']] ?? [];
-
           return Container(
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+            decoration: BoxDecoration(
+              color: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(20),
+              ),
             ),
             child: Column(
               children: [
                 Container(
                   padding: const EdgeInsets.all(16),
-                  decoration: const BoxDecoration(
+                  decoration: BoxDecoration(
                     border: Border(
-                      bottom: BorderSide(color: Colors.grey, width: 0.5),
+                      bottom: BorderSide(
+                        color: _isDark ? Colors.white12 : Colors.grey[200]!,
+                        width: 0.5,
+                      ),
                     ),
                   ),
                   child: Row(
                     children: [
                       CircleAvatar(
                         radius: 20,
-                        backgroundColor: const Color(
-                          0xFFFF6B8B,
-                        ).withValues(alpha: 0.1),
+                        backgroundColor: AppTheme.primary.withValues(
+                          alpha: 0.1,
+                        ),
                         backgroundImage: barber['avatar'] != null
                             ? NetworkImage(barber['avatar'])
                             : null,
                         child: barber['avatar'] == null
                             ? Text(
                                 barber['name'][0].toUpperCase(),
-                                style: const TextStyle(
-                                  color: Color(0xFFFF6B8B),
+                                style: TextStyle(
+                                  color: AppTheme.primary,
                                   fontWeight: FontWeight.bold,
                                   fontSize: 16,
                                 ),
@@ -1741,23 +1908,29 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
                           children: [
                             Text(
                               barber['name'],
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontWeight: FontWeight.bold,
                                 fontSize: 16,
+                                color: _isDark ? Colors.white : Colors.black87,
                               ),
                             ),
                             Text(
                               '${schedules.where((s) => s['is_working'] == true).length} Working / ${schedules.length} Regular',
                               style: TextStyle(
                                 fontSize: 12,
-                                color: Colors.grey[600],
+                                color: _isDark
+                                    ? Colors.white60
+                                    : Colors.grey[600],
                               ),
                             ),
                           ],
                         ),
                       ),
                       IconButton(
-                        icon: const Icon(Icons.close),
+                        icon: Icon(
+                          Icons.close,
+                          color: _isDark ? Colors.white : Colors.grey,
+                        ),
                         onPressed: () => Navigator.pop(context),
                       ),
                     ],
@@ -1865,7 +2038,10 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   ) {
     return ActionChip(
       avatar: Icon(icon, size: 18, color: color),
-      label: Text(label),
+      label: Text(
+        label,
+        style: TextStyle(color: _isDark ? Colors.white : Colors.black87),
+      ),
       onPressed: onPressed,
       backgroundColor: color.withValues(alpha: 0.1),
       side: BorderSide(color: color.withValues(alpha: 0.3)),
@@ -1873,42 +2049,62 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   }
 }
 
-// ==================== ADD SPECIAL SCHEDULE DIALOG ====================
-class _AddSpecialScheduleDialog extends StatefulWidget {
+// ============================================
+// ✅ ALL DIALOGS WITH DARK MODE SUPPORT
+// ============================================
+
+// ==================== ADD SCHEDULE DIALOG ====================
+class _AddScheduleDialog extends StatefulWidget {
   final String barberId;
   final String salonId;
   final String salonTimezone;
+  final List<Map<String, dynamic>> existingSchedules;
   final TimeOfDay? defaultOpenTime;
   final TimeOfDay? defaultCloseTime;
+  final bool isDark;
 
-  const _AddSpecialScheduleDialog({
+  const _AddScheduleDialog({
     required this.barberId,
     required this.salonId,
     required this.salonTimezone,
+    required this.existingSchedules,
     this.defaultOpenTime,
     this.defaultCloseTime,
+    required this.isDark,
   });
 
   @override
-  State<_AddSpecialScheduleDialog> createState() =>
-      _AddSpecialScheduleDialogState();
+  State<_AddScheduleDialog> createState() => _AddScheduleDialogState();
 }
 
-class _AddSpecialScheduleDialogState extends State<_AddSpecialScheduleDialog> {
+class _AddScheduleDialogState extends State<_AddScheduleDialog> {
   final supabase = Supabase.instance.client;
 
-  DateTime? _selectedDate;
+  int? _selectedDay;
   TimeOfDay? _startTime;
   TimeOfDay? _endTime;
   bool _isWorking = true;
-  final TextEditingController _reasonController = TextEditingController();
   bool _isLoading = false;
 
-  @override
-  void initState() {
-    super.initState();
-    _startTime = widget.defaultOpenTime;
-    _endTime = widget.defaultCloseTime;
+  final List<Map<String, dynamic>> _days = const [
+    {'id': 1, 'name': 'Monday'},
+    {'id': 2, 'name': 'Tuesday'},
+    {'id': 3, 'name': 'Wednesday'},
+    {'id': 4, 'name': 'Thursday'},
+    {'id': 5, 'name': 'Friday'},
+    {'id': 6, 'name': 'Saturday'},
+    {'id': 7, 'name': 'Sunday'},
+  ];
+
+  List<int> get _availableDays {
+    final existingDays = widget.existingSchedules
+        .where((s) => s['day_of_week'] != null)
+        .map((s) => s['day_of_week'] as int)
+        .toSet();
+    return _days
+        .where((d) => !existingDays.contains(d['id']))
+        .map((d) => d['id'] as int)
+        .toList();
   }
 
   String _localTimeToUtc(TimeOfDay localTime) {
@@ -1919,17 +2115,23 @@ class _AddSpecialScheduleDialogState extends State<_AddSpecialScheduleDialog> {
   }
 
   @override
+  void initState() {
+    super.initState();
+    _startTime = widget.defaultOpenTime;
+    _endTime = widget.defaultCloseTime;
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final bool isWeb = screenWidth > 800;
-    final bool isMobile = screenWidth < 600;
+    final bool isWeb = context.isWeb;
 
     return Dialog(
+      backgroundColor: widget.isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Container(
-        width: isWeb ? 500 : screenWidth * 0.92,
+        width: isWeb ? 500 : MediaQuery.of(context).size.width * 0.9,
         constraints: BoxConstraints(
-          maxHeight: MediaQuery.of(context).size.height * 0.85,
+          maxHeight: MediaQuery.of(context).size.height * 0.8,
         ),
         padding: EdgeInsets.all(isWeb ? 24 : 16),
         child: SingleChildScrollView(
@@ -1937,102 +2139,92 @@ class _AddSpecialScheduleDialogState extends State<_AddSpecialScheduleDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'Add Special Schedule',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 20),
-              const Text(
-                'Select Date',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              GestureDetector(
-                onTap: () async {
-                  final date = await showDatePicker(
-                    context: context,
-                    initialDate: DateTime.now(),
-                    firstDate: DateTime.now(),
-                    lastDate: DateTime.now().add(const Duration(days: 365)),
-                  );
-                  if (date != null) setState(() => _selectedDate = date);
-                },
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 14,
-                  ),
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Colors.grey[300]!),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.calendar_today,
-                        color: _selectedDate != null
-                            ? const Color(0xFFFF6B8B)
-                            : Colors.grey,
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          _selectedDate != null
-                              ? DateFormat('yyyy-MM-dd').format(_selectedDate!)
-                              : 'Select date',
-                        ),
-                      ),
-                    ],
-                  ),
+              Text(
+                'Add Schedule',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: widget.isDark ? Colors.white : Colors.black87,
                 ),
               ),
+              const SizedBox(height: 20),
+              Text(
+                'Select Day',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: widget.isDark ? Colors.white : Colors.black87,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: _days.map((day) {
+                  final isSelected = _selectedDay == day['id'];
+                  final isAvailable = _availableDays.contains(day['id']);
+                  return FilterChip(
+                    label: Text(
+                      day['name'],
+                      style: TextStyle(
+                        color: isSelected
+                            ? AppTheme.primary
+                            : (widget.isDark ? Colors.white70 : Colors.black87),
+                      ),
+                    ),
+                    selected: isSelected,
+                    onSelected: isAvailable
+                        ? (selected) => setState(() => _selectedDay = day['id'])
+                        : null,
+                    backgroundColor: widget.isDark
+                        ? const Color(0xFF2A2A2A)
+                        : Colors.grey[100],
+                    selectedColor: AppTheme.primary.withValues(alpha: 0.2),
+                    checkmarkColor: AppTheme.primary,
+                    avatar: isAvailable
+                        ? null
+                        : Icon(
+                            Icons.lock,
+                            size: 16,
+                            color: widget.isDark ? Colors.white30 : Colors.grey,
+                          ),
+                  );
+                }).toList(),
+              ),
+              if (_availableDays.isEmpty && _selectedDay == null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    'All days already have schedules!',
+                    style: TextStyle(
+                      color: widget.isDark
+                          ? Colors.orange[300]
+                          : Colors.orange[700],
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
               const SizedBox(height: 16),
-              if (isMobile)
-                Column(
-                  children: [
-                    _TimePickerField(
+              Row(
+                children: [
+                  Expanded(
+                    child: _TimePickerField(
                       label: 'Start Time',
                       initialTime: _startTime,
                       onTimeSelected: (time) =>
                           setState(() => _startTime = time),
+                      isDark: widget.isDark,
                     ),
-                    const SizedBox(height: 12),
-                    _TimePickerField(
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _TimePickerField(
                       label: 'End Time',
                       initialTime: _endTime,
                       onTimeSelected: (time) => setState(() => _endTime = time),
+                      isDark: widget.isDark,
                     ),
-                  ],
-                )
-              else
-                Row(
-                  children: [
-                    Expanded(
-                      child: _TimePickerField(
-                        label: 'Start Time',
-                        initialTime: _startTime,
-                        onTimeSelected: (time) =>
-                            setState(() => _startTime = time),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _TimePickerField(
-                        label: 'End Time',
-                        initialTime: _endTime,
-                        onTimeSelected: (time) =>
-                            setState(() => _endTime = time),
-                      ),
-                    ),
-                  ],
-                ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: _reasonController,
-                decoration: const InputDecoration(
-                  labelText: 'Reason (e.g., Training, Holiday)',
-                  border: OutlineInputBorder(),
-                ),
+                  ),
+                ],
               ),
               const SizedBox(height: 16),
               Container(
@@ -2059,10 +2251,28 @@ class _AddSpecialScheduleDialogState extends State<_AddSpecialScheduleDialog> {
                     ),
                     const SizedBox(width: 12),
                     Expanded(
-                      child: Text(
-                        _isWorking
-                            ? 'Working on this day'
-                            : 'Not working on this day',
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Working Day',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: _isWorking ? Colors.green : Colors.red,
+                            ),
+                          ),
+                          Text(
+                            _isWorking
+                                ? 'This day will be available for bookings'
+                                : 'This day will be marked as day off',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: widget.isDark
+                                  ? Colors.white60
+                                  : Colors.grey[600],
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                     Switch(
@@ -2075,299 +2285,29 @@ class _AddSpecialScheduleDialogState extends State<_AddSpecialScheduleDialog> {
                 ),
               ),
               const SizedBox(height: 24),
-              if (isMobile)
-                Column(
-                  children: [
-                    SizedBox(
-                      width: double.infinity,
-                      child: TextButton(
-                        onPressed: () => Navigator.pop(context),
-                        style: TextButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                        ),
-                        child: const Text(
-                          'Cancel',
-                          style: TextStyle(fontSize: 16),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed:
-                            (_selectedDate != null &&
-                                _startTime != null &&
-                                _endTime != null &&
-                                !_isLoading)
-                            ? _saveSpecialSchedule
-                            : null,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFFF6B8B),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                        ),
-                        child: _isLoading
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Text(
-                                'Add Special Schedule',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                      ),
-                    ),
-                  ],
-                )
-              else
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: const Text('Cancel'),
-                    ),
-                    const SizedBox(width: 12),
-                    ElevatedButton(
-                      onPressed:
-                          (_selectedDate != null &&
-                              _startTime != null &&
-                              _endTime != null &&
-                              !_isLoading)
-                          ? _saveSpecialSchedule
-                          : null,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFFFF6B8B),
-                        foregroundColor: Colors.white,
-                      ),
-                      child: _isLoading
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Text('Add Special Schedule'),
-                    ),
-                  ],
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Future<void> _saveSpecialSchedule() async {
-    setState(() => _isLoading = true);
-    try {
-      final salonIdInt = int.parse(widget.salonId);
-      final startTimeString = _localTimeToUtc(_startTime!);
-      final endTimeString = _localTimeToUtc(_endTime!);
-
-      await supabase.from('barber_special_schedules').insert({
-        'barber_id': widget.barberId,
-        'salon_id': salonIdInt,
-        'schedule_date': _selectedDate!.toIso8601String().split('T').first,
-        'start_time': startTimeString,
-        'end_time': endTimeString,
-        'is_working': _isWorking,
-        'reason': _reasonController.text.isNotEmpty
-            ? _reasonController.text
-            : null,
-      });
-      if (mounted) Navigator.pop(context, {'success': true});
-    } catch (e) {
-      debugPrint('Error saving special schedule: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-        );
-        setState(() => _isLoading = false);
-      }
-    }
-  }
-}
-
-// ==================== ADD SPECIAL BREAK DIALOG ====================
-class _AddSpecialBreakDialog extends StatefulWidget {
-  final String barberId;
-  final String salonId;
-  final String salonTimezone;
-  final List<Map<String, dynamic>> breakTypes;
-  final TimeOfDay? defaultOpenTime;
-  final TimeOfDay? defaultCloseTime;
-
-  const _AddSpecialBreakDialog({
-    required this.barberId,
-    required this.salonId,
-    required this.salonTimezone,
-    required this.breakTypes,
-    this.defaultOpenTime,
-    this.defaultCloseTime,
-  });
-
-  @override
-  State<_AddSpecialBreakDialog> createState() => _AddSpecialBreakDialogState();
-}
-
-class _AddSpecialBreakDialogState extends State<_AddSpecialBreakDialog> {
-  final supabase = Supabase.instance.client;
-
-  DateTime? _selectedDate;
-  TimeOfDay? _startTime;
-  TimeOfDay? _endTime;
-  String _selectedBreakType = 'lunch';
-  bool _isLoading = false;
-
-  String _localTimeToUtc(TimeOfDay localTime) {
-    return TimezoneService.timeOfDayToUtcWithTimezone(
-      localTime,
-      widget.salonTimezone,
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final bool isWeb = screenWidth > 800;
-
-    return Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Container(
-        width: isWeb ? 500 : screenWidth * 0.9,
-        constraints: BoxConstraints(
-          maxHeight: MediaQuery.of(context).size.height * 0.8,
-        ),
-        padding: EdgeInsets.all(isWeb ? 24 : 16),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Add Special Break',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 20),
-              const Text(
-                'Select Date',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              GestureDetector(
-                onTap: () async {
-                  final date = await showDatePicker(
-                    context: context,
-                    initialDate: DateTime.now(),
-                    firstDate: DateTime.now(),
-                    lastDate: DateTime.now().add(const Duration(days: 365)),
-                  );
-                  if (date != null) setState(() => _selectedDate = date);
-                },
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 14,
-                  ),
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Colors.grey[300]!),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.calendar_today,
-                        color: _selectedDate != null
-                            ? const Color(0xFFFF6B8B)
-                            : Colors.grey,
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          _selectedDate != null
-                              ? DateFormat('yyyy-MM-dd').format(_selectedDate!)
-                              : 'Select date',
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'Break Type',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: widget.breakTypes.map((type) {
-                  final isSelected = _selectedBreakType == type['id'];
-                  return FilterChip(
-                    label: Text(type['name']),
-                    selected: isSelected,
-                    onSelected: (selected) {
-                      if (selected) {
-                        setState(() => _selectedBreakType = type['id']);
-                      }
-                    },
-                    avatar: Icon(type['icon'], size: 18),
-                    backgroundColor: Colors.grey[100],
-                    selectedColor: const Color(
-                      0xFFFF6B8B,
-                    ).withValues(alpha: 0.2),
-                    checkmarkColor: const Color(0xFFFF6B8B),
-                  );
-                }).toList(),
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: _TimePickerField(
-                      label: 'Start Time',
-                      initialTime: _startTime,
-                      onTimeSelected: (time) =>
-                          setState(() => _startTime = time),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _TimePickerField(
-                      label: 'End Time',
-                      initialTime: _endTime,
-                      onTimeSelected: (time) => setState(() => _endTime = time),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 24),
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   TextButton(
                     onPressed: () => Navigator.pop(context),
-                    child: const Text('Cancel'),
+                    child: Text(
+                      'Cancel',
+                      style: TextStyle(
+                        color: widget.isDark ? Colors.white60 : Colors.black87,
+                      ),
+                    ),
                   ),
                   const SizedBox(width: 12),
                   ElevatedButton(
                     onPressed:
-                        (_selectedDate != null &&
+                        (_selectedDay != null &&
                             _startTime != null &&
                             _endTime != null &&
                             !_isLoading)
-                        ? _saveSpecialBreak
+                        ? _saveSchedule
                         : null,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFFF6B8B),
+                      backgroundColor: AppTheme.primary,
                       foregroundColor: Colors.white,
                     ),
                     child: _isLoading
@@ -2376,7 +2316,7 @@ class _AddSpecialBreakDialogState extends State<_AddSpecialBreakDialog> {
                             height: 20,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : const Text('Add Special Break'),
+                        : const Text('Add Schedule'),
                   ),
                 ],
               ),
@@ -2387,27 +2327,30 @@ class _AddSpecialBreakDialogState extends State<_AddSpecialBreakDialog> {
     );
   }
 
-  Future<void> _saveSpecialBreak() async {
+  Future<void> _saveSchedule() async {
     setState(() => _isLoading = true);
     try {
       final salonIdInt = int.parse(widget.salonId);
       final startTimeString = _localTimeToUtc(_startTime!);
       final endTimeString = _localTimeToUtc(_endTime!);
 
-      await supabase.from('barber_special_breaks').insert({
+      await supabase.from('barber_schedules').insert({
         'barber_id': widget.barberId,
         'salon_id': salonIdInt,
-        'break_date': _selectedDate!.toIso8601String().split('T').first,
+        'day_of_week': _selectedDay,
         'start_time': startTimeString,
         'end_time': endTimeString,
-        'break_type': _selectedBreakType,
+        'is_working': _isWorking,
       });
       if (mounted) Navigator.pop(context, {'success': true});
     } catch (e) {
-      debugPrint('Error saving special break: $e');
+      debugPrint('Error saving schedule: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: widget.isDark ? Colors.red[700] : Colors.red,
+          ),
         );
         setState(() => _isLoading = false);
       }
@@ -2415,31 +2358,30 @@ class _AddSpecialBreakDialogState extends State<_AddSpecialBreakDialog> {
   }
 }
 
-// ==================== EDIT SPECIAL SCHEDULE DIALOG ====================
-class _EditSpecialScheduleDialog extends StatefulWidget {
+// ==================== EDIT SCHEDULE DIALOG ====================
+class _EditScheduleDialog extends StatefulWidget {
   final Map<String, dynamic> schedule;
   final String salonTimezone;
   final TimeOfDay? defaultOpenTime;
   final TimeOfDay? defaultCloseTime;
+  final bool isDark;
 
-  const _EditSpecialScheduleDialog({
+  const _EditScheduleDialog({
     required this.schedule,
     required this.salonTimezone,
     this.defaultOpenTime,
     this.defaultCloseTime,
+    required this.isDark,
   });
 
   @override
-  State<_EditSpecialScheduleDialog> createState() =>
-      _EditSpecialScheduleDialogState();
+  State<_EditScheduleDialog> createState() => _EditScheduleDialogState();
 }
 
-class _EditSpecialScheduleDialogState
-    extends State<_EditSpecialScheduleDialog> {
+class _EditScheduleDialogState extends State<_EditScheduleDialog> {
   late TimeOfDay _startTime;
   late TimeOfDay _endTime;
   late bool _isWorking;
-  final TextEditingController _reasonController = TextEditingController();
   bool _isLoading = false;
   final supabase = Supabase.instance.client;
 
@@ -2455,7 +2397,6 @@ class _EditSpecialScheduleDialogState
       widget.salonTimezone,
     );
     _isWorking = widget.schedule['is_working'] ?? true;
-    _reasonController.text = widget.schedule['reason'] ?? '';
   }
 
   String _localTimeToUtc(TimeOfDay localTime) {
@@ -2467,14 +2408,23 @@ class _EditSpecialScheduleDialogState
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final bool isWeb = screenWidth > 800;
-    final date = DateTime.parse(widget.schedule['schedule_date']);
+    final bool isWeb = context.isWeb;
+    final dayNames = {
+      1: 'Monday',
+      2: 'Tuesday',
+      3: 'Wednesday',
+      4: 'Thursday',
+      5: 'Friday',
+      6: 'Saturday',
+      7: 'Sunday',
+    };
+    final dayName = dayNames[widget.schedule['day_of_week']] ?? 'Unknown';
 
     return Dialog(
+      backgroundColor: widget.isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Container(
-        width: isWeb ? 500 : screenWidth * 0.9,
+        width: isWeb ? 500 : MediaQuery.of(context).size.width * 0.9,
         constraints: BoxConstraints(
           maxHeight: MediaQuery.of(context).size.height * 0.8,
         ),
@@ -2485,10 +2435,11 @@ class _EditSpecialScheduleDialogState
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Edit Special Schedule - ${DateFormat('yyyy-MM-dd').format(date)}',
-                style: const TextStyle(
+                'Edit Schedule - $dayName',
+                style: TextStyle(
                   fontSize: 20,
                   fontWeight: FontWeight.bold,
+                  color: widget.isDark ? Colors.white : Colors.black87,
                 ),
               ),
               const SizedBox(height: 20),
@@ -2500,6 +2451,7 @@ class _EditSpecialScheduleDialogState
                       initialTime: _startTime,
                       onTimeSelected: (time) =>
                           setState(() => _startTime = time),
+                      isDark: widget.isDark,
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -2508,17 +2460,10 @@ class _EditSpecialScheduleDialogState
                       label: 'End Time',
                       initialTime: _endTime,
                       onTimeSelected: (time) => setState(() => _endTime = time),
+                      isDark: widget.isDark,
                     ),
                   ),
                 ],
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: _reasonController,
-                decoration: const InputDecoration(
-                  labelText: 'Reason',
-                  border: OutlineInputBorder(),
-                ),
               ),
               const SizedBox(height: 16),
               Container(
@@ -2531,6 +2476,11 @@ class _EditSpecialScheduleDialogState
                       ? Colors.green.withValues(alpha: 0.1)
                       : Colors.red.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: _isWorking
+                        ? Colors.green.withValues(alpha: 0.3)
+                        : Colors.red.withValues(alpha: 0.3),
+                  ),
                 ),
                 child: Row(
                   children: [
@@ -2540,10 +2490,28 @@ class _EditSpecialScheduleDialogState
                     ),
                     const SizedBox(width: 12),
                     Expanded(
-                      child: Text(
-                        _isWorking
-                            ? 'Working on this day'
-                            : 'Not working on this day',
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Working Day',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: _isWorking ? Colors.green : Colors.red,
+                            ),
+                          ),
+                          Text(
+                            _isWorking
+                                ? 'This day will be available for bookings'
+                                : 'This day will be marked as day off',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: widget.isDark
+                                  ? Colors.white60
+                                  : Colors.grey[600],
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                     Switch(
@@ -2561,13 +2529,18 @@ class _EditSpecialScheduleDialogState
                 children: [
                   TextButton(
                     onPressed: () => Navigator.pop(context),
-                    child: const Text('Cancel'),
+                    child: Text(
+                      'Cancel',
+                      style: TextStyle(
+                        color: widget.isDark ? Colors.white60 : Colors.black87,
+                      ),
+                    ),
                   ),
                   const SizedBox(width: 12),
                   ElevatedButton(
-                    onPressed: _isLoading ? null : _updateSpecialSchedule,
+                    onPressed: _isLoading ? null : _updateSchedule,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFFF6B8B),
+                      backgroundColor: AppTheme.primary,
                       foregroundColor: Colors.white,
                     ),
                     child: _isLoading
@@ -2576,7 +2549,7 @@ class _EditSpecialScheduleDialogState
                             height: 20,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : const Text('Update'),
+                        : const Text('Update Schedule'),
                   ),
                 ],
               ),
@@ -2587,212 +2560,29 @@ class _EditSpecialScheduleDialogState
     );
   }
 
-  Future<void> _updateSpecialSchedule() async {
+  Future<void> _updateSchedule() async {
     setState(() => _isLoading = true);
     try {
       final startTimeString = _localTimeToUtc(_startTime);
       final endTimeString = _localTimeToUtc(_endTime);
 
       await supabase
-          .from('barber_special_schedules')
+          .from('barber_schedules')
           .update({
             'start_time': startTimeString,
             'end_time': endTimeString,
             'is_working': _isWorking,
-            'reason': _reasonController.text.isNotEmpty
-                ? _reasonController.text
-                : null,
           })
           .eq('id', widget.schedule['id']);
       if (mounted) Navigator.pop(context, {'success': true});
     } catch (e) {
-      debugPrint('Error updating special schedule: $e');
+      debugPrint('Error updating schedule: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-        );
-        setState(() => _isLoading = false);
-      }
-    }
-  }
-}
-
-// ==================== EDIT SPECIAL BREAK DIALOG ====================
-class _EditSpecialBreakDialog extends StatefulWidget {
-  final Map<String, dynamic> breakItem;
-  final String salonTimezone;
-  final List<Map<String, dynamic>> breakTypes;
-  final TimeOfDay? defaultOpenTime;
-  final TimeOfDay? defaultCloseTime;
-
-  const _EditSpecialBreakDialog({
-    required this.breakItem,
-    required this.salonTimezone,
-    required this.breakTypes,
-    this.defaultOpenTime,
-    this.defaultCloseTime,
-  });
-
-  @override
-  State<_EditSpecialBreakDialog> createState() =>
-      _EditSpecialBreakDialogState();
-}
-
-class _EditSpecialBreakDialogState extends State<_EditSpecialBreakDialog> {
-  late TimeOfDay _startTime;
-  late TimeOfDay _endTime;
-  late String _selectedBreakType;
-  bool _isLoading = false;
-  final supabase = Supabase.instance.client;
-
-  @override
-  void initState() {
-    super.initState();
-    _startTime = TimezoneService.utcToTimeOfDayWithTimezone(
-      widget.breakItem['start_time'],
-      widget.salonTimezone,
-    );
-    _endTime = TimezoneService.utcToTimeOfDayWithTimezone(
-      widget.breakItem['end_time'],
-      widget.salonTimezone,
-    );
-    _selectedBreakType = widget.breakItem['break_type'] ?? 'lunch';
-  }
-
-  String _localTimeToUtc(TimeOfDay localTime) {
-    return TimezoneService.timeOfDayToUtcWithTimezone(
-      localTime,
-      widget.salonTimezone,
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final bool isWeb = screenWidth > 800;
-    final date = DateTime.parse(widget.breakItem['break_date']);
-
-    return Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Container(
-        width: isWeb ? 500 : screenWidth * 0.9,
-        constraints: BoxConstraints(
-          maxHeight: MediaQuery.of(context).size.height * 0.8,
-        ),
-        padding: EdgeInsets.all(isWeb ? 24 : 16),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Edit Special Break - ${DateFormat('yyyy-MM-dd').format(date)}',
-                style: const TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 20),
-              const Text(
-                'Break Type',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: widget.breakTypes.map((type) {
-                  final isSelected = _selectedBreakType == type['id'];
-                  return FilterChip(
-                    label: Text(type['name']),
-                    selected: isSelected,
-                    onSelected: (selected) {
-                      if (selected) {
-                        setState(() => _selectedBreakType = type['id']);
-                      }
-                    },
-                    avatar: Icon(type['icon'], size: 18),
-                    backgroundColor: Colors.grey[100],
-                    selectedColor: const Color(
-                      0xFFFF6B8B,
-                    ).withValues(alpha: 0.2),
-                    checkmarkColor: const Color(0xFFFF6B8B),
-                  );
-                }).toList(),
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: _TimePickerField(
-                      label: 'Start Time',
-                      initialTime: _startTime,
-                      onTimeSelected: (time) =>
-                          setState(() => _startTime = time),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _TimePickerField(
-                      label: 'End Time',
-                      initialTime: _endTime,
-                      onTimeSelected: (time) => setState(() => _endTime = time),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 24),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('Cancel'),
-                  ),
-                  const SizedBox(width: 12),
-                  ElevatedButton(
-                    onPressed: _isLoading ? null : _updateSpecialBreak,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFFF6B8B),
-                      foregroundColor: Colors.white,
-                    ),
-                    child: _isLoading
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text('Update'),
-                  ),
-                ],
-              ),
-            ],
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: widget.isDark ? Colors.red[700] : Colors.red,
           ),
-        ),
-      ),
-    );
-  }
-
-  Future<void> _updateSpecialBreak() async {
-    setState(() => _isLoading = true);
-    try {
-      final startTimeString = _localTimeToUtc(_startTime);
-      final endTimeString = _localTimeToUtc(_endTime);
-
-      await supabase
-          .from('barber_special_breaks')
-          .update({
-            'start_time': startTimeString,
-            'end_time': endTimeString,
-            'break_type': _selectedBreakType,
-          })
-          .eq('id', widget.breakItem['id']);
-      if (mounted) Navigator.pop(context, {'success': true});
-    } catch (e) {
-      debugPrint('Error updating special break: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
         );
         setState(() => _isLoading = false);
       }
@@ -2809,6 +2599,7 @@ class _AddBreakDialog extends StatefulWidget {
   final List<Map<String, dynamic>> breakTypes;
   final TimeOfDay? defaultOpenTime;
   final TimeOfDay? defaultCloseTime;
+  final bool isDark;
 
   const _AddBreakDialog({
     required this.barberId,
@@ -2818,6 +2609,7 @@ class _AddBreakDialog extends StatefulWidget {
     required this.breakTypes,
     this.defaultOpenTime,
     this.defaultCloseTime,
+    required this.isDark,
   });
 
   @override
@@ -2877,13 +2669,13 @@ class _AddBreakDialogState extends State<_AddBreakDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final bool isWeb = screenWidth > 800;
+    final bool isWeb = context.isWeb;
 
     return Dialog(
+      backgroundColor: widget.isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Container(
-        width: isWeb ? 500 : screenWidth * 0.9,
+        width: isWeb ? 500 : MediaQuery.of(context).size.width * 0.9,
         constraints: BoxConstraints(
           maxHeight: MediaQuery.of(context).size.height * 0.8,
         ),
@@ -2893,14 +2685,21 @@ class _AddBreakDialogState extends State<_AddBreakDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
+              Text(
                 'Add Break',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: widget.isDark ? Colors.white : Colors.black87,
+                ),
               ),
               const SizedBox(height: 20),
-              const Text(
+              Text(
                 'Break Type',
-                style: TextStyle(fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: widget.isDark ? Colors.white : Colors.black87,
+                ),
               ),
               const SizedBox(height: 8),
               Wrap(
@@ -2909,26 +2708,40 @@ class _AddBreakDialogState extends State<_AddBreakDialog> {
                 children: widget.breakTypes.map((type) {
                   final isSelected = _selectedBreakType == type['id'];
                   return FilterChip(
-                    label: Text(type['name']),
+                    label: Text(
+                      type['name'],
+                      style: TextStyle(
+                        color: isSelected
+                            ? AppTheme.primary
+                            : (widget.isDark ? Colors.white70 : Colors.black87),
+                      ),
+                    ),
                     selected: isSelected,
                     onSelected: (selected) {
                       if (selected) {
                         setState(() => _selectedBreakType = type['id']);
                       }
                     },
-                    avatar: Icon(type['icon'], size: 18),
-                    backgroundColor: Colors.grey[100],
-                    selectedColor: const Color(
-                      0xFFFF6B8B,
-                    ).withValues(alpha: 0.2),
-                    checkmarkColor: const Color(0xFFFF6B8B),
+                    avatar: Icon(
+                      type['icon'],
+                      size: 18,
+                      color: isSelected ? AppTheme.primary : Colors.grey,
+                    ),
+                    backgroundColor: widget.isDark
+                        ? const Color(0xFF2A2A2A)
+                        : Colors.grey[100],
+                    selectedColor: AppTheme.primary.withValues(alpha: 0.2),
+                    checkmarkColor: AppTheme.primary,
                   );
                 }).toList(),
               ),
               const SizedBox(height: 16),
-              const Text(
+              Text(
                 'Select Day',
-                style: TextStyle(fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: widget.isDark ? Colors.white : Colors.black87,
+                ),
               ),
               const SizedBox(height: 8),
               Wrap(
@@ -2938,19 +2751,30 @@ class _AddBreakDialogState extends State<_AddBreakDialog> {
                   final isSelected = _selectedDay == day['id'];
                   final isAvailable = _availableDays.contains(day['id']);
                   return FilterChip(
-                    label: Text(day['name']),
+                    label: Text(
+                      day['name'],
+                      style: TextStyle(
+                        color: isSelected
+                            ? AppTheme.primary
+                            : (widget.isDark ? Colors.white70 : Colors.black87),
+                      ),
+                    ),
                     selected: isSelected,
                     onSelected: isAvailable
                         ? (selected) => setState(() => _selectedDay = day['id'])
                         : null,
-                    backgroundColor: Colors.grey[100],
-                    selectedColor: const Color(
-                      0xFFFF6B8B,
-                    ).withValues(alpha: 0.2),
-                    checkmarkColor: const Color(0xFFFF6B8B),
+                    backgroundColor: widget.isDark
+                        ? const Color(0xFF2A2A2A)
+                        : Colors.grey[100],
+                    selectedColor: AppTheme.primary.withValues(alpha: 0.2),
+                    checkmarkColor: AppTheme.primary,
                     avatar: isAvailable
                         ? null
-                        : const Icon(Icons.lock, size: 16),
+                        : Icon(
+                            Icons.lock,
+                            size: 16,
+                            color: widget.isDark ? Colors.white30 : Colors.grey,
+                          ),
                   );
                 }).toList(),
               ),
@@ -2959,7 +2783,12 @@ class _AddBreakDialogState extends State<_AddBreakDialog> {
                   padding: const EdgeInsets.only(top: 8),
                   child: Text(
                     'All days already have breaks!',
-                    style: TextStyle(color: Colors.orange[700], fontSize: 12),
+                    style: TextStyle(
+                      color: widget.isDark
+                          ? Colors.orange[300]
+                          : Colors.orange[700],
+                      fontSize: 12,
+                    ),
                   ),
                 ),
               const SizedBox(height: 16),
@@ -2971,6 +2800,7 @@ class _AddBreakDialogState extends State<_AddBreakDialog> {
                       initialTime: _startTime,
                       onTimeSelected: (time) =>
                           setState(() => _startTime = time),
+                      isDark: widget.isDark,
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -2979,6 +2809,7 @@ class _AddBreakDialogState extends State<_AddBreakDialog> {
                       label: 'End Time',
                       initialTime: _endTime,
                       onTimeSelected: (time) => setState(() => _endTime = time),
+                      isDark: widget.isDark,
                     ),
                   ),
                 ],
@@ -2989,7 +2820,12 @@ class _AddBreakDialogState extends State<_AddBreakDialog> {
                 children: [
                   TextButton(
                     onPressed: () => Navigator.pop(context),
-                    child: const Text('Cancel'),
+                    child: Text(
+                      'Cancel',
+                      style: TextStyle(
+                        color: widget.isDark ? Colors.white60 : Colors.black87,
+                      ),
+                    ),
                   ),
                   const SizedBox(width: 12),
                   ElevatedButton(
@@ -3001,7 +2837,7 @@ class _AddBreakDialogState extends State<_AddBreakDialog> {
                         ? _saveBreak
                         : null,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFFF6B8B),
+                      backgroundColor: AppTheme.primary,
                       foregroundColor: Colors.white,
                     ),
                     child: _isLoading
@@ -3041,7 +2877,10 @@ class _AddBreakDialogState extends State<_AddBreakDialog> {
       debugPrint('Error saving break: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: widget.isDark ? Colors.red[700] : Colors.red,
+          ),
         );
         setState(() => _isLoading = false);
       }
@@ -3056,6 +2895,7 @@ class _EditBreakDialog extends StatefulWidget {
   final List<Map<String, dynamic>> breakTypes;
   final TimeOfDay? defaultOpenTime;
   final TimeOfDay? defaultCloseTime;
+  final bool isDark;
 
   const _EditBreakDialog({
     required this.breakItem,
@@ -3063,6 +2903,7 @@ class _EditBreakDialog extends StatefulWidget {
     required this.breakTypes,
     this.defaultOpenTime,
     this.defaultCloseTime,
+    required this.isDark,
   });
 
   @override
@@ -3109,14 +2950,14 @@ class _EditBreakDialogState extends State<_EditBreakDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final bool isWeb = screenWidth > 800;
+    final bool isWeb = context.isWeb;
     final dayName = _dayNames[widget.breakItem['day_of_week']] ?? 'Unknown';
 
     return Dialog(
+      backgroundColor: widget.isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Container(
-        width: isWeb ? 500 : screenWidth * 0.9,
+        width: isWeb ? 500 : MediaQuery.of(context).size.width * 0.9,
         constraints: BoxConstraints(
           maxHeight: MediaQuery.of(context).size.height * 0.8,
         ),
@@ -3128,15 +2969,19 @@ class _EditBreakDialogState extends State<_EditBreakDialog> {
             children: [
               Text(
                 'Edit Break - $dayName',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 20,
                   fontWeight: FontWeight.bold,
+                  color: widget.isDark ? Colors.white : Colors.black87,
                 ),
               ),
               const SizedBox(height: 20),
-              const Text(
+              Text(
                 'Break Type',
-                style: TextStyle(fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: widget.isDark ? Colors.white : Colors.black87,
+                ),
               ),
               const SizedBox(height: 8),
               Wrap(
@@ -3145,19 +2990,30 @@ class _EditBreakDialogState extends State<_EditBreakDialog> {
                 children: widget.breakTypes.map((type) {
                   final isSelected = _selectedBreakType == type['id'];
                   return FilterChip(
-                    label: Text(type['name']),
+                    label: Text(
+                      type['name'],
+                      style: TextStyle(
+                        color: isSelected
+                            ? AppTheme.primary
+                            : (widget.isDark ? Colors.white70 : Colors.black87),
+                      ),
+                    ),
                     selected: isSelected,
                     onSelected: (selected) {
                       if (selected) {
                         setState(() => _selectedBreakType = type['id']);
                       }
                     },
-                    avatar: Icon(type['icon'], size: 18),
-                    backgroundColor: Colors.grey[100],
-                    selectedColor: const Color(
-                      0xFFFF6B8B,
-                    ).withValues(alpha: 0.2),
-                    checkmarkColor: const Color(0xFFFF6B8B),
+                    avatar: Icon(
+                      type['icon'],
+                      size: 18,
+                      color: isSelected ? AppTheme.primary : Colors.grey,
+                    ),
+                    backgroundColor: widget.isDark
+                        ? const Color(0xFF2A2A2A)
+                        : Colors.grey[100],
+                    selectedColor: AppTheme.primary.withValues(alpha: 0.2),
+                    checkmarkColor: AppTheme.primary,
                   );
                 }).toList(),
               ),
@@ -3170,6 +3026,7 @@ class _EditBreakDialogState extends State<_EditBreakDialog> {
                       initialTime: _startTime,
                       onTimeSelected: (time) =>
                           setState(() => _startTime = time),
+                      isDark: widget.isDark,
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -3178,6 +3035,7 @@ class _EditBreakDialogState extends State<_EditBreakDialog> {
                       label: 'End Time',
                       initialTime: _endTime,
                       onTimeSelected: (time) => setState(() => _endTime = time),
+                      isDark: widget.isDark,
                     ),
                   ),
                 ],
@@ -3188,13 +3046,18 @@ class _EditBreakDialogState extends State<_EditBreakDialog> {
                 children: [
                   TextButton(
                     onPressed: () => Navigator.pop(context),
-                    child: const Text('Cancel'),
+                    child: Text(
+                      'Cancel',
+                      style: TextStyle(
+                        color: widget.isDark ? Colors.white60 : Colors.black87,
+                      ),
+                    ),
                   ),
                   const SizedBox(width: 12),
                   ElevatedButton(
                     onPressed: _isLoading ? null : _updateBreak,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFFF6B8B),
+                      backgroundColor: AppTheme.primary,
                       foregroundColor: Colors.white,
                     ),
                     child: _isLoading
@@ -3233,7 +3096,10 @@ class _EditBreakDialogState extends State<_EditBreakDialog> {
       debugPrint('Error updating break: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: widget.isDark ? Colors.red[700] : Colors.red,
+          ),
         );
         setState(() => _isLoading = false);
       }
@@ -3241,56 +3107,44 @@ class _EditBreakDialogState extends State<_EditBreakDialog> {
   }
 }
 
-// ==================== ADD SCHEDULE DIALOG ====================
-class _AddScheduleDialog extends StatefulWidget {
+// ==================== ADD SPECIAL SCHEDULE DIALOG (FIXED) ====================
+class _AddSpecialScheduleDialog extends StatefulWidget {
   final String barberId;
   final String salonId;
   final String salonTimezone;
-  final List<Map<String, dynamic>> existingSchedules;
   final TimeOfDay? defaultOpenTime;
   final TimeOfDay? defaultCloseTime;
+  final bool isDark;
 
-  const _AddScheduleDialog({
+  const _AddSpecialScheduleDialog({
     required this.barberId,
     required this.salonId,
     required this.salonTimezone,
-    required this.existingSchedules,
     this.defaultOpenTime,
     this.defaultCloseTime,
+    required this.isDark,
   });
 
   @override
-  State<_AddScheduleDialog> createState() => _AddScheduleDialogState();
+  State<_AddSpecialScheduleDialog> createState() =>
+      _AddSpecialScheduleDialogState();
 }
 
-class _AddScheduleDialogState extends State<_AddScheduleDialog> {
+class _AddSpecialScheduleDialogState extends State<_AddSpecialScheduleDialog> {
   final supabase = Supabase.instance.client;
 
-  int? _selectedDay;
+  DateTime? _selectedDate;
   TimeOfDay? _startTime;
   TimeOfDay? _endTime;
   bool _isWorking = true;
+  final TextEditingController _reasonController = TextEditingController();
   bool _isLoading = false;
 
-  final List<Map<String, dynamic>> _days = const [
-    {'id': 1, 'name': 'Monday'},
-    {'id': 2, 'name': 'Tuesday'},
-    {'id': 3, 'name': 'Wednesday'},
-    {'id': 4, 'name': 'Thursday'},
-    {'id': 5, 'name': 'Friday'},
-    {'id': 6, 'name': 'Saturday'},
-    {'id': 7, 'name': 'Sunday'},
-  ];
-
-  List<int> get _availableDays {
-    final existingDays = widget.existingSchedules
-        .where((s) => s['day_of_week'] != null)
-        .map((s) => s['day_of_week'] as int)
-        .toSet();
-    return _days
-        .where((d) => !existingDays.contains(d['id']))
-        .map((d) => d['id'] as int)
-        .toList();
+  @override
+  void initState() {
+    super.initState();
+    _startTime = widget.defaultOpenTime;
+    _endTime = widget.defaultCloseTime;
   }
 
   String _localTimeToUtc(TimeOfDay localTime) {
@@ -3301,21 +3155,15 @@ class _AddScheduleDialogState extends State<_AddScheduleDialog> {
   }
 
   @override
-  void initState() {
-    super.initState();
-    _startTime = widget.defaultOpenTime;
-    _endTime = widget.defaultCloseTime;
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final bool isWeb = screenWidth > 800;
+    final bool isWeb = context.isWeb;
+    final bool isMobile = !isWeb;
 
     return Dialog(
+      backgroundColor: widget.isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Container(
-        width: isWeb ? 500 : screenWidth * 0.9,
+        width: isWeb ? 500 : MediaQuery.of(context).size.width * 0.92,
         constraints: BoxConstraints(
           maxHeight: MediaQuery.of(context).size.height * 0.8,
         ),
@@ -3325,67 +3173,161 @@ class _AddScheduleDialogState extends State<_AddScheduleDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'Add Schedule',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              Text(
+                'Add Special Schedule',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: widget.isDark ? Colors.white : Colors.black87,
+                ),
               ),
               const SizedBox(height: 20),
-              const Text(
-                'Select Day',
-                style: TextStyle(fontWeight: FontWeight.bold),
+              Text(
+                'Select Date',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: widget.isDark ? Colors.white : Colors.black87,
+                ),
               ),
               const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: _days.map((day) {
-                  final isSelected = _selectedDay == day['id'];
-                  final isAvailable = _availableDays.contains(day['id']);
-                  return FilterChip(
-                    label: Text(day['name']),
-                    selected: isSelected,
-                    onSelected: isAvailable
-                        ? (selected) => setState(() => _selectedDay = day['id'])
-                        : null,
-                    backgroundColor: Colors.grey[100],
-                    selectedColor: const Color(
-                      0xFFFF6B8B,
-                    ).withValues(alpha: 0.2),
-                    checkmarkColor: const Color(0xFFFF6B8B),
-                    avatar: isAvailable
-                        ? null
-                        : const Icon(Icons.lock, size: 16),
+              GestureDetector(
+                onTap: () async {
+                  final date = await showDatePicker(
+                    context: context,
+                    initialDate: DateTime.now(),
+                    firstDate: DateTime.now(),
+                    lastDate: DateTime.now().add(const Duration(days: 365)),
                   );
-                }).toList(),
-              ),
-              if (_availableDays.isEmpty && _selectedDay == null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text(
-                    'All days already have schedules!',
-                    style: TextStyle(color: Colors.orange[700], fontSize: 12),
+                  if (date != null) setState(() => _selectedDate = date);
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 14,
+                  ),
+                  decoration: BoxDecoration(
+                    border: Border.all(
+                      color: widget.isDark
+                          ? Colors.grey[700]!
+                          : Colors.grey[300]!,
+                    ),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.calendar_today,
+                        color: _selectedDate != null
+                            ? AppTheme.primary
+                            : (widget.isDark ? Colors.white70 : Colors.grey),
+                        size: isMobile ? 20 : 24,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          _selectedDate != null
+                              ? DateFormat('yyyy-MM-dd').format(_selectedDate!)
+                              : 'Select date',
+                          style: TextStyle(
+                            color: widget.isDark
+                                ? Colors.white
+                                : Colors.black87,
+                            fontSize: isMobile ? 14 : 16,
+                          ),
+                        ),
+                      ),
+                      Icon(
+                        Icons.arrow_drop_down,
+                        color: widget.isDark ? Colors.white70 : Colors.grey,
+                        size: isMobile ? 20 : 24,
+                      ),
+                    ],
                   ),
                 ),
+              ),
               const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: _TimePickerField(
-                      label: 'Start Time',
-                      initialTime: _startTime,
-                      onTimeSelected: (time) =>
-                          setState(() => _startTime = time),
+              // ✅ FIXED: Column layout for mobile, Row for web
+              isMobile
+                  ? Column(
+                      children: [
+                        _TimePickerField(
+                          label: 'Start Time',
+                          initialTime: _startTime,
+                          onTimeSelected: (time) =>
+                              setState(() => _startTime = time),
+                          isDark: widget.isDark,
+                        ),
+                        const SizedBox(height: 12),
+                        _TimePickerField(
+                          label: 'End Time',
+                          initialTime: _endTime,
+                          onTimeSelected: (time) =>
+                              setState(() => _endTime = time),
+                          isDark: widget.isDark,
+                        ),
+                      ],
+                    )
+                  : Row(
+                      children: [
+                        Expanded(
+                          child: _TimePickerField(
+                            label: 'Start Time',
+                            initialTime: _startTime,
+                            onTimeSelected: (time) =>
+                                setState(() => _startTime = time),
+                            isDark: widget.isDark,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _TimePickerField(
+                            label: 'End Time',
+                            initialTime: _endTime,
+                            onTimeSelected: (time) =>
+                                setState(() => _endTime = time),
+                            isDark: widget.isDark,
+                          ),
+                        ),
+                      ],
+                    ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _reasonController,
+                style: TextStyle(
+                  color: widget.isDark ? Colors.white : Colors.black87,
+                ),
+                decoration: InputDecoration(
+                  labelText: 'Reason (e.g., Training, Holiday)',
+                  labelStyle: TextStyle(
+                    color: widget.isDark ? Colors.white60 : Colors.grey[600],
+                  ),
+                  border: OutlineInputBorder(
+                    borderSide: BorderSide(
+                      color: widget.isDark
+                          ? Colors.grey[700]!
+                          : Colors.grey[300]!,
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _TimePickerField(
-                      label: 'End Time',
-                      initialTime: _endTime,
-                      onTimeSelected: (time) => setState(() => _endTime = time),
+                  enabledBorder: OutlineInputBorder(
+                    borderSide: BorderSide(
+                      color: widget.isDark
+                          ? Colors.grey[700]!
+                          : Colors.grey[300]!,
                     ),
                   ),
-                ],
+                  focusedBorder: const OutlineInputBorder(
+                    borderSide: BorderSide(color: AppTheme.primary, width: 2),
+                  ),
+                  fillColor: widget.isDark
+                      ? const Color(0xFF2A2A2A)
+                      : Colors.white,
+                  filled: true,
+                  contentPadding: EdgeInsets.symmetric(
+                    horizontal: isMobile ? 12 : 16,
+                    vertical: isMobile ? 10 : 14,
+                  ),
+                ),
+                maxLines: 1,
               ),
               const SizedBox(height: 16),
               Container(
@@ -3409,29 +3351,18 @@ class _AddScheduleDialogState extends State<_AddScheduleDialog> {
                     Icon(
                       _isWorking ? Icons.check_circle : Icons.cancel,
                       color: _isWorking ? Colors.green : Colors.red,
+                      size: isMobile ? 20 : 24,
                     ),
                     const SizedBox(width: 12),
                     Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Working Day',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: _isWorking ? Colors.green : Colors.red,
-                            ),
-                          ),
-                          Text(
-                            _isWorking
-                                ? 'This day will be available for bookings'
-                                : 'This day will be marked as day off',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey[600],
-                            ),
-                          ),
-                        ],
+                      child: Text(
+                        _isWorking
+                            ? 'Working on this day'
+                            : 'Not working on this day',
+                        style: TextStyle(
+                          color: widget.isDark ? Colors.white : Colors.black87,
+                          fontSize: isMobile ? 13 : 14,
+                        ),
                       ),
                     ),
                     Switch(
@@ -3439,41 +3370,97 @@ class _AddScheduleDialogState extends State<_AddScheduleDialog> {
                       onChanged: (value) => setState(() => _isWorking = value),
                       activeThumbColor: Colors.green,
                       inactiveThumbColor: Colors.red,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
                   ],
                 ),
               ),
               const SizedBox(height: 24),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('Cancel'),
-                  ),
-                  const SizedBox(width: 12),
-                  ElevatedButton(
-                    onPressed:
-                        (_selectedDay != null &&
-                            _startTime != null &&
-                            _endTime != null &&
-                            !_isLoading)
-                        ? _saveSchedule
-                        : null,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFFF6B8B),
-                      foregroundColor: Colors.white,
+              // ✅ FIXED: Column for mobile, Row for web
+              isMobile
+                  ? Column(
+                      children: [
+                        SizedBox(
+                          width: double.infinity,
+                          child: TextButton(
+                            onPressed: () => Navigator.pop(context),
+                            style: TextButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              foregroundColor: widget.isDark
+                                  ? Colors.white60
+                                  : Colors.black87,
+                            ),
+                            child: const Text('Cancel'),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton(
+                            onPressed:
+                                (_selectedDate != null &&
+                                    _startTime != null &&
+                                    _endTime != null &&
+                                    !_isLoading)
+                                ? _saveSpecialSchedule
+                                : null,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppTheme.primary,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                            ),
+                            child: _isLoading
+                                ? const SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Text('Add Special Schedule'),
+                          ),
+                        ),
+                      ],
+                    )
+                  : Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: Text(
+                            'Cancel',
+                            style: TextStyle(
+                              color: widget.isDark
+                                  ? Colors.white60
+                                  : Colors.black87,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        ElevatedButton(
+                          onPressed:
+                              (_selectedDate != null &&
+                                  _startTime != null &&
+                                  _endTime != null &&
+                                  !_isLoading)
+                              ? _saveSpecialSchedule
+                              : null,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppTheme.primary,
+                            foregroundColor: Colors.white,
+                          ),
+                          child: _isLoading
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Text('Add Special Schedule'),
+                        ),
+                      ],
                     ),
-                    child: _isLoading
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text('Add Schedule'),
-                  ),
-                ],
-              ),
             ],
           ),
         ),
@@ -3481,27 +3468,33 @@ class _AddScheduleDialogState extends State<_AddScheduleDialog> {
     );
   }
 
-  Future<void> _saveSchedule() async {
+  Future<void> _saveSpecialSchedule() async {
     setState(() => _isLoading = true);
     try {
       final salonIdInt = int.parse(widget.salonId);
       final startTimeString = _localTimeToUtc(_startTime!);
       final endTimeString = _localTimeToUtc(_endTime!);
 
-      await supabase.from('barber_schedules').insert({
+      await supabase.from('barber_special_schedules').insert({
         'barber_id': widget.barberId,
         'salon_id': salonIdInt,
-        'day_of_week': _selectedDay,
+        'schedule_date': _selectedDate!.toIso8601String().split('T').first,
         'start_time': startTimeString,
         'end_time': endTimeString,
         'is_working': _isWorking,
+        'reason': _reasonController.text.isNotEmpty
+            ? _reasonController.text
+            : null,
       });
       if (mounted) Navigator.pop(context, {'success': true});
     } catch (e) {
-      debugPrint('Error saving schedule: $e');
+      debugPrint('Error saving special schedule: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: widget.isDark ? Colors.red[700] : Colors.red,
+          ),
         );
         setState(() => _isLoading = false);
       }
@@ -3509,28 +3502,33 @@ class _AddScheduleDialogState extends State<_AddScheduleDialog> {
   }
 }
 
-// ==================== EDIT SCHEDULE DIALOG ====================
-class _EditScheduleDialog extends StatefulWidget {
+// ==================== EDIT SPECIAL SCHEDULE DIALOG (FIXED) ====================
+class _EditSpecialScheduleDialog extends StatefulWidget {
   final Map<String, dynamic> schedule;
   final String salonTimezone;
   final TimeOfDay? defaultOpenTime;
   final TimeOfDay? defaultCloseTime;
+  final bool isDark;
 
-  const _EditScheduleDialog({
+  const _EditSpecialScheduleDialog({
     required this.schedule,
     required this.salonTimezone,
     this.defaultOpenTime,
     this.defaultCloseTime,
+    required this.isDark,
   });
 
   @override
-  State<_EditScheduleDialog> createState() => _EditScheduleDialogState();
+  State<_EditSpecialScheduleDialog> createState() =>
+      _EditSpecialScheduleDialogState();
 }
 
-class _EditScheduleDialogState extends State<_EditScheduleDialog> {
+class _EditSpecialScheduleDialogState
+    extends State<_EditSpecialScheduleDialog> {
   late TimeOfDay _startTime;
   late TimeOfDay _endTime;
   late bool _isWorking;
+  final TextEditingController _reasonController = TextEditingController();
   bool _isLoading = false;
   final supabase = Supabase.instance.client;
 
@@ -3546,6 +3544,7 @@ class _EditScheduleDialogState extends State<_EditScheduleDialog> {
       widget.salonTimezone,
     );
     _isWorking = widget.schedule['is_working'] ?? true;
+    _reasonController.text = widget.schedule['reason'] ?? '';
   }
 
   String _localTimeToUtc(TimeOfDay localTime) {
@@ -3557,23 +3556,15 @@ class _EditScheduleDialogState extends State<_EditScheduleDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final bool isWeb = screenWidth > 800;
-    final dayNames = {
-      1: 'Monday',
-      2: 'Tuesday',
-      3: 'Wednesday',
-      4: 'Thursday',
-      5: 'Friday',
-      6: 'Saturday',
-      7: 'Sunday',
-    };
-    final dayName = dayNames[widget.schedule['day_of_week']] ?? 'Unknown';
+    final bool isWeb = context.isWeb;
+    final bool isMobile = !isWeb;
+    final date = DateTime.parse(widget.schedule['schedule_date']);
 
     return Dialog(
+      backgroundColor: widget.isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Container(
-        width: isWeb ? 500 : screenWidth * 0.9,
+        width: isWeb ? 500 : MediaQuery.of(context).size.width * 0.92,
         constraints: BoxConstraints(
           maxHeight: MediaQuery.of(context).size.height * 0.8,
         ),
@@ -3584,32 +3575,96 @@ class _EditScheduleDialogState extends State<_EditScheduleDialog> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Edit Schedule - $dayName',
-                style: const TextStyle(
-                  fontSize: 20,
+                'Edit Special Schedule - ${DateFormat('yyyy-MM-dd').format(date)}',
+                style: TextStyle(
+                  fontSize: isMobile ? 16 : 20,
                   fontWeight: FontWeight.bold,
+                  color: widget.isDark ? Colors.white : Colors.black87,
                 ),
               ),
               const SizedBox(height: 20),
-              Row(
-                children: [
-                  Expanded(
-                    child: _TimePickerField(
-                      label: 'Start Time',
-                      initialTime: _startTime,
-                      onTimeSelected: (time) =>
-                          setState(() => _startTime = time),
+              // ✅ FIXED: Column for mobile, Row for web
+              isMobile
+                  ? Column(
+                      children: [
+                        _TimePickerField(
+                          label: 'Start Time',
+                          initialTime: _startTime,
+                          onTimeSelected: (time) =>
+                              setState(() => _startTime = time),
+                          isDark: widget.isDark,
+                        ),
+                        const SizedBox(height: 12),
+                        _TimePickerField(
+                          label: 'End Time',
+                          initialTime: _endTime,
+                          onTimeSelected: (time) =>
+                              setState(() => _endTime = time),
+                          isDark: widget.isDark,
+                        ),
+                      ],
+                    )
+                  : Row(
+                      children: [
+                        Expanded(
+                          child: _TimePickerField(
+                            label: 'Start Time',
+                            initialTime: _startTime,
+                            onTimeSelected: (time) =>
+                                setState(() => _startTime = time),
+                            isDark: widget.isDark,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _TimePickerField(
+                            label: 'End Time',
+                            initialTime: _endTime,
+                            onTimeSelected: (time) =>
+                                setState(() => _endTime = time),
+                            isDark: widget.isDark,
+                          ),
+                        ),
+                      ],
+                    ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _reasonController,
+                style: TextStyle(
+                  color: widget.isDark ? Colors.white : Colors.black87,
+                ),
+                decoration: InputDecoration(
+                  labelText: 'Reason',
+                  labelStyle: TextStyle(
+                    color: widget.isDark ? Colors.white60 : Colors.grey[600],
+                  ),
+                  border: OutlineInputBorder(
+                    borderSide: BorderSide(
+                      color: widget.isDark
+                          ? Colors.grey[700]!
+                          : Colors.grey[300]!,
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _TimePickerField(
-                      label: 'End Time',
-                      initialTime: _endTime,
-                      onTimeSelected: (time) => setState(() => _endTime = time),
+                  enabledBorder: OutlineInputBorder(
+                    borderSide: BorderSide(
+                      color: widget.isDark
+                          ? Colors.grey[700]!
+                          : Colors.grey[300]!,
                     ),
                   ),
-                ],
+                  focusedBorder: const OutlineInputBorder(
+                    borderSide: BorderSide(color: AppTheme.primary, width: 2),
+                  ),
+                  fillColor: widget.isDark
+                      ? const Color(0xFF2A2A2A)
+                      : Colors.white,
+                  filled: true,
+                  contentPadding: EdgeInsets.symmetric(
+                    horizontal: isMobile ? 12 : 16,
+                    vertical: isMobile ? 10 : 14,
+                  ),
+                ),
+                maxLines: 1,
               ),
               const SizedBox(height: 16),
               Container(
@@ -3633,29 +3688,18 @@ class _EditScheduleDialogState extends State<_EditScheduleDialog> {
                     Icon(
                       _isWorking ? Icons.check_circle : Icons.cancel,
                       color: _isWorking ? Colors.green : Colors.red,
+                      size: isMobile ? 20 : 24,
                     ),
                     const SizedBox(width: 12),
                     Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Working Day',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: _isWorking ? Colors.green : Colors.red,
-                            ),
-                          ),
-                          Text(
-                            _isWorking
-                                ? 'This day will be available for bookings'
-                                : 'This day will be marked as day off',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey[600],
-                            ),
-                          ),
-                        ],
+                      child: Text(
+                        _isWorking
+                            ? 'Working on this day'
+                            : 'Not working on this day',
+                        style: TextStyle(
+                          color: widget.isDark ? Colors.white : Colors.black87,
+                          fontSize: isMobile ? 13 : 14,
+                        ),
                       ),
                     ),
                     Switch(
@@ -3663,35 +3707,87 @@ class _EditScheduleDialogState extends State<_EditScheduleDialog> {
                       onChanged: (value) => setState(() => _isWorking = value),
                       activeThumbColor: Colors.green,
                       inactiveThumbColor: Colors.red,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
                   ],
                 ),
               ),
               const SizedBox(height: 24),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('Cancel'),
-                  ),
-                  const SizedBox(width: 12),
-                  ElevatedButton(
-                    onPressed: _isLoading ? null : _updateSchedule,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFFF6B8B),
-                      foregroundColor: Colors.white,
+              // ✅ FIXED: Column for mobile, Row for web
+              isMobile
+                  ? Column(
+                      children: [
+                        SizedBox(
+                          width: double.infinity,
+                          child: TextButton(
+                            onPressed: () => Navigator.pop(context),
+                            style: TextButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              foregroundColor: widget.isDark
+                                  ? Colors.white60
+                                  : Colors.black87,
+                            ),
+                            child: const Text('Cancel'),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton(
+                            onPressed: _isLoading
+                                ? null
+                                : _updateSpecialSchedule,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppTheme.primary,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                            ),
+                            child: _isLoading
+                                ? const SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Text('Update'),
+                          ),
+                        ),
+                      ],
+                    )
+                  : Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: Text(
+                            'Cancel',
+                            style: TextStyle(
+                              color: widget.isDark
+                                  ? Colors.white60
+                                  : Colors.black87,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        ElevatedButton(
+                          onPressed: _isLoading ? null : _updateSpecialSchedule,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppTheme.primary,
+                            foregroundColor: Colors.white,
+                          ),
+                          child: _isLoading
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Text('Update'),
+                        ),
+                      ],
                     ),
-                    child: _isLoading
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text('Update Schedule'),
-                  ),
-                ],
-              ),
             ],
           ),
         ),
@@ -3699,26 +3795,665 @@ class _EditScheduleDialogState extends State<_EditScheduleDialog> {
     );
   }
 
-  Future<void> _updateSchedule() async {
+  Future<void> _updateSpecialSchedule() async {
     setState(() => _isLoading = true);
     try {
       final startTimeString = _localTimeToUtc(_startTime);
       final endTimeString = _localTimeToUtc(_endTime);
 
       await supabase
-          .from('barber_schedules')
+          .from('barber_special_schedules')
           .update({
             'start_time': startTimeString,
             'end_time': endTimeString,
             'is_working': _isWorking,
+            'reason': _reasonController.text.isNotEmpty
+                ? _reasonController.text
+                : null,
           })
           .eq('id', widget.schedule['id']);
       if (mounted) Navigator.pop(context, {'success': true});
     } catch (e) {
-      debugPrint('Error updating schedule: $e');
+      debugPrint('Error updating special schedule: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: widget.isDark ? Colors.red[700] : Colors.red,
+          ),
+        );
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+}
+
+// ==================== ADD SPECIAL BREAK DIALOG (FIXED) ====================
+class _AddSpecialBreakDialog extends StatefulWidget {
+  final String barberId;
+  final String salonId;
+  final String salonTimezone;
+  final List<Map<String, dynamic>> breakTypes;
+  final TimeOfDay? defaultOpenTime;
+  final TimeOfDay? defaultCloseTime;
+  final bool isDark;
+
+  const _AddSpecialBreakDialog({
+    required this.barberId,
+    required this.salonId,
+    required this.salonTimezone,
+    required this.breakTypes,
+    this.defaultOpenTime,
+    this.defaultCloseTime,
+    required this.isDark,
+  });
+
+  @override
+  State<_AddSpecialBreakDialog> createState() => _AddSpecialBreakDialogState();
+}
+
+class _AddSpecialBreakDialogState extends State<_AddSpecialBreakDialog> {
+  final supabase = Supabase.instance.client;
+
+  DateTime? _selectedDate;
+  TimeOfDay? _startTime;
+  TimeOfDay? _endTime;
+  String _selectedBreakType = 'lunch';
+  bool _isLoading = false;
+
+  String _localTimeToUtc(TimeOfDay localTime) {
+    return TimezoneService.timeOfDayToUtcWithTimezone(
+      localTime,
+      widget.salonTimezone,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bool isWeb = context.isWeb;
+    final bool isMobile = !isWeb;
+
+    return Dialog(
+      backgroundColor: widget.isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Container(
+        width: isWeb ? 500 : MediaQuery.of(context).size.width * 0.92,
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.8,
+        ),
+        padding: EdgeInsets.all(isWeb ? 24 : 16),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Add Special Break',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: widget.isDark ? Colors.white : Colors.black87,
+                ),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                'Select Date',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: widget.isDark ? Colors.white : Colors.black87,
+                ),
+              ),
+              const SizedBox(height: 8),
+              GestureDetector(
+                onTap: () async {
+                  final date = await showDatePicker(
+                    context: context,
+                    initialDate: DateTime.now(),
+                    firstDate: DateTime.now(),
+                    lastDate: DateTime.now().add(const Duration(days: 365)),
+                  );
+                  if (date != null) setState(() => _selectedDate = date);
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 14,
+                  ),
+                  decoration: BoxDecoration(
+                    border: Border.all(
+                      color: widget.isDark
+                          ? Colors.grey[700]!
+                          : Colors.grey[300]!,
+                    ),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.calendar_today,
+                        color: _selectedDate != null
+                            ? AppTheme.primary
+                            : (widget.isDark ? Colors.white70 : Colors.grey),
+                        size: isMobile ? 20 : 24,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          _selectedDate != null
+                              ? DateFormat('yyyy-MM-dd').format(_selectedDate!)
+                              : 'Select date',
+                          style: TextStyle(
+                            color: widget.isDark
+                                ? Colors.white
+                                : Colors.black87,
+                            fontSize: isMobile ? 14 : 16,
+                          ),
+                        ),
+                      ),
+                      Icon(
+                        Icons.arrow_drop_down,
+                        color: widget.isDark ? Colors.white70 : Colors.grey,
+                        size: isMobile ? 20 : 24,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Break Type',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: widget.isDark ? Colors.white : Colors.black87,
+                ),
+              ),
+              const SizedBox(height: 8),
+              // ✅ FIXED: Wrap with proper spacing for mobile
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                alignment: WrapAlignment.start,
+                children: widget.breakTypes.map((type) {
+                  final isSelected = _selectedBreakType == type['id'];
+                  return FilterChip(
+                    label: Text(
+                      type['name'],
+                      style: TextStyle(
+                        fontSize: isMobile ? 11 : 13,
+                        color: isSelected
+                            ? AppTheme.primary
+                            : (widget.isDark ? Colors.white70 : Colors.black87),
+                      ),
+                    ),
+                    selected: isSelected,
+                    onSelected: (selected) {
+                      if (selected) {
+                        setState(() => _selectedBreakType = type['id']);
+                      }
+                    },
+                    avatar: Icon(
+                      type['icon'],
+                      size: isMobile ? 16 : 18,
+                      color: isSelected ? AppTheme.primary : Colors.grey,
+                    ),
+                    backgroundColor: widget.isDark
+                        ? const Color(0xFF2A2A2A)
+                        : Colors.grey[100],
+                    selectedColor: AppTheme.primary.withValues(alpha: 0.2),
+                    checkmarkColor: AppTheme.primary,
+                    padding: EdgeInsets.symmetric(
+                      horizontal: isMobile ? 8 : 12,
+                      vertical: isMobile ? 6 : 8,
+                    ),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 16),
+              // ✅ FIXED: Column for mobile, Row for web
+              isMobile
+                  ? Column(
+                      children: [
+                        _TimePickerField(
+                          label: 'Start Time',
+                          initialTime: _startTime,
+                          onTimeSelected: (time) =>
+                              setState(() => _startTime = time),
+                          isDark: widget.isDark,
+                        ),
+                        const SizedBox(height: 12),
+                        _TimePickerField(
+                          label: 'End Time',
+                          initialTime: _endTime,
+                          onTimeSelected: (time) =>
+                              setState(() => _endTime = time),
+                          isDark: widget.isDark,
+                        ),
+                      ],
+                    )
+                  : Row(
+                      children: [
+                        Expanded(
+                          child: _TimePickerField(
+                            label: 'Start Time',
+                            initialTime: _startTime,
+                            onTimeSelected: (time) =>
+                                setState(() => _startTime = time),
+                            isDark: widget.isDark,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _TimePickerField(
+                            label: 'End Time',
+                            initialTime: _endTime,
+                            onTimeSelected: (time) =>
+                                setState(() => _endTime = time),
+                            isDark: widget.isDark,
+                          ),
+                        ),
+                      ],
+                    ),
+              const SizedBox(height: 24),
+              // ✅ FIXED: Column for mobile, Row for web
+              isMobile
+                  ? Column(
+                      children: [
+                        SizedBox(
+                          width: double.infinity,
+                          child: TextButton(
+                            onPressed: () => Navigator.pop(context),
+                            style: TextButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              foregroundColor: widget.isDark
+                                  ? Colors.white60
+                                  : Colors.black87,
+                            ),
+                            child: const Text('Cancel'),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton(
+                            onPressed:
+                                (_selectedDate != null &&
+                                    _startTime != null &&
+                                    _endTime != null &&
+                                    !_isLoading)
+                                ? _saveSpecialBreak
+                                : null,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppTheme.primary,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                            ),
+                            child: _isLoading
+                                ? const SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Text('Add Special Break'),
+                          ),
+                        ),
+                      ],
+                    )
+                  : Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: Text(
+                            'Cancel',
+                            style: TextStyle(
+                              color: widget.isDark
+                                  ? Colors.white60
+                                  : Colors.black87,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        ElevatedButton(
+                          onPressed:
+                              (_selectedDate != null &&
+                                  _startTime != null &&
+                                  _endTime != null &&
+                                  !_isLoading)
+                              ? _saveSpecialBreak
+                              : null,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppTheme.primary,
+                            foregroundColor: Colors.white,
+                          ),
+                          child: _isLoading
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Text('Add Special Break'),
+                        ),
+                      ],
+                    ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _saveSpecialBreak() async {
+    setState(() => _isLoading = true);
+    try {
+      final salonIdInt = int.parse(widget.salonId);
+      final startTimeString = _localTimeToUtc(_startTime!);
+      final endTimeString = _localTimeToUtc(_endTime!);
+
+      await supabase.from('barber_special_breaks').insert({
+        'barber_id': widget.barberId,
+        'salon_id': salonIdInt,
+        'break_date': _selectedDate!.toIso8601String().split('T').first,
+        'start_time': startTimeString,
+        'end_time': endTimeString,
+        'break_type': _selectedBreakType,
+      });
+      if (mounted) Navigator.pop(context, {'success': true});
+    } catch (e) {
+      debugPrint('Error saving special break: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: widget.isDark ? Colors.red[700] : Colors.red,
+          ),
+        );
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+}
+
+// ==================== EDIT SPECIAL BREAK DIALOG (FIXED) ====================
+class _EditSpecialBreakDialog extends StatefulWidget {
+  final Map<String, dynamic> breakItem;
+  final String salonTimezone;
+  final List<Map<String, dynamic>> breakTypes;
+  final TimeOfDay? defaultOpenTime;
+  final TimeOfDay? defaultCloseTime;
+  final bool isDark;
+
+  const _EditSpecialBreakDialog({
+    required this.breakItem,
+    required this.salonTimezone,
+    required this.breakTypes,
+    this.defaultOpenTime,
+    this.defaultCloseTime,
+    required this.isDark,
+  });
+
+  @override
+  State<_EditSpecialBreakDialog> createState() =>
+      _EditSpecialBreakDialogState();
+}
+
+class _EditSpecialBreakDialogState extends State<_EditSpecialBreakDialog> {
+  late TimeOfDay _startTime;
+  late TimeOfDay _endTime;
+  late String _selectedBreakType;
+  bool _isLoading = false;
+  final supabase = Supabase.instance.client;
+
+  @override
+  void initState() {
+    super.initState();
+    _startTime = TimezoneService.utcToTimeOfDayWithTimezone(
+      widget.breakItem['start_time'],
+      widget.salonTimezone,
+    );
+    _endTime = TimezoneService.utcToTimeOfDayWithTimezone(
+      widget.breakItem['end_time'],
+      widget.salonTimezone,
+    );
+    _selectedBreakType = widget.breakItem['break_type'] ?? 'lunch';
+  }
+
+  String _localTimeToUtc(TimeOfDay localTime) {
+    return TimezoneService.timeOfDayToUtcWithTimezone(
+      localTime,
+      widget.salonTimezone,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bool isWeb = context.isWeb;
+    final bool isMobile = !isWeb;
+    final date = DateTime.parse(widget.breakItem['break_date']);
+
+    return Dialog(
+      backgroundColor: widget.isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Container(
+        width: isWeb ? 500 : MediaQuery.of(context).size.width * 0.92,
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.8,
+        ),
+        padding: EdgeInsets.all(isWeb ? 24 : 16),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Edit Special Break - ${DateFormat('yyyy-MM-dd').format(date)}',
+                style: TextStyle(
+                  fontSize: isMobile ? 16 : 20,
+                  fontWeight: FontWeight.bold,
+                  color: widget.isDark ? Colors.white : Colors.black87,
+                ),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                'Break Type',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: widget.isDark ? Colors.white : Colors.black87,
+                ),
+              ),
+              const SizedBox(height: 8),
+              // ✅ FIXED: Wrap with proper spacing for mobile
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                alignment: WrapAlignment.start,
+                children: widget.breakTypes.map((type) {
+                  final isSelected = _selectedBreakType == type['id'];
+                  return FilterChip(
+                    label: Text(
+                      type['name'],
+                      style: TextStyle(
+                        fontSize: isMobile ? 11 : 13,
+                        color: isSelected
+                            ? AppTheme.primary
+                            : (widget.isDark ? Colors.white70 : Colors.black87),
+                      ),
+                    ),
+                    selected: isSelected,
+                    onSelected: (selected) {
+                      if (selected) {
+                        setState(() => _selectedBreakType = type['id']);
+                      }
+                    },
+                    avatar: Icon(
+                      type['icon'],
+                      size: isMobile ? 16 : 18,
+                      color: isSelected ? AppTheme.primary : Colors.grey,
+                    ),
+                    backgroundColor: widget.isDark
+                        ? const Color(0xFF2A2A2A)
+                        : Colors.grey[100],
+                    selectedColor: AppTheme.primary.withValues(alpha: 0.2),
+                    checkmarkColor: AppTheme.primary,
+                    padding: EdgeInsets.symmetric(
+                      horizontal: isMobile ? 8 : 12,
+                      vertical: isMobile ? 6 : 8,
+                    ),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 16),
+              // ✅ FIXED: Column for mobile, Row for web
+              isMobile
+                  ? Column(
+                      children: [
+                        _TimePickerField(
+                          label: 'Start Time',
+                          initialTime: _startTime,
+                          onTimeSelected: (time) =>
+                              setState(() => _startTime = time),
+                          isDark: widget.isDark,
+                        ),
+                        const SizedBox(height: 12),
+                        _TimePickerField(
+                          label: 'End Time',
+                          initialTime: _endTime,
+                          onTimeSelected: (time) =>
+                              setState(() => _endTime = time),
+                          isDark: widget.isDark,
+                        ),
+                      ],
+                    )
+                  : Row(
+                      children: [
+                        Expanded(
+                          child: _TimePickerField(
+                            label: 'Start Time',
+                            initialTime: _startTime,
+                            onTimeSelected: (time) =>
+                                setState(() => _startTime = time),
+                            isDark: widget.isDark,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _TimePickerField(
+                            label: 'End Time',
+                            initialTime: _endTime,
+                            onTimeSelected: (time) =>
+                                setState(() => _endTime = time),
+                            isDark: widget.isDark,
+                          ),
+                        ),
+                      ],
+                    ),
+              const SizedBox(height: 24),
+              // ✅ FIXED: Column for mobile, Row for web
+              isMobile
+                  ? Column(
+                      children: [
+                        SizedBox(
+                          width: double.infinity,
+                          child: TextButton(
+                            onPressed: () => Navigator.pop(context),
+                            style: TextButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              foregroundColor: widget.isDark
+                                  ? Colors.white60
+                                  : Colors.black87,
+                            ),
+                            child: const Text('Cancel'),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton(
+                            onPressed: _isLoading ? null : _updateSpecialBreak,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppTheme.primary,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                            ),
+                            child: _isLoading
+                                ? const SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Text('Update'),
+                          ),
+                        ),
+                      ],
+                    )
+                  : Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: Text(
+                            'Cancel',
+                            style: TextStyle(
+                              color: widget.isDark
+                                  ? Colors.white60
+                                  : Colors.black87,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        ElevatedButton(
+                          onPressed: _isLoading ? null : _updateSpecialBreak,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppTheme.primary,
+                            foregroundColor: Colors.white,
+                          ),
+                          child: _isLoading
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Text('Update'),
+                        ),
+                      ],
+                    ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _updateSpecialBreak() async {
+    setState(() => _isLoading = true);
+    try {
+      final startTimeString = _localTimeToUtc(_startTime);
+      final endTimeString = _localTimeToUtc(_endTime);
+
+      await supabase
+          .from('barber_special_breaks')
+          .update({
+            'start_time': startTimeString,
+            'end_time': endTimeString,
+            'break_type': _selectedBreakType,
+          })
+          .eq('id', widget.breakItem['id']);
+      if (mounted) Navigator.pop(context, {'success': true});
+    } catch (e) {
+      debugPrint('Error updating special break: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: widget.isDark ? Colors.red[700] : Colors.red,
+          ),
         );
         setState(() => _isLoading = false);
       }
@@ -3731,11 +4466,13 @@ class _TimePickerField extends StatefulWidget {
   final String label;
   final TimeOfDay? initialTime;
   final ValueChanged<TimeOfDay> onTimeSelected;
+  final bool isDark;
 
   const _TimePickerField({
     required this.label,
     this.initialTime,
     required this.onTimeSelected,
+    required this.isDark,
   });
 
   @override
@@ -3760,21 +4497,6 @@ class _TimePickerFieldState extends State<_TimePickerField> {
     return '$hour:$minute $period';
   }
 
-  Future<void> _showTimePicker() async {
-    final result = await showDialog<TimeOfDay>(
-      context: context,
-      builder: (context) => _EnhancedTimePicker(
-        initialTime: _selectedTime,
-        onTimeSelected: (time) {},
-      ),
-    );
-
-    if (result != null) {
-      setState(() => _selectedTime = result);
-      widget.onTimeSelected(result);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -3785,18 +4507,34 @@ class _TimePickerFieldState extends State<_TimePickerField> {
           style: TextStyle(
             fontSize: 14,
             fontWeight: FontWeight.w600,
-            color: Colors.grey[700],
+            color: widget.isDark ? Colors.white70 : Colors.grey[700],
           ),
         ),
         const SizedBox(height: 8),
         GestureDetector(
-          onTap: _showTimePicker,
+          onTap: () async {
+            final result = await showDialog<TimeOfDay>(
+              context: context,
+              builder: (context) => _EnhancedTimePicker(
+                initialTime: _selectedTime,
+                isDark: widget.isDark,
+              ),
+            );
+
+            if (result != null) {
+              setState(() => _selectedTime = result);
+              widget.onTimeSelected(result);
+            }
+          },
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             decoration: BoxDecoration(
-              border: Border.all(color: Colors.grey[300]!, width: 1),
+              border: Border.all(
+                color: widget.isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                width: 1,
+              ),
               borderRadius: BorderRadius.circular(12),
-              color: Colors.white,
+              color: widget.isDark ? const Color(0xFF2A2A2A) : Colors.white,
             ),
             child: Row(
               children: [
@@ -3804,8 +4542,8 @@ class _TimePickerFieldState extends State<_TimePickerField> {
                   Icons.access_time,
                   size: 20,
                   color: _selectedTime != null
-                      ? const Color(0xFFFF6B8B)
-                      : Colors.grey[400],
+                      ? AppTheme.primary
+                      : (widget.isDark ? Colors.white70 : Colors.grey[400]),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -3817,12 +4555,16 @@ class _TimePickerFieldState extends State<_TimePickerField> {
                       fontSize: 16,
                       fontWeight: FontWeight.w500,
                       color: _selectedTime != null
-                          ? Colors.black
-                          : Colors.grey[500],
+                          ? (widget.isDark ? Colors.white : Colors.black)
+                          : (widget.isDark ? Colors.white70 : Colors.grey[500]),
                     ),
                   ),
                 ),
-                const Icon(Icons.arrow_drop_down, color: Colors.grey, size: 24),
+                Icon(
+                  Icons.arrow_drop_down,
+                  color: widget.isDark ? Colors.white70 : Colors.grey,
+                  size: 24,
+                ),
               ],
             ),
           ),
@@ -3835,12 +4577,9 @@ class _TimePickerFieldState extends State<_TimePickerField> {
 // ==================== ENHANCED TIME PICKER ====================
 class _EnhancedTimePicker extends StatefulWidget {
   final TimeOfDay? initialTime;
-  final ValueChanged<TimeOfDay> onTimeSelected;
+  final bool isDark;
 
-  const _EnhancedTimePicker({
-    required this.initialTime,
-    required this.onTimeSelected,
-  });
+  const _EnhancedTimePicker({required this.initialTime, required this.isDark});
 
   @override
   State<_EnhancedTimePicker> createState() => _EnhancedTimePickerState();
@@ -3907,7 +4646,6 @@ class _EnhancedTimePickerState extends State<_EnhancedTimePicker> {
       hour24 = _selectedHour == 12 ? 12 : _selectedHour + 12;
     }
     final selectedTime = TimeOfDay(hour: hour24, minute: _selectedMinute);
-    widget.onTimeSelected(selectedTime);
     Navigator.of(context).pop(selectedTime);
   }
 
@@ -3916,7 +4654,9 @@ class _EnhancedTimePickerState extends State<_EnhancedTimePicker> {
   @override
   Widget build(BuildContext context) {
     final isMobile = MediaQuery.of(context).size.width < 600;
+
     return Dialog(
+      backgroundColor: widget.isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
       child: Container(
         width: isMobile ? double.infinity : 320,
@@ -3924,15 +4664,19 @@ class _EnhancedTimePickerState extends State<_EnhancedTimePicker> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text(
+            Text(
               'Select Time',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: widget.isDark ? Colors.white : Colors.black87,
+              ),
             ),
             const SizedBox(height: 20),
             Container(
               padding: const EdgeInsets.symmetric(vertical: 16),
               decoration: BoxDecoration(
-                color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                color: AppTheme.primary.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(16),
               ),
               child: Row(
@@ -3940,26 +4684,26 @@ class _EnhancedTimePickerState extends State<_EnhancedTimePicker> {
                 children: [
                   Text(
                     _selectedHour.toString().padLeft(2, '0'),
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 48,
                       fontWeight: FontWeight.bold,
-                      color: Color(0xFFFF6B8B),
+                      color: AppTheme.primary,
                     ),
                   ),
-                  const Text(
+                  Text(
                     ':',
                     style: TextStyle(
                       fontSize: 48,
                       fontWeight: FontWeight.bold,
-                      color: Color(0xFFFF6B8B),
+                      color: AppTheme.primary,
                     ),
                   ),
                   Text(
                     _selectedMinute.toString().padLeft(2, '0'),
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 48,
                       fontWeight: FontWeight.bold,
-                      color: Color(0xFFFF6B8B),
+                      color: AppTheme.primary,
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -3969,14 +4713,17 @@ class _EnhancedTimePickerState extends State<_EnhancedTimePicker> {
                       vertical: 6,
                     ),
                     decoration: BoxDecoration(
-                      color: Colors.grey[200],
+                      color: widget.isDark
+                          ? Colors.grey[800]
+                          : Colors.grey[200],
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Text(
                       _selectedPeriod,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w600,
+                        color: widget.isDark ? Colors.white : Colors.black87,
                       ),
                     ),
                   ),
@@ -4016,6 +4763,9 @@ class _EnhancedTimePickerState extends State<_EnhancedTimePicker> {
                     onPressed: _cancelTime,
                     style: TextButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 12),
+                      foregroundColor: widget.isDark
+                          ? Colors.white60
+                          : Colors.black87,
                     ),
                     child: const Text('Cancel'),
                   ),
@@ -4025,7 +4775,7 @@ class _EnhancedTimePickerState extends State<_EnhancedTimePicker> {
                   child: ElevatedButton(
                     onPressed: _confirmTime,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFFF6B8B),
+                      backgroundColor: AppTheme.primary,
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 12),
                     ),
@@ -4057,9 +4807,9 @@ class _EnhancedTimePickerState extends State<_EnhancedTimePicker> {
         children: [
           Text(
             title,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 12,
-              color: Colors.grey,
+              color: widget.isDark ? Colors.white60 : Colors.grey,
               fontWeight: FontWeight.w600,
             ),
           ),
@@ -4067,7 +4817,9 @@ class _EnhancedTimePickerState extends State<_EnhancedTimePicker> {
           Container(
             height: 150,
             decoration: BoxDecoration(
-              border: Border.all(color: Colors.grey[300]!),
+              border: Border.all(
+                color: widget.isDark ? Colors.grey[700]! : Colors.grey[300]!,
+              ),
               borderRadius: BorderRadius.circular(12),
             ),
             child: ListWheelScrollView.useDelegate(
@@ -4091,8 +4843,10 @@ class _EnhancedTimePickerState extends State<_EnhancedTimePicker> {
                             ? FontWeight.bold
                             : FontWeight.normal,
                         color: isSelected
-                            ? const Color(0xFFFF6B8B)
-                            : Colors.grey[800],
+                            ? AppTheme.primary
+                            : (widget.isDark
+                                  ? Colors.white70
+                                  : Colors.grey[800]),
                       ),
                     ),
                   );

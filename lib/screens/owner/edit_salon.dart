@@ -3,6 +3,8 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
+import 'package:flutter_application_1/extensions/context_extensions.dart';
+import 'package:flutter_application_1/theme/app_theme.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as path;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -98,9 +100,11 @@ class _EnhancedTimePickerState extends State<EnhancedTimePicker> {
 
   @override
   Widget build(BuildContext context) {
-    final isMobile = MediaQuery.of(context).size.width < 600;
+    final isDark = context.isDarkMode;
+    final isMobile = context.isMobile;
 
     return Dialog(
+      backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
       child: Container(
         width: isMobile ? double.infinity : 320,
@@ -108,16 +112,20 @@ class _EnhancedTimePickerState extends State<EnhancedTimePicker> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text(
+            Text(
               'Select Time',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
             ),
             const SizedBox(height: 20),
 
             Container(
               padding: const EdgeInsets.symmetric(vertical: 16),
               decoration: BoxDecoration(
-                color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                color: AppTheme.primary.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(16),
               ),
               child: Row(
@@ -128,15 +136,15 @@ class _EnhancedTimePickerState extends State<EnhancedTimePicker> {
                     style: const TextStyle(
                       fontSize: 48,
                       fontWeight: FontWeight.bold,
-                      color: Color(0xFFFF6B8B),
+                      color: AppTheme.primary,
                     ),
                   ),
-                  const Text(
+                  Text(
                     ':',
                     style: TextStyle(
                       fontSize: 48,
                       fontWeight: FontWeight.bold,
-                      color: Color(0xFFFF6B8B),
+                      color: isDark ? Colors.white : AppTheme.primary,
                     ),
                   ),
                   Text(
@@ -144,7 +152,7 @@ class _EnhancedTimePickerState extends State<EnhancedTimePicker> {
                     style: const TextStyle(
                       fontSize: 48,
                       fontWeight: FontWeight.bold,
-                      color: Color(0xFFFF6B8B),
+                      color: AppTheme.primary,
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -154,14 +162,15 @@ class _EnhancedTimePickerState extends State<EnhancedTimePicker> {
                       vertical: 6,
                     ),
                     decoration: BoxDecoration(
-                      color: Colors.grey[200],
+                      color: isDark ? Colors.grey[800] : Colors.grey[200],
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Text(
                       _selectedPeriod,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w600,
+                        color: isDark ? Colors.white : Colors.black87,
                       ),
                     ),
                   ),
@@ -203,6 +212,7 @@ class _EnhancedTimePickerState extends State<EnhancedTimePicker> {
                   child: TextButton(
                     onPressed: _cancelTime,
                     style: TextButton.styleFrom(
+                      foregroundColor: isDark ? Colors.white60 : Colors.grey,
                       padding: const EdgeInsets.symmetric(vertical: 12),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
@@ -216,7 +226,7 @@ class _EnhancedTimePickerState extends State<EnhancedTimePicker> {
                   child: ElevatedButton(
                     onPressed: _confirmTime,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFFF6B8B),
+                      backgroundColor: AppTheme.primary,
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 12),
                       shape: RoundedRectangleBorder(
@@ -246,14 +256,16 @@ class _EnhancedTimePickerState extends State<EnhancedTimePicker> {
     required T selectedValue,
     required ValueChanged<T> onChanged,
   }) {
+    final isDark = context.isDarkMode;
+
     return Expanded(
       child: Column(
         children: [
           Text(
             title,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 12,
-              color: Colors.grey,
+              color: isDark ? Colors.white60 : Colors.grey,
               fontWeight: FontWeight.w600,
             ),
           ),
@@ -261,7 +273,9 @@ class _EnhancedTimePickerState extends State<EnhancedTimePicker> {
           Container(
             height: 150,
             decoration: BoxDecoration(
-              border: Border.all(color: Colors.grey[300]!),
+              border: Border.all(
+                color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+              ),
               borderRadius: BorderRadius.circular(12),
             ),
             child: ListWheelScrollView.useDelegate(
@@ -281,12 +295,10 @@ class _EnhancedTimePickerState extends State<EnhancedTimePicker> {
                       item.toString(),
                       style: TextStyle(
                         fontSize: 20,
-                        fontWeight: isSelected
-                            ? FontWeight.bold
-                            : FontWeight.normal,
+                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                         color: isSelected
-                            ? const Color(0xFFFF6B8B)
-                            : Colors.grey[800],
+                            ? AppTheme.primary
+                            : (isDark ? Colors.white70 : Colors.grey[800]),
                       ),
                     ),
                   );
@@ -357,6 +369,9 @@ class _TimePickerFieldState extends State<TimePickerField> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = context.isDarkMode;
+    final accentColor = AppTheme.primary;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -365,7 +380,7 @@ class _TimePickerFieldState extends State<TimePickerField> {
           style: TextStyle(
             fontSize: 14,
             fontWeight: FontWeight.w600,
-            color: Colors.grey[700],
+            color: isDark ? Colors.white70 : Colors.grey[700],
           ),
         ),
         const SizedBox(height: 8),
@@ -374,18 +389,19 @@ class _TimePickerFieldState extends State<TimePickerField> {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             decoration: BoxDecoration(
-              border: Border.all(color: Colors.grey[300]!, width: 1),
+              border: Border.all(
+                color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                width: 1,
+              ),
               borderRadius: BorderRadius.circular(12),
-              color: Colors.white,
+              color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
             ),
             child: Row(
               children: [
                 Icon(
                   Icons.access_time,
                   size: 20,
-                  color: _selectedTime != null
-                      ? const Color(0xFFFF6B8B)
-                      : Colors.grey[400],
+                  color: _selectedTime != null ? accentColor : Colors.grey[400],
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -397,12 +413,16 @@ class _TimePickerFieldState extends State<TimePickerField> {
                       fontSize: 16,
                       fontWeight: FontWeight.w500,
                       color: _selectedTime != null
-                          ? Colors.black
-                          : Colors.grey[500],
+                          ? (isDark ? Colors.white : Colors.black)
+                          : (isDark ? Colors.white70 : Colors.grey[500]),
                     ),
                   ),
                 ),
-                const Icon(Icons.arrow_drop_down, color: Colors.grey, size: 24),
+                Icon(
+                  Icons.arrow_drop_down,
+                  color: isDark ? Colors.white70 : Colors.grey,
+                  size: 24,
+                ),
               ],
             ),
           ),
@@ -466,7 +486,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   final TextEditingController _serviceCategoryDescriptionController =
       TextEditingController();
   String _selectedIcon = 'content_cut';
-  Color _selectedColor = const Color(0xFFFF6B8B);
+  Color _selectedColor = AppTheme.primary;
   List<Map<String, dynamic>> _globalCategories = [];
 
   final List<Map<String, dynamic>> _iconList = [
@@ -497,19 +517,14 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   bool _isUploadingCover = false;
 
   // ============================================
-  // TIMEZONE VARIABLES (CRITICAL - DON'T MISS!)
+  // TIMEZONE VARIABLES
   // ============================================
   String _userTimezone = '';
   String _salonTimezone = '';
-
-  // Business hours - UTC for database
   String _openTimeUtc = '';
   String _closeTimeUtc = '';
-
-  // Business hours - Local for display
   TimeOfDay? _openTimeLocal;
   TimeOfDay? _closeTimeLocal;
-
   bool _isTimezoneLoaded = false;
   bool _isLoadingGlobalData = false;
   bool _hasErrorLoadingData = false;
@@ -521,9 +536,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   final supabase = Supabase.instance.client;
   final picker = ImagePicker();
 
-  // ==================== DST-SAFE TIMEZONE CONVERSION USING TimezoneService ====================
-  
-  /// Get timezone display string using TimezoneService
+  late bool _isWeb;
+  late bool _isDark;
+
   String _getTimezoneDisplay() {
     if (_salonTimezone.isEmpty) {
       return 'Loading timezone...';
@@ -537,6 +552,13 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     _ageCategoryMinAgeController.text = '0';
     _ageCategoryMaxAgeController.text = '100';
     _initializeWithTimezone();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _isWeb = context.isWeb;
+    _isDark = context.isDarkMode;
   }
 
   @override
@@ -563,12 +585,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
 
     final prefs = await SharedPreferences.getInstance();
 
-    // Get user's timezone
     _userTimezone =
         prefs.getString('user_timezone') ??
         TimezoneService.getCurrentTimezone();
 
-    // Ensure TimezoneService uses this timezone
     await TimezoneService.setTimezone(_userTimezone);
 
     setState(() {
@@ -668,10 +688,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       _currentLogoUrl = response['logo_url'];
       _currentCoverUrl = response['cover_url'];
 
-      // ✅ IMPORTANT: Get salon's timezone from database
       _salonTimezone = response['timezone'] ?? TimezoneService.getCurrentTimezone();
 
-      // ✅ Load and convert times using salon's timezone (DST-SAFE via TimezoneService)
       if (response['open_time'] != null) {
         _openTimeUtc = response['open_time'] as String;
         _openTimeLocal = TimezoneService.utcToTimeOfDayWithTimezone(_openTimeUtc, _salonTimezone);
@@ -687,9 +705,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         _closeTimeLocal = const TimeOfDay(hour: 18, minute: 0);
         _closeTimeUtc = TimezoneService.timeOfDayToUtcWithTimezone(_closeTimeLocal!, _salonTimezone);
       }
-      
-     
-      
+
+      debugPrint('✅ Salon timezone loaded: $_salonTimezone');
+      debugPrint('✅ UTC times: $_openTimeUtc - $_closeTimeUtc');
     } catch (e) {
       debugPrint('❌ Error loading salon: $e');
       rethrow;
@@ -698,7 +716,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
 
   Future<void> _loadSalonSelections() async {
     try {
-      // Load genders
       final genderResponse = await supabase
           .from('salon_genders')
           .select('display_name')
@@ -720,7 +737,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         }
       });
 
-      // Load age categories
       final ageResponse = await supabase
           .from('salon_age_categories')
           .select('display_name, min_age, max_age')
@@ -741,7 +757,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         }
       });
 
-      // Load service categories
       final categoryResponse = await supabase
           .from('salon_categories')
           .select('display_name, description, icon_name, color')
@@ -839,8 +854,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       _ageCategoryDisplayNameController.text =
           selected['display_name']?.toString() ?? '';
       _ageCategoryMinAgeController.text = (selected['min_age'] ?? 0).toString();
-      _ageCategoryMaxAgeController.text = (selected['max_age'] ?? 100)
-          .toString();
+      _ageCategoryMaxAgeController.text = (selected['max_age'] ?? 100).toString();
       _validateAgeFields();
     });
   }
@@ -919,7 +933,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       if (colorStr.startsWith('#')) {
         _selectedColor = Color(int.parse('0xFF${colorStr.substring(1)}'));
       } else {
-        _selectedColor = const Color(0xFFFF6B8B);
+        _selectedColor = AppTheme.primary;
       }
     });
   }
@@ -983,7 +997,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             uiSettings: [
               AndroidUiSettings(
                 toolbarTitle: 'Crop Logo',
-                toolbarColor: const Color(0xFFFF6B8B),
+                toolbarColor: AppTheme.primary,
                 toolbarWidgetColor: Colors.white,
                 initAspectRatio: CropAspectRatioPreset.square,
                 lockAspectRatio: true,
@@ -1029,7 +1043,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             uiSettings: [
               AndroidUiSettings(
                 toolbarTitle: 'Crop Logo',
-                toolbarColor: const Color(0xFFFF6B8B),
+                toolbarColor: AppTheme.primary,
                 toolbarWidgetColor: Colors.white,
                 lockAspectRatio: true,
               ),
@@ -1082,7 +1096,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             uiSettings: [
               AndroidUiSettings(
                 toolbarTitle: 'Crop Cover',
-                toolbarColor: const Color(0xFFFF6B8B),
+                toolbarColor: AppTheme.primary,
                 toolbarWidgetColor: Colors.white,
                 initAspectRatio: CropAspectRatioPreset.ratio16x9,
                 lockAspectRatio: true,
@@ -1128,7 +1142,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             uiSettings: [
               AndroidUiSettings(
                 toolbarTitle: 'Crop Cover',
-                toolbarColor: const Color(0xFFFF6B8B),
+                toolbarColor: AppTheme.primary,
                 toolbarWidgetColor: Colors.white,
                 lockAspectRatio: true,
               ),
@@ -1275,10 +1289,14 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       final logoUrl = await _uploadLogo();
       final coverUrl = await _uploadCover();
 
-      // ✅ IMPORTANT: Convert local times to UTC using salon's timezone (DST-SAFE via TimezoneService)
-      final openTimeUtc = TimezoneService.timeOfDayToUtcWithTimezone(_openTimeLocal!, _salonTimezone);
-      final closeTimeUtc = TimezoneService.timeOfDayToUtcWithTimezone(_closeTimeLocal!, _salonTimezone);
-
+      final openTimeUtc = TimezoneService.timeOfDayToUtcWithTimezone(
+        _openTimeLocal!,
+        _salonTimezone,
+      );
+      final closeTimeUtc = TimezoneService.timeOfDayToUtcWithTimezone(
+        _closeTimeLocal!,
+        _salonTimezone,
+      );
 
       final updateData = {
         'name': _nameController.text.trim(),
@@ -1303,7 +1321,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
 
       await supabase.from('salons').update(updateData).eq('id', widget.salonId);
 
-      // Update genders
       await supabase
           .from('salon_genders')
           .delete()
@@ -1321,7 +1338,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         });
       }
 
-      // Update age categories
       await supabase
           .from('salon_age_categories')
           .delete()
@@ -1338,7 +1354,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         });
       }
 
-      // Update service categories
       await supabase
           .from('salon_categories')
           .delete()
@@ -1388,17 +1403,24 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   // ============================================
 
   Future<void> _deleteSalon() async {
+    final isDark = _isDark;
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Row(
+        title: Row(
           children: [
-            Icon(Icons.warning_amber_rounded, color: Colors.red, size: 28),
-            SizedBox(width: 12),
+            const Icon(Icons.warning_amber_rounded, color: Colors.red, size: 28),
+            const SizedBox(width: 12),
             Text(
               'Delete Salon',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
             ),
           ],
         ),
@@ -1408,7 +1430,11 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
           children: [
             Text(
               "Are you sure you want to delete '${_nameController.text.trim()}'?",
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
             ),
             const SizedBox(height: 16),
             Container(
@@ -1417,7 +1443,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 color: Colors.red.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: const Column(
+              child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
@@ -1425,28 +1451,55 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                     style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.bold,
-                      color: Colors.red,
+                      color: isDark ? Colors.red[300] : Colors.red,
                     ),
                   ),
-                  SizedBox(height: 8),
-                  Text('• All appointments', style: TextStyle(fontSize: 13)),
-                  Text('• All services', style: TextStyle(fontSize: 13)),
-                  Text('• All barbers', style: TextStyle(fontSize: 13)),
-                  Text('• All reviews', style: TextStyle(fontSize: 13)),
+                  const SizedBox(height: 8),
+                  Text(
+                    '• All appointments',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: isDark ? Colors.white70 : Colors.black87,
+                    ),
+                  ),
+                  Text(
+                    '• All services',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: isDark ? Colors.white70 : Colors.black87,
+                    ),
+                  ),
+                  Text(
+                    '• All barbers',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: isDark ? Colors.white70 : Colors.black87,
+                    ),
+                  ),
+                  Text(
+                    '• All reviews',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: isDark ? Colors.white70 : Colors.black87,
+                    ),
+                  ),
                   Text(
                     '• All service variants',
-                    style: TextStyle(fontSize: 13),
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: isDark ? Colors.white70 : Colors.black87,
+                    ),
                   ),
                 ],
               ),
             ),
             const SizedBox(height: 16),
-            const Text(
+            Text(
               'This action cannot be undone!',
               style: TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w500,
-                color: Colors.red,
+                color: isDark ? Colors.red[300] : Colors.red,
               ),
             ),
           ],
@@ -1454,7 +1507,13 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel', style: TextStyle(fontSize: 16)),
+            child: Text(
+              'Cancel',
+              style: TextStyle(
+                fontSize: 16,
+                color: isDark ? Colors.white60 : Colors.black87,
+              ),
+            ),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
@@ -1501,8 +1560,11 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   // ============================================
 
   Widget _buildTimezoneInfoCard() {
+    final isDark = _isDark;
+
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
+      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -1513,9 +1575,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               children: [
                 Text(
                   _getTimezoneDisplay(),
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w500,
+                    color: isDark ? Colors.white : Colors.black87,
                   ),
                 ),
               ],
@@ -1523,11 +1586,17 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             const SizedBox(height: 4),
             Text(
               'Salon timezone: $_salonTimezone',
-              style: const TextStyle(fontSize: 11, color: Colors.grey),
+              style: TextStyle(
+                fontSize: 11,
+                color: isDark ? Colors.white70 : Colors.grey,
+              ),
             ),
             Text(
               'Your timezone: $_userTimezone',
-              style: const TextStyle(fontSize: 11, color: Colors.grey),
+              style: TextStyle(
+                fontSize: 11,
+                color: isDark ? Colors.white70 : Colors.grey,
+              ),
             ),
           ],
         ),
@@ -1541,9 +1610,12 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     Color color,
     VoidCallback onRetry,
   ) {
+    final isDark = _isDark;
+
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
       elevation: 2,
+      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -1562,19 +1634,20 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 const SizedBox(width: 12),
                 Text(
                   title,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : Colors.black87,
                   ),
                 ),
                 const Spacer(),
-                const Icon(Icons.error_outline, color: Colors.red),
+                Icon(Icons.error_outline, color: isDark ? Colors.red[300] : Colors.red),
               ],
             ),
             const SizedBox(height: 12),
-            const Text(
+            Text(
               'Failed to load data',
-              style: TextStyle(color: Colors.red),
+              style: TextStyle(color: isDark ? Colors.red[300] : Colors.red),
             ),
             const SizedBox(height: 8),
             SizedBox(
@@ -1600,9 +1673,12 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   }
 
   Widget _buildLoadingCard(String title, IconData icon, Color color) {
+    final isDark = _isDark;
+
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
       elevation: 2,
+      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -1619,7 +1695,11 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             const SizedBox(width: 12),
             Text(
               title,
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
             ),
             const Spacer(),
             const SizedBox(
@@ -1642,27 +1722,43 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     required bool isValid,
     required VoidCallback onChanged,
   }) {
+    final isDark = _isDark;
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: TextFormField(
         controller: controller,
+        style: TextStyle(color: isDark ? Colors.white : Colors.black87),
         keyboardType: keyboardType,
         onChanged: (value) => onChanged(),
         decoration: InputDecoration(
           labelText: label,
           hintText: hint,
-          prefixIcon: Icon(icon, color: Colors.grey),
+          hintStyle: TextStyle(color: isDark ? Colors.white70 : Colors.grey),
+          prefixIcon: Icon(icon, color: isDark ? Colors.white70 : Colors.grey),
           errorText: !isValid && controller.text.isNotEmpty
               ? 'Enter a valid number (0-150)'
               : null,
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+          errorStyle: TextStyle(color: isDark ? Colors.red[300] : Colors.red),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(
+              color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+            ),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(
+              color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+            ),
+          ),
           contentPadding: const EdgeInsets.symmetric(
             horizontal: 12,
             vertical: 10,
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: Color(0xFFFF6B8B), width: 2),
+            borderSide: const BorderSide(color: AppTheme.primary, width: 2),
           ),
           errorBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
@@ -1672,6 +1768,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             borderRadius: BorderRadius.circular(8),
             borderSide: const BorderSide(color: Colors.red, width: 2),
           ),
+          fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+          filled: true,
         ),
       ),
     );
@@ -1687,12 +1785,13 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     required Widget formFields,
     required VoidCallback onAdd,
   }) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isDesktop = screenWidth > 800;
+    final isDark = _isDark;
+    final isDesktop = _isWeb;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
       elevation: 2,
+      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -1712,9 +1811,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 const SizedBox(width: 12),
                 Text(
                   title,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : Colors.black87,
                   ),
                 ),
                 const Spacer(),
@@ -1731,7 +1831,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                     '${addedItems.length} items',
                     style: TextStyle(
                       fontSize: 12,
-                      color: color,
+                      color: isDark ? color : color,
                       fontWeight: FontWeight.w500,
                     ),
                   ),
@@ -1749,9 +1849,11 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                     child: Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: Colors.grey[50],
+                        color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.grey[200]!),
+                        border: Border.all(
+                          color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
+                        ),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1769,7 +1871,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                                 style: TextStyle(
                                   fontSize: 14,
                                   fontWeight: FontWeight.w600,
-                                  color: color,
+                                  color: isDark ? color : color,
                                 ),
                               ),
                             ],
@@ -1786,9 +1888,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: color,
                                 foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 10,
-                                ),
+                                padding: const EdgeInsets.symmetric(vertical: 10),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(8),
                                 ),
@@ -1806,9 +1906,11 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                     child: Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: Colors.grey[50],
+                        color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.grey[200]!),
+                        border: Border.all(
+                          color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
+                        ),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1826,26 +1928,22 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                                 style: TextStyle(
                                   fontSize: 14,
                                   fontWeight: FontWeight.w600,
-                                  color: color,
+                                  color: isDark ? color : color,
                                 ),
                               ),
                               const Spacer(),
                               if (addedItems.isNotEmpty)
                                 TextButton(
-                                  onPressed: () {
-                                    setState(() {
-                                      addedItems.clear();
-                                    });
-                                  },
+                                  onPressed: () => setState(() => addedItems.clear()),
                                   style: TextButton.styleFrom(
                                     padding: EdgeInsets.zero,
                                     minimumSize: Size.zero,
                                   ),
-                                  child: const Text(
+                                  child: Text(
                                     'Clear All',
                                     style: TextStyle(
                                       fontSize: 12,
-                                      color: Colors.red,
+                                      color: isDark ? Colors.red[300] : Colors.red,
                                     ),
                                   ),
                                 ),
@@ -1856,7 +1954,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                             Container(
                               padding: const EdgeInsets.all(24),
                               decoration: BoxDecoration(
-                                color: Colors.white,
+                                color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Center(
@@ -1865,20 +1963,20 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                                     Icon(
                                       Icons.inbox,
                                       size: 40,
-                                      color: Colors.grey[400],
+                                      color: isDark ? Colors.white30 : Colors.grey[400],
                                     ),
                                     const SizedBox(height: 8),
                                     Text(
                                       'No $title added yet',
                                       style: TextStyle(
-                                        color: Colors.grey[500],
+                                        color: isDark ? Colors.white70 : Colors.grey[500],
                                         fontSize: 12,
                                       ),
                                     ),
                                     Text(
                                       'Use the form on the left to add',
                                       style: TextStyle(
-                                        color: Colors.grey[400],
+                                        color: isDark ? Colors.white30 : Colors.grey[400],
                                         fontSize: 10,
                                       ),
                                     ),
@@ -1897,29 +1995,28 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                                 final item = addedItems[index];
                                 return ListTile(
                                   leading: CircleAvatar(
-                                    backgroundColor: color.withValues(
-                                      alpha: 0.1,
-                                    ),
+                                    backgroundColor: color.withValues(alpha: 0.1),
                                     child: Text(
                                       '${index + 1}',
                                       style: TextStyle(
                                         fontSize: 12,
-                                        color: color,
+                                        color: isDark ? color : color,
                                       ),
                                     ),
                                   ),
                                   title: Text(
                                     itemDisplayName(item),
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       fontSize: 13,
                                       fontWeight: FontWeight.w500,
+                                      color: isDark ? Colors.white : Colors.black87,
                                     ),
                                   ),
                                   trailing: IconButton(
-                                    icon: const Icon(
+                                    icon: Icon(
                                       Icons.delete_outline,
                                       size: 20,
-                                      color: Colors.red,
+                                      color: isDark ? Colors.red[300] : Colors.red,
                                     ),
                                     onPressed: () => onRemove(index),
                                   ),
@@ -1940,9 +2037,11 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: Colors.grey[50],
+                      color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.grey[200]!),
+                      border: Border.all(
+                        color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
+                      ),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1960,7 +2059,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                               style: TextStyle(
                                 fontSize: 14,
                                 fontWeight: FontWeight.w600,
-                                color: color,
+                                color: isDark ? color : color,
                               ),
                             ),
                           ],
@@ -1992,9 +2091,11 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: Colors.grey[50],
+                      color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.grey[200]!),
+                      border: Border.all(
+                        color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
+                      ),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2012,26 +2113,22 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                               style: TextStyle(
                                 fontSize: 14,
                                 fontWeight: FontWeight.w600,
-                                color: color,
+                                color: isDark ? color : color,
                               ),
                             ),
                             const Spacer(),
                             if (addedItems.isNotEmpty)
                               TextButton(
-                                onPressed: () {
-                                  setState(() {
-                                    addedItems.clear();
-                                  });
-                                },
+                                onPressed: () => setState(() => addedItems.clear()),
                                 style: TextButton.styleFrom(
                                   padding: EdgeInsets.zero,
                                   minimumSize: Size.zero,
                                 ),
-                                child: const Text(
+                                child: Text(
                                   'Clear All',
                                   style: TextStyle(
                                     fontSize: 12,
-                                    color: Colors.red,
+                                    color: isDark ? Colors.red[300] : Colors.red,
                                   ),
                                 ),
                               ),
@@ -2042,7 +2139,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                           Container(
                             padding: const EdgeInsets.all(24),
                             decoration: BoxDecoration(
-                              color: Colors.white,
+                              color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Center(
@@ -2051,20 +2148,20 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                                   Icon(
                                     Icons.inbox,
                                     size: 40,
-                                    color: Colors.grey[400],
+                                    color: isDark ? Colors.white30 : Colors.grey[400],
                                   ),
                                   const SizedBox(height: 8),
                                   Text(
                                     'No $title added yet',
                                     style: TextStyle(
-                                      color: Colors.grey[500],
+                                      color: isDark ? Colors.white70 : Colors.grey[500],
                                       fontSize: 12,
                                     ),
                                   ),
                                   Text(
                                     'Tap + button to add',
                                     style: TextStyle(
-                                      color: Colors.grey[400],
+                                      color: isDark ? Colors.white30 : Colors.grey[400],
                                       fontSize: 10,
                                     ),
                                   ),
@@ -2088,22 +2185,23 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                                     '${index + 1}',
                                     style: TextStyle(
                                       fontSize: 12,
-                                      color: color,
+                                      color: isDark ? color : color,
                                     ),
                                   ),
                                 ),
                                 title: Text(
                                   itemDisplayName(item),
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontSize: 13,
                                     fontWeight: FontWeight.w500,
+                                    color: isDark ? Colors.white : Colors.black87,
                                   ),
                                 ),
                                 trailing: IconButton(
-                                  icon: const Icon(
+                                  icon: Icon(
                                     Icons.delete_outline,
                                     size: 20,
-                                    color: Colors.red,
+                                    color: isDark ? Colors.red[300] : Colors.red,
                                   ),
                                   onPressed: () => onRemove(index),
                                 ),
@@ -2138,9 +2236,12 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       return const SizedBox.shrink();
     }
 
+    final isDark = _isDark;
+
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
       elevation: 2,
+      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -2158,25 +2259,32 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                   child: const Icon(Icons.people, color: Colors.blue),
                 ),
                 const SizedBox(width: 12),
-                const Text(
+                Text(
                   'Gender Categories',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
                 ),
                 const Spacer(),
                 if (_selectedGenderIds.isNotEmpty)
                   TextButton(
                     onPressed: () => setState(() => _selectedGenderIds.clear()),
-                    child: const Text(
+                    child: Text(
                       'Clear All',
-                      style: TextStyle(color: Colors.red),
+                      style: TextStyle(color: isDark ? Colors.red[300] : Colors.red),
                     ),
                   ),
               ],
             ),
             const SizedBox(height: 12),
-            const Text(
+            Text(
               'Select the genders your salon serves',
-              style: TextStyle(fontSize: 12, color: Colors.grey),
+              style: TextStyle(
+                fontSize: 12,
+                color: isDark ? Colors.white60 : Colors.grey,
+              ),
             ),
             const SizedBox(height: 16),
             Wrap(
@@ -2188,7 +2296,14 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 final displayName = gender['display_name'] as String;
 
                 return FilterChip(
-                  label: Text(displayName),
+                  label: Text(
+                    displayName,
+                    style: TextStyle(
+                      color: isSelected
+                          ? Colors.blue
+                          : (isDark ? Colors.white70 : Colors.grey[700]),
+                    ),
+                  ),
                   selected: isSelected,
                   onSelected: (selected) {
                     setState(() {
@@ -2201,18 +2316,14 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                       }
                     });
                   },
-                  backgroundColor: Colors.white,
+                  backgroundColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
                   selectedColor: Colors.blue.withValues(alpha: 0.2),
                   checkmarkColor: Colors.blue,
-                  labelStyle: TextStyle(
-                    color: isSelected ? Colors.blue : Colors.grey[700],
-                    fontWeight: isSelected
-                        ? FontWeight.w500
-                        : FontWeight.normal,
-                  ),
                   shape: StadiumBorder(
                     side: BorderSide(
-                      color: isSelected ? Colors.blue : Colors.grey[300]!,
+                      color: isSelected
+                          ? Colors.blue
+                          : (isDark ? Colors.grey[700]! : Colors.grey[300]!),
                     ),
                   ),
                 );
@@ -2232,9 +2343,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                   ),
                   child: Text(
                     '${_selectedGenderIds.length} gender${_selectedGenderIds.length > 1 ? 's' : ''} selected',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 12,
-                      color: Colors.blue,
+                      color: isDark ? Colors.blue[300] : Colors.blue,
                       fontWeight: FontWeight.w500,
                     ),
                   ),
@@ -2248,22 +2359,13 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
 
   Widget _buildAgeCategorySection() {
     if (_isLoadingGlobalData) {
-      return _buildLoadingCard(
-        'Age Categories',
-        Icons.calendar_today,
-        Colors.green,
-      );
+      return _buildLoadingCard('Age Categories', Icons.calendar_today, Colors.green);
     }
 
     if (_hasErrorLoadingData && _globalAgeCategories.isEmpty) {
-      return _buildErrorCard(
-        'Age Categories',
-        Icons.calendar_today,
-        Colors.green,
-        () {
-          _loadAllData();
-        },
-      );
+      return _buildErrorCard('Age Categories', Icons.calendar_today, Colors.green, () {
+        _loadAllData();
+      });
     }
 
     return _buildSplitViewSection(
@@ -2325,7 +2427,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               padding: const EdgeInsets.only(top: 4),
               child: Row(
                 children: [
-                  const Icon(Icons.error_outline, size: 14, color: Colors.red),
+                  Icon(Icons.error_outline, size: 14, color: Colors.red),
                   const SizedBox(width: 4),
                   const Text(
                     'Min age cannot be greater than max age',
@@ -2346,14 +2448,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     }
 
     if (_hasErrorLoadingData && _globalCategories.isEmpty) {
-      return _buildErrorCard(
-        'Main Services',
-        Icons.category,
-        Colors.orange,
-        () {
-          _loadAllData();
-        },
-      );
+      return _buildErrorCard('Main Services', Icons.category, Colors.orange, () {
+        _loadAllData();
+      });
     }
 
     return _buildSplitViewSection(
@@ -2400,12 +2497,18 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   }
 
   Widget _buildIconSelector() {
+    final isDark = _isDark;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
+        Text(
           'Icon',
-          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: isDark ? Colors.white : Colors.black87,
+          ),
         ),
         const SizedBox(height: 8),
         SizedBox(
@@ -2418,20 +2521,19 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               final isSelected = _selectedIcon == iconItem['name'];
 
               return GestureDetector(
-                onTap: () =>
-                    setState(() => _selectedIcon = iconItem['name'] as String),
+                onTap: () => setState(() => _selectedIcon = iconItem['name'] as String),
                 child: Container(
                   width: 60,
                   margin: const EdgeInsets.only(right: 8),
                   decoration: BoxDecoration(
                     color: isSelected
-                        ? const Color(0xFFFF6B8B).withValues(alpha: 0.1)
-                        : Colors.grey[100],
+                        ? AppTheme.primary.withValues(alpha: 0.1)
+                        : (isDark ? const Color(0xFF2A2A2A) : Colors.grey[100]),
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
                       color: isSelected
-                          ? const Color(0xFFFF6B8B)
-                          : Colors.grey[300]!,
+                          ? AppTheme.primary
+                          : (isDark ? Colors.grey[700]! : Colors.grey[300]!),
                       width: isSelected ? 1.5 : 1,
                     ),
                   ),
@@ -2442,8 +2544,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                         iconItem['icon'] as IconData,
                         size: 24,
                         color: isSelected
-                            ? const Color(0xFFFF6B8B)
-                            : Colors.grey[600],
+                            ? AppTheme.primary
+                            : (isDark ? Colors.white60 : Colors.grey[600]),
                       ),
                       const SizedBox(height: 4),
                       Text(
@@ -2451,8 +2553,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                         style: TextStyle(
                           fontSize: 9,
                           color: isSelected
-                              ? const Color(0xFFFF6B8B)
-                              : Colors.grey[600],
+                              ? AppTheme.primary
+                              : (isDark ? Colors.white60 : Colors.grey[600]),
                         ),
                         textAlign: TextAlign.center,
                         maxLines: 1,
@@ -2470,8 +2572,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   }
 
   Widget _buildColorPicker() {
+    final isDark = _isDark;
     final List<Color> colorOptions = [
-      const Color(0xFFFF6B8B),
+      AppTheme.primary,
       const Color(0xFF4CAF50),
       const Color(0xFF2196F3),
       const Color(0xFFFF9800),
@@ -2485,9 +2588,13 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
+        Text(
           'Color',
-          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: isDark ? Colors.white : Colors.black87,
+          ),
         ),
         const SizedBox(height: 8),
         Wrap(
@@ -2538,6 +2645,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     TextInputType keyboardType = TextInputType.text,
     int maxLines = 1,
   }) {
+    final isDark = _isDark;
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Autocomplete<String>(
@@ -2555,48 +2664,62 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
           onSelected(selection);
           controller.text = selection;
         },
-        fieldViewBuilder:
-            (context, textController, focusNode, onFieldSubmitted) {
-              if (textController.text != controller.text) {
-                textController.text = controller.text;
-              }
-              controller.addListener(() {
-                if (textController.text != controller.text) {
-                  textController.text = controller.text;
-                }
-              });
+        fieldViewBuilder: (
+          context,
+          textController,
+          focusNode,
+          onFieldSubmitted,
+        ) {
+          if (textController.text != controller.text) {
+            textController.text = controller.text;
+          }
+          controller.addListener(() {
+            if (textController.text != controller.text) {
+              textController.text = controller.text;
+            }
+          });
 
-              return TextFormField(
-                controller: textController,
-                focusNode: focusNode,
-                keyboardType: keyboardType,
-                maxLines: maxLines,
-                decoration: InputDecoration(
-                  labelText: label,
-                  hintText: hint,
-                  prefixIcon: Icon(icon, color: Colors.grey),
-                  suffixIcon: const Icon(
-                    Icons.arrow_drop_down,
-                    color: Colors.grey,
-                  ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 10,
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(
-                      color: Color(0xFFFF6B8B),
-                      width: 2,
-                    ),
-                  ),
+          return TextFormField(
+            controller: textController,
+            focusNode: focusNode,
+            style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+            keyboardType: keyboardType,
+            maxLines: maxLines,
+            decoration: InputDecoration(
+              labelText: label,
+              hintText: hint,
+              hintStyle: TextStyle(color: isDark ? Colors.white70 : Colors.grey),
+              prefixIcon: Icon(icon, color: isDark ? Colors.white70 : Colors.grey),
+              suffixIcon: Icon(
+                Icons.arrow_drop_down,
+                color: isDark ? Colors.white70 : Colors.grey,
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(
+                  color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
                 ),
-                onChanged: (value) => controller.text = value,
-              );
-            },
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(
+                  color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                ),
+              ),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 10,
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: const BorderSide(color: AppTheme.primary, width: 2),
+              ),
+              fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+              filled: true,
+            ),
+            onChanged: (value) => controller.text = value,
+          );
+        },
       ),
     );
   }
@@ -2611,10 +2734,13 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     bool isPhone = false,
     bool isEmail = false,
   }) {
+    final isDark = _isDark;
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: TextFormField(
         controller: controller,
+        style: TextStyle(color: isDark ? Colors.white : Colors.black87),
         keyboardType: keyboardType,
         maxLines: maxLines,
         onChanged: (value) {
@@ -2624,20 +2750,33 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         decoration: InputDecoration(
           labelText: label,
           hintText: hint,
-          prefixIcon: Icon(icon, color: Colors.grey),
+          hintStyle: TextStyle(color: isDark ? Colors.white70 : Colors.grey),
+          prefixIcon: Icon(icon, color: isDark ? Colors.white70 : Colors.grey),
           errorText: isPhone && !_isPhoneValid && controller.text.isNotEmpty
               ? 'Enter valid phone number (e.g., 0771234567)'
               : isEmail && !_isEmailValid && controller.text.isNotEmpty
               ? 'Enter valid email address'
               : null,
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+          errorStyle: TextStyle(color: isDark ? Colors.red[300] : Colors.red),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(
+              color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+            ),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(
+              color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+            ),
+          ),
           contentPadding: const EdgeInsets.symmetric(
             horizontal: 12,
             vertical: 10,
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: Color(0xFFFF6B8B), width: 2),
+            borderSide: const BorderSide(color: AppTheme.primary, width: 2),
           ),
           errorBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
@@ -2647,6 +2786,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             borderRadius: BorderRadius.circular(8),
             borderSide: const BorderSide(color: Colors.red, width: 2),
           ),
+          fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+          filled: true,
         ),
       ),
     );
@@ -2657,8 +2798,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   // ============================================
 
   Widget _buildCoverSection() {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isDesktop = screenWidth > 800;
+    final isDesktop = _isWeb;
+    final isDark = _isDark;
 
     return Container(
       height: isDesktop ? 250 : 180,
@@ -2672,10 +2813,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               width: double.infinity,
               height: double.infinity,
               decoration: BoxDecoration(
-                color: Colors.grey[200],
+                color: isDark ? Colors.grey[800] : Colors.grey[200],
                 borderRadius: BorderRadius.circular(16),
-                image:
-                    (_coverFile != null ||
+                image: (_coverFile != null ||
                         _coverWebBytes != null ||
                         _currentCoverUrl != null)
                     ? DecorationImage(
@@ -2684,8 +2824,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                       )
                     : null,
               ),
-              child:
-                  (_coverFile == null &&
+              child: (_coverFile == null &&
                       _coverWebBytes == null &&
                       _currentCoverUrl == null)
                   ? Center(
@@ -2695,12 +2834,14 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                           Icon(
                             Icons.add_photo_alternate,
                             size: isDesktop ? 48 : 36,
-                            color: Colors.grey[400],
+                            color: isDark ? Colors.white30 : Colors.grey[400],
                           ),
                           const SizedBox(height: 8),
                           Text(
                             'Tap to add cover photo',
-                            style: TextStyle(color: Colors.grey[600]),
+                            style: TextStyle(
+                              color: isDark ? Colors.white60 : Colors.grey[600],
+                            ),
                           ),
                         ],
                       ),
@@ -2756,8 +2897,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   }
 
   Widget _buildLogoSeparate() {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isDesktop = screenWidth > 800;
+    final isDesktop = _isWeb;
+    final isDark = _isDark;
 
     return Container(
       margin: const EdgeInsets.only(left: 16, top: 0, bottom: 16),
@@ -2767,7 +2908,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
           width: isDesktop ? 100 : 80,
           height: isDesktop ? 100 : 80,
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
             shape: BoxShape.circle,
             boxShadow: [
               BoxShadow(
@@ -2776,8 +2917,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 offset: const Offset(0, 2),
               ),
             ],
-            image:
-                (_logoFile != null ||
+            image: (_logoFile != null ||
                     _logoWebBytes != null ||
                     _currentLogoUrl != null)
                 ? DecorationImage(
@@ -2786,13 +2926,12 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                   )
                 : null,
           ),
-          child:
-              (_logoFile == null &&
+          child: (_logoFile == null &&
                   _logoWebBytes == null &&
                   _currentLogoUrl == null)
               ? Container(
                   decoration: BoxDecoration(
-                    color: Colors.grey[300],
+                    color: isDark ? Colors.grey[800] : Colors.grey[300],
                     shape: BoxShape.circle,
                   ),
                   child: Column(
@@ -2801,14 +2940,14 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                       Icon(
                         Icons.add_a_photo,
                         size: isDesktop ? 30 : 24,
-                        color: Colors.grey[600],
+                        color: isDark ? Colors.white70 : Colors.grey[600],
                       ),
                       SizedBox(height: isDesktop ? 4 : 2),
                       Text(
                         'Add Logo',
                         style: TextStyle(
                           fontSize: isDesktop ? 10 : 8,
-                          color: Colors.grey[600],
+                          color: isDark ? Colors.white70 : Colors.grey[600],
                         ),
                       ),
                     ],
@@ -2826,7 +2965,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                       child: Container(
                         padding: const EdgeInsets.all(4),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFFF6B8B),
+                          color: AppTheme.primary,
                           shape: BoxShape.circle,
                           border: Border.all(color: Colors.white, width: 2),
                         ),
@@ -2856,8 +2995,11 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   }
 
   void _showLogoSourceDialog() {
+    final isDark = _isDark;
+
     showModalBottomSheet(
       context: context,
+      backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -2865,28 +3007,38 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Padding(
-              padding: EdgeInsets.all(16),
+            Padding(
+              padding: const EdgeInsets.all(16),
               child: Text(
                 'Add Logo',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
               ),
             ),
             const Divider(),
             ListTile(
               leading: const Icon(
                 Icons.photo_library,
-                color: Color(0xFFFF6B8B),
+                color: AppTheme.primary,
               ),
-              title: const Text('Choose from Gallery'),
+              title: Text(
+                'Choose from Gallery',
+                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+              ),
               onTap: () {
                 Navigator.pop(context);
                 _pickLogo();
               },
             ),
             ListTile(
-              leading: const Icon(Icons.camera_alt, color: Color(0xFFFF6B8B)),
-              title: const Text('Take a Photo'),
+              leading: const Icon(Icons.camera_alt, color: AppTheme.primary),
+              title: Text(
+                'Take a Photo',
+                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+              ),
               onTap: () {
                 Navigator.pop(context);
                 _takeLogoPhoto();
@@ -2897,9 +3049,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 _currentLogoUrl != null)
               ListTile(
                 leading: const Icon(Icons.delete, color: Colors.red),
-                title: const Text(
+                title: Text(
                   'Remove Logo',
-                  style: TextStyle(color: Colors.red),
+                  style: TextStyle(color: isDark ? Colors.red[300] : Colors.red),
                 ),
                 onTap: () {
                   Navigator.pop(context);
@@ -2914,8 +3066,11 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   }
 
   void _showCoverSourceDialog() {
+    final isDark = _isDark;
+
     showModalBottomSheet(
       context: context,
+      backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -2923,28 +3078,38 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Padding(
-              padding: EdgeInsets.all(16),
+            Padding(
+              padding: const EdgeInsets.all(16),
               child: Text(
                 'Add Cover Photo',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
               ),
             ),
             const Divider(),
             ListTile(
               leading: const Icon(
                 Icons.photo_library,
-                color: Color(0xFFFF6B8B),
+                color: AppTheme.primary,
               ),
-              title: const Text('Choose from Gallery'),
+              title: Text(
+                'Choose from Gallery',
+                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+              ),
               onTap: () {
                 Navigator.pop(context);
                 _pickCover();
               },
             ),
             ListTile(
-              leading: const Icon(Icons.camera_alt, color: Color(0xFFFF6B8B)),
-              title: const Text('Take a Photo'),
+              leading: const Icon(Icons.camera_alt, color: AppTheme.primary),
+              title: Text(
+                'Take a Photo',
+                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+              ),
               onTap: () {
                 Navigator.pop(context);
                 _takeCoverPhoto();
@@ -2955,9 +3120,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 _currentCoverUrl != null)
               ListTile(
                 leading: const Icon(Icons.delete, color: Colors.red),
-                title: const Text(
+                title: Text(
                   'Remove Cover',
-                  style: TextStyle(color: Colors.red),
+                  style: TextStyle(color: isDark ? Colors.red[300] : Colors.red),
                 ),
                 onTap: () {
                   Navigator.pop(context);
@@ -2972,33 +3137,41 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   }
 
   // ============================================
-  // BUSINESS HOURS CARD (UPDATED WITH UTC INFO)
+  // BUSINESS HOURS CARD
   // ============================================
 
   Widget _buildBusinessHoursCard() {
+    final isDark = _isDark;
+
     return Card(
+      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'Business Hours',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
             ),
             const SizedBox(height: 8),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
-                color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                color: AppTheme.primary.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Text(
                 _getTimezoneDisplay(),
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w500,
+                  color: isDark ? Colors.white : Colors.black87,
                 ),
               ),
             ),
@@ -3013,7 +3186,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                     onTimeSelected: (time) {
                       setState(() {
                         _openTimeLocal = time;
-                        _openTimeUtc = TimezoneService.timeOfDayToUtcWithTimezone(time, _salonTimezone);
+                        _openTimeUtc = TimezoneService.timeOfDayToUtcWithTimezone(
+                          time,
+                          _salonTimezone,
+                        );
                         debugPrint('✅ Open time updated: Local=${_openTimeLocal!.format(context)}, UTC=$_openTimeUtc');
                       });
                     },
@@ -3028,7 +3204,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                     onTimeSelected: (time) {
                       setState(() {
                         _closeTimeLocal = time;
-                        _closeTimeUtc = TimezoneService.timeOfDayToUtcWithTimezone(time, _salonTimezone);
+                        _closeTimeUtc = TimezoneService.timeOfDayToUtcWithTimezone(
+                          time,
+                          _salonTimezone,
+                        );
                         debugPrint('✅ Close time updated: Local=${_closeTimeLocal!.format(context)}, UTC=$_closeTimeUtc');
                       });
                     },
@@ -3037,21 +3216,23 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               ],
             ),
             const SizedBox(height: 12),
-            // Show UTC info for transparency
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: Colors.grey[100],
+                color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[100],
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.info_outline, size: 14, color: Colors.grey),
+                  Icon(Icons.info_outline, size: 14, color: isDark ? Colors.white70 : Colors.grey),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       'Times are stored in UTC. Your local time: ${_openTimeLocal?.format(context)} - ${_closeTimeLocal?.format(context)}',
-                      style: const TextStyle(fontSize: 10, color: Colors.grey),
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: isDark ? Colors.white70 : Colors.grey,
+                      ),
                     ),
                   ),
                 ],
@@ -3074,28 +3255,34 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     );
   }
 
+  // ============================================
+  // BUILD METHOD
+  // ============================================
+
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isDesktop = screenWidth > 800;
+    final isDark = context.isDarkMode;
+    final isDesktop = context.isWeb;
 
     if (!_isTimezoneLoaded) {
       return Scaffold(
+        backgroundColor: isDark ? const Color(0xFF121212) : Colors.white,
         appBar: AppBar(
           title: const Text('Edit Salon'),
-          backgroundColor: const Color(0xFFFF6B8B),
+          backgroundColor: AppTheme.primary,
           foregroundColor: Colors.white,
           elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: Colors.white),
+            onPressed: () => Navigator.pop(context),
+            tooltip: 'Back',
+          ),
         ),
         body: const Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              SizedBox(
-                width: 40,
-                height: 40,
-                child: CircularProgressIndicator(),
-              ),
+              SizedBox(width: 40, height: 40, child: CircularProgressIndicator()),
               SizedBox(height: 16),
               Text('Loading timezone...'),
             ],
@@ -3105,236 +3292,254 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     }
 
     return Scaffold(
+      backgroundColor: isDark ? const Color(0xFF121212) : Colors.white,
       appBar: AppBar(
-        title: const Text('Edit Salon'),
-        backgroundColor: const Color(0xFFFF6B8B),
+        title: Text(
+          'Edit Salon',
+          style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        backgroundColor: AppTheme.primary,
         foregroundColor: Colors.white,
         elevation: 0,
         centerTitle: isDesktop,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+          tooltip: 'Back',
+        ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.delete_outline),
+            icon: Icon(Icons.delete_outline, color: Colors.white),
             onPressed: _isDeleting ? null : _deleteSalon,
             tooltip: 'Delete Salon',
           ),
         ],
       ),
-      body: _isLoading
-          ? const Center(
-              child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
-            )
-          : Container(
-              color: Colors.grey[50],
-              child: Center(
-                child: Container(
-                  constraints: BoxConstraints(
-                    maxWidth: isDesktop ? 1200 : double.infinity,
-                  ),
-                  child: SingleChildScrollView(
-                    padding: EdgeInsets.all(isDesktop ? 32 : 16),
-                    child: Form(
-                      key: _formKey,
-                      child: Column(
-                        children: [
-                          _buildCoverSection(),
-                          Transform.translate(
-                            offset: const Offset(16, -40),
-                            child: Align(
-                              alignment: Alignment.topLeft,
-                              child: _buildLogoSeparate(),
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-
-                          _buildTimezoneInfoCard(),
-                          const SizedBox(height: 16),
-
-                          // Basic Info Card
-                          Card(
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                            child: Padding(
-                              padding: const EdgeInsets.all(16),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text(
-                                    'Basic Information',
-                                    style: TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 16),
-                                  _buildTextField(
-                                    controller: _nameController,
-                                    label: 'Salon Name *',
-                                    hint: 'Enter salon name',
-                                    icon: Icons.store,
-                                  ),
-                                  const SizedBox(height: 12),
-                                  _buildTextField(
-                                    controller: _addressController,
-                                    label: 'Address',
-                                    hint: 'Enter address',
-                                    icon: Icons.location_on,
-                                    maxLines: 2,
-                                  ),
-                                  const SizedBox(height: 12),
-                                  _buildTextField(
-                                    controller: _descriptionController,
-                                    label: 'Description',
-                                    hint: 'Tell about your salon',
-                                    icon: Icons.description,
-                                    maxLines: 3,
-                                  ),
-                                ],
+      body: SafeArea(
+        child: _isLoading
+            ? Center(
+                child: CircularProgressIndicator(color: AppTheme.primary),
+              )
+            : Container(
+                color: isDark ? const Color(0xFF121212) : Colors.grey[50],
+                child: Center(
+                  child: Container(
+                    constraints: BoxConstraints(
+                      maxWidth: isDesktop ? 1200 : double.infinity,
+                    ),
+                    child: SingleChildScrollView(
+                      padding: EdgeInsets.all(isDesktop ? 32 : 16),
+                      child: Form(
+                        key: _formKey,
+                        child: Column(
+                          children: [
+                            _buildCoverSection(),
+                            Transform.translate(
+                              offset: const Offset(16, -40),
+                              child: Align(
+                                alignment: Alignment.topLeft,
+                                child: _buildLogoSeparate(),
                               ),
                             ),
-                          ),
-                          const SizedBox(height: 16),
+                            const SizedBox(height: 16),
 
-                          // Contact Info Card
-                          Card(
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                            child: Padding(
-                              padding: const EdgeInsets.all(16),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text(
-                                    'Contact Information',
-                                    style: TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 16),
-                                  _buildTextField(
-                                    controller: _phoneController,
-                                    label: 'Phone Number',
-                                    hint:
-                                        'Enter phone number (e.g., 0771234567)',
-                                    icon: Icons.phone,
-                                    keyboardType: TextInputType.phone,
-                                    isPhone: true,
-                                  ),
-                                  const SizedBox(height: 12),
-                                  _buildTextField(
-                                    controller: _emailController,
-                                    label: 'Email Address',
-                                    hint:
-                                        'Enter email address (e.g., salon@example.com)',
-                                    icon: Icons.email,
-                                    keyboardType: TextInputType.emailAddress,
-                                    isEmail: true,
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    'Phone and email are optional but recommended',
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      color: Colors.grey[500],
-                                    ),
-                                  ),
-                                ],
+                            _buildTimezoneInfoCard(),
+                            const SizedBox(height: 16),
+
+                            // Basic Info Card
+                            Card(
+                              color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
                               ),
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-
-                          _buildBusinessHoursCard(),
-                          const SizedBox(height: 16),
-
-                          _buildServiceCategorySection(),
-                          _buildAgeCategorySection(),
-                          _buildGenderSelection(),
-
-                          const SizedBox(height: 24),
-
-                          // Action Buttons
-                          Row(
-                            children: [
-                              Expanded(
-                                child: OutlinedButton(
-                                  onPressed: _isSaving
-                                      ? null
-                                      : () => Navigator.pop(context),
-                                  style: OutlinedButton.styleFrom(
-                                    foregroundColor: Colors.grey[700],
-                                    side: BorderSide(color: Colors.grey[300]!),
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 14,
+                              child: Padding(
+                                padding: const EdgeInsets.all(16),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Basic Information',
+                                      style: TextStyle(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.bold,
+                                        color: isDark ? Colors.white : Colors.black87,
+                                      ),
                                     ),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12),
+                                    const SizedBox(height: 16),
+                                    _buildTextField(
+                                      controller: _nameController,
+                                      label: 'Salon Name *',
+                                      hint: 'Enter salon name',
+                                      icon: Icons.store,
                                     ),
-                                  ),
-                                  child: const Text(
-                                    'Cancel',
-                                    style: TextStyle(fontSize: 16),
-                                  ),
+                                    const SizedBox(height: 12),
+                                    _buildTextField(
+                                      controller: _addressController,
+                                      label: 'Address',
+                                      hint: 'Enter address',
+                                      icon: Icons.location_on,
+                                      maxLines: 2,
+                                    ),
+                                    const SizedBox(height: 12),
+                                    _buildTextField(
+                                      controller: _descriptionController,
+                                      label: 'Description',
+                                      hint: 'Tell about your salon',
+                                      icon: Icons.description,
+                                      maxLines: 3,
+                                    ),
+                                  ],
                                 ),
                               ),
-                              const SizedBox(width: 16),
-                              Expanded(
-                                child: ElevatedButton(
-                                  onPressed:
-                                      (_isSaving ||
-                                          _isUploadingLogo ||
-                                          _isUploadingCover)
-                                      ? null
-                                      : _updateSalon,
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: const Color(0xFFFF6B8B),
-                                    foregroundColor: Colors.white,
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 14,
+                            ),
+                            const SizedBox(height: 16),
+
+                            // Contact Info Card
+                            Card(
+                              color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.all(16),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Contact Information',
+                                      style: TextStyle(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.bold,
+                                        color: isDark ? Colors.white : Colors.black87,
+                                      ),
                                     ),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12),
+                                    const SizedBox(height: 16),
+                                    _buildTextField(
+                                      controller: _phoneController,
+                                      label: 'Phone Number',
+                                      hint: 'Enter phone number (e.g., 0771234567)',
+                                      icon: Icons.phone,
+                                      keyboardType: TextInputType.phone,
+                                      isPhone: true,
+                                    ),
+                                    const SizedBox(height: 12),
+                                    _buildTextField(
+                                      controller: _emailController,
+                                      label: 'Email Address',
+                                      hint: 'Enter email address (e.g., salon@example.com)',
+                                      icon: Icons.email,
+                                      keyboardType: TextInputType.emailAddress,
+                                      isEmail: true,
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      'Phone and email are optional but recommended',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: isDark ? Colors.white70 : Colors.grey[500],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+
+                            _buildBusinessHoursCard(),
+                            const SizedBox(height: 16),
+
+                            _buildServiceCategorySection(),
+                            _buildAgeCategorySection(),
+                            _buildGenderSelection(),
+
+                            const SizedBox(height: 24),
+
+                            // Action Buttons
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: OutlinedButton(
+                                    onPressed: _isSaving
+                                        ? null
+                                        : () => Navigator.pop(context),
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: isDark ? Colors.white60 : Colors.grey[700],
+                                      side: BorderSide(
+                                        color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                                      ),
+                                      padding: const EdgeInsets.symmetric(vertical: 14),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                    ),
+                                    child: Text(
+                                      'Cancel',
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        color: isDark ? Colors.white : Colors.black87,
+                                      ),
                                     ),
                                   ),
-                                  child:
-                                      _isSaving ||
-                                          _isUploadingLogo ||
-                                          _isUploadingCover
-                                      ? const Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            SizedBox(
-                                              height: 20,
-                                              width: 20,
-                                              child: CircularProgressIndicator(
-                                                color: Colors.white,
-                                                strokeWidth: 2,
+                                ),
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: ElevatedButton(
+                                    onPressed: (_isSaving ||
+                                            _isUploadingLogo ||
+                                            _isUploadingCover)
+                                        ? null
+                                        : _updateSalon,
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: AppTheme.primary,
+                                      foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 14,
+                                      ),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                    ),
+                                    child: _isSaving ||
+                                            _isUploadingLogo ||
+                                            _isUploadingCover
+                                        ? const Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              SizedBox(
+                                                height: 20,
+                                                width: 20,
+                                                child: CircularProgressIndicator(
+                                                  color: Colors.white,
+                                                  strokeWidth: 2,
+                                                ),
                                               ),
+                                              SizedBox(width: 8),
+                                              Text('Saving...'),
+                                            ],
+                                          )
+                                        : const Text(
+                                            'Save Changes',
+                                            style: TextStyle(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.bold,
                                             ),
-                                            SizedBox(width: 8),
-                                            Text('Saving...'),
-                                          ],
-                                        )
-                                      : const Text(
-                                          'Save Changes',
-                                          style: TextStyle(
-                                            fontSize: 16,
-                                            fontWeight: FontWeight.bold,
                                           ),
-                                        ),
+                                  ),
                                 ),
-                              ),
-                            ],
-                          ),
-                        ],
+                              ],
+                            ),
+                            const SizedBox(height: 24),
+                          ],
+                        ),
                       ),
                     ),
                   ),
                 ),
               ),
-            ),
+      ),
     );
   }
 }

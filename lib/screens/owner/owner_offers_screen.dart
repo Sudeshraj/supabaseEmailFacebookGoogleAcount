@@ -4,6 +4,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/notification_service.dart';
 import '../../services/timezone_service.dart';
+import '../../extensions/context_extensions.dart';
+import '../../theme/app_theme.dart';
 
 class OwnerOffersScreen extends StatefulWidget {
   final String? salonId;
@@ -41,11 +43,22 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
   String _userTimezone = '';
   bool _isTimezoneLoaded = false;
 
+  // ============================================
+  // RESPONSIVE VARIABLES
+  // ============================================
+  late bool _isDark;
+
   @override
   void initState() {
     super.initState();
     _initializeTimezone();
     _scrollController.addListener(_onScroll);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _isDark = context.isDarkMode;
   }
 
   @override
@@ -75,14 +88,12 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
   }
 
   // ============================================
-  // TIMEZONE HELPER METHODS (FIXED)
+  // TIMEZONE HELPER METHODS
   // ============================================
 
-  /// Convert UTC date string to local date for display
   DateTime _utcToLocalDate(String utcDateStr) {
     try {
       final utcDateTime = DateTime.parse(utcDateStr);
-      // ✅ FIXED: Use utcToLocalDateTimeForDate instead of deprecated method
       final localDateTime = TimezoneService.utcToLocalDateTimeForDate(
         '12:00:00',
         utcDateTime,
@@ -98,7 +109,6 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
     }
   }
 
-  /// Format UTC date to local date string
   String _formatLocalDate(String utcDateStr) {
     try {
       final localDate = _utcToLocalDate(utcDateStr);
@@ -109,7 +119,6 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
     }
   }
 
-  /// Check if offer is active based on local date
   bool _isOfferActive(Map<String, dynamic> offer) {
     final now = DateTime.now();
     final nowLocal = DateTime(now.year, now.month, now.day);
@@ -119,7 +128,6 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
     return offer['is_active'] == true && validToLocal.isAfter(nowLocal);
   }
 
-  /// Check if offer is expired based on local date
   bool _isOfferExpired(Map<String, dynamic> offer) {
     final now = DateTime.now();
     final nowLocal = DateTime(now.year, now.month, now.day);
@@ -130,7 +138,6 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
     return validToLocal.isBefore(nowLocal) || validFromLocal.isAfter(nowLocal);
   }
 
-  /// Get days left in local timezone
   int _getDaysLeft(Map<String, dynamic> offer) {
     final now = DateTime.now();
     final nowLocal = DateTime(now.year, now.month, now.day);
@@ -160,12 +167,11 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
         return;
       }
 
-      // ✅ STEP 1: Check if user has active owner role
       final ownerCheck = await supabase
           .from('user_roles')
           .select('status')
           .eq('user_id', user.id)
-          .eq('role_id', 1) // owner role ID
+          .eq('role_id', 1)
           .maybeSingle();
 
       if (ownerCheck == null || ownerCheck['status'] != 'active') {
@@ -179,7 +185,6 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
         return;
       }
 
-      // ✅ STEP 2: Check if profile is active and not blocked
       final profileCheck = await supabase
           .from('profiles')
           .select('is_active, is_blocked')
@@ -362,7 +367,6 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
     setState(() => _isLoading = true);
 
     try {
-      // Prepare insert data (dates already in UTC format from dialog)
       final Map<String, dynamic> insertData = {
         'salon_id': salonId,
         'title': offerData['title'],
@@ -379,7 +383,6 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
         'created_at': DateTime.now().toUtc().toIso8601String(),
       };
 
-      // Add time range if provided
       if (offerData['valid_from_time'] != null &&
           offerData['valid_to_time'] != null) {
         insertData['valid_from_time'] = offerData['valid_from_time'];
@@ -396,11 +399,14 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('✨ Offer created successfully!'),
+        SnackBar(
+          content: Text(
+            '✨ Offer created successfully!',
+            style: TextStyle(color: Colors.white),
+          ),
           backgroundColor: Colors.green,
           behavior: SnackBarBehavior.floating,
-          duration: Duration(seconds: 2),
+          duration: const Duration(seconds: 2),
         ),
       );
     } catch (e) {
@@ -410,6 +416,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
         SnackBar(
           content: Text(
             '❌ Failed to create offer: ${e.toString().substring(0, 100)}',
+            style: TextStyle(color: Colors.white),
           ),
           backgroundColor: Colors.red,
           behavior: SnackBarBehavior.floating,
@@ -420,126 +427,127 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
     }
   }
 
-Future<void> _sendOfferNotificationsToFollowers(
-  Map<String, dynamic> offer,
-) async {
-  final salonId = _currentSalonId;
-  if (salonId == null) return;
+  Future<void> _sendOfferNotificationsToFollowers(
+    Map<String, dynamic> offer,
+  ) async {
+    final salonId = _currentSalonId;
+    if (salonId == null) return;
 
-  setState(() => _isLoading = true);
+    setState(() => _isLoading = true);
 
-  try {
-    // ✅ Step 1: Get active followers with FCM tokens
-    final followers = await supabase.rpc(
-      'get_active_customer_followers',
-      params: {'p_salon_id': salonId},
-    );
+    try {
+      final followers = await supabase.rpc(
+        'get_active_customer_followers',
+        params: {'p_salon_id': salonId},
+      );
 
-    if (followers == null || followers.isEmpty) {
+      if (followers == null || followers.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                '⚠️ No active followers to notify',
+                style: TextStyle(color: Colors.white),
+              ),
+              backgroundColor: Colors.orange,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+        return;
+      }
+
+      debugPrint('📊 Found ${followers.length} active followers');
+
+      String discountText = '';
+      if (offer['discount_type'] == 'percentage') {
+        discountText = '${offer['discount_value']}% OFF';
+      } else if (offer['discount_type'] == 'fixed') {
+        discountText = '₹${offer['discount_value']} OFF';
+      } else {
+        discountText = 'FREE SERVICE';
+      }
+
+      int sentCount = 0;
+      int failedCount = 0;
+
+      for (var follower in followers) {
+        try {
+          final customerId = follower['customer_id'] as String;
+          final customerName = follower['full_name'] ?? 'Customer';
+
+          await _notificationService.sendSpecialOffer(
+            customerId: customerId,
+            offerTitle: offer['title'] ?? 'Special Offer',
+            offerDescription: offer['description'] ?? '',
+            discountText: discountText,
+            offerId: offer['id'] ?? 0,
+            salonName: _currentSalonName ?? 'Salon',
+          );
+
+          sentCount++;
+          debugPrint('✅ Notification sent to $customerName ($customerId)');
+        } catch (e) {
+          debugPrint('❌ Failed to send to ${follower['customer_id']}: $e');
+          failedCount++;
+        }
+      }
+
+      debugPrint('📊 Notifications sent: $sentCount, Failed: $failedCount');
+
+      if (mounted) {
+        String message;
+        if (sentCount > 0 && failedCount == 0) {
+          message =
+              '📢 Notifications sent to $sentCount followers successfully!';
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(message, style: TextStyle(color: Colors.white)),
+              backgroundColor: Colors.green,
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        } else if (sentCount > 0 && failedCount > 0) {
+          message = '📢 $sentCount sent, $failedCount failed';
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(message, style: TextStyle(color: Colors.white)),
+              backgroundColor: Colors.orange,
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        } else {
+          message = '⚠️ No notifications sent. $failedCount followers failed.';
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(message, style: TextStyle(color: Colors.white)),
+              backgroundColor: Colors.red,
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ Error sending notifications: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('⚠️ No active followers to notify'),
-            backgroundColor: Colors.orange,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-      return;
-    }
-
-    debugPrint('📊 Found ${followers.length} active followers');
-
-    // Generate discount text
-    String discountText = '';
-    if (offer['discount_type'] == 'percentage') {
-      discountText = '${offer['discount_value']}% OFF';
-    } else if (offer['discount_type'] == 'fixed') {
-      discountText = '₹${offer['discount_value']} OFF';
-    } else {
-      discountText = 'FREE SERVICE';
-    }
-
-    int sentCount = 0;
-    int failedCount = 0;
-
-    // ✅ Step 2: Send notification to each follower
-    for (var follower in followers) {
-      try {
-        final customerId = follower['customer_id'] as String;
-        final customerName = follower['full_name'] ?? 'Customer';
-
-        // ✅ Save to database AND send push using NotificationService
-        await _notificationService.sendSpecialOffer(
-          customerId: customerId,
-          offerTitle: offer['title'] ?? 'Special Offer',
-          offerDescription: offer['description'] ?? '',
-          discountText: discountText,
-          offerId: offer['id'] ?? 0,
-          salonName: _currentSalonName ?? 'Salon',
-        );
-
-        sentCount++;
-        debugPrint('✅ Notification sent to $customerName ($customerId)');
-        
-      } catch (e) {
-        debugPrint('❌ Failed to send to ${follower['customer_id']}: $e');
-        failedCount++;
-      }
-    }
-
-    debugPrint('📊 Notifications sent: $sentCount, Failed: $failedCount');
-
-    // ✅ Step 3: Show result
-    if (mounted) {
-      String message;
-      if (sentCount > 0 && failedCount == 0) {
-        message = '📢 Notifications sent to $sentCount followers successfully!';
-        ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(message),
-            backgroundColor: Colors.green,
-            behavior: SnackBarBehavior.floating,
-            duration: const Duration(seconds: 3),
-          ),
-        );
-      } else if (sentCount > 0 && failedCount > 0) {
-        message = '📢 $sentCount sent, $failedCount failed';
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(message),
-            backgroundColor: Colors.orange,
-            behavior: SnackBarBehavior.floating,
-            duration: const Duration(seconds: 4),
-          ),
-        );
-      } else {
-        message = '⚠️ No notifications sent. $failedCount followers failed.';
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(message),
+            content: Text(
+              '❌ Failed: ${e.toString().substring(0, 100)}',
+              style: TextStyle(color: Colors.white),
+            ),
             backgroundColor: Colors.red,
             behavior: SnackBarBehavior.floating,
-            duration: const Duration(seconds: 4),
           ),
         );
       }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
-  } catch (e) {
-    debugPrint('❌ Error sending notifications: $e');
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('❌ Failed: ${e.toString().substring(0, 100)}'),
-          backgroundColor: Colors.red,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    }
-  } finally {
-    if (mounted) setState(() => _isLoading = false);
   }
-}
 
   Future<void> _updateOffer(int offerId, Map<String, dynamic> offerData) async {
     setState(() => _isLoading = true);
@@ -558,7 +566,6 @@ Future<void> _sendOfferNotificationsToFollowers(
         'updated_at': DateTime.now().toUtc().toIso8601String(),
       };
 
-      // Add time range if provided
       if (offerData['valid_from_time'] != null &&
           offerData['valid_to_time'] != null) {
         updateData['valid_from_time'] = offerData['valid_from_time'];
@@ -574,11 +581,14 @@ Future<void> _sendOfferNotificationsToFollowers(
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('✏️ Offer updated successfully'),
+        SnackBar(
+          content: Text(
+            '✏️ Offer updated successfully',
+            style: TextStyle(color: Colors.white),
+          ),
           backgroundColor: Colors.green,
           behavior: SnackBarBehavior.floating,
-          duration: Duration(seconds: 2),
+          duration: const Duration(seconds: 2),
         ),
       );
     } catch (e) {
@@ -588,6 +598,7 @@ Future<void> _sendOfferNotificationsToFollowers(
         SnackBar(
           content: Text(
             '❌ Failed to update offer: ${e.toString().substring(0, 100)}',
+            style: TextStyle(color: Colors.white),
           ),
           backgroundColor: Colors.red,
           behavior: SnackBarBehavior.floating,
@@ -617,6 +628,7 @@ Future<void> _sendOfferNotificationsToFollowers(
         SnackBar(
           content: Text(
             !isActive ? '✅ Offer activated' : '⏸️ Offer deactivated',
+            style: TextStyle(color: Colors.white),
           ),
           backgroundColor: !isActive ? Colors.green : Colors.orange,
           behavior: SnackBarBehavior.floating,
@@ -628,7 +640,10 @@ Future<void> _sendOfferNotificationsToFollowers(
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('❌ Failed to update offer status'),
+          content: Text(
+            '❌ Failed to update offer status',
+            style: TextStyle(color: Colors.white),
+          ),
           backgroundColor: Colors.red,
           behavior: SnackBarBehavior.floating,
         ),
@@ -639,25 +654,39 @@ Future<void> _sendOfferNotificationsToFollowers(
   }
 
   Future<void> _deleteOffer(int offerId) async {
+    final isDark = _isDark;
+
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Row(
-          children: const [
-            Icon(Icons.warning_amber_rounded, color: Colors.red, size: 28),
-            SizedBox(width: 12),
-            Text('Delete Offer'),
+          children: [
+            const Icon(
+              Icons.warning_amber_rounded,
+              color: Colors.red,
+              size: 28,
+            ),
+            const SizedBox(width: 12),
+            Text(
+              'Delete Offer',
+              style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+            ),
           ],
         ),
-        content: const Text(
+        content: Text(
           'Are you sure you want to delete this offer?\n\nThis action cannot be undone and will remove this offer from all customers.',
-          style: TextStyle(height: 1.4),
+          style: TextStyle(
+            height: 1.4,
+            color: isDark ? Colors.white70 : Colors.black87,
+          ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
             style: TextButton.styleFrom(
+              foregroundColor: isDark ? Colors.white60 : Colors.grey,
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
             ),
             child: const Text('Cancel'),
@@ -687,11 +716,14 @@ Future<void> _sendOfferNotificationsToFollowers(
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('🗑️ Offer deleted successfully'),
+        SnackBar(
+          content: Text(
+            '🗑️ Offer deleted successfully',
+            style: TextStyle(color: Colors.white),
+          ),
           backgroundColor: Colors.green,
           behavior: SnackBarBehavior.floating,
-          duration: Duration(seconds: 2),
+          duration: const Duration(seconds: 2),
         ),
       );
     } catch (e) {
@@ -701,6 +733,7 @@ Future<void> _sendOfferNotificationsToFollowers(
         SnackBar(
           content: Text(
             '❌ Failed to delete offer: ${e.toString().substring(0, 100)}',
+            style: TextStyle(color: Colors.white),
           ),
           backgroundColor: Colors.red,
           behavior: SnackBarBehavior.floating,
@@ -774,24 +807,34 @@ Future<void> _sendOfferNotificationsToFollowers(
     return Colors.green;
   }
 
+  // ============================================
+  // BUILD METHOD
+  // ============================================
+
   @override
   Widget build(BuildContext context) {
-    final isSmallScreen = MediaQuery.of(context).size.width < 600;
-    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    final isDark = context.isDarkMode;
+    final isWeb = context.isWeb;
 
     if (!_isTimezoneLoaded) {
       return Scaffold(
+        backgroundColor: isDark ? const Color(0xFF121212) : Colors.white,
         appBar: AppBar(
           title: const Text('Manage Offers'),
-          backgroundColor: const Color(0xFFFF6B8B),
+          backgroundColor: AppTheme.primary,
           foregroundColor: Colors.white,
           elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: Colors.white),
+            onPressed: () => Navigator.pop(context),
+            tooltip: 'Back',
+          ),
         ),
         body: const Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+              CircularProgressIndicator(color: AppTheme.primary),
               SizedBox(height: 16),
               Text('Loading timezone...'),
             ],
@@ -801,83 +844,387 @@ Future<void> _sendOfferNotificationsToFollowers(
     }
 
     return Scaffold(
-      backgroundColor: isDarkMode ? Colors.grey[900] : Colors.grey[50],
+      backgroundColor: isDark ? const Color(0xFF121212) : Colors.grey[50],
       appBar: AppBar(
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'Manage Offers',
-              style: TextStyle(fontWeight: FontWeight.bold),
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
             ),
             if (_currentSalonName != null)
               Text(
                 _currentSalonName!,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.normal,
+                  color: Colors.white70,
                 ),
               ),
           ],
         ),
-        backgroundColor: const Color(0xFFFF6B8B),
+        backgroundColor: AppTheme.primary,
         foregroundColor: Colors.white,
         elevation: 0,
-        centerTitle: false,
+        centerTitle: isWeb,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+          tooltip: 'Back',
+        ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.filter_alt_outlined),
+            icon: Icon(Icons.filter_alt_outlined, color: Colors.white),
             onPressed: () => _showFilterMenu(),
             tooltip: 'Filter',
           ),
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: Icon(Icons.refresh, color: Colors.white),
             onPressed: _loadOffers,
             tooltip: 'Refresh',
           ),
         ],
       ),
-      body: _isLoading && _offers.isEmpty
-          ? _buildLoadingState()
-          : _hasError
-          ? _buildErrorState()
-          : _buildMainContent(isSmallScreen, isDarkMode),
+      body: SafeArea(
+        child: _isLoading && _offers.isEmpty
+            ? _buildLoadingState()
+            : _hasError
+            ? _buildErrorState()
+            : isWeb
+            ? _buildWebLayout()
+            : _buildMobileLayout(),
+      ),
       floatingActionButton:
           _showFloatingButton && !_isLoading && !_hasError && _offers.isNotEmpty
           ? FloatingActionButton(
               onPressed: _createOffer,
-              backgroundColor: const Color(0xFFFF6B8B),
+              backgroundColor: AppTheme.primary,
               child: const Icon(Icons.add, color: Colors.white),
             )
           : null,
     );
   }
 
-  Widget _buildLoadingState() {
-    return const Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+  // ============================================
+  // WEB LAYOUT
+  // ============================================
+
+  Widget _buildWebLayout() {
+    final isDark = _isDark;
+
+    return Center(
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 1200),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Left Sidebar
+            Container(
+              width: 320,
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                children: [
+                  _buildSalonInfoCard(isDark),
+                  const SizedBox(height: 16),
+                  _buildStatsCard(),
+                  const SizedBox(height: 16),
+                  // ✅ Quick Actions Card - Fixed
+                  _buildQuickActionsCard(),
+                ],
+              ),
+            ),
+            // Right Content
+            Expanded(
+              child: Column(
+                children: [
+                  _buildFilterChips(true),
+                  Expanded(
+                    child: _filteredOffers.isEmpty
+                        ? _buildEmptyState(false)
+                        : Scrollbar(
+                            controller: _scrollController,
+                            thumbVisibility: true,
+                            trackVisibility: true,
+                            thickness: 8.0,
+                            radius: const Radius.circular(10),
+                            child: ListView.builder(
+                              controller: _scrollController,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 8,
+                              ),
+                              itemCount: _filteredOffers.length,
+                              itemBuilder: (context, index) {
+                                final offer = _filteredOffers[index];
+                                return _buildOfferCard(offer, false);
+                              },
+                            ),
+                          ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ============================================
+  // MOBILE LAYOUT
+  // ============================================
+
+  Widget _buildMobileLayout() {
+    return Column(
+      children: [
+        _buildSalonInfoCard(_isDark),
+        _buildFilterChips(false),
+        Expanded(
+          child: _filteredOffers.isEmpty
+              ? _buildEmptyState(true)
+              : ListView.builder(
+                  controller: _scrollController,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  itemCount: _filteredOffers.length,
+                  itemBuilder: (context, index) {
+                    final offer = _filteredOffers[index];
+                    return _buildOfferCard(offer, true);
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
+  // ============================================
+  // STATS CARD (Web Only)
+  // ============================================
+
+  Widget _buildStatsCard() {
+    final isDark = _isDark;
+
+    return Card(
+      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '📊 Statistics',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
+            ),
+            const SizedBox(height: 12),
+            _buildStatItem(
+              'Total Offers',
+              _offers.length.toString(),
+              Colors.blue,
+            ),
+            _buildStatItem('Active', _activeCount.toString(), Colors.green),
+            _buildStatItem(
+              'Expired',
+              (_offers.length - _activeCount).toString(),
+              Colors.red,
+            ),
+            _buildStatItem(
+              'Total Redemptions',
+              _offers
+                  .fold<int>(
+                    0,
+                    (sum, o) => sum + (o['used_count'] as int? ?? 0),
+                  )
+                  .toString(),
+              Colors.purple,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatItem(String label, String value, Color color) {
+    final isDark = _isDark;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          CircularProgressIndicator(color: Color(0xFFFF6B8B)),
-          SizedBox(height: 16),
-          Text('Loading your offers...'),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 13,
+              color: isDark ? Colors.white70 : Colors.grey[600],
+            ),
+          ),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
         ],
       ),
     );
   }
 
+  // ============================================
+  // QUICK ACTIONS CARD (Web Only)
+  // ============================================
+
+  Widget _buildQuickActionsCard() {
+    final isDark = _isDark;
+
+    return Card(
+      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '⚡ Quick Actions',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
+            ),
+            const SizedBox(height: 12),
+
+            // ✅ Button 1: Create Offer
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _createOffer,
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('Create New Offer'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 8),
+
+            // ✅ Button 2: Refresh
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _loadOffers,
+                icon: const Icon(Icons.refresh, size: 18),
+                label: const Text('Refresh'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: isDark ? Colors.white70 : Colors.grey,
+                  side: BorderSide(
+                    color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 8),
+
+            // ✅ Button 3: View All Offers
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () {
+                  setState(() {
+                    _selectedFilter = 'all';
+                  });
+                },
+                icon: const Icon(Icons.list_alt, size: 18),
+                label: const Text('View All Offers'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: isDark ? Colors.white70 : Colors.blue,
+                  side: BorderSide(
+                    color: isDark ? Colors.grey[700]! : Colors.blue.shade200,
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ============================================
+  // LOADING STATE
+  // ============================================
+
+  Widget _buildLoadingState() {
+    final isDark = _isDark;
+
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const CircularProgressIndicator(color: AppTheme.primary),
+          const SizedBox(height: 16),
+          Text(
+            'Loading your offers...',
+            style: TextStyle(color: isDark ? Colors.white60 : Colors.grey),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ============================================
+  // ERROR STATE
+  // ============================================
+
   Widget _buildErrorState() {
+    final isDark = _isDark;
+
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24.0),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.error_outline, size: 80, color: Colors.grey[400]),
+            Icon(
+              Icons.error_outline,
+              size: 80,
+              color: isDark ? Colors.white70 : Colors.grey[400],
+            ),
             const SizedBox(height: 16),
             Text(
               _errorMessage,
-              style: TextStyle(color: Colors.grey[600], fontSize: 16),
+              style: TextStyle(
+                color: isDark ? Colors.white60 : Colors.grey[600],
+                fontSize: 16,
+              ),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 24),
@@ -886,7 +1233,7 @@ Future<void> _sendOfferNotificationsToFollowers(
               icon: const Icon(Icons.refresh),
               label: const Text('Try Again'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFFF6B8B),
+                backgroundColor: AppTheme.primary,
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(
                   horizontal: 24,
@@ -903,57 +1250,38 @@ Future<void> _sendOfferNotificationsToFollowers(
     );
   }
 
-  Widget _buildMainContent(bool isSmallScreen, bool isDarkMode) {
-    return Column(
-      children: [
-        _buildSalonInfoCard(isDarkMode),
-        _buildFilterChips(isSmallScreen),
-        Expanded(
-          child: _filteredOffers.isEmpty
-              ? _buildEmptyState(isSmallScreen)
-              : ListView.builder(
-                  controller: _scrollController,
-                  padding: EdgeInsets.symmetric(
-                    horizontal: isSmallScreen ? 12 : 24,
-                    vertical: 8,
-                  ),
-                  itemCount: _filteredOffers.length,
-                  itemBuilder: (context, index) {
-                    final offer = _filteredOffers[index];
-                    return _buildOfferCard(offer, isSmallScreen);
-                  },
-                ),
-        ),
-      ],
-    );
-  }
+  // ============================================
+  // SALON INFO CARD
+  // ============================================
 
   Widget _buildSalonInfoCard(bool isDarkMode) {
     return Container(
-      margin: const EdgeInsets.all(16),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: isDarkMode ? Colors.grey[850] : Colors.white,
+        color: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withValues(alpha: 0.1),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
         ],
+        border: Border.all(
+          color: isDarkMode ? Colors.grey[800]! : Colors.grey[200]!,
+        ),
       ),
       child: Row(
         children: [
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+              color: AppTheme.primary.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(16),
             ),
             child: const Icon(
               Icons.local_offer,
-              color: Color(0xFFFF6B8B),
+              color: AppTheme.primary,
               size: 28,
             ),
           ),
@@ -964,9 +1292,10 @@ Future<void> _sendOfferNotificationsToFollowers(
               children: [
                 Text(
                   _currentSalonName ?? 'Loading...',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
+                    color: isDarkMode ? Colors.white : Colors.black87,
                   ),
                 ),
                 const SizedBox(height: 4),
@@ -974,7 +1303,7 @@ Future<void> _sendOfferNotificationsToFollowers(
                   '📊 ${_offers.length} Total  •  🟢 $_activeCount Active',
                   style: TextStyle(
                     fontSize: 13,
-                    color: isDarkMode ? Colors.grey[400] : Colors.grey[600],
+                    color: isDarkMode ? Colors.white60 : Colors.grey[600],
                   ),
                 ),
               ],
@@ -1007,11 +1336,25 @@ Future<void> _sendOfferNotificationsToFollowers(
     );
   }
 
-  Widget _buildFilterChips(bool isSmallScreen) {
+  // ============================================
+  // FILTER CHIPS
+  // ============================================
+
+  Widget _buildFilterChips(bool isWeb) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: isSmallScreen
-          ? SingleChildScrollView(
+      child: isWeb
+          ? Row(
+              mainAxisAlignment: MainAxisAlignment.start,
+              children: [
+                _buildFilterChip('All Offers', 'all'),
+                const SizedBox(width: 8),
+                _buildFilterChip('Active Offers', 'active'),
+                const SizedBox(width: 8),
+                _buildFilterChip('Expired/Inactive', 'expired'),
+              ],
+            )
+          : SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: Row(
                 children: [
@@ -1022,45 +1365,49 @@ Future<void> _sendOfferNotificationsToFollowers(
                   _buildFilterChip('Expired', 'expired'),
                 ],
               ),
-            )
-          : Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                _buildFilterChip('All Offers', 'all'),
-                const SizedBox(width: 8),
-                _buildFilterChip('Active Offers', 'active'),
-                const SizedBox(width: 8),
-                _buildFilterChip('Expired/Inactive', 'expired'),
-              ],
             ),
     );
   }
 
   Widget _buildFilterChip(String label, String value) {
+    final isDark = _isDark;
     final isSelected = _selectedFilter == value;
+
     return FilterChip(
-      label: Text(label),
+      label: Text(
+        label,
+        style: TextStyle(
+          color: isSelected
+              ? AppTheme.primary
+              : (isDark ? Colors.white70 : Colors.grey[600]),
+        ),
+      ),
       selected: isSelected,
       onSelected: (selected) {
         setState(() {
           _selectedFilter = value;
         });
       },
-      selectedColor: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
-      checkmarkColor: const Color(0xFFFF6B8B),
-      labelStyle: TextStyle(
-        color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[600],
-        fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-      ),
+      selectedColor: AppTheme.primary.withValues(alpha: 0.1),
+      checkmarkColor: AppTheme.primary,
+      backgroundColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
       shape: StadiumBorder(
         side: BorderSide(
-          color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[300]!,
+          color: isSelected
+              ? AppTheme.primary
+              : (isDark ? Colors.grey[700]! : Colors.grey[300]!),
         ),
       ),
     );
   }
 
+  // ============================================
+  // EMPTY STATE
+  // ============================================
+
   Widget _buildEmptyState(bool isSmallScreen) {
+    final isDark = _isDark;
+
     return Center(
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
@@ -1070,7 +1417,7 @@ Future<void> _sendOfferNotificationsToFollowers(
             Container(
               padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(
-                color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                color: AppTheme.primary.withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
               child: Icon(
@@ -1080,7 +1427,7 @@ Future<void> _sendOfferNotificationsToFollowers(
                     ? Icons.timer_off_outlined
                     : Icons.add_circle_outline,
                 size: isSmallScreen ? 60 : 80,
-                color: const Color(0xFFFF6B8B).withValues(alpha: 0.5),
+                color: AppTheme.primary.withValues(alpha: 0.5),
               ),
             ),
             const SizedBox(height: 24),
@@ -1089,14 +1436,17 @@ Future<void> _sendOfferNotificationsToFollowers(
               style: TextStyle(
                 fontSize: isSmallScreen ? 18 : 20,
                 fontWeight: FontWeight.bold,
-                color: Colors.grey[700],
+                color: isDark ? Colors.white : Colors.grey[700],
               ),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 8),
             Text(
               _getEmptyStateSubMessage(),
-              style: TextStyle(fontSize: 14, color: Colors.grey[500]),
+              style: TextStyle(
+                fontSize: 14,
+                color: isDark ? Colors.white70 : Colors.grey[500],
+              ),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 24),
@@ -1106,7 +1456,7 @@ Future<void> _sendOfferNotificationsToFollowers(
                 icon: const Icon(Icons.add),
                 label: const Text('Create Your First Offer'),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFFF6B8B),
+                  backgroundColor: AppTheme.primary,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(
                     horizontal: 24,
@@ -1147,12 +1497,16 @@ Future<void> _sendOfferNotificationsToFollowers(
     }
   }
 
+  // ============================================
+  // OFFER CARD
+  // ============================================
+
   Widget _buildOfferCard(Map<String, dynamic> offer, bool isSmallScreen) {
+    final isDark = _isDark;
     final statusColor = _getStatusColor(offer);
     final statusText = _getStatusText(offer);
     final discountText = _getDiscountText(offer);
 
-    // ✅ Use local date conversion for display
     final validFrom = _formatLocalDate(offer['valid_from']);
     final validTo = _formatLocalDate(offer['valid_to']);
 
@@ -1171,6 +1525,7 @@ Future<void> _sendOfferNotificationsToFollowers(
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       elevation: 2,
+      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: InkWell(
         onTap: () => _editOffer(offer),
@@ -1192,8 +1547,8 @@ Future<void> _sendOfferNotificationsToFollowers(
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
                           colors: [
-                            const Color(0xFFFF6B8B),
-                            const Color(0xFFFF6B8B).withValues(alpha: 0.7),
+                            AppTheme.primary,
+                            AppTheme.primary.withValues(alpha: 0.7),
                           ],
                         ),
                         borderRadius: BorderRadius.circular(20),
@@ -1249,9 +1604,10 @@ Future<void> _sendOfferNotificationsToFollowers(
               // Title
               Text(
                 offer['title'],
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white : Colors.black87,
                 ),
               ),
               const SizedBox(height: 8),
@@ -1263,7 +1619,7 @@ Future<void> _sendOfferNotificationsToFollowers(
                   offer['description'],
                   style: TextStyle(
                     fontSize: 14,
-                    color: Colors.grey[600],
+                    color: isDark ? Colors.white70 : Colors.grey[600],
                     height: 1.4,
                   ),
                   maxLines: 2,
@@ -1296,9 +1652,10 @@ Future<void> _sendOfferNotificationsToFollowers(
                           const SizedBox(width: 4),
                           Text(
                             '${offer['points_required']} pts',
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.w500,
+                              color: isDark ? Colors.white : Colors.black87,
                             ),
                           ),
                         ],
@@ -1311,23 +1668,23 @@ Future<void> _sendOfferNotificationsToFollowers(
                       vertical: 5,
                     ),
                     decoration: BoxDecoration(
-                      color: Colors.grey[200],
+                      color: isDark ? Colors.grey[800] : Colors.grey[200],
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(
+                        Icon(
                           Icons.calendar_today,
                           size: 12,
-                          color: Colors.grey,
+                          color: isDark ? Colors.white70 : Colors.grey,
                         ),
                         const SizedBox(width: 4),
                         Text(
                           isSmallScreen ? validFrom : '$validFrom - $validTo',
                           style: TextStyle(
                             fontSize: 11,
-                            color: Colors.grey[600],
+                            color: isDark ? Colors.white60 : Colors.grey[600],
                           ),
                         ),
                       ],
@@ -1347,10 +1704,10 @@ Future<void> _sendOfferNotificationsToFollowers(
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(
+                          Icon(
                             Icons.access_time,
                             size: 12,
-                            color: Colors.purple,
+                            color: isDark ? Colors.purple[300] : Colors.purple,
                           ),
                           const SizedBox(width: 4),
                           Text(
@@ -1358,7 +1715,9 @@ Future<void> _sendOfferNotificationsToFollowers(
                             style: TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.w500,
-                              color: Colors.purple[700],
+                              color: isDark
+                                  ? Colors.purple[300]
+                                  : Colors.purple[700],
                             ),
                           ),
                         ],
@@ -1416,7 +1775,7 @@ Future<void> _sendOfferNotificationsToFollowers(
                           'Redemption Progress',
                           style: TextStyle(
                             fontSize: 11,
-                            color: Colors.grey[500],
+                            color: isDark ? Colors.white70 : Colors.grey[500],
                           ),
                         ),
                         Text(
@@ -1434,7 +1793,9 @@ Future<void> _sendOfferNotificationsToFollowers(
                       borderRadius: BorderRadius.circular(4),
                       child: LinearProgressIndicator(
                         value: usedCount / usageLimit,
-                        backgroundColor: Colors.grey[200],
+                        backgroundColor: isDark
+                            ? Colors.grey[800]
+                            : Colors.grey[200],
                         color: usageLimitColor,
                         minHeight: 6,
                       ),
@@ -1484,14 +1845,12 @@ Future<void> _sendOfferNotificationsToFollowers(
                     ),
                     IconButton(
                       onPressed: () => _editOffer(offer),
-                      icon: const Icon(Icons.edit, size: 20),
-                      color: Colors.blue,
+                      icon: Icon(Icons.edit, size: 20, color: Colors.blue),
                       tooltip: 'Edit',
                     ),
                     IconButton(
                       onPressed: () => _deleteOffer(offer['id']),
-                      icon: const Icon(Icons.delete, size: 20),
-                      color: Colors.red,
+                      icon: Icon(Icons.delete, size: 20, color: Colors.red),
                       tooltip: 'Delete',
                     ),
                   ],
@@ -1510,22 +1869,34 @@ Future<void> _sendOfferNotificationsToFollowers(
     required String label,
     required Color color,
   }) {
+    final isDark = _isDark;
+
     return OutlinedButton.icon(
       onPressed: onPressed,
       icon: Icon(icon, size: 16),
-      label: Text(label, style: const TextStyle(fontSize: 12)),
+      label: Text(
+        label,
+        style: TextStyle(fontSize: 12, color: isDark ? Colors.white : color),
+      ),
       style: OutlinedButton.styleFrom(
         foregroundColor: color,
-        side: BorderSide(color: color),
+        side: BorderSide(color: isDark ? color.withValues(alpha: 0.5) : color),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       ),
     );
   }
 
+  // ============================================
+  // FILTER MENU
+  // ============================================
+
   void _showFilterMenu() {
+    final isDark = _isDark;
+
     showModalBottomSheet(
       context: context,
+      backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -1534,9 +1905,13 @@ Future<void> _sendOfferNotificationsToFollowers(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text(
+            Text(
               'Filter Offers',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
             ),
             const SizedBox(height: 16),
             _buildFilterOption('All Offers', 'all', Icons.list_alt),
@@ -1549,19 +1924,30 @@ Future<void> _sendOfferNotificationsToFollowers(
   }
 
   Widget _buildFilterOption(String title, String value, IconData icon) {
-    return ListTile(
-      leading: Icon(
-        icon,
-        color: _selectedFilter == value ? const Color(0xFFFF6B8B) : null,
+    final isDark = _isDark;
+    final isSelected = _selectedFilter == value;
+
+    return Material(
+      color: Colors.transparent,
+      child: ListTile(
+        leading: Icon(
+          icon,
+          color: isSelected
+              ? AppTheme.primary
+              : (isDark ? Colors.white60 : null),
+        ),
+        title: Text(
+          title,
+          style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+        ),
+        trailing: isSelected
+            ? Icon(Icons.check, color: AppTheme.primary)
+            : null,
+        onTap: () {
+          setState(() => _selectedFilter = value);
+          Navigator.pop(context);
+        },
       ),
-      title: Text(title),
-      trailing: _selectedFilter == value
-          ? const Icon(Icons.check, color: Color(0xFFFF6B8B))
-          : null,
-      onTap: () {
-        setState(() => _selectedFilter = value);
-        Navigator.pop(context);
-      },
     );
   }
 }
@@ -1607,6 +1993,8 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
   TimeOfDay? _validFromTime;
   TimeOfDay? _validToTime;
 
+  late bool _isDark;
+
   @override
   void initState() {
     super.initState();
@@ -1630,7 +2018,6 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
       _validFrom = DateTime.parse(widget.offer!['valid_from']);
       _validTo = DateTime.parse(widget.offer!['valid_to']);
 
-      // Load time range if exists
       if (widget.offer!.containsKey('valid_from_time') &&
           widget.offer!['valid_from_time'] != null) {
         final fromTimeStr = widget.offer!['valid_from_time'].toString();
@@ -1648,6 +2035,12 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
       _pointsRequiredController = TextEditingController(text: '0');
       _usageLimitController = TextEditingController();
     }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _isDark = context.isDarkMode;
   }
 
   TimeOfDay _parseTimeString(String timeStr) {
@@ -1668,6 +2061,8 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
   }
 
   Future<void> _selectDateRange() async {
+    final isDark = _isDark;
+
     final DateTimeRange? picked = await showDateRangePicker(
       context: context,
       firstDate: DateTime.now(),
@@ -1676,6 +2071,16 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
       helpText: 'Select Offer Validity Period',
       confirmText: 'Apply',
       cancelText: 'Cancel',
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: isDark
+                ? ColorScheme.dark(primary: AppTheme.primary)
+                : ColorScheme.light(primary: AppTheme.primary),
+          ),
+          child: child!,
+        );
+      },
     );
 
     if (picked != null) {
@@ -1687,10 +2092,22 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
   }
 
   Future<void> _selectFromTime() async {
+    final isDark = _isDark;
+
     final TimeOfDay? picked = await showTimePicker(
       context: context,
       initialTime: _validFromTime ?? const TimeOfDay(hour: 9, minute: 0),
       helpText: 'Select Start Time',
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: isDark
+                ? ColorScheme.dark(primary: AppTheme.primary)
+                : ColorScheme.light(primary: AppTheme.primary),
+          ),
+          child: child!,
+        );
+      },
     );
     if (picked != null) {
       setState(() {
@@ -1704,10 +2121,22 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
   }
 
   Future<void> _selectToTime() async {
+    final isDark = _isDark;
+
     final TimeOfDay? picked = await showTimePicker(
       context: context,
       initialTime: _validToTime ?? const TimeOfDay(hour: 18, minute: 0),
       helpText: 'Select End Time',
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: isDark
+                ? ColorScheme.dark(primary: AppTheme.primary)
+                : ColorScheme.light(primary: AppTheme.primary),
+          ),
+          child: child!,
+        );
+      },
     );
     if (picked != null) {
       setState(() {
@@ -1727,8 +2156,11 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
     if (_formKey.currentState!.validate()) {
       if (_validTo.isBefore(_validFrom)) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('End date must be after start date'),
+          SnackBar(
+            content: Text(
+              'End date must be after start date',
+              style: TextStyle(color: Colors.white),
+            ),
             backgroundColor: Colors.red,
           ),
         );
@@ -1738,8 +2170,11 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
       if (_hasTimeRestriction) {
         if (_validFromTime == null || _validToTime == null) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Please select both start and end times'),
+            SnackBar(
+              content: Text(
+                'Please select both start and end times',
+                style: TextStyle(color: Colors.white),
+              ),
               backgroundColor: Colors.red,
             ),
           );
@@ -1774,9 +2209,11 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final isSmallScreen = MediaQuery.of(context).size.width < 600;
+    final isSmallScreen = context.isMobile;
+    final isDark = context.isDarkMode;
 
     return Dialog(
+      backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
       child: Container(
         width: isSmallScreen ? double.infinity : 600,
@@ -1795,12 +2232,12 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                    color: AppTheme.primary.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(14),
                   ),
                   child: Icon(
                     widget.isEditing ? Icons.edit : Icons.add,
-                    color: const Color(0xFFFF6B8B),
+                    color: AppTheme.primary,
                     size: 24,
                   ),
                 ),
@@ -1808,14 +2245,18 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                 Expanded(
                   child: Text(
                     widget.isEditing ? 'Edit Offer' : 'Create New Offer',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.bold,
+                      color: isDark ? Colors.white : Colors.black87,
                     ),
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.close),
+                  icon: Icon(
+                    Icons.close,
+                    color: isDark ? Colors.white60 : Colors.grey,
+                  ),
                   onPressed: () => Navigator.pop(context),
                   tooltip: 'Close',
                 ),
@@ -1832,23 +2273,52 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       // Title
-                      const Text(
+                      Text(
                         'Offer Title *',
                         style: TextStyle(
                           fontWeight: FontWeight.w600,
                           fontSize: 14,
+                          color: isDark ? Colors.white : Colors.black87,
                         ),
                       ),
                       const SizedBox(height: 8),
                       TextFormField(
                         controller: _titleController,
+                        style: TextStyle(
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
                         decoration: InputDecoration(
                           hintText: 'e.g., Summer Special Sale',
+                          hintStyle: TextStyle(
+                            color: isDark ? Colors.white70 : Colors.grey,
+                          ),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(
+                              color: isDark
+                                  ? Colors.grey[700]!
+                                  : Colors.grey[300]!,
+                            ),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(
+                              color: isDark
+                                  ? Colors.grey[700]!
+                                  : Colors.grey[300]!,
+                            ),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(
+                              color: AppTheme.primary,
+                              width: 2,
+                            ),
                           ),
                           filled: true,
-                          fillColor: Colors.grey[50],
+                          fillColor: isDark
+                              ? const Color(0xFF2A2A2A)
+                              : Colors.grey[50],
                           contentPadding: const EdgeInsets.symmetric(
                             horizontal: 16,
                             vertical: 14,
@@ -1867,18 +2337,51 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                       const SizedBox(height: 16),
 
                       // Description
-                      const Text('Description (Optional)'),
+                      Text(
+                        'Description (Optional)',
+                        style: TextStyle(
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
+                      ),
                       const SizedBox(height: 8),
                       TextFormField(
                         controller: _descriptionController,
                         maxLines: 3,
+                        style: TextStyle(
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
                         decoration: InputDecoration(
                           hintText: 'Describe your offer details...',
+                          hintStyle: TextStyle(
+                            color: isDark ? Colors.white70 : Colors.grey,
+                          ),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(
+                              color: isDark
+                                  ? Colors.grey[700]!
+                                  : Colors.grey[300]!,
+                            ),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(
+                              color: isDark
+                                  ? Colors.grey[700]!
+                                  : Colors.grey[300]!,
+                            ),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(
+                              color: AppTheme.primary,
+                              width: 2,
+                            ),
                           ),
                           filled: true,
-                          fillColor: Colors.grey[50],
+                          fillColor: isDark
+                              ? const Color(0xFF2A2A2A)
+                              : Colors.grey[50],
                           contentPadding: const EdgeInsets.symmetric(
                             horizontal: 16,
                             vertical: 14,
@@ -1888,45 +2391,81 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                       const SizedBox(height: 16),
 
                       // Discount Type
-                      const Text('Discount Type *'),
+                      Text(
+                        'Discount Type *',
+                        style: TextStyle(
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
+                      ),
                       const SizedBox(height: 8),
                       Row(
                         children: [
                           Expanded(
                             child: ChoiceChip(
-                              label: const Text('Percentage %'),
+                              label: Text(
+                                'Percentage %',
+                                style: TextStyle(
+                                  color: _discountType == 'percentage'
+                                      ? AppTheme.primary
+                                      : (isDark
+                                            ? Colors.white70
+                                            : Colors.black87),
+                                ),
+                              ),
                               selected: _discountType == 'percentage',
                               onSelected: (selected) {
                                 if (selected) {
                                   setState(() => _discountType = 'percentage');
                                 }
                               },
-                              selectedColor: const Color(
-                                0xFFFF6B8B,
-                              ).withValues(alpha: 0.2),
-                              backgroundColor: Colors.grey[100],
+                              selectedColor: AppTheme.primary.withValues(
+                                alpha: 0.2,
+                              ),
+                              backgroundColor: isDark
+                                  ? const Color(0xFF2A2A2A)
+                                  : Colors.grey[100],
                             ),
                           ),
                           const SizedBox(width: 8),
                           Expanded(
                             child: ChoiceChip(
-                              label: const Text('Fixed ₹'),
+                              label: Text(
+                                'Fixed ₹',
+                                style: TextStyle(
+                                  color: _discountType == 'fixed'
+                                      ? AppTheme.primary
+                                      : (isDark
+                                            ? Colors.white70
+                                            : Colors.black87),
+                                ),
+                              ),
                               selected: _discountType == 'fixed',
                               onSelected: (selected) {
                                 if (selected) {
                                   setState(() => _discountType = 'fixed');
                                 }
                               },
-                              selectedColor: const Color(
-                                0xFFFF6B8B,
-                              ).withValues(alpha: 0.2),
-                              backgroundColor: Colors.grey[100],
+                              selectedColor: AppTheme.primary.withValues(
+                                alpha: 0.2,
+                              ),
+                              backgroundColor: isDark
+                                  ? const Color(0xFF2A2A2A)
+                                  : Colors.grey[100],
                             ),
                           ),
                           const SizedBox(width: 8),
                           Expanded(
                             child: ChoiceChip(
-                              label: const Text('Free Service'),
+                              label: Text(
+                                'Free Service',
+                                style: TextStyle(
+                                  color: _discountType == 'free_service'
+                                      ? AppTheme.primary
+                                      : (isDark
+                                            ? Colors.white70
+                                            : Colors.black87),
+                                ),
+                              ),
                               selected: _discountType == 'free_service',
                               onSelected: (selected) {
                                 if (selected) {
@@ -1935,10 +2474,12 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                                   );
                                 }
                               },
-                              selectedColor: const Color(
-                                0xFFFF6B8B,
-                              ).withValues(alpha: 0.2),
-                              backgroundColor: Colors.grey[100],
+                              selectedColor: AppTheme.primary.withValues(
+                                alpha: 0.2,
+                              ),
+                              backgroundColor: isDark
+                                  ? const Color(0xFF2A2A2A)
+                                  : Colors.grey[100],
                             ),
                           ),
                         ],
@@ -1947,11 +2488,19 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
 
                       // Discount Value
                       if (_discountType != 'free_service') ...[
-                        const Text('Discount Value *'),
+                        Text(
+                          'Discount Value *',
+                          style: TextStyle(
+                            color: isDark ? Colors.white : Colors.black87,
+                          ),
+                        ),
                         const SizedBox(height: 8),
                         TextFormField(
                           controller: _discountValueController,
                           keyboardType: TextInputType.number,
+                          style: TextStyle(
+                            color: isDark ? Colors.white : Colors.black87,
+                          ),
                           decoration: InputDecoration(
                             hintText: _discountType == 'percentage'
                                 ? 'e.g., 20'
@@ -1959,11 +2508,39 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                             prefixText: _discountType == 'percentage'
                                 ? '% '
                                 : '₹ ',
+                            prefixStyle: TextStyle(
+                              color: isDark ? Colors.white60 : Colors.grey,
+                            ),
+                            hintStyle: TextStyle(
+                              color: isDark ? Colors.white70 : Colors.grey,
+                            ),
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide(
+                                color: isDark
+                                    ? Colors.grey[700]!
+                                    : Colors.grey[300]!,
+                              ),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide(
+                                color: isDark
+                                    ? Colors.grey[700]!
+                                    : Colors.grey[300]!,
+                              ),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: const BorderSide(
+                                color: AppTheme.primary,
+                                width: 2,
+                              ),
                             ),
                             filled: true,
-                            fillColor: Colors.grey[50],
+                            fillColor: isDark
+                                ? const Color(0xFF2A2A2A)
+                                : Colors.grey[50],
                             contentPadding: const EdgeInsets.symmetric(
                               horizontal: 16,
                               vertical: 14,
@@ -1990,18 +2567,51 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                       ],
 
                       // Points Required
-                      const Text('Points Required'),
+                      Text(
+                        'Points Required',
+                        style: TextStyle(
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
+                      ),
                       const SizedBox(height: 8),
                       TextFormField(
                         controller: _pointsRequiredController,
                         keyboardType: TextInputType.number,
+                        style: TextStyle(
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
                         decoration: InputDecoration(
                           hintText: '0 (Available for all customers)',
+                          hintStyle: TextStyle(
+                            color: isDark ? Colors.white70 : Colors.grey,
+                          ),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(
+                              color: isDark
+                                  ? Colors.grey[700]!
+                                  : Colors.grey[300]!,
+                            ),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(
+                              color: isDark
+                                  ? Colors.grey[700]!
+                                  : Colors.grey[300]!,
+                            ),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(
+                              color: AppTheme.primary,
+                              width: 2,
+                            ),
                           ),
                           filled: true,
-                          fillColor: Colors.grey[50],
+                          fillColor: isDark
+                              ? const Color(0xFF2A2A2A)
+                              : Colors.grey[50],
                           contentPadding: const EdgeInsets.symmetric(
                             horizontal: 16,
                             vertical: 14,
@@ -2022,19 +2632,55 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                       const SizedBox(height: 16),
 
                       // Usage Limit
-                      const Text('Usage Limit (Optional)'),
+                      Text(
+                        'Usage Limit (Optional)',
+                        style: TextStyle(
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
+                      ),
                       const SizedBox(height: 8),
                       TextFormField(
                         controller: _usageLimitController,
                         keyboardType: TextInputType.number,
+                        style: TextStyle(
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
                         decoration: InputDecoration(
                           hintText: 'e.g., 10 (First 10 customers only)',
+                          hintStyle: TextStyle(
+                            color: isDark ? Colors.white70 : Colors.grey,
+                          ),
                           helperText: 'Leave empty for unlimited uses',
+                          helperStyle: TextStyle(
+                            color: isDark ? Colors.white70 : Colors.grey,
+                          ),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(
+                              color: isDark
+                                  ? Colors.grey[700]!
+                                  : Colors.grey[300]!,
+                            ),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(
+                              color: isDark
+                                  ? Colors.grey[700]!
+                                  : Colors.grey[300]!,
+                            ),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(
+                              color: AppTheme.primary,
+                              width: 2,
+                            ),
                           ),
                           filled: true,
-                          fillColor: Colors.grey[50],
+                          fillColor: isDark
+                              ? const Color(0xFF2A2A2A)
+                              : Colors.grey[50],
                           contentPadding: const EdgeInsets.symmetric(
                             horizontal: 16,
                             vertical: 14,
@@ -2055,7 +2701,12 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                       const SizedBox(height: 16),
 
                       // Valid Period
-                      const Text('Valid Period *'),
+                      Text(
+                        'Valid Period *',
+                        style: TextStyle(
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
+                      ),
                       const SizedBox(height: 8),
                       InkWell(
                         onTap: _selectDateRange,
@@ -2065,27 +2716,38 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                             vertical: 14,
                           ),
                           decoration: BoxDecoration(
-                            color: Colors.grey[50],
+                            color: isDark
+                                ? const Color(0xFF2A2A2A)
+                                : Colors.grey[50],
                             borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Colors.grey[300]!),
+                            border: Border.all(
+                              color: isDark
+                                  ? Colors.grey[700]!
+                                  : Colors.grey[300]!,
+                            ),
                           ),
                           child: Row(
                             children: [
-                              const Icon(
+                              Icon(
                                 Icons.calendar_today,
-                                color: Color(0xFFFF6B8B),
+                                color: AppTheme.primary,
                                 size: 20,
                               ),
                               const SizedBox(width: 12),
                               Expanded(
                                 child: Text(
                                   '${DateFormat('MMM dd, yyyy').format(_validFrom)} → ${DateFormat('MMM dd, yyyy').format(_validTo)}',
-                                  style: const TextStyle(fontSize: 14),
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    color: isDark
+                                        ? Colors.white
+                                        : Colors.black87,
+                                  ),
                                 ),
                               ),
-                              const Icon(
+                              Icon(
                                 Icons.arrow_drop_down,
-                                color: Colors.grey,
+                                color: isDark ? Colors.white70 : Colors.grey,
                               ),
                             ],
                           ),
@@ -2105,12 +2767,18 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                         child: Column(
                           children: [
                             SwitchListTile(
-                              title: const Text(
+                              title: Text(
                                 'Restrict to specific time range',
-                                style: TextStyle(fontWeight: FontWeight.w500),
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w500,
+                                  color: isDark ? Colors.white : Colors.black87,
+                                ),
                               ),
-                              subtitle: const Text(
+                              subtitle: Text(
                                 'Offer valid only during selected hours',
+                                style: TextStyle(
+                                  color: isDark ? Colors.white60 : Colors.grey,
+                                ),
                               ),
                               value: _hasTimeRestriction,
                               onChanged: (value) {
@@ -2122,7 +2790,7 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                                   }
                                 });
                               },
-                              activeThumbColor: const Color(0xFFFF6B8B),
+                              activeThumbColor: AppTheme.primary,
                             ),
                             if (_hasTimeRestriction) ...[
                               const Divider(height: 1),
@@ -2138,21 +2806,27 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                                             vertical: 12,
                                           ),
                                           decoration: BoxDecoration(
-                                            color: Colors.grey[50],
+                                            color: isDark
+                                                ? const Color(0xFF2A2A2A)
+                                                : Colors.grey[50],
                                             borderRadius: BorderRadius.circular(
                                               10,
                                             ),
                                             border: Border.all(
-                                              color: Colors.grey[300]!,
+                                              color: isDark
+                                                  ? Colors.grey[700]!
+                                                  : Colors.grey[300]!,
                                             ),
                                           ),
                                           child: Column(
                                             children: [
-                                              const Text(
+                                              Text(
                                                 'Start Time',
                                                 style: TextStyle(
                                                   fontSize: 12,
-                                                  color: Colors.grey,
+                                                  color: isDark
+                                                      ? Colors.white70
+                                                      : Colors.grey,
                                                 ),
                                               ),
                                               const SizedBox(height: 4),
@@ -2166,8 +2840,10 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                                                   fontSize: 16,
                                                   fontWeight: FontWeight.w500,
                                                   color: _validFromTime != null
-                                                      ? const Color(0xFFFF6B8B)
-                                                      : Colors.grey,
+                                                      ? AppTheme.primary
+                                                      : (isDark
+                                                            ? Colors.white70
+                                                            : Colors.grey),
                                                 ),
                                               ),
                                             ],
@@ -2176,9 +2852,11 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                                       ),
                                     ),
                                     const SizedBox(width: 16),
-                                    const Icon(
+                                    Icon(
                                       Icons.arrow_forward,
-                                      color: Colors.grey,
+                                      color: isDark
+                                          ? Colors.white70
+                                          : Colors.grey,
                                     ),
                                     const SizedBox(width: 16),
                                     Expanded(
@@ -2189,21 +2867,27 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                                             vertical: 12,
                                           ),
                                           decoration: BoxDecoration(
-                                            color: Colors.grey[50],
+                                            color: isDark
+                                                ? const Color(0xFF2A2A2A)
+                                                : Colors.grey[50],
                                             borderRadius: BorderRadius.circular(
                                               10,
                                             ),
                                             border: Border.all(
-                                              color: Colors.grey[300]!,
+                                              color: isDark
+                                                  ? Colors.grey[700]!
+                                                  : Colors.grey[300]!,
                                             ),
                                           ),
                                           child: Column(
                                             children: [
-                                              const Text(
+                                              Text(
                                                 'End Time',
                                                 style: TextStyle(
                                                   fontSize: 12,
-                                                  color: Colors.grey,
+                                                  color: isDark
+                                                      ? Colors.white70
+                                                      : Colors.grey,
                                                 ),
                                               ),
                                               const SizedBox(height: 4),
@@ -2217,8 +2901,10 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                                                   fontSize: 16,
                                                   fontWeight: FontWeight.w500,
                                                   color: _validToTime != null
-                                                      ? const Color(0xFFFF6B8B)
-                                                      : Colors.grey,
+                                                      ? AppTheme.primary
+                                                      : (isDark
+                                                            ? Colors.white70
+                                                            : Colors.grey),
                                                 ),
                                               ),
                                             ],
@@ -2265,18 +2951,23 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    const Text(
+                                    Text(
                                       'Notify Followers',
                                       style: TextStyle(
                                         fontWeight: FontWeight.w600,
                                         fontSize: 14,
+                                        color: isDark
+                                            ? Colors.white
+                                            : Colors.black87,
                                       ),
                                     ),
                                     Text(
                                       'Send push notification to all salon followers',
                                       style: TextStyle(
                                         fontSize: 11,
-                                        color: Colors.grey[600],
+                                        color: isDark
+                                            ? Colors.white60
+                                            : Colors.grey[600],
                                       ),
                                     ),
                                   ],
@@ -2290,7 +2981,7 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                                   });
                                   widget.onNotificationToggle(value);
                                 },
-                                activeThumbColor: const Color(0xFFFF6B8B),
+                                activeThumbColor: AppTheme.primary,
                               ),
                             ],
                           ),
@@ -2310,6 +3001,10 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                   child: OutlinedButton(
                     onPressed: () => Navigator.pop(context),
                     style: OutlinedButton.styleFrom(
+                      foregroundColor: isDark ? Colors.white60 : Colors.grey,
+                      side: BorderSide(
+                        color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                      ),
                       padding: const EdgeInsets.symmetric(vertical: 12),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
@@ -2323,7 +3018,7 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                   child: ElevatedButton(
                     onPressed: _submit,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFFF6B8B),
+                      backgroundColor: AppTheme.primary,
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 12),
                       shape: RoundedRectangleBorder(
@@ -2332,6 +3027,7 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                     ),
                     child: Text(
                       widget.isEditing ? 'Update Offer' : 'Create Offer',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
                   ),
                 ),

@@ -3,16 +3,14 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter_application_1/extensions/context_extensions.dart';
+import 'package:flutter_application_1/theme/app_theme.dart';
 
 class CustomerListScreen extends StatefulWidget {
   final String? salonId;
   final String role; // 'owner', 'barber', 'customer'
 
-  const CustomerListScreen({
-    super.key,
-    this.salonId,
-    required this.role,
-  });
+  const CustomerListScreen({super.key, this.salonId, required this.role});
 
   @override
   State<CustomerListScreen> createState() => _CustomerListScreenState();
@@ -34,10 +32,30 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
   String _selectedFilter = 'All'; // All, Followers, Bookings, Newest
   bool _showFilterOptions = false;
 
+  // ✅ Responsive variables
+  late bool _isWeb;
+  late bool _isDark;
+
+  // ✅ Scroll Controller for web
+  final ScrollController _scrollController = ScrollController();
+
   @override
   void initState() {
     super.initState();
     _loadData();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _isWeb = context.isWeb;
+    _isDark = context.isDarkMode;
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadData() async {
@@ -130,7 +148,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
               'is_current_user': true,
               'is_follower': false,
               'followed_at': null,
-            }
+            },
           ];
           _totalCustomers = 1;
           _totalBookings = bookingsResponse.length;
@@ -198,12 +216,18 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
       }
 
       final customers = customerMap.values.toList()
-        ..sort((a, b) => (b['booking_count'] as int).compareTo(a['booking_count'] as int));
+        ..sort(
+          (a, b) =>
+              (b['booking_count'] as int).compareTo(a['booking_count'] as int),
+        );
 
       setState(() {
         _customers = customers;
         _totalCustomers = customers.length;
-        _totalBookings = customers.fold(0, (sum, c) => sum + (c['booking_count'] as int));
+        _totalBookings = customers.fold(
+          0,
+          (sum, c) => sum + (c['booking_count'] as int),
+        );
         _isLoading = false;
       });
     } catch (e) {
@@ -221,7 +245,6 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
     try {
       final salonIdInt = int.parse(salonId);
 
-      // STEP 1: Get customers who booked at this salon
       final appointmentsResponse = await supabase
           .from('appointments')
           .select('''
@@ -239,7 +262,6 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
           .neq('status', 'cancelled')
           .order('appointment_date', ascending: false);
 
-      // STEP 2: Get followers who haven't booked yet
       final followersResponse = await supabase
           .from('salon_followers')
           .select('''
@@ -257,10 +279,8 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
           .eq('salon_id', salonIdInt)
           .order('created_at', ascending: false);
 
-      // Group by customer
       final Map<String, Map<String, dynamic>> customerMap = {};
 
-      // Add customers from appointments
       for (var appointment in appointmentsResponse) {
         final profile = appointment['profiles'] as Map?;
         if (profile == null) continue;
@@ -284,7 +304,6 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
             (customerMap[customerId]!['booking_count'] as int) + 1;
       }
 
-      // Add followers (who haven't booked or already have bookings)
       int followerCount = 0;
       for (var follower in followersResponse) {
         final profile = follower['profiles'] as Map?;
@@ -306,7 +325,6 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
           };
           followerCount++;
         } else {
-          // Already has bookings, mark as follower too
           customerMap[customerId]!['is_follower'] = true;
           if (customerMap[customerId]!['followed_at'] == null) {
             customerMap[customerId]!['followed_at'] = follower['created_at'];
@@ -316,12 +334,10 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
 
       final customers = customerMap.values.toList()
         ..sort((a, b) {
-          // Sort by booking count first
           final bookingCompare = (b['booking_count'] as int).compareTo(
             a['booking_count'] as int,
           );
           if (bookingCompare != 0) return bookingCompare;
-          // Then by follower status (followers first)
           if (a['is_follower'] == true && b['is_follower'] == false) return -1;
           if (a['is_follower'] == false && b['is_follower'] == true) return 1;
           return 0;
@@ -341,7 +357,9 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
       });
 
       debugPrint('✅ Loaded ${customers.length} customers for salon $salonId');
-      debugPrint('   - ${customers.where((c) => c['booking_count'] > 0).length} with bookings');
+      debugPrint(
+        '   - ${customers.where((c) => c['booking_count'] > 0).length} with bookings',
+      );
       debugPrint('   - $_totalFollowers followers');
     } catch (e) {
       setState(() {
@@ -357,7 +375,6 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
   List<Map<String, dynamic>> get _filteredCustomers {
     var filtered = List<Map<String, dynamic>>.from(_customers);
 
-    // Search filter
     if (_searchQuery.isNotEmpty) {
       filtered = filtered.where((customer) {
         final name = (customer['full_name'] as String?)?.toLowerCase() ?? '';
@@ -370,20 +387,26 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
       }).toList();
     }
 
-    // Sort filter
     switch (_selectedFilter) {
       case 'Followers':
         filtered = filtered.where((c) => c['is_follower'] == true).toList();
-        filtered.sort((a, b) => (b['followed_at'] ?? '').compareTo(a['followed_at'] ?? ''));
+        filtered.sort(
+          (a, b) => (b['followed_at'] ?? '').compareTo(a['followed_at'] ?? ''),
+        );
         break;
       case 'Bookings':
         filtered = filtered.where((c) => c['booking_count'] > 0).toList();
-        filtered.sort((a, b) => (b['booking_count'] as int).compareTo(a['booking_count'] as int));
+        filtered.sort(
+          (a, b) =>
+              (b['booking_count'] as int).compareTo(a['booking_count'] as int),
+        );
         break;
       case 'Newest':
-        filtered.sort((a, b) => (b['created_at'] ?? '').compareTo(a['created_at'] ?? ''));
+        filtered.sort(
+          (a, b) => (b['created_at'] ?? '').compareTo(a['created_at'] ?? ''),
+        );
         break;
-      default: // 'All'
+      default:
         break;
     }
 
@@ -394,9 +417,12 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
   // VIEW CUSTOMER DETAILS
   // ============================================================
   void _viewCustomerDetails(Map<String, dynamic> customer) {
+    final isDark = _isDark;
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -408,15 +434,19 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
   // BUILD STATS HEADER
   // ============================================================
   Widget _buildStatsHeader() {
+    final isDark = _isDark;
+
     if (_customers.isEmpty) return const SizedBox.shrink();
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.grey[50],
+        color: isDark ? const Color(0xFF1E1E1E) : Colors.grey[50],
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[200]!),
+        border: Border.all(
+          color: isDark ? Colors.grey[800]! : Colors.grey[200]!,
+        ),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
@@ -430,7 +460,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
           Container(
             width: 1,
             height: 30,
-            color: Colors.grey[300],
+            color: isDark ? Colors.grey[800] : Colors.grey[300],
           ),
           _buildStatItem(
             icon: Icons.star,
@@ -441,7 +471,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
           Container(
             width: 1,
             height: 30,
-            color: Colors.grey[300],
+            color: isDark ? Colors.grey[800] : Colors.grey[300],
           ),
           _buildStatItem(
             icon: Icons.event_available,
@@ -460,6 +490,8 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
     required String value,
     required Color color,
   }) {
+    final isDark = _isDark;
+
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -473,7 +505,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
-                color: color,
+                color: isDark ? color : color,
               ),
             ),
           ],
@@ -482,7 +514,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
           label,
           style: TextStyle(
             fontSize: 10,
-            color: Colors.grey[500],
+            color: isDark ? Colors.white60 : Colors.grey[500],
           ),
         ),
       ],
@@ -495,18 +527,21 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final filteredCustomers = _filteredCustomers;
+    final isDark = _isDark;
+    final isWeb = _isWeb;
 
     return Scaffold(
+      backgroundColor: isDark ? const Color(0xFF121212) : Colors.white,
       appBar: AppBar(
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               widget.role == 'customer' ? 'My Profile' : 'Customers',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
+                color: Colors.white,
               ),
             ),
             if (_selectedSalonName != null)
@@ -520,14 +555,23 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
               ),
           ],
         ),
-        backgroundColor: const Color(0xFFFF6B8B),
+        backgroundColor: AppTheme.primary,
         foregroundColor: Colors.white,
         elevation: 0,
+        centerTitle: isWeb,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+          tooltip: 'Back',
+        ),
         actions: [
           if (widget.role != 'customer')
             IconButton(
               icon: Icon(
-                _showFilterOptions ? Icons.filter_list : Icons.filter_list_outlined,
+                _showFilterOptions
+                    ? Icons.filter_list
+                    : Icons.filter_list_outlined,
+                color: Colors.white,
               ),
               onPressed: () {
                 setState(() {
@@ -536,180 +580,411 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
               },
             ),
         ],
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(60),
-          child: Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: TextField(
-              onChanged: (value) {
-                setState(() {
-                  _searchQuery = value;
-                });
-              },
-              decoration: InputDecoration(
-                hintText: 'Search customers...',
-                hintStyle: TextStyle(color: Colors.grey[400]),
-                prefixIcon: const Icon(Icons.search, color: Colors.grey),
-                filled: true,
-                fillColor: Colors.white,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
-                ),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-                suffixIcon: _searchQuery.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.clear, size: 18),
-                        onPressed: () {
-                          setState(() {
-                            _searchQuery = '';
-                          });
-                        },
-                      )
-                    : null,
+      ),
+      body: _isLoading
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircularProgressIndicator(color: AppTheme.primary),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Loading customers...',
+                    style: TextStyle(
+                      color: isDark ? Colors.white60 : Colors.grey,
+                    ),
+                  ),
+                ],
+              ),
+            )
+          : _errorMessage != null
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.error_outline,
+                    size: 64,
+                    color: isDark ? Colors.white30 : Colors.grey[400],
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    _errorMessage!,
+                    style: TextStyle(
+                      color: isDark ? Colors.white60 : Colors.grey[600],
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 24),
+                  ElevatedButton(
+                    onPressed: _loadData,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.primary,
+                      foregroundColor: Colors.white,
+                    ),
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
+            )
+          : isWeb
+          ? _buildWebLayout()
+          : _buildMobileLayout(),
+    );
+  }
+
+  // ============================================================
+  // ✅ WEB LAYOUT - Dashboard Style with Search Bar inside
+  // ============================================================
+  Widget _buildWebLayout() {
+    final filteredCustomers = _filteredCustomers;
+    final isDark = _isDark;
+
+    return RefreshIndicator(
+      onRefresh: _loadData,
+      color: AppTheme.primary,
+      child: Center(
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 1200),
+          child: Scrollbar(
+            controller: _scrollController,
+            thumbVisibility: true,
+            trackVisibility: true,
+            thickness: 8.0,
+            radius: const Radius.circular(10),
+            scrollbarOrientation: ScrollbarOrientation.right,
+            child: SingleChildScrollView(
+              controller: _scrollController,
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // ✅ Search Bar inside content (Web)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 20),
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                      borderRadius: BorderRadius.circular(30),
+                      border: Border.all(
+                        color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.05),
+                          blurRadius: 8,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: TextField(
+                      onChanged: (value) {
+                        setState(() {
+                          _searchQuery = value;
+                        });
+                      },
+                      style: TextStyle(
+                        color: isDark ? Colors.white : Colors.black87,
+                        fontSize: 16,
+                      ),
+                      decoration: InputDecoration(
+                        hintText:
+                            '🔍 Search customers by name, email, or phone...',
+                        hintStyle: TextStyle(
+                          color: isDark ? Colors.white60 : Colors.grey[500],
+                          fontSize: 15,
+                        ),
+                        prefixIcon: Icon(
+                          Icons.search,
+                          color: isDark ? Colors.white60 : Colors.grey[600],
+                          size: 24,
+                        ),
+                        suffixIcon: _searchQuery.isNotEmpty
+                            ? IconButton(
+                                icon: Icon(
+                                  Icons.clear,
+                                  size: 20,
+                                  color: isDark
+                                      ? Colors.white60
+                                      : Colors.grey[600],
+                                ),
+                                onPressed: () {
+                                  setState(() {
+                                    _searchQuery = '';
+                                  });
+                                },
+                              )
+                            : null,
+                        border: InputBorder.none,
+                        contentPadding: const EdgeInsets.symmetric(
+                          vertical: 16,
+                          horizontal: 8,
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  // Stats Header
+                  if (widget.role == 'owner') _buildStatsHeader(),
+
+                  // Filter options
+                  if (_showFilterOptions && widget.role != 'customer')
+                    Container(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: [
+                            _buildFilterChip('All'),
+                            const SizedBox(width: 8),
+                            _buildFilterChip('Followers'),
+                            const SizedBox(width: 8),
+                            _buildFilterChip('Bookings'),
+                            const SizedBox(width: 8),
+                            _buildFilterChip('Newest'),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                  // Customer count
+                  if (filteredCustomers.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 16, top: 8),
+                      child: Row(
+                        children: [
+                          Text(
+                            '${filteredCustomers.length} customer${filteredCustomers.length > 1 ? 's' : ''}',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                              color: isDark ? Colors.white60 : Colors.grey[600],
+                            ),
+                          ),
+                          const Spacer(),
+                          if (_searchQuery.isNotEmpty)
+                            Text(
+                              'Showing results for "$_searchQuery"',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: isDark
+                                    ? Colors.white70
+                                    : Colors.grey[500],
+                                fontStyle: FontStyle.italic,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+
+                  // Customer Grid
+                  filteredCustomers.isEmpty
+                      ? _buildEmptyState(isDark)
+                      : GridView.builder(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          gridDelegate:
+                              const SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: 2,
+                                crossAxisSpacing: 16,
+                                mainAxisSpacing: 16,
+                                childAspectRatio: 1.2,
+                              ),
+                          itemCount: filteredCustomers.length,
+                          itemBuilder: (context, index) {
+                            final customer = filteredCustomers[index];
+                            return _buildCustomerCard(customer);
+                          },
+                        ),
+
+                  const SizedBox(height: 40),
+                ],
               ),
             ),
           ),
         ),
       ),
-      body: _isLoading
-          ? const Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  CircularProgressIndicator(color: Color(0xFFFF6B8B)),
-                  SizedBox(height: 16),
-                  Text('Loading customers...'),
+    );
+  }
+
+  // ============================================================
+  // ✅ MOBILE LAYOUT
+  // ============================================================
+  Widget _buildMobileLayout() {
+    final filteredCustomers = _filteredCustomers;
+    final isDark = _isDark;
+
+    return RefreshIndicator(
+      onRefresh: _loadData,
+      color: AppTheme.primary,
+      child: Column(
+        children: [
+          // ✅ Search Bar below AppBar (Mobile)
+          Container(
+            padding: const EdgeInsets.all(12),
+            color: isDark ? const Color(0xFF121212) : Colors.white,
+            child: Container(
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                borderRadius: BorderRadius.circular(30),
+                border: Border.all(
+                  color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.05),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
                 ],
               ),
-            )
-          : _errorMessage != null
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.error_outline, size: 64, color: Colors.grey[400]),
-                      const SizedBox(height: 16),
-                      Text(
-                        _errorMessage!,
-                        style: TextStyle(color: Colors.grey[600]),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 24),
-                      ElevatedButton(
-                        onPressed: _loadData,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFFF6B8B),
-                          foregroundColor: Colors.white,
-                        ),
-                        child: const Text('Retry'),
-                      ),
-                    ],
+              child: TextField(
+                onChanged: (value) {
+                  setState(() {
+                    _searchQuery = value;
+                  });
+                },
+                style: TextStyle(
+                  color: isDark ? Colors.white : Colors.black87,
+                  fontSize: 14,
+                ),
+                decoration: InputDecoration(
+                  hintText: '🔍 Search customers...',
+                  hintStyle: TextStyle(
+                    color: isDark ? Colors.white60 : Colors.grey[500],
+                    fontSize: 13,
                   ),
-                )
-              : Column(
-                  children: [
-                    // Stats header
-                    if (widget.role == 'owner') _buildStatsHeader(),
-
-                    // Filter options
-                    if (_showFilterOptions && widget.role != 'customer')
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 8,
-                        ),
-                        child: SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: Row(
-                            children: [
-                              _buildFilterChip('All'),
-                              const SizedBox(width: 8),
-                              _buildFilterChip('Followers'),
-                              const SizedBox(width: 8),
-                              _buildFilterChip('Bookings'),
-                              const SizedBox(width: 8),
-                              _buildFilterChip('Newest'),
-                            ],
+                  prefixIcon: Icon(
+                    Icons.search,
+                    color: isDark ? Colors.white60 : Colors.grey[600],
+                    size: 20,
+                  ),
+                  suffixIcon: _searchQuery.isNotEmpty
+                      ? IconButton(
+                          icon: Icon(
+                            Icons.clear,
+                            size: 18,
+                            color: isDark ? Colors.white60 : Colors.grey[600],
                           ),
-                        ),
-                      ),
+                          onPressed: () {
+                            setState(() {
+                              _searchQuery = '';
+                            });
+                          },
+                        )
+                      : null,
+                  border: InputBorder.none,
+                  contentPadding: const EdgeInsets.symmetric(
+                    vertical: 12,
+                    horizontal: 8,
+                  ),
+                ),
+              ),
+            ),
+          ),
 
-                    // Customer count
-                    if (filteredCustomers.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 8,
-                        ),
-                        child: Row(
-                          children: [
-                            Text(
-                              '${filteredCustomers.length} customer${filteredCustomers.length > 1 ? 's' : ''}',
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: Colors.grey[600],
-                              ),
-                            ),
-                            const Spacer(),
-                            if (_searchQuery.isNotEmpty)
-                              Text(
-                                'Showing results for "$_searchQuery"',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.grey[500],
-                                  fontStyle: FontStyle.italic,
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
+          // Stats Header
+          if (widget.role == 'owner') _buildStatsHeader(),
 
-                    // Customer list
-                    Expanded(
-                      child: filteredCustomers.isEmpty
-                          ? Center(
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(
-                                    Icons.people_outline,
-                                    size: 64,
-                                    color: Colors.grey[400],
-                                  ),
-                                  const SizedBox(height: 16),
-                                  Text(
-                                    _searchQuery.isNotEmpty
-                                        ? 'No customers found matching "$_searchQuery"'
-                                        : 'No customers yet',
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      color: Colors.grey[600],
-                                    ),
-                                  ),
-                                  if (_searchQuery.isNotEmpty)
-                                    TextButton(
-                                      onPressed: () {
-                                        setState(() {
-                                          _searchQuery = '';
-                                        });
-                                      },
-                                      child: const Text('Clear Search'),
-                                    ),
-                                ],
-                              ),
-                            )
-                          : ListView.builder(
-                              padding: const EdgeInsets.all(16),
-                              itemCount: filteredCustomers.length,
-                              itemBuilder: (context, index) {
-                                final customer = filteredCustomers[index];
-                                return _buildCustomerCard(customer);
-                              },
-                            ),
-                    ),
+          // Filter options
+          if (_showFilterOptions && widget.role != 'customer')
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    _buildFilterChip('All'),
+                    const SizedBox(width: 8),
+                    _buildFilterChip('Followers'),
+                    const SizedBox(width: 8),
+                    _buildFilterChip('Bookings'),
+                    const SizedBox(width: 8),
+                    _buildFilterChip('Newest'),
                   ],
                 ),
+              ),
+            ),
+
+          // Customer count
+          if (filteredCustomers.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                children: [
+                  Text(
+                    '${filteredCustomers.length} customer${filteredCustomers.length > 1 ? 's' : ''}',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: isDark ? Colors.white60 : Colors.grey[600],
+                    ),
+                  ),
+                  const Spacer(),
+                  if (_searchQuery.isNotEmpty)
+                    Text(
+                      'Showing results for "$_searchQuery"',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isDark ? Colors.white70 : Colors.grey[500],
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+
+          // Customer List
+          Expanded(
+            child: filteredCustomers.isEmpty
+                ? _buildEmptyState(isDark)
+                : ListView.builder(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: filteredCustomers.length,
+                    itemBuilder: (context, index) {
+                      final customer = filteredCustomers[index];
+                      return _buildCustomerCard(customer);
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ============================================================
+  // ✅ EMPTY STATE
+  // ============================================================
+  Widget _buildEmptyState(bool isDark) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.people_outline,
+            size: 64,
+            color: isDark ? Colors.white30 : Colors.grey[400],
+          ),
+          const SizedBox(height: 16),
+          Text(
+            _searchQuery.isNotEmpty
+                ? 'No customers found matching "$_searchQuery"'
+                : 'No customers yet',
+            style: TextStyle(
+              fontSize: 16,
+              color: isDark ? Colors.white60 : Colors.grey[600],
+            ),
+          ),
+          if (_searchQuery.isNotEmpty)
+            TextButton(
+              onPressed: () {
+                setState(() {
+                  _searchQuery = '';
+                });
+              },
+              child: const Text('Clear Search'),
+            ),
+        ],
+      ),
     );
   }
 
@@ -717,22 +992,32 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
   // BUILD FILTER CHIP
   // ============================================================
   Widget _buildFilterChip(String label) {
+    final isDark = _isDark;
     final isSelected = _selectedFilter == label;
+
     return FilterChip(
-      label: Text(label),
+      label: Text(
+        label,
+        style: TextStyle(
+          color: isSelected
+              ? AppTheme.primary
+              : (isDark ? Colors.white70 : Colors.grey[700]),
+        ),
+      ),
       selected: isSelected,
       onSelected: (selected) {
         setState(() {
           _selectedFilter = selected ? label : 'All';
         });
       },
-      backgroundColor: Colors.grey[100],
-      selectedColor: const Color(0xFFFF6B8B).withValues(alpha: 0.2),
-      labelStyle: TextStyle(
-        color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[700],
-        fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+      backgroundColor: isDark ? const Color(0xFF2A2A2A) : Colors.grey[100],
+      selectedColor: AppTheme.primary.withValues(alpha: 0.2),
+      checkmarkColor: AppTheme.primary,
+      shape: StadiumBorder(
+        side: BorderSide(
+          color: isSelected ? AppTheme.primary : Colors.transparent,
+        ),
       ),
-      checkmarkColor: const Color(0xFFFF6B8B),
     );
   }
 
@@ -740,6 +1025,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
   // BUILD CUSTOMER CARD
   // ============================================================
   Widget _buildCustomerCard(Map<String, dynamic> customer) {
+    final isDark = _isDark;
     final name = customer['full_name']?.toString() ?? 'Unknown';
     final email = customer['email']?.toString() ?? '';
     final phone = customer['phone']?.toString() ?? '';
@@ -749,19 +1035,19 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
     final isFollower = customer['is_follower'] == true;
     final hasBookings = bookingCount > 0;
 
-    // Card border color based on type
     Color? borderColor;
     if (isFollower && !hasBookings) {
-      borderColor = Colors.orange.shade300; // Follower only
+      borderColor = Colors.orange.shade300;
     } else if (hasBookings && isFollower) {
-      borderColor = Colors.green.shade300; // Both booking and follower
+      borderColor = Colors.green.shade300;
     } else if (hasBookings) {
-      borderColor = Colors.blue.shade300; // Booking only
+      borderColor = Colors.blue.shade300;
     }
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       elevation: 2,
+      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
         side: borderColor != null
@@ -781,7 +1067,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                 height: 55,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                  color: AppTheme.primary.withValues(alpha: 0.1),
                 ),
                 child: avatarUrl != null && avatarUrl.isNotEmpty
                     ? ClipOval(
@@ -798,7 +1084,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                               style: TextStyle(
                                 fontSize: 24,
                                 fontWeight: FontWeight.bold,
-                                color: const Color(0xFFFF6B8B),
+                                color: AppTheme.primary,
                               ),
                             ),
                           ),
@@ -810,7 +1096,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                           style: TextStyle(
                             fontSize: 24,
                             fontWeight: FontWeight.bold,
-                            color: const Color(0xFFFF6B8B),
+                            color: AppTheme.primary,
                           ),
                         ),
                       ),
@@ -827,9 +1113,10 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                         Expanded(
                           child: Text(
                             name,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.bold,
+                              color: isDark ? Colors.white : Colors.black87,
                             ),
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -859,14 +1146,20 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                     if (email.isNotEmpty)
                       Row(
                         children: [
-                          Icon(Icons.email, size: 14, color: Colors.grey[500]),
+                          Icon(
+                            Icons.email,
+                            size: 14,
+                            color: isDark ? Colors.white70 : Colors.grey[500],
+                          ),
                           const SizedBox(width: 4),
                           Expanded(
                             child: Text(
                               email,
                               style: TextStyle(
                                 fontSize: 13,
-                                color: Colors.grey[600],
+                                color: isDark
+                                    ? Colors.white70
+                                    : Colors.grey[600],
                               ),
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -876,13 +1169,17 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                     if (phone.isNotEmpty)
                       Row(
                         children: [
-                          Icon(Icons.phone, size: 14, color: Colors.grey[500]),
+                          Icon(
+                            Icons.phone,
+                            size: 14,
+                            color: isDark ? Colors.white70 : Colors.grey[500],
+                          ),
                           const SizedBox(width: 4),
                           Text(
                             phone,
                             style: TextStyle(
                               fontSize: 13,
-                              color: Colors.grey[600],
+                              color: isDark ? Colors.white70 : Colors.grey[600],
                             ),
                           ),
                         ],
@@ -892,7 +1189,6 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                       spacing: 8,
                       runSpacing: 4,
                       children: [
-                        // Booking count
                         Container(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 8,
@@ -901,7 +1197,9 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                           decoration: BoxDecoration(
                             color: hasBookings
                                 ? Colors.blue.withValues(alpha: 0.1)
-                                : Colors.grey.withValues(alpha: 0.1),
+                                : (isDark
+                                      ? Colors.grey[800]
+                                      : Colors.grey.withValues(alpha: 0.1)),
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Row(
@@ -910,14 +1208,18 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                               Icon(
                                 Icons.event_available,
                                 size: 12,
-                                color: hasBookings ? Colors.blue : Colors.grey,
+                                color: hasBookings
+                                    ? Colors.blue
+                                    : (isDark ? Colors.white70 : Colors.grey),
                               ),
                               const SizedBox(width: 4),
                               Text(
                                 '$bookingCount booking${bookingCount > 1 ? 's' : ''}',
                                 style: TextStyle(
                                   fontSize: 11,
-                                  color: hasBookings ? Colors.blue : Colors.grey,
+                                  color: hasBookings
+                                      ? Colors.blue
+                                      : (isDark ? Colors.white70 : Colors.grey),
                                   fontWeight: hasBookings
                                       ? FontWeight.w500
                                       : FontWeight.normal,
@@ -926,7 +1228,6 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                             ],
                           ),
                         ),
-                        // Follower badge
                         if (isFollower)
                           Container(
                             padding: const EdgeInsets.symmetric(
@@ -963,10 +1264,9 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                 ),
               ),
 
-              // Arrow
               Icon(
                 Icons.chevron_right,
-                color: Colors.grey[400],
+                color: isDark ? Colors.white30 : Colors.grey[400],
                 size: 24,
               ),
             ],
@@ -987,6 +1287,7 @@ class CustomerDetailsSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = context.isDarkMode;
     final name = customer['full_name']?.toString() ?? 'Unknown';
     final email = customer['email']?.toString() ?? '';
     final phone = customer['phone']?.toString() ?? '';
@@ -1004,9 +1305,9 @@ class CustomerDetailsSheet extends StatelessWidget {
       builder: (context, scrollController) {
         return Container(
           padding: const EdgeInsets.all(20),
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
           ),
           child: Column(
             children: [
@@ -1017,7 +1318,7 @@ class CustomerDetailsSheet extends StatelessWidget {
                   height: 4,
                   margin: const EdgeInsets.only(bottom: 16),
                   decoration: BoxDecoration(
-                    color: Colors.grey[300],
+                    color: isDark ? Colors.grey[700] : Colors.grey[300],
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
@@ -1031,7 +1332,7 @@ class CustomerDetailsSheet extends StatelessWidget {
                     height: 80,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                      color: AppTheme.primary.withValues(alpha: 0.1),
                     ),
                     child: avatarUrl != null && avatarUrl.isNotEmpty
                         ? ClipOval(
@@ -1043,10 +1344,10 @@ class CustomerDetailsSheet extends StatelessWidget {
                               errorWidget: (context, url, error) => Center(
                                 child: Text(
                                   name.isNotEmpty ? name[0].toUpperCase() : '?',
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontSize: 32,
                                     fontWeight: FontWeight.bold,
-                                    color: Color(0xFFFF6B8B),
+                                    color: AppTheme.primary,
                                   ),
                                 ),
                               ),
@@ -1055,10 +1356,10 @@ class CustomerDetailsSheet extends StatelessWidget {
                         : Center(
                             child: Text(
                               name.isNotEmpty ? name[0].toUpperCase() : '?',
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 32,
                                 fontWeight: FontWeight.bold,
-                                color: Color(0xFFFF6B8B),
+                                color: AppTheme.primary,
                               ),
                             ),
                           ),
@@ -1073,9 +1374,10 @@ class CustomerDetailsSheet extends StatelessWidget {
                             Expanded(
                               child: Text(
                                 name,
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 20,
                                   fontWeight: FontWeight.bold,
+                                  color: isDark ? Colors.white : Colors.black87,
                                 ),
                               ),
                             ),
@@ -1106,7 +1408,7 @@ class CustomerDetailsSheet extends StatelessWidget {
                             email,
                             style: TextStyle(
                               fontSize: 14,
-                              color: Colors.grey[600],
+                              color: isDark ? Colors.white70 : Colors.grey[600],
                             ),
                           ),
                         if (phone.isNotEmpty)
@@ -1114,7 +1416,7 @@ class CustomerDetailsSheet extends StatelessWidget {
                             phone,
                             style: TextStyle(
                               fontSize: 14,
-                              color: Colors.grey[600],
+                              color: isDark ? Colors.white70 : Colors.grey[600],
                             ),
                           ),
                         const SizedBox(height: 8),
@@ -1179,7 +1481,9 @@ class CustomerDetailsSheet extends StatelessWidget {
                               'Followed: ${_formatDate(followedAt)}',
                               style: TextStyle(
                                 fontSize: 11,
-                                color: Colors.grey[500],
+                                color: isDark
+                                    ? Colors.white70
+                                    : Colors.grey[500],
                               ),
                             ),
                           ),
@@ -1190,9 +1494,12 @@ class CustomerDetailsSheet extends StatelessWidget {
               ),
 
               const SizedBox(height: 20),
-              const Divider(),
+              Divider(
+                color: isDark ? Colors.grey[800] : Colors.grey[200],
+                height: 1,
+              ),
 
-              // Actions - ✅ FIXED: Wrap each ListTile in Material
+              // Actions
               Expanded(
                 child: ListView(
                   controller: scrollController,
@@ -1209,8 +1516,18 @@ class CustomerDetailsSheet extends StatelessWidget {
                             ),
                             child: const Icon(Icons.email, color: Colors.blue),
                           ),
-                          title: const Text('Send Email'),
-                          subtitle: Text(email),
+                          title: Text(
+                            'Send Email',
+                            style: TextStyle(
+                              color: isDark ? Colors.white : Colors.black87,
+                            ),
+                          ),
+                          subtitle: Text(
+                            email,
+                            style: TextStyle(
+                              color: isDark ? Colors.white60 : Colors.grey[600],
+                            ),
+                          ),
                           onTap: () {
                             // Implement email
                           },
@@ -1228,8 +1545,18 @@ class CustomerDetailsSheet extends StatelessWidget {
                             ),
                             child: const Icon(Icons.phone, color: Colors.green),
                           ),
-                          title: const Text('Call Customer'),
-                          subtitle: Text(phone),
+                          title: Text(
+                            'Call Customer',
+                            style: TextStyle(
+                              color: isDark ? Colors.white : Colors.black87,
+                            ),
+                          ),
+                          subtitle: Text(
+                            phone,
+                            style: TextStyle(
+                              color: isDark ? Colors.white60 : Colors.grey[600],
+                            ),
+                          ),
                           onTap: () {
                             // Implement call
                           },
@@ -1244,10 +1571,23 @@ class CustomerDetailsSheet extends StatelessWidget {
                             color: Colors.orange.withValues(alpha: 0.1),
                             shape: BoxShape.circle,
                           ),
-                          child: const Icon(Icons.history, color: Colors.orange),
+                          child: const Icon(
+                            Icons.history,
+                            color: Colors.orange,
+                          ),
                         ),
-                        title: const Text('Booking History'),
-                        subtitle: const Text('View all bookings'),
+                        title: Text(
+                          'Booking History',
+                          style: TextStyle(
+                            color: isDark ? Colors.white : Colors.black87,
+                          ),
+                        ),
+                        subtitle: Text(
+                          'View all bookings',
+                          style: TextStyle(
+                            color: isDark ? Colors.white60 : Colors.grey[600],
+                          ),
+                        ),
                         onTap: () {
                           Navigator.pop(context);
                           // Navigate to booking history
@@ -1265,8 +1605,18 @@ class CustomerDetailsSheet extends StatelessWidget {
                           ),
                           child: const Icon(Icons.star, color: Colors.purple),
                         ),
-                        title: const Text('Reviews'),
-                        subtitle: const Text('View customer reviews'),
+                        title: Text(
+                          'Reviews',
+                          style: TextStyle(
+                            color: isDark ? Colors.white : Colors.black87,
+                          ),
+                        ),
+                        subtitle: Text(
+                          'View customer reviews',
+                          style: TextStyle(
+                            color: isDark ? Colors.white60 : Colors.grey[600],
+                          ),
+                        ),
                         onTap: () {
                           Navigator.pop(context);
                           // Navigate to reviews
@@ -1302,5 +1652,4 @@ class CustomerDetailsSheet extends StatelessWidget {
       return dateStr;
     }
   }
-
 }

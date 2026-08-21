@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import '../../extensions/context_extensions.dart';
+import '../../theme/app_theme.dart';
 
 class AppointmentsScreen extends StatefulWidget {
   final String? salonId;
@@ -28,11 +30,29 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
   int _pendingCount = 0;
   int _cancelledCount = 0;
 
+  // ✅ Web Scroll Controller
+  final ScrollController _scrollController = ScrollController();
+  late bool _isWeb;
+  late bool _isDark;
+
   @override
   void initState() {
     super.initState();
     _selectedFilter = widget.filter ?? 'today';
     _loadData();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _isWeb = context.isWeb;
+    _isDark = context.isDarkMode;
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadData() async {
@@ -72,7 +92,6 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
     }
   }
 
-  // ✅ FIXED: _loadAppointments() function
   Future<void> _loadAppointments() async {
     try {
       final salonIdInt = widget.salonId != null
@@ -80,7 +99,6 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
           : null;
       final today = DateTime.now().toIso8601String().split('T')[0];
 
-      // Build query
       var query = supabase.from('appointments').select('''
             id,
             booking_number,
@@ -143,7 +161,6 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
           .order('appointment_date', ascending: true)
           .order('start_time', ascending: true);
 
-      // Process appointments
       final List<Map<String, dynamic>> appointments = [];
       int total = 0;
       int completed = 0;
@@ -219,7 +236,6 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
     }
   }
 
-  // ... rest of the methods (same as before)
   String _formatDate(String dateStr) {
     try {
       final date = DateTime.parse(dateStr);
@@ -309,9 +325,16 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
     }
   }
 
+  // ============================================================
+  // ✅ BUILD METHOD - EDGE-TO-EDGE + RESPONSIVE
+  // ============================================================
   @override
   Widget build(BuildContext context) {
+    _isWeb = context.isWeb;
+    _isDark = context.isDarkMode;
+
     return Scaffold(
+      backgroundColor: _isDark ? const Color(0xFF121212) : Colors.white,
       appBar: AppBar(
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -322,107 +345,204 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                   : _selectedFilter == 'pending'
                   ? 'Pending Appointments'
                   : 'All Appointments',
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                fontSize: _isWeb ? 20 : 18,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
             ),
             if (_selectedSalonName.isNotEmpty)
               Text(
                 _selectedSalonName,
-                style: const TextStyle(
-                  fontSize: 12,
+                style: TextStyle(
+                  fontSize: _isWeb ? 14 : 12,
                   fontWeight: FontWeight.normal,
                   color: Colors.white70,
                 ),
               ),
           ],
         ),
-        backgroundColor: const Color(0xFFFF6B8B),
+        backgroundColor: AppTheme.primary,
         foregroundColor: Colors.white,
         elevation: 0,
+        centerTitle: _isWeb,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+          tooltip: 'Back',
+        ),
         actions: [
           PopupMenuButton<String>(
-            icon: const Icon(Icons.filter_list),
+            icon: const Icon(Icons.filter_list, color: Colors.white),
             onSelected: (value) {
               setState(() {
                 _selectedFilter = value;
               });
               _loadAppointments();
             },
+            color: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
             itemBuilder: (context) => [
-              const PopupMenuItem(value: 'today', child: Text('Today')),
-              const PopupMenuItem(value: 'pending', child: Text('Pending')),
-              const PopupMenuItem(value: 'all', child: Text('All')),
+              const PopupMenuItem(
+                value: 'today',
+                child: Text('Today'),
+              ),
+              const PopupMenuItem(
+                value: 'pending',
+                child: Text('Pending'),
+              ),
+              const PopupMenuItem(
+                value: 'all',
+                child: Text('All'),
+              ),
             ],
           ),
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh, color: Colors.white),
             onPressed: _loadData,
             tooltip: 'Refresh',
           ),
         ],
       ),
-      body: _isLoading
-          ? const Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  CircularProgressIndicator(color: Color(0xFFFF6B8B)),
-                  SizedBox(height: 16),
-                  Text('Loading appointments...'),
-                ],
-              ),
-            )
-          : _errorMessage != null
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.error_outline, size: 64, color: Colors.grey[400]),
-                  const SizedBox(height: 16),
-                  Text(
-                    _errorMessage!,
-                    style: TextStyle(color: Colors.grey[600]),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 24),
-                  ElevatedButton(
-                    onPressed: _loadData,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFFF6B8B),
-                      foregroundColor: Colors.white,
+      // ✅ EDGE-TO-EDGE: SafeArea with responsive body
+      body: SafeArea(
+        child: _isLoading
+            ? Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    CircularProgressIndicator(color: AppTheme.primary),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Loading appointments...',
+                      style: TextStyle(
+                        color: _isDark ? Colors.white60 : Colors.grey[600],
+                      ),
                     ),
-                    child: const Text('Retry'),
-                  ),
-                ],
-              ),
-            )
-          : Column(
-              children: [
-                // Stats summary
-                Container(
-                  margin: const EdgeInsets.all(16),
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.grey[50],
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.grey[200]!),
-                  ),
+                  ],
+                ),
+              )
+            : _errorMessage != null
+            ? Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.error_outline,
+                      size: 64,
+                      color: _isDark ? Colors.white70 : Colors.grey[400],
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      _errorMessage!,
+                      style: TextStyle(
+                        color: _isDark ? Colors.white60 : Colors.grey[600],
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 24),
+                    ElevatedButton(
+                      onPressed: _loadData,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.primary,
+                        foregroundColor: Colors.white,
+                      ),
+                      child: const Text('Retry'),
+                    ),
+                  ],
+                ),
+              )
+            : _isWeb
+            ? _buildWebLayout()
+            : _buildMobileLayout(),
+      ),
+    );
+  }
+
+  // ✅ WEB LAYOUT - Centered with Scrollbar
+  Widget _buildWebLayout() {
+    return Center(
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 1200),
+        child: Scrollbar(
+          controller: _scrollController,
+          thumbVisibility: true,
+          trackVisibility: true,
+          thickness: 8.0,
+          radius: const Radius.circular(10),
+          scrollbarOrientation: ScrollbarOrientation.right,
+          child: SingleChildScrollView(
+            controller: _scrollController,
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.all(24),
+            child: _buildContent(),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ✅ MOBILE LAYOUT
+  Widget _buildMobileLayout() {
+    return SingleChildScrollView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: EdgeInsets.zero,
+      child: _buildContent(),
+    );
+  }
+
+  // ✅ CONTENT
+  Widget _buildContent() {
+    return Column(
+      children: [
+        // Stats summary - Responsive
+        Container(
+          margin: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: _isDark ? const Color(0xFF1E1E1E) : Colors.grey[50],
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: _isDark ? Colors.grey[800]! : Colors.grey[200]!,
+            ),
+          ),
+          child: _isWeb
+              ? Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    _buildStatItem('Total', '$_totalCount', Colors.blue),
+                    _buildStatItem('Completed', '$_completedCount', Colors.green),
+                    _buildStatItem('Pending', '$_pendingCount', Colors.orange),
+                    _buildStatItem('Cancelled', '$_cancelledCount', Colors.red),
+                  ],
+                )
+              : SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  physics: const BouncingScrollPhysics(),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceAround,
                     children: [
                       _buildStatItem('Total', '$_totalCount', Colors.blue),
-                      Container(width: 1, height: 30, color: Colors.grey[300]),
+                      Container(
+                        width: 1,
+                        height: 30,
+                        color: _isDark ? Colors.grey[800] : Colors.grey[300],
+                      ),
                       _buildStatItem(
                         'Completed',
                         '$_completedCount',
                         Colors.green,
                       ),
-                      Container(width: 1, height: 30, color: Colors.grey[300]),
-                      _buildStatItem(
-                        'Pending',
-                        '$_pendingCount',
-                        Colors.orange,
+                      Container(
+                        width: 1,
+                        height: 30,
+                        color: _isDark ? Colors.grey[800] : Colors.grey[300],
                       ),
-                      Container(width: 1, height: 30, color: Colors.grey[300]),
+                      _buildStatItem('Pending', '$_pendingCount', Colors.orange),
+                      Container(
+                        width: 1,
+                        height: 30,
+                        color: _isDark ? Colors.grey[800] : Colors.grey[300],
+                      ),
                       _buildStatItem(
                         'Cancelled',
                         '$_cancelledCount',
@@ -431,77 +551,103 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                     ],
                   ),
                 ),
-
-                // Appointments list
-                Expanded(
-                  child: _appointments.isEmpty
-                      ? Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                Icons.event_busy,
-                                size: 64,
-                                color: Colors.grey[400],
-                              ),
-                              const SizedBox(height: 16),
-                              Text(
-                                _selectedFilter == 'today'
-                                    ? 'No appointments today'
-                                    : _selectedFilter == 'pending'
-                                    ? 'No pending appointments'
-                                    : 'No appointments found',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  color: Colors.grey[600],
-                                ),
-                              ),
-                              const SizedBox(height: 24),
-                              ElevatedButton.icon(
-                                onPressed: () {
-                                  setState(() => _selectedFilter = 'today');
-                                  _loadAppointments();
-                                },
-                                icon: const Icon(Icons.calendar_today),
-                                label: const Text('View Today'),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFFFF6B8B),
-                                  foregroundColor: Colors.white,
-                                ),
-                              ),
-                            ],
-                          ),
-                        )
-                      : ListView.builder(
-                          padding: const EdgeInsets.all(16),
-                          itemCount: _appointments.length,
-                          itemBuilder: (context, index) {
-                            return _buildAppointmentCard(_appointments[index]);
-                          },
-                        ),
-                ),
-              ],
-            ),
-    );
-  }
-
-  Widget _buildStatItem(String label, String value, Color color) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-            color: color,
-          ),
         ),
-        Text(label, style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+
+        // Appointments list
+        _appointments.isEmpty
+            ? Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.event_busy,
+                      size: 64,
+                      color: _isDark ? Colors.white30 : Colors.grey[400],
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      _selectedFilter == 'today'
+                          ? 'No appointments today'
+                          : _selectedFilter == 'pending'
+                          ? 'No pending appointments'
+                          : 'No appointments found',
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: _isDark ? Colors.white60 : Colors.grey[600],
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        setState(() => _selectedFilter = 'today');
+                        _loadAppointments();
+                      },
+                      icon: const Icon(Icons.calendar_today),
+                      label: const Text('View Today'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.primary,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            : _isWeb
+            ? GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                padding: const EdgeInsets.all(16),
+                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                  maxCrossAxisExtent: 400,
+                  crossAxisSpacing: 16,
+                  mainAxisSpacing: 16,
+                  childAspectRatio: 0.9,
+                ),
+                itemCount: _appointments.length,
+                itemBuilder: (context, index) {
+                  return _buildAppointmentCard(_appointments[index]);
+                },
+              )
+            : ListView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                padding: const EdgeInsets.all(16),
+                itemCount: _appointments.length,
+                itemBuilder: (context, index) {
+                  return _buildAppointmentCard(_appointments[index]);
+                },
+              ),
       ],
     );
   }
 
+  Widget _buildStatItem(String label, String value, Color color) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: _isWeb ? 20 : 18,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: _isWeb ? 13 : 11,
+              color: _isDark ? Colors.white60 : Colors.grey[500],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ✅ APPOINTMENT CARD - Dark Mode Aware
   Widget _buildAppointmentCard(Map<String, dynamic> apt) {
     final status = apt['status'] as String;
     final statusColor = _getStatusColor(status);
@@ -518,6 +664,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
+      color: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
       elevation: 2,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
@@ -539,9 +686,9 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                   Text(
                     apt['booking_number'] ?? 'BK-XXXX',
                     style: TextStyle(
-                      fontSize: 14,
+                      fontSize: _isWeb ? 15 : 14,
                       fontWeight: FontWeight.bold,
-                      color: Colors.grey[700],
+                      color: _isDark ? Colors.white70 : Colors.grey[700],
                     ),
                   ),
                   const Spacer(),
@@ -618,7 +765,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                     height: 45,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: Colors.grey[200],
+                      color: _isDark ? Colors.grey[800] : Colors.grey[200],
                     ),
                     child: customerAvatar != null && customerAvatar.isNotEmpty
                         ? ClipOval(
@@ -632,10 +779,10 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                                   customerName.isNotEmpty
                                       ? customerName[0].toUpperCase()
                                       : '?',
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontSize: 18,
                                     fontWeight: FontWeight.bold,
-                                    color: Colors.grey,
+                                    color: _isDark ? Colors.white60 : Colors.grey,
                                   ),
                                 ),
                               ),
@@ -646,10 +793,10 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                               customerName.isNotEmpty
                                   ? customerName[0].toUpperCase()
                                   : '?',
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 18,
                                 fontWeight: FontWeight.bold,
-                                color: Colors.grey,
+                                color: _isDark ? Colors.white60 : Colors.grey,
                               ),
                             ),
                           ),
@@ -661,9 +808,10 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                       children: [
                         Text(
                           customerName,
-                          style: const TextStyle(
-                            fontSize: 15,
+                          style: TextStyle(
+                            fontSize: _isWeb ? 16 : 15,
                             fontWeight: FontWeight.bold,
+                            color: _isDark ? Colors.white : Colors.black87,
                           ),
                         ),
                         const SizedBox(height: 2),
@@ -672,14 +820,14 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                             Icon(
                               Icons.person_outline,
                               size: 12,
-                              color: Colors.grey[500],
+                              color: _isDark ? Colors.white60 : Colors.grey[500],
                             ),
                             const SizedBox(width: 4),
                             Text(
                               'Barber: $barberName',
                               style: TextStyle(
                                 fontSize: 12,
-                                color: Colors.grey[600],
+                                color: _isDark ? Colors.white60 : Colors.grey[600],
                               ),
                             ),
                           ],
@@ -700,9 +848,10 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                       children: [
                         Text(
                           serviceName,
-                          style: const TextStyle(
-                            fontSize: 14,
+                          style: TextStyle(
+                            fontSize: _isWeb ? 15 : 14,
                             fontWeight: FontWeight.w500,
+                            color: _isDark ? Colors.white : Colors.black87,
                           ),
                         ),
                         const SizedBox(height: 2),
@@ -710,7 +859,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                           '${apt['duration']} min • Rs. ${price.toStringAsFixed(2)}',
                           style: TextStyle(
                             fontSize: 12,
-                            color: Colors.grey[600],
+                            color: _isDark ? Colors.white60 : Colors.grey[600],
                           ),
                         ),
                       ],
@@ -740,9 +889,10 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                       const SizedBox(height: 4),
                       Text(
                         '$startTime - $endTime',
-                        style: const TextStyle(
-                          fontSize: 13,
+                        style: TextStyle(
+                          fontSize: _isWeb ? 14 : 13,
                           fontWeight: FontWeight.w500,
+                          color: _isDark ? Colors.white : Colors.black87,
                         ),
                       ),
                     ],
@@ -757,24 +907,38 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
   }
 
   void _viewAppointmentDetails(Map<String, dynamic> apt) {
+    final isDark = _isDark;
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) => AppointmentDetailsSheet(appointment: apt),
+      builder: (context) => AppointmentDetailsSheet(
+        appointment: apt,
+        isDark: isDark,
+        isWeb: _isWeb,
+      ),
     );
   }
 }
 
 // ============================================================
-// APPOINTMENT DETAILS SHEET
+// APPOINTMENT DETAILS SHEET - Dark Mode Aware
 // ============================================================
 class AppointmentDetailsSheet extends StatelessWidget {
   final Map<String, dynamic> appointment;
+  final bool isDark;
+  final bool isWeb;
 
-  const AppointmentDetailsSheet({super.key, required this.appointment});
+  const AppointmentDetailsSheet({
+    super.key,
+    required this.appointment,
+    required this.isDark,
+    required this.isWeb,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -803,9 +967,9 @@ class AppointmentDetailsSheet extends StatelessWidget {
       builder: (context, scrollController) {
         return Container(
           padding: const EdgeInsets.all(20),
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -816,7 +980,7 @@ class AppointmentDetailsSheet extends StatelessWidget {
                   height: 4,
                   margin: const EdgeInsets.only(bottom: 16),
                   decoration: BoxDecoration(
-                    color: Colors.grey[300],
+                    color: isDark ? Colors.grey[700] : Colors.grey[300],
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
@@ -829,9 +993,10 @@ class AppointmentDetailsSheet extends StatelessWidget {
                       children: [
                         Text(
                           'Booking #$bookingNumber',
-                          style: const TextStyle(
-                            fontSize: 16,
+                          style: TextStyle(
+                            fontSize: isWeb ? 18 : 16,
                             fontWeight: FontWeight.bold,
+                            color: isDark ? Colors.white : Colors.black87,
                           ),
                         ),
                         const SizedBox(height: 4),
@@ -906,7 +1071,7 @@ class AppointmentDetailsSheet extends StatelessWidget {
                   height: 50,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: Colors.grey[200],
+                    color: isDark ? Colors.grey[800] : Colors.grey[200],
                   ),
                   child: customerAvatar != null && customerAvatar.isNotEmpty
                       ? ClipOval(
@@ -920,10 +1085,10 @@ class AppointmentDetailsSheet extends StatelessWidget {
                                 customerName.isNotEmpty
                                     ? customerName[0].toUpperCase()
                                     : '?',
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 20,
                                   fontWeight: FontWeight.bold,
-                                  color: Colors.grey,
+                                  color: isDark ? Colors.white60 : Colors.grey,
                                 ),
                               ),
                             ),
@@ -934,30 +1099,46 @@ class AppointmentDetailsSheet extends StatelessWidget {
                             customerName.isNotEmpty
                                 ? customerName[0].toUpperCase()
                                 : '?',
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 20,
                               fontWeight: FontWeight.bold,
-                              color: Colors.grey,
+                              color: isDark ? Colors.white60 : Colors.grey,
                             ),
                           ),
                         ),
                 ),
                 title: Text(
                   customerName,
-                  style: const TextStyle(
-                    fontSize: 16,
+                  style: TextStyle(
+                    fontSize: isWeb ? 17 : 16,
                     fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : Colors.black87,
                   ),
                 ),
                 subtitle: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (customerPhone.isNotEmpty) Text(customerPhone),
-                    if (customerEmail.isNotEmpty) Text(customerEmail),
+                    if (customerPhone.isNotEmpty)
+                      Text(
+                        customerPhone,
+                        style: TextStyle(
+                          color: isDark ? Colors.white70 : Colors.black87,
+                        ),
+                      ),
+                    if (customerEmail.isNotEmpty)
+                      Text(
+                        customerEmail,
+                        style: TextStyle(
+                          color: isDark ? Colors.white60 : Colors.grey[600],
+                        ),
+                      ),
                     if (childName != null && childName.isNotEmpty)
                       Text(
                         'Child: $childName',
-                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: isDark ? Colors.white60 : Colors.grey[600],
+                        ),
                       ),
                   ],
                 ),
@@ -983,6 +1164,10 @@ class AppointmentDetailsSheet extends StatelessWidget {
                       icon: const Icon(Icons.close),
                       label: const Text('Close'),
                       style: OutlinedButton.styleFrom(
+                        foregroundColor: isDark ? Colors.white : Colors.black87,
+                        side: BorderSide(
+                          color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                        ),
                         padding: const EdgeInsets.symmetric(vertical: 12),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
@@ -1009,13 +1194,20 @@ class AppointmentDetailsSheet extends StatelessWidget {
             width: 80,
             child: Text(
               label,
-              style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+              style: TextStyle(
+                fontSize: isWeb ? 14 : 13,
+                color: isDark ? Colors.white60 : Colors.grey[600],
+              ),
             ),
           ),
           Expanded(
             child: Text(
               value,
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+              style: TextStyle(
+                fontSize: isWeb ? 14 : 13,
+                fontWeight: FontWeight.w500,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
             ),
           ),
         ],

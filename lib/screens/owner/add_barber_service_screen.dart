@@ -1,6 +1,8 @@
 // meka use karanne baber list screen eken edit service gihin service baberta add karaddi
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../extensions/context_extensions.dart';
+import '../../theme/app_theme.dart';
 
 class AddBarberServiceScreen extends StatefulWidget {
   final String salonId;
@@ -42,8 +44,12 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
   Map<int, Map<String, dynamic>> _ageCategoryMap = {};
   Map<int, Map<String, dynamic>> _categoryMap = {};
 
-  // Alternating card colors
-  final List<Color> _cardColors = [
+  // ✅ Android 16: Responsive screen variables
+  bool _isWeb = false;
+  bool _isDark = false;
+
+  // Alternating card colors - Dark mode aware
+  final List<Color> _cardColorsLight = [
     const Color(0xFFE3F2FD), // Light Blue
     const Color(0xFFFCE4EC), // Light Pink
     const Color(0xFFE8F5E9), // Light Green
@@ -52,6 +58,17 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
     const Color(0xFFE0F7FA), // Light Cyan
     const Color(0xFFFFEBEE), // Light Red
     const Color(0xFFE8EAF6), // Light Indigo
+  ];
+
+  final List<Color> _cardColorsDark = [
+    const Color(0xFF1A237E), // Dark Blue
+    const Color(0xFF4A148C), // Dark Purple
+    const Color(0xFF1B5E20), // Dark Green
+    const Color(0xFFE65100), // Dark Orange
+    const Color(0xFF4A148C), // Dark Purple
+    const Color(0xFF004D40), // Dark Cyan
+    const Color(0xFFB71C1C), // Dark Red
+    const Color(0xFF1A237E), // Dark Indigo
   ];
 
   @override
@@ -63,6 +80,13 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
         _searchQuery = _searchController.text.toLowerCase();
       });
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _isWeb = context.isWeb;
+    _isDark = context.isDarkMode;
   }
 
   @override
@@ -86,7 +110,7 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
           .from('user_roles')
           .select('status')
           .eq('user_id', widget.barberId)
-          .eq('role_id', 2) // barber role ID
+          .eq('role_id', 2)
           .maybeSingle();
 
       if (barberRoleCheck == null) {
@@ -126,7 +150,7 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
             .select('id')
             .eq('barber_id', widget.barberId)
             .eq('salon_id', salonIdInt)
-            .eq('status', 'active') // ✅ Added status check
+            .eq('status', 'active')
             .maybeSingle();
 
         if (salonBarberResponse != null) {
@@ -311,7 +335,6 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
             backgroundColor: Colors.red,
           ),
         );
-        // Navigate back if barber is inactive
         if (e.toString().contains('inactive') ||
             e.toString().contains('blocked')) {
           Future.delayed(const Duration(seconds: 2), () {
@@ -493,7 +516,7 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
       case 'nails':
         return Colors.purple;
       default:
-        return const Color(0xFFFF6B8B);
+        return AppTheme.primary;
     }
   }
 
@@ -520,32 +543,51 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
     }
   }
 
+  // ============================================================
+  // ✅ BUILD METHOD
+  // ============================================================
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final bool isWeb = screenWidth > 800;
+    _isWeb = context.isWeb;
+    _isDark = context.isDarkMode;
+
     final int selectedCount = _getSelectedCount();
-    final double padding = isWeb ? 24.0 : 16.0;
+    final double padding = _isWeb ? 24.0 : 16.0;
+    final accentColor = AppTheme.primary;
 
     return Scaffold(
+      backgroundColor: _isDark ? const Color(0xFF121212) : Colors.white,
       appBar: AppBar(
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Add Services', style: TextStyle(fontSize: isWeb ? 20 : 18)),
+            Text(
+              'Add Services',
+              style: TextStyle(
+                fontSize: _isWeb ? 20 : 18,
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
             if (widget.barberName != null)
               Text(
                 'for ${widget.barberName}',
                 style: TextStyle(
-                  fontSize: isWeb ? 14 : 12,
+                  fontSize: _isWeb ? 14 : 12,
                   fontWeight: FontWeight.normal,
+                  color: Colors.white.withValues(alpha: 0.8),
                 ),
               ),
           ],
         ),
-        backgroundColor: const Color(0xFFFF6B8B),
+        backgroundColor: accentColor,
         foregroundColor: Colors.white,
-        centerTitle: isWeb,
+        centerTitle: _isWeb,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+          tooltip: 'Back',
+        ),
         actions: [
           if (selectedCount > 0)
             Container(
@@ -592,25 +634,23 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
         ],
       ),
       body: _isLoading
-          ? const Center(
-              child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
-            )
+          ? Center(child: CircularProgressIndicator(color: accentColor))
           : Column(
               children: [
-                _buildSearchAndFilterBar(isWeb, padding),
+                _buildSearchAndFilterBar(padding),
                 Expanded(
                   child: _filteredServices.isEmpty
-                      ? _buildEmptyState(isWeb)
-                      : isWeb
+                      ? _buildEmptyState()
+                      : _isWeb
                       ? _buildWebView(padding, selectedCount)
                       : _buildMobileView(padding, selectedCount),
                 ),
               ],
             ),
-      floatingActionButton: selectedCount > 0 && !isWeb
+      floatingActionButton: selectedCount > 0 && !_isWeb
           ? FloatingActionButton.extended(
               onPressed: _isSaving ? null : _saveServices,
-              backgroundColor: const Color(0xFFFF6B8B),
+              backgroundColor: accentColor,
               icon: _isSaving
                   ? const SizedBox(
                       width: 20,
@@ -627,37 +667,60 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
     );
   }
 
-  Widget _buildSearchAndFilterBar(bool isWeb, double padding) {
+  // ============================================================
+  // ✅ SEARCH AND FILTER BAR
+  // ============================================================
+  Widget _buildSearchAndFilterBar(double padding) {
+    final isDark = _isDark;
+
     return Container(
       padding: EdgeInsets.all(padding),
-      color: Colors.white,
+      color: isDark ? const Color(0xFF1A1A1A) : Colors.white,
       child: Column(
         children: [
           TextField(
             controller: _searchController,
+            style: TextStyle(color: isDark ? Colors.white : Colors.black87),
             decoration: InputDecoration(
               hintText: 'Search services...',
-              prefixIcon: const Icon(Icons.search, color: Colors.grey),
+              hintStyle: TextStyle(
+                color: isDark ? Colors.white70 : Colors.grey,
+              ),
+              prefixIcon: Icon(
+                Icons.search,
+                color: isDark ? Colors.white70 : Colors.grey,
+              ),
               suffixIcon: _searchQuery.isNotEmpty
                   ? IconButton(
-                      icon: const Icon(Icons.clear, color: Colors.grey),
+                      icon: Icon(
+                        Icons.clear,
+                        color: isDark ? Colors.white70 : Colors.grey,
+                      ),
                       onPressed: () => _searchController.clear(),
                     )
                   : null,
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(
+                  color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                ),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(
+                  color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                ),
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(
-                  color: Color(0xFFFF6B8B),
-                  width: 2,
-                ),
+                borderSide: const BorderSide(color: AppTheme.primary, width: 2),
               ),
               contentPadding: EdgeInsets.symmetric(
                 horizontal: 16,
-                vertical: isWeb ? 16 : 12,
+                vertical: _isWeb ? 16 : 12,
               ),
+              filled: true,
+              fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
             ),
           ),
           const SizedBox(height: 12),
@@ -669,12 +732,20 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                 FilterChip(
                   label: Text(
                     'All',
-                    style: TextStyle(fontSize: isWeb ? 14 : 12),
+                    style: TextStyle(
+                      fontSize: _isWeb ? 14 : 12,
+                      color: _selectedCategory == 'all'
+                          ? AppTheme.primary
+                          : (isDark ? Colors.white70 : Colors.grey[700]),
+                    ),
                   ),
                   selected: _selectedCategory == 'all',
                   onSelected: (_) => setState(() => _selectedCategory = 'all'),
-                  selectedColor: const Color(0xFFFF6B8B).withValues(alpha: 0.2),
-                  checkmarkColor: const Color(0xFFFF6B8B),
+                  selectedColor: AppTheme.primary.withValues(alpha: 0.2),
+                  checkmarkColor: AppTheme.primary,
+                  backgroundColor: isDark
+                      ? const Color(0xFF2A2A2A)
+                      : Colors.grey[100],
                 ),
                 const SizedBox(width: 8),
                 ..._categories.map((category) {
@@ -683,15 +754,21 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                     child: FilterChip(
                       label: Text(
                         category[0].toUpperCase() + category.substring(1),
-                        style: TextStyle(fontSize: isWeb ? 14 : 12),
+                        style: TextStyle(
+                          fontSize: _isWeb ? 14 : 12,
+                          color: _selectedCategory == category
+                              ? AppTheme.primary
+                              : (isDark ? Colors.white70 : Colors.grey[700]),
+                        ),
                       ),
                       selected: _selectedCategory == category,
                       onSelected: (_) =>
                           setState(() => _selectedCategory = category),
-                      selectedColor: const Color(
-                        0xFFFF6B8B,
-                      ).withValues(alpha: 0.2),
-                      checkmarkColor: const Color(0xFFFF6B8B),
+                      selectedColor: AppTheme.primary.withValues(alpha: 0.2),
+                      checkmarkColor: AppTheme.primary,
+                      backgroundColor: isDark
+                          ? const Color(0xFF2A2A2A)
+                          : Colors.grey[100],
                     ),
                   );
                 }),
@@ -703,23 +780,28 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
     );
   }
 
-  Widget _buildEmptyState(bool isWeb) {
+  // ============================================================
+  // ✅ EMPTY STATE
+  // ============================================================
+  Widget _buildEmptyState() {
+    final isDark = _isDark;
+
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Icon(
             Icons.search_off,
-            size: isWeb ? 80 : 64,
-            color: Colors.grey[400],
+            size: _isWeb ? 80 : 64,
+            color: isDark ? Colors.white30 : Colors.grey[400],
           ),
           const SizedBox(height: 16),
           Text(
             'No services found',
             style: TextStyle(
-              fontSize: isWeb ? 20 : 18,
+              fontSize: _isWeb ? 20 : 18,
               fontWeight: FontWeight.w500,
-              color: Colors.grey[600],
+              color: isDark ? Colors.white60 : Colors.grey[600],
             ),
           ),
           const SizedBox(height: 8),
@@ -728,8 +810,8 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                 ? 'Try adjusting your search or filters'
                 : 'No services available',
             style: TextStyle(
-              fontSize: isWeb ? 16 : 14,
-              color: Colors.grey[500],
+              fontSize: _isWeb ? 16 : 14,
+              color: isDark ? Colors.white70 : Colors.grey[500],
             ),
           ),
         ],
@@ -737,7 +819,13 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
     );
   }
 
+  // ============================================================
+  // ✅ WEB VIEW
+  // ============================================================
   Widget _buildWebView(double padding, int selectedCount) {
+    final isDark = _isDark;
+    final accentColor = AppTheme.primary;
+
     return SingleChildScrollView(
       padding: EdgeInsets.all(padding),
       child: Column(
@@ -745,24 +833,29 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
         children: [
           if (selectedCount > 0) ...[
             Card(
-              color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+              color: isDark
+                  ? const Color(0xFF2A2A2A)
+                  : accentColor.withValues(alpha: 0.1),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
-                side: const BorderSide(color: Color(0xFFFF6B8B)),
+                side: BorderSide(color: accentColor),
               ),
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: Row(
                   children: [
-                    const Icon(Icons.info_outline, color: Color(0xFFFF6B8B)),
+                    Icon(
+                      Icons.info_outline,
+                      color: isDark ? Colors.white : accentColor,
+                    ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
                         '$selectedCount service${selectedCount > 1 ? 's' : ''} selected',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w500,
-                          color: Color(0xFFFF6B8B),
+                          color: isDark ? Colors.white : accentColor,
                         ),
                       ),
                     ),
@@ -771,7 +864,7 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                       icon: const Icon(Icons.save),
                       label: const Text('Save Now'),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFFFF6B8B),
+                        backgroundColor: accentColor,
                         foregroundColor: Colors.white,
                       ),
                     ),
@@ -801,7 +894,11 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
     );
   }
 
+  // ============================================================
+  // ✅ WEB SERVICE CARD
+  // ============================================================
   Widget _buildServiceCardWeb(Map<String, dynamic> service, int index) {
+    final isDark = _isDark;
     final serviceId = service['id_str'];
     final variants = service['variants'] as List;
     final hasVariants = variants.isNotEmpty;
@@ -810,8 +907,10 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
     final isFullServiceSelected = _isFullServiceSelected(serviceId);
     final selectedVariantCount = _selectedVariants[serviceId]?.length ?? 0;
     final categoryColor = _getCategoryColor(service['category_name']);
-    final cardColor = _cardColors[index % _cardColors.length];
-    final accentColor = const Color(0xFFFF6B8B);
+    final cardColor = isDark
+        ? _cardColorsDark[index % _cardColorsDark.length]
+        : _cardColorsLight[index % _cardColorsLight.length];
+    final accentColor = AppTheme.primary;
 
     final isCompletelyAssigned = !hasVariants
         ? isFullServiceAssigned
@@ -820,12 +919,13 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
     return Opacity(
       opacity: isCompletelyAssigned ? 0.6 : 1.0,
       child: Card(
+        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
           side: BorderSide(
             color: isFullServiceSelected || selectedVariantCount > 0
                 ? accentColor
-                : Colors.grey[300]!,
+                : (isDark ? Colors.grey[700]! : Colors.grey[300]!),
             width: isFullServiceSelected || selectedVariantCount > 0 ? 2 : 1,
           ),
         ),
@@ -842,7 +942,9 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.5),
+                  color: isDark
+                      ? Colors.black.withValues(alpha: 0.3)
+                      : Colors.white.withValues(alpha: 0.5),
                   borderRadius: const BorderRadius.only(
                     topLeft: Radius.circular(16),
                     topRight: Radius.circular(16),
@@ -854,7 +956,7 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                       width: 36,
                       height: 36,
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: Center(
@@ -875,7 +977,7 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                             style: TextStyle(
                               fontWeight: FontWeight.bold,
                               fontSize: 14,
-                              color: Colors.grey[800],
+                              color: isDark ? Colors.white : Colors.grey[800],
                             ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
@@ -906,7 +1008,9 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                                   '${variants.length} variants',
                                   style: TextStyle(
                                     fontSize: 10,
-                                    color: Colors.grey[600],
+                                    color: isDark
+                                        ? Colors.white60
+                                        : Colors.grey[600],
                                   ),
                                 ),
                               ],
@@ -939,7 +1043,7 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                           'Rs. ${service['minPrice']} - ${service['maxPrice']}',
                           style: TextStyle(
                             fontSize: 11,
-                            color: Colors.grey[700],
+                            color: isDark ? Colors.white60 : Colors.grey[700],
                             fontWeight: FontWeight.w500,
                           ),
                         ),
@@ -953,7 +1057,9 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                             vertical: 4,
                           ),
                           decoration: BoxDecoration(
-                            color: Colors.green[50],
+                            color: isDark
+                                ? Colors.green[900]
+                                : Colors.green[50],
                             borderRadius: BorderRadius.circular(4),
                           ),
                           child: Row(
@@ -962,14 +1068,18 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                               Icon(
                                 Icons.check_circle,
                                 size: 12,
-                                color: Colors.green[700],
+                                color: isDark
+                                    ? Colors.green[300]
+                                    : Colors.green[700],
                               ),
                               const SizedBox(width: 4),
                               Text(
                                 'Already assigned',
                                 style: TextStyle(
                                   fontSize: 10,
-                                  color: Colors.green[700],
+                                  color: isDark
+                                      ? Colors.green[300]
+                                      : Colors.green[700],
                                   fontWeight: FontWeight.w500,
                                 ),
                               ),
@@ -984,7 +1094,7 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                             'Full Service',
                             style: TextStyle(
                               fontSize: 12,
-                              color: Colors.grey[600],
+                              color: isDark ? Colors.white60 : Colors.grey[600],
                             ),
                           ),
                         ),
@@ -1015,12 +1125,18 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                                   decoration: BoxDecoration(
                                     color: isSelected
                                         ? accentColor.withValues(alpha: 0.1)
-                                        : Colors.white.withValues(alpha: 0.7),
+                                        : (isDark
+                                              ? const Color(0xFF2A2A2A)
+                                              : Colors.white.withValues(
+                                                  alpha: 0.7,
+                                                )),
                                     borderRadius: BorderRadius.circular(8),
                                     border: Border.all(
                                       color: isSelected
                                           ? accentColor
-                                          : Colors.grey[300]!,
+                                          : (isDark
+                                                ? Colors.grey[700]!
+                                                : Colors.grey[300]!),
                                     ),
                                   ),
                                   child: Row(
@@ -1032,7 +1148,9 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                                         size: 14,
                                         color: isSelected
                                             ? accentColor
-                                            : Colors.grey[400],
+                                            : (isDark
+                                                  ? Colors.white70
+                                                  : Colors.grey[400]),
                                       ),
                                       const SizedBox(width: 8),
                                       Expanded(
@@ -1049,14 +1167,18 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                                                     : FontWeight.normal,
                                                 color: isSelected
                                                     ? accentColor
-                                                    : Colors.grey[800],
+                                                    : (isDark
+                                                          ? Colors.white70
+                                                          : Colors.grey[800]),
                                               ),
                                             ),
                                             Text(
                                               'Rs. ${variant['price']} • ${variant['duration']} min',
                                               style: TextStyle(
                                                 fontSize: 9,
-                                                color: Colors.grey[600],
+                                                color: isDark
+                                                    ? Colors.white70
+                                                    : Colors.grey[600],
                                               ),
                                             ),
                                           ],
@@ -1069,7 +1191,9 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                                             vertical: 2,
                                           ),
                                           decoration: BoxDecoration(
-                                            color: Colors.green[100],
+                                            color: isDark
+                                                ? Colors.green[900]
+                                                : Colors.green[100],
                                             borderRadius: BorderRadius.circular(
                                               4,
                                             ),
@@ -1078,7 +1202,9 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                                             'Assigned',
                                             style: TextStyle(
                                               fontSize: 8,
-                                              color: Colors.green[700],
+                                              color: isDark
+                                                  ? Colors.green[300]
+                                                  : Colors.green[700],
                                             ),
                                           ),
                                         ),
@@ -1114,7 +1240,13 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
     );
   }
 
+  // ============================================================
+  // ✅ MOBILE VIEW
+  // ============================================================
   Widget _buildMobileView(double padding, int selectedCount) {
+    final isDark = _isDark;
+    final accentColor = AppTheme.primary; // ✅ එක වතාවක් පමණයි
+
     return ListView.builder(
       padding: EdgeInsets.all(padding),
       itemCount: _filteredServices.length,
@@ -1129,8 +1261,10 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
         final selectedVariantCount = _selectedVariants[serviceId]?.length ?? 0;
         final isExpanded = _expandedServices.contains(serviceId);
         final categoryColor = _getCategoryColor(service['category_name']);
-        final cardColor = _cardColors[index % _cardColors.length];
-        final accentColor = const Color(0xFFFF6B8B);
+        final cardColor = isDark
+            ? _cardColorsDark[index % _cardColorsDark.length]
+            : _cardColorsLight[index % _cardColorsLight.length];
+        // ✅ Remove duplicate accentColor
 
         final isCompletelyAssigned = !hasVariants
             ? isFullServiceAssigned
@@ -1138,12 +1272,13 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
 
         return Card(
           margin: const EdgeInsets.only(bottom: 12),
+          color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
             side: BorderSide(
               color: isFullServiceSelected || selectedVariantCount > 0
-                  ? accentColor
-                  : Colors.grey[300]!,
+                  ? accentColor // ✅ Use outer accentColor
+                  : (isDark ? Colors.grey[700]! : Colors.grey[300]!),
               width: isFullServiceSelected || selectedVariantCount > 0 ? 2 : 1,
             ),
           ),
@@ -1169,13 +1304,15 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                             width: 36,
                             height: 36,
                             decoration: BoxDecoration(
-                              color: Colors.white,
+                              color: isDark
+                                  ? const Color(0xFF2A2A2A)
+                                  : Colors.white,
                               borderRadius: BorderRadius.circular(10),
                             ),
                             child: Center(
                               child: Icon(
                                 _getIconForName(service['icon_name']),
-                                color: accentColor,
+                                color: accentColor, // ✅ Use outer accentColor
                                 size: 18,
                               ),
                             ),
@@ -1195,8 +1332,12 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                                         : FontWeight.w600,
                                     fontSize: 14,
                                     color: isCompletelyAssigned
-                                        ? Colors.grey
-                                        : Colors.grey[800],
+                                        ? (isDark
+                                              ? Colors.white70
+                                              : Colors.grey)
+                                        : (isDark
+                                              ? Colors.white
+                                              : Colors.grey[800]),
                                   ),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
@@ -1229,7 +1370,9 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                                         '${variants.length} variants',
                                         style: TextStyle(
                                           fontSize: 9,
-                                          color: Colors.grey[600],
+                                          color: isDark
+                                              ? Colors.white70
+                                              : Colors.grey[600],
                                         ),
                                       ),
                                     ],
@@ -1244,7 +1387,8 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                               onChanged: isCompletelyAssigned
                                   ? null
                                   : (_) => _toggleFullService(serviceId),
-                              activeColor: accentColor,
+                              activeColor:
+                                  accentColor, // ✅ Use outer accentColor
                               visualDensity: VisualDensity.compact,
                             ),
                           if (hasVariants)
@@ -1254,8 +1398,8 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                                   : Icons.expand_more,
                               size: 20,
                               color: selectedVariantCount > 0
-                                  ? accentColor
-                                  : Colors.grey,
+                                  ? accentColor // ✅ Use outer accentColor
+                                  : (isDark ? Colors.white70 : Colors.grey),
                             ),
                         ],
                       ),
@@ -1279,13 +1423,19 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                             margin: const EdgeInsets.only(bottom: 6),
                             decoration: BoxDecoration(
                               color: isSelected
-                                  ? accentColor.withValues(alpha: 0.05)
-                                  : Colors.white.withValues(alpha: 0.7),
+                                  ? accentColor.withValues(
+                                      alpha: 0.05,
+                                    ) // ✅ Use outer accentColor
+                                  : (isDark
+                                        ? const Color(0xFF2A2A2A)
+                                        : Colors.white.withValues(alpha: 0.7)),
                               borderRadius: BorderRadius.circular(8),
                               border: Border.all(
                                 color: isSelected
-                                    ? accentColor
-                                    : Colors.grey[200]!,
+                                    ? accentColor // ✅ Use outer accentColor
+                                    : (isDark
+                                          ? Colors.grey[700]!
+                                          : Colors.grey[200]!),
                               ),
                             ),
                             child: ListTile(
@@ -1299,7 +1449,8 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                                     ? null
                                     : (_) =>
                                           _toggleVariant(serviceId, variantId),
-                                activeColor: accentColor,
+                                activeColor:
+                                    accentColor, // ✅ Use outer accentColor
                                 visualDensity: VisualDensity.compact,
                               ),
                               title: Text(
@@ -1309,13 +1460,19 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                                       ? FontWeight.w600
                                       : FontWeight.normal,
                                   fontSize: 12,
+                                  color: isDark ? Colors.white : Colors.black87,
                                 ),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               ),
                               subtitle: Text(
                                 'Rs. ${variant['price']} • ${variant['duration']} min',
-                                style: TextStyle(fontSize: 10),
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: isDark
+                                      ? Colors.white70
+                                      : Colors.grey[600],
+                                ),
                               ),
                               trailing: isAssigned
                                   ? Container(
@@ -1324,14 +1481,18 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                                         vertical: 2,
                                       ),
                                       decoration: BoxDecoration(
-                                        color: Colors.green[100],
+                                        color: isDark
+                                            ? Colors.green[900]
+                                            : Colors.green[100],
                                         borderRadius: BorderRadius.circular(4),
                                       ),
                                       child: Text(
                                         'Assigned',
                                         style: TextStyle(
                                           fontSize: 9,
-                                          color: Colors.green[700],
+                                          color: isDark
+                                              ? Colors.green[300]
+                                              : Colors.green[700],
                                         ),
                                       ),
                                     )

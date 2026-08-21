@@ -3,6 +3,8 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
+import 'package:flutter_application_1/extensions/context_extensions.dart';
+import 'package:flutter_application_1/theme/app_theme.dart';
 
 class RevenueScreen extends StatefulWidget {
   final String? salonId;
@@ -43,10 +45,30 @@ class _RevenueScreenState extends State<RevenueScreen> {
   // Salon name
   String? _salonName;
 
+  // ✅ Responsive variables
+  late bool _isWeb;
+  late bool _isDark;
+
+  // ✅ Scroll Controller for web
+  final ScrollController _scrollController = ScrollController();
+
   @override
   void initState() {
     super.initState();
     _loadData();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _isWeb = context.isWeb;
+    _isDark = context.isDarkMode;
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadData() async {
@@ -109,21 +131,16 @@ class _RevenueScreenState extends State<RevenueScreen> {
       final today = DateTime.now();
       final todayStr = DateFormat('yyyy-MM-dd').format(today);
 
-      // Week dates
       final weekStart = today.subtract(Duration(days: today.weekday - 1));
       final weekStartStr = DateFormat('yyyy-MM-dd').format(weekStart);
 
-      // Month dates
       final monthStart = DateTime(today.year, today.month, 1);
       final monthStartStr = DateFormat('yyyy-MM-dd').format(monthStart);
 
-      // All time
       final allTimeStart = DateTime(2000, 1, 1);
       final allTimeStartStr = DateFormat('yyyy-MM-dd').format(allTimeStart);
 
-      // Run all queries
       final results = await Future.wait([
-        // Today
         supabase
             .from('appointments')
             .select('price, status')
@@ -131,7 +148,6 @@ class _RevenueScreenState extends State<RevenueScreen> {
             .eq('appointment_date', todayStr)
             .eq('status', 'completed'),
 
-        // Week
         supabase
             .from('appointments')
             .select('price, status')
@@ -139,7 +155,6 @@ class _RevenueScreenState extends State<RevenueScreen> {
             .gte('appointment_date', weekStartStr)
             .eq('status', 'completed'),
 
-        // Month
         supabase
             .from('appointments')
             .select('price, status')
@@ -147,7 +162,6 @@ class _RevenueScreenState extends State<RevenueScreen> {
             .gte('appointment_date', monthStartStr)
             .eq('status', 'completed'),
 
-        // All time
         supabase
             .from('appointments')
             .select('price, status')
@@ -155,7 +169,6 @@ class _RevenueScreenState extends State<RevenueScreen> {
             .gte('appointment_date', allTimeStartStr)
             .eq('status', 'completed'),
 
-        // Daily revenue for chart (last 7 days)
         supabase
             .from('appointments')
             .select('appointment_date, price, status')
@@ -163,7 +176,6 @@ class _RevenueScreenState extends State<RevenueScreen> {
             .gte('appointment_date', weekStartStr)
             .eq('status', 'completed'),
 
-        // Monthly revenue for chart (last 6 months)
         supabase
             .from('appointments')
             .select('appointment_date, price, status')
@@ -190,7 +202,6 @@ class _RevenueScreenState extends State<RevenueScreen> {
       _totalRevenue = allTimeData.fold(0, (sum, item) => sum + ((item['price'] as num?)?.toInt() ?? 0));
       _totalAppointments = allTimeData.length;
 
-      // Process daily data
       final Map<String, int> dailyMap = {};
       for (var item in dailyData) {
         final date = item['appointment_date'] as String;
@@ -205,11 +216,10 @@ class _RevenueScreenState extends State<RevenueScreen> {
           .toList()
         ..sort((a, b) => (a['date'] as String).compareTo(b['date'] as String));
 
-      // Process monthly data
       final Map<String, int> monthlyMap = {};
       for (var item in allData) {
         final date = item['appointment_date'] as String;
-        final month = date.substring(0, 7); // YYYY-MM
+        final month = date.substring(0, 7);
         final price = (item['price'] as num?)?.toInt() ?? 0;
         monthlyMap[month] = (monthlyMap[month] ?? 0) + price;
       }
@@ -221,7 +231,6 @@ class _RevenueScreenState extends State<RevenueScreen> {
           .toList()
         ..sort((a, b) => (a['month'] as String).compareTo(b['month'] as String));
 
-      // Weekly revenue
       final Map<String, int> weeklyMap = {};
       for (var item in weekData) {
         final date = item['appointment_date'] as String;
@@ -268,8 +277,6 @@ class _RevenueScreenState extends State<RevenueScreen> {
 
       final salonId = widget.salonId != null ? int.parse(widget.salonId!) : null;
 
-      // ✅ FIXED: instead of query.clone() (which doesn't exist),
-      // use a factory function that builds a fresh query each time.
       PostgrestFilterBuilder<PostgrestList> buildBaseQuery() {
         var q = supabase
             .from('appointments')
@@ -284,17 +291,11 @@ class _RevenueScreenState extends State<RevenueScreen> {
       }
 
       final results = await Future.wait([
-        // Today
         buildBaseQuery().eq('appointment_date', todayStr),
-        // Week
         buildBaseQuery().gte('appointment_date', weekStartStr),
-        // Month
         buildBaseQuery().gte('appointment_date', monthStartStr),
-        // All time
         buildBaseQuery().gte('appointment_date', allTimeStartStr),
-        // Daily chart
         buildBaseQuery().gte('appointment_date', weekStartStr),
-        // Monthly chart
         buildBaseQuery(),
       ]);
 
@@ -317,7 +318,6 @@ class _RevenueScreenState extends State<RevenueScreen> {
       _totalRevenue = allTimeData.fold(0, (sum, item) => sum + ((item['price'] as num?)?.toInt() ?? 0));
       _totalAppointments = allTimeData.length;
 
-      // Process charts
       final Map<String, int> dailyMap = {};
       for (var item in dailyData) {
         final date = item['appointment_date'] as String;
@@ -364,22 +364,27 @@ class _RevenueScreenState extends State<RevenueScreen> {
 
   @override
   Widget build(BuildContext context) {
+    _isWeb = context.isWeb;
+    _isDark = context.isDarkMode;
+
     return Scaffold(
+      backgroundColor: _isDark ? const Color(0xFF121212) : Colors.white,
       appBar: AppBar(
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               widget.role == 'barber' ? 'My Revenue' : 'Revenue',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
+                color: Colors.white,
               ),
             ),
             if (_salonName != null)
               Text(
                 _salonName!,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.normal,
                   color: Colors.white70,
@@ -387,76 +392,128 @@ class _RevenueScreenState extends State<RevenueScreen> {
               ),
           ],
         ),
-        backgroundColor: const Color(0xFFFF6B8B),
+        backgroundColor: AppTheme.primary,
         foregroundColor: Colors.white,
         elevation: 0,
+        centerTitle: _isWeb,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+          tooltip: 'Back',
+        ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh, color: Colors.white),
             onPressed: _loadData,
           ),
         ],
       ),
-      body: _isLoading
-          ? const Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  CircularProgressIndicator(color: Color(0xFFFF6B8B)),
-                  SizedBox(height: 16),
-                  Text('Loading revenue data...'),
-                ],
-              ),
-            )
-          : _errorMessage != null
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.error_outline, size: 64, color: Colors.grey[400]),
-                      const SizedBox(height: 16),
-                      Text(
-                        _errorMessage!,
-                        style: TextStyle(color: Colors.grey[600]),
-                        textAlign: TextAlign.center,
+      body: SafeArea(
+        child: _isLoading
+            ? Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    CircularProgressIndicator(color: AppTheme.primary),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Loading revenue data...',
+                      style: TextStyle(
+                        color: _isDark ? Colors.white60 : Colors.grey,
                       ),
-                      const SizedBox(height: 24),
-                      ElevatedButton(
-                        onPressed: _loadData,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFFF6B8B),
-                          foregroundColor: Colors.white,
-                        ),
-                        child: const Text('Retry'),
-                      ),
-                    ],
-                  ),
-                )
-              : SingleChildScrollView(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    children: [
-                      // Period Selector
-                      _buildPeriodSelector(),
-                      const SizedBox(height: 16),
-
-                      // Revenue Stats
-                      _buildRevenueStats(),
-                      const SizedBox(height: 16),
-
-                      // Revenue Chart
-                      _buildRevenueChart(),
-                      const SizedBox(height: 16),
-
-                      // Appointments Stats
-                      _buildAppointmentsStats(),
-                      const SizedBox(height: 16),
-
-                      // Additional Info
-                      _buildAdditionalInfo(),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
+              )
+            : _errorMessage != null
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.error_outline,
+                          size: 64,
+                          color: _isDark ? Colors.white30 : Colors.grey[400],
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          _errorMessage!,
+                          style: TextStyle(
+                            color: _isDark ? Colors.white60 : Colors.grey[600],
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 24),
+                        ElevatedButton(
+                          onPressed: _loadData,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppTheme.primary,
+                            foregroundColor: Colors.white,
+                          ),
+                          child: const Text('Retry'),
+                        ),
+                      ],
+                    ),
+                  )
+                : _isWeb
+                    ? _buildWebLayout()
+                    : _buildMobileLayout(),
+      ),
+    );
+  }
+
+  // ============================================================
+  // ✅ WEB LAYOUT - Dashboard Style
+  // ============================================================
+  Widget _buildWebLayout() {
+    return Center(
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 1200),
+        child: Scrollbar(
+          controller: _scrollController,
+          thumbVisibility: true,
+          trackVisibility: true,
+          thickness: 8.0,
+          radius: const Radius.circular(10),
+          scrollbarOrientation: ScrollbarOrientation.right,
+          child: SingleChildScrollView(
+            controller: _scrollController,
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.all(24),
+            child: _buildContent(),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ============================================================
+  // ✅ MOBILE LAYOUT
+  // ============================================================
+  Widget _buildMobileLayout() {
+    return SingleChildScrollView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.all(16),
+      child: _buildContent(),
+    );
+  }
+
+  // ============================================================
+  // ✅ CONTENT
+  // ============================================================
+  Widget _buildContent() {
+    return Column(
+      children: [
+        _buildPeriodSelector(),
+        const SizedBox(height: 16),
+        _buildRevenueStats(),
+        const SizedBox(height: 16),
+        _buildRevenueChart(),
+        const SizedBox(height: 16),
+        _buildAppointmentsStats(),
+        const SizedBox(height: 16),
+        _buildAdditionalInfo(),
+      ],
     );
   }
 
@@ -465,12 +522,16 @@ class _RevenueScreenState extends State<RevenueScreen> {
   // ============================================================
   Widget _buildPeriodSelector() {
     final periods = ['Today', 'Week', 'Month'];
+    final isDark = _isDark;
 
     return Container(
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
-        color: Colors.grey[100],
+        color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[100],
         borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
+        ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -486,12 +547,14 @@ class _RevenueScreenState extends State<RevenueScreen> {
               child: Container(
                 padding: const EdgeInsets.symmetric(vertical: 10),
                 decoration: BoxDecoration(
-                  color: isSelected ? Colors.white : Colors.transparent,
+                  color: isSelected
+                      ? (isDark ? const Color(0xFF1E1E1E) : Colors.white)
+                      : Colors.transparent,
                   borderRadius: BorderRadius.circular(10),
                   boxShadow: isSelected
                       ? [
                           BoxShadow(
-                            color: Colors.grey.withValues(alpha: 0.15),
+                            color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.1),
                             blurRadius: 8,
                             offset: const Offset(0, 2),
                           ),
@@ -503,7 +566,9 @@ class _RevenueScreenState extends State<RevenueScreen> {
                     period,
                     style: TextStyle(
                       fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                      color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[600],
+                      color: isSelected
+                          ? AppTheme.primary
+                          : (isDark ? Colors.white60 : Colors.grey[600]),
                     ),
                   ),
                 ),
@@ -519,6 +584,7 @@ class _RevenueScreenState extends State<RevenueScreen> {
   // BUILD REVENUE STATS
   // ============================================================
   Widget _buildRevenueStats() {
+    final isDark = _isDark;
     int revenue = 0;
     int appointments = 0;
     String periodLabel = '';
@@ -543,6 +609,7 @@ class _RevenueScreenState extends State<RevenueScreen> {
 
     return Card(
       elevation: 3,
+      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
       ),
@@ -557,7 +624,7 @@ class _RevenueScreenState extends State<RevenueScreen> {
                   periodLabel,
                   style: TextStyle(
                     fontSize: 14,
-                    color: Colors.grey[600],
+                    color: isDark ? Colors.white60 : Colors.grey[600],
                   ),
                 ),
                 Container(
@@ -568,6 +635,9 @@ class _RevenueScreenState extends State<RevenueScreen> {
                   decoration: BoxDecoration(
                     color: Colors.green.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: Colors.green.withValues(alpha: 0.2),
+                    ),
                   ),
                   child: Row(
                     children: [
@@ -579,9 +649,9 @@ class _RevenueScreenState extends State<RevenueScreen> {
                       const SizedBox(width: 4),
                       Text(
                         '+$appointments',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 12,
-                          color: Colors.green,
+                          color: isDark ? Colors.green[300] : Colors.green,
                           fontWeight: FontWeight.w500,
                         ),
                       ),
@@ -593,19 +663,19 @@ class _RevenueScreenState extends State<RevenueScreen> {
             const SizedBox(height: 12),
             Row(
               children: [
-                const Text(
+                Text(
                   'Rs. ',
                   style: TextStyle(
                     fontSize: 24,
-                    color: Colors.grey,
+                    color: isDark ? Colors.white60 : Colors.grey,
                   ),
                 ),
                 Text(
                   revenue.toString(),
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 32,
                     fontWeight: FontWeight.bold,
-                    color: Color(0xFFFF6B8B),
+                    color: isDark ? Colors.white : AppTheme.primary,
                   ),
                 ),
               ],
@@ -615,7 +685,7 @@ class _RevenueScreenState extends State<RevenueScreen> {
               '$appointments appointments completed',
               style: TextStyle(
                 fontSize: 14,
-                color: Colors.grey[600],
+                color: isDark ? Colors.white60 : Colors.grey[600],
               ),
             ),
           ],
@@ -628,6 +698,7 @@ class _RevenueScreenState extends State<RevenueScreen> {
   // BUILD REVENUE CHART (Simple Bar Chart)
   // ============================================================
   Widget _buildRevenueChart() {
+    final isDark = _isDark;
     List<Map<String, dynamic>> data = [];
     String title = '';
     String valueKey = '';
@@ -657,6 +728,7 @@ class _RevenueScreenState extends State<RevenueScreen> {
     if (data.isEmpty) {
       return Card(
         elevation: 2,
+        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
         ),
@@ -669,20 +741,21 @@ class _RevenueScreenState extends State<RevenueScreen> {
                   Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                      color: AppTheme.primary.withValues(alpha: 0.1),
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(
+                    child: Icon(
                       Icons.show_chart,
-                      color: Color(0xFFFF6B8B),
+                      color: isDark ? Colors.white : AppTheme.primary,
                     ),
                   ),
                   const SizedBox(width: 12),
                   Text(
                     title,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
+                      color: isDark ? Colors.white : Colors.black87,
                     ),
                   ),
                 ],
@@ -697,13 +770,13 @@ class _RevenueScreenState extends State<RevenueScreen> {
                     Icon(
                       Icons.insert_chart_outlined,
                       size: 48,
-                      color: Colors.grey[300],
+                      color: isDark ? Colors.white30 : Colors.grey[300],
                     ),
                     const SizedBox(height: 8),
                     Text(
                       'No revenue data available',
                       style: TextStyle(
-                        color: Colors.grey[500],
+                        color: isDark ? Colors.white70 : Colors.grey[500],
                       ),
                     ),
                   ],
@@ -715,7 +788,6 @@ class _RevenueScreenState extends State<RevenueScreen> {
       );
     }
 
-    // Find max value for scaling
     final maxValue = data.fold(0, (max, item) {
           final val = item[valueKey] as int? ?? 0;
           return val > max ? val : max;
@@ -724,6 +796,7 @@ class _RevenueScreenState extends State<RevenueScreen> {
 
     return Card(
       elevation: 2,
+      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
       ),
@@ -737,20 +810,21 @@ class _RevenueScreenState extends State<RevenueScreen> {
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                    color: AppTheme.primary.withValues(alpha: 0.1),
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(
+                  child: Icon(
                     Icons.show_chart,
-                    color: Color(0xFFFF6B8B),
+                    color: isDark ? Colors.white : AppTheme.primary,
                   ),
                 ),
                 const SizedBox(width: 12),
                 Text(
                   title,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : Colors.black87,
                   ),
                 ),
                 const Spacer(),
@@ -758,7 +832,7 @@ class _RevenueScreenState extends State<RevenueScreen> {
                   '${data.length} entries',
                   style: TextStyle(
                     fontSize: 12,
-                    color: Colors.grey[500],
+                    color: isDark ? Colors.white70 : Colors.grey[500],
                   ),
                 ),
               ],
@@ -781,7 +855,7 @@ class _RevenueScreenState extends State<RevenueScreen> {
                           'Rs.${(value / 1000).toStringAsFixed(1)}k',
                           style: TextStyle(
                             fontSize: 10,
-                            color: Colors.grey[600],
+                            color: isDark ? Colors.white60 : Colors.grey[600],
                           ),
                         ),
                         const SizedBox(height: 4),
@@ -789,10 +863,10 @@ class _RevenueScreenState extends State<RevenueScreen> {
                           height: height,
                           width: 20,
                           decoration: BoxDecoration(
-                            gradient: const LinearGradient(
+                            gradient: LinearGradient(
                               colors: [
-                                Color(0xFFFF6B8B),
-                                Color(0xFFFF8A9F),
+                                isDark ? Colors.white : AppTheme.primary,
+                                isDark ? Colors.white60 : const Color(0xFFFF8A9F),
                               ],
                             ),
                             borderRadius: BorderRadius.circular(4),
@@ -803,7 +877,7 @@ class _RevenueScreenState extends State<RevenueScreen> {
                           _formatLabel(label),
                           style: TextStyle(
                             fontSize: 10,
-                            color: Colors.grey[600],
+                            color: isDark ? Colors.white60 : Colors.grey[600],
                           ),
                         ),
                       ],
@@ -823,10 +897,8 @@ class _RevenueScreenState extends State<RevenueScreen> {
       if (label.contains('-')) {
         final parts = label.split('-');
         if (parts.length == 3) {
-          // Date: YYYY-MM-DD
           return '${parts[2]}/${parts[1]}';
         } else if (parts.length == 2) {
-          // Month: YYYY-MM
           const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
           final month = int.parse(parts[1]) - 1;
           return months[month];
@@ -842,8 +914,11 @@ class _RevenueScreenState extends State<RevenueScreen> {
   // BUILD APPOINTMENTS STATS
   // ============================================================
   Widget _buildAppointmentsStats() {
+    final isDark = _isDark;
+
     return Card(
       elevation: 2,
+      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
       ),
@@ -866,11 +941,12 @@ class _RevenueScreenState extends State<RevenueScreen> {
                   ),
                 ),
                 const SizedBox(width: 12),
-                const Text(
+                Text(
                   'Appointments Summary',
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : Colors.black87,
                   ),
                 ),
               ],
@@ -919,6 +995,8 @@ class _RevenueScreenState extends State<RevenueScreen> {
     required String value,
     required Color color,
   }) {
+    final isDark = _isDark;
+
     return Column(
       children: [
         Text(
@@ -926,7 +1004,7 @@ class _RevenueScreenState extends State<RevenueScreen> {
           style: TextStyle(
             fontSize: 20,
             fontWeight: FontWeight.bold,
-            color: color,
+            color: isDark ? color : color,
           ),
         ),
         const SizedBox(height: 4),
@@ -934,7 +1012,7 @@ class _RevenueScreenState extends State<RevenueScreen> {
           label,
           style: TextStyle(
             fontSize: 12,
-            color: Colors.grey[600],
+            color: isDark ? Colors.white60 : Colors.grey[600],
           ),
         ),
       ],
@@ -945,8 +1023,11 @@ class _RevenueScreenState extends State<RevenueScreen> {
   // BUILD ADDITIONAL INFO
   // ============================================================
   Widget _buildAdditionalInfo() {
+    final isDark = _isDark;
+
     return Card(
       elevation: 2,
+      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
       ),
@@ -969,11 +1050,12 @@ class _RevenueScreenState extends State<RevenueScreen> {
                   ),
                 ),
                 const SizedBox(width: 12),
-                const Text(
+                Text(
                   'Revenue Summary',
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : Colors.black87,
                   ),
                 ),
               ],
@@ -998,6 +1080,8 @@ class _RevenueScreenState extends State<RevenueScreen> {
   }
 
   Widget _buildInfoRow(String label, String value) {
+    final isDark = _isDark;
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
@@ -1007,14 +1091,15 @@ class _RevenueScreenState extends State<RevenueScreen> {
             label,
             style: TextStyle(
               fontSize: 14,
-              color: Colors.grey[600],
+              color: isDark ? Colors.white60 : Colors.grey[600],
             ),
           ),
           Text(
             value,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w600,
+              color: isDark ? Colors.white : Colors.black87,
             ),
           ),
         ],
