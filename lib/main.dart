@@ -25,6 +25,7 @@ import 'package:flutter_application_1/screens/customer/followed_salons_screen.da
 import 'package:flutter_application_1/screens/customer/my_bookings_screen.dart';
 import 'package:flutter_application_1/screens/customer/offers_screen.dart';
 import 'package:flutter_application_1/screens/customer/salon_profile_screen.dart';
+import 'package:flutter_application_1/screens/customer/search_salons_screen.dart';
 import 'package:flutter_application_1/screens/customer/vip_booking_screen.dart';
 import 'package:flutter_application_1/screens/owner/analytics_screen.dart';
 import 'package:flutter_application_1/screens/owner/appointments_screen.dart';
@@ -1422,6 +1423,11 @@ GoRouter _createRouter() {
         path: '/customer/my-salons',
         name: 'my-salons',
         builder: (context, state) => const FollowedSalonsScreen(),
+      ),
+      GoRoute(
+        path: '/customer/search-salons',
+        name: 'search-salons',
+        builder: (context, state) => const SearchSalonsScreen(),
       ),
       GoRoute(
         path: '/customer/history',

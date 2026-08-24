@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/screens/customer/booking_flow_screen.dart';
+import 'package:flutter_application_1/theme/app_theme.dart';
+import 'package:flutter_application_1/extensions/context_extensions.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../services/timezone_service.dart';
@@ -25,16 +27,16 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
   // Tab controller
   late TabController _tabController;
 
-  // Colors
-  final Color _primaryColor = const Color(0xFFFF6B8B);
+  // Colors - Using AppTheme
   final Color _vipColor = const Color(0xFF9C27B0);
   final Color _regularColor = const Color(0xFF4CAF50);
-  final Color _secondaryColor = const Color(0xFF4CAF50);
-  final Color _bgLight = const Color(0xFFF8F9FA);
 
   // Loading states
   bool _isCancelling = false;
   bool _isProcessingOverflow = false;
+
+  // ✅ Web Scroll Controller
+  final ScrollController _scrollController = ScrollController();
 
   @override
   void initState() {
@@ -46,6 +48,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
   @override
   void dispose() {
     _tabController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -61,7 +64,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
   }
 
   // =====================================================
-  // LOAD BOOKINGS (UPDATED - FOLLOWED SALONS ONLY + QUEUE NUMBERS)
+  // LOAD BOOKINGS
   // =====================================================
   Future<void> _loadBookings() async {
     try {
@@ -74,16 +77,16 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
         return;
       }
 
-      // ✅ STEP 0: Get customer role ID dynamically
+      // ✅ Get customer role ID dynamically
       final roleResponse = await supabase
           .from('roles')
           .select('id')
           .eq('name', 'customer')
           .single();
-      
+
       final customerRoleId = roleResponse['id'];
 
-      // ✅ STEP 1: Check if user has active customer role
+      // ✅ Check if user has active customer role
       final roleCheck = await supabase
           .from('user_roles')
           .select('status')
@@ -99,7 +102,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
         return;
       }
 
-      // ✅ STEP 2: Get followed salons
+      // ✅ Get followed salons
       final followedSalons = await supabase
           .from('salon_followers')
           .select('salon_id')
@@ -109,7 +112,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
           .map((f) => f['salon_id'] as int)
           .toList();
 
-      // ✅ STEP 3: If no followed salons, show empty state
+      // ✅ If no followed salons, show empty state
       if (followedSalonIds.isEmpty) {
         setState(() {
           _bookings = [];
@@ -118,7 +121,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
         return;
       }
 
-      // ✅ STEP 4: Get appointments only from followed salons
+      // ✅ Get appointments only from followed salons
       final appointments = await supabase
           .from('appointments')
           .select('*')
@@ -205,7 +208,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
         // =====================================================
         final isVip = booking['is_vip'] ?? false;
         String displayQueueNumber = '';
-        
+
         if (isVip) {
           final vipNum = booking['vip_queue_number'];
           if (vipNum != null) {
@@ -245,7 +248,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
       setState(() {
         _bookings = processedBookings;
       });
-    } catch (e) {     
+    } catch (e) {
       setState(() {
         _error = 'Failed to load bookings: $e';
       });
@@ -255,7 +258,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
   }
 
   // =====================================================
-  // LOAD OVERFLOW NOTIFICATIONS (UPDATED - FOLLOWED SALONS ONLY)
+  // LOAD OVERFLOW NOTIFICATIONS
   // =====================================================
   Future<void> _loadOverflowNotifications() async {
     try {
@@ -268,7 +271,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
           .select('id')
           .eq('name', 'customer')
           .single();
-      
+
       final customerRoleId = roleResponse['id'];
 
       // ✅ Check if user has active customer role
@@ -380,7 +383,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
       }
 
       setState(() => _overflowNotifications = notifications);
-    } catch (e) {    
+    } catch (e) {
       setState(() => _overflowNotifications = []);
     }
   }
@@ -395,7 +398,6 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
       final user = supabase.auth.currentUser;
       if (user == null) return;
 
-      // ✅ Call handle_overflow_response RPC
       final result = await supabase.rpc(
         'handle_overflow_response',
         params: {
@@ -453,6 +455,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
   // OVERFLOW DECISION DIALOG
   // =====================================================
   void _showOverflowDecisionDialog(Map<String, dynamic> notification) {
+    final isDark = context.isDarkMode;
     final apt = notification['appointment'];
     final excessMinutes = notification['excess_minutes'];
     final estimatedEnd = notification['estimated_end'];
@@ -462,6 +465,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Row(
           children: [
@@ -471,9 +475,13 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
               size: 28,
             ),
             const SizedBox(width: 12),
-            const Text(
+            Text(
               'Appointment Overflow',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
             ),
           ],
         ),
@@ -484,9 +492,9 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.orange.shade50,
+                color: isDark ? Colors.orange.withValues(alpha: 0.1) : Colors.orange.shade50,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.orange.shade200),
+                border: Border.all(color: Colors.orange.withValues(alpha: 0.2)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -495,35 +503,40 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                     '⚠️ Delay of $excessMinutes minutes detected',
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
-                      color: Colors.orange.shade800,
+                      color: isDark ? Colors.orange.shade300 : Colors.orange.shade800,
                     ),
                   ),
                   const SizedBox(height: 8),
                   Text(
                     'Your appointment on ${apt['appointment_date']} at ${apt['start_time']} may be significantly delayed.',
-                    style: TextStyle(color: Colors.orange.shade700),
+                    style: TextStyle(
+                      color: isDark ? Colors.orange.shade300 : Colors.orange.shade700,
+                    ),
                   ),
                   const SizedBox(height: 8),
                   Text(
                     'Estimated end: $estimatedEnd | Salon closes: $salonClose',
                     style: TextStyle(
                       fontSize: 12,
-                      color: Colors.orange.shade600,
+                      color: isDark ? Colors.orange.shade300 : Colors.orange.shade600,
                     ),
                   ),
                 ],
               ),
             ),
             const SizedBox(height: 16),
-            const Text(
+            Text(
               'What would you like to do?',
-              style: TextStyle(fontWeight: FontWeight.bold),
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
             ),
             const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.green.shade50,
+                color: isDark ? Colors.green.withValues(alpha: 0.1) : Colors.green.shade50,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Row(
@@ -538,14 +551,14 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                           'Move to Next Day',
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
-                            color: Colors.green.shade800,
+                            color: isDark ? Colors.green.shade300 : Colors.green.shade800,
                           ),
                         ),
                         Text(
                           'Reschedule your appointment to tomorrow',
                           style: TextStyle(
                             fontSize: 12,
-                            color: Colors.green.shade600,
+                            color: isDark ? Colors.green.shade300 : Colors.green.shade600,
                           ),
                         ),
                       ],
@@ -558,7 +571,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.red.shade50,
+                color: isDark ? Colors.red.withValues(alpha: 0.1) : Colors.red.shade50,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Row(
@@ -573,14 +586,14 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                           'Cancel Appointment',
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
-                            color: Colors.red.shade800,
+                            color: isDark ? Colors.red.shade300 : Colors.red.shade800,
                           ),
                         ),
                         Text(
                           'Cancel this appointment (no charges)',
                           style: TextStyle(
                             fontSize: 12,
-                            color: Colors.red.shade600,
+                            color: isDark ? Colors.red.shade300 : Colors.red.shade600,
                           ),
                         ),
                       ],
@@ -592,21 +605,32 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
             const SizedBox(height: 12),
             Text(
               '⚠️ If no response within 30 minutes, your appointment will be auto-cancelled.',
-              style: TextStyle(fontSize: 12, color: Colors.orange.shade600),
+              style: TextStyle(
+                fontSize: 12,
+                color: isDark ? Colors.orange.shade300 : Colors.orange.shade600,
+              ),
             ),
           ],
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('DECIDE LATER'),
+            child: Text(
+              'DECIDE LATER',
+              style: TextStyle(
+                color: isDark ? Colors.white60 : Colors.black87,
+              ),
+            ),
           ),
           ElevatedButton(
             onPressed: () async {
               Navigator.pop(dialogContext);
               await _showMoveCancelOptions(notification['id']);
             },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.orange,
+              foregroundColor: Colors.white,
+            ),
             child: const Text('PROCEED'),
           ),
         ],
@@ -615,20 +639,41 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
   }
 
   Future<void> _showMoveCancelOptions(int notificationId) async {
+    final isDark = context.isDarkMode;
+
     final result = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Choose Action'),
-        content: const Text('What would you like to do?'),
+        title: Text(
+          'Choose Action',
+          style: TextStyle(
+            color: isDark ? Colors.white : Colors.black87,
+          ),
+        ),
+        content: Text(
+          'What would you like to do?',
+          style: TextStyle(
+            color: isDark ? Colors.white70 : Colors.black87,
+          ),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, 'CANCEL'),
-            child: const Text('CANCEL', style: TextStyle(color: Colors.red)),
+            child: Text(
+              'CANCEL',
+              style: TextStyle(
+                color: isDark ? Colors.red.shade300 : Colors.red,
+              ),
+            ),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, 'MOVE'),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.green,
+              foregroundColor: Colors.white,
+            ),
             child: const Text('MOVE TO NEXT DAY'),
           ),
         ],
@@ -644,6 +689,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
   // CANCEL BOOKING
   // =====================================================
   Future<void> _cancelBooking(Map<String, dynamic> booking) async {
+    final isDark = context.isDarkMode;
     final hasOverflow = _overflowNotifications.any(
       (n) => n['appointment']['id'] == booking['id'],
     );
@@ -651,6 +697,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Row(
           children: [
@@ -660,7 +707,12 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
               size: 28,
             ),
             const SizedBox(width: 12),
-            const Text('Cancel Booking?'),
+            Text(
+              'Cancel Booking?',
+              style: TextStyle(
+                color: isDark ? Colors.white : Colors.black87,
+              ),
+            ),
           ],
         ),
         content: Column(
@@ -669,13 +721,16 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
           children: [
             Text(
               'Are you sure you want to cancel this booking?',
-              style: TextStyle(fontSize: 16, color: Colors.grey[800]),
+              style: TextStyle(
+                fontSize: 16,
+                color: isDark ? Colors.white70 : Colors.grey[800],
+              ),
             ),
             const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.grey[100],
+                color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[100],
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Column(
@@ -683,11 +738,14 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                 children: [
                   Row(
                     children: [
-                      Icon(Icons.store, size: 16, color: _primaryColor),
+                      Icon(Icons.store, size: 16, color: AppTheme.primary),
                       const SizedBox(width: 8),
                       Text(
                         booking['salon_name'],
-                        style: const TextStyle(fontWeight: FontWeight.w500),
+                        style: TextStyle(
+                          fontWeight: FontWeight.w500,
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
                       ),
                     ],
                   ),
@@ -697,23 +755,29 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                       Icon(
                         Icons.calendar_today,
                         size: 16,
-                        color: _primaryColor,
+                        color: AppTheme.primary,
                       ),
                       const SizedBox(width: 8),
                       Text(
                         DateFormat(
                           'EEEE, MMM dd, yyyy',
                         ).format(DateTime.parse(booking['appointment_date'])),
+                        style: TextStyle(
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
                       ),
                     ],
                   ),
                   const SizedBox(height: 4),
                   Row(
                     children: [
-                      Icon(Icons.access_time, size: 16, color: _primaryColor),
+                      Icon(Icons.access_time, size: 16, color: AppTheme.primary),
                       const SizedBox(width: 8),
                       Text(
                         '${booking['local_start_time']} - ${booking['local_end_time']}',
+                        style: TextStyle(
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
                       ),
                     ],
                   ),
@@ -741,7 +805,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                               ' (Position ${booking['queue_position']})',
                               style: TextStyle(
                                 fontSize: 12,
-                                color: Colors.grey[600],
+                                color: isDark ? Colors.white60 : Colors.grey[600],
                               ),
                             ),
                         ],
@@ -755,7 +819,10 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                 padding: const EdgeInsets.only(top: 12),
                 child: Text(
                   '⚠️ Cancelling now will resolve overflow.',
-                  style: TextStyle(fontSize: 12, color: Colors.orange.shade700),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isDark ? Colors.orange.shade300 : Colors.orange.shade700,
+                  ),
                 ),
               ),
           ],
@@ -763,11 +830,19 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('KEEP BOOKING'),
+            child: Text(
+              'KEEP BOOKING',
+              style: TextStyle(
+                color: isDark ? Colors.white60 : Colors.black87,
+              ),
+            ),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
             child: const Text('YES, CANCEL'),
           ),
         ],
@@ -790,9 +865,9 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
           'p_cancel_reason': 'Cancelled by customer',
         },
       );
-      
+
       if (!mounted) return;
-      
+
       if (result['success'] == true) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -803,7 +878,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                 Text('Booking cancelled successfully'),
               ],
             ),
-            backgroundColor: _secondaryColor,
+            backgroundColor: _regularColor,
           ),
         );
         await _loadData();
@@ -831,128 +906,555 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
       _bookings.where((b) => b['status_category'] == 'cancelled').toList();
 
   // =====================================================
-  // BUILD METHOD
+  // LEAVE REVIEW DIALOG
   // =====================================================
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: _bgLight,
-      appBar: AppBar(
-        title: const Text(
-          'My Bookings',
-          style: TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.w600,
-            color: Colors.white,
+  void _showLeaveReviewDialog(Map<String, dynamic> booking) {
+    final isDark = context.isDarkMode;
+    int selectedRating = 0;
+    String reviewText = '';
+    final TextEditingController reviewController = TextEditingController();
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) {
+          return AlertDialog(
+            backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(24),
+            ),
+            title: Row(
+              children: [
+                Icon(Icons.star_rate_rounded, color: Colors.amber, size: 28),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Leave a Review',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            content: SizedBox(
+              width: MediaQuery.of(context).size.width * 0.85,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            booking['salon_name'],
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: isDark ? Colors.white : Colors.black87,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Barber: ${booking['barber_name']}',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: isDark ? Colors.white60 : Colors.grey[600],
+                            ),
+                          ),
+                          Text(
+                            'Service: ${booking['service_name']}',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: isDark ? Colors.white60 : Colors.grey[600],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+
+                    Text(
+                      'Your Rating',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: List.generate(5, (index) {
+                        final isSelected = index < selectedRating;
+                        return IconButton(
+                          onPressed: () => setState(() => selectedRating = index + 1),
+                          icon: Icon(
+                            isSelected ? Icons.star : Icons.star_border,
+                            color: isSelected
+                                ? Colors.amber
+                                : (isDark ? Colors.grey[600] : Colors.grey[400]),
+                            size: 36,
+                          ),
+                        );
+                      }),
+                    ),
+                    const SizedBox(height: 8),
+                    Center(
+                      child: Text(
+                        selectedRating == 0
+                            ? 'Tap to rate'
+                            : 'You rated: $selectedRating/5',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: selectedRating == 0
+                              ? (isDark ? Colors.white70 : Colors.grey[500])
+                              : Colors.amber[700],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+
+                    Text(
+                      'Your Review (Optional)',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: reviewController,
+                      maxLines: 4,
+                      maxLength: 500,
+                      style: TextStyle(
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
+                      decoration: InputDecoration(
+                        hintText: 'Share your experience...',
+                        hintStyle: TextStyle(
+                          color: isDark ? Colors.white70 : Colors.grey[400],
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: AppTheme.primary, width: 2),
+                        ),
+                        filled: true,
+                        fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
+                      ),
+                      onChanged: (value) => reviewText = value,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text(
+                  'CANCEL',
+                  style: TextStyle(
+                    color: isDark ? Colors.white60 : Colors.black87,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              ElevatedButton(
+                onPressed: selectedRating == 0
+                    ? null
+                    : () async {
+                        if (selectedRating > 0) {
+                          await _submitReview(
+                            bookingId: booking['id'],
+                            rating: selectedRating,
+                            review: reviewText,
+                          );
+                          if (context.mounted) Navigator.pop(context);
+                        }
+                      },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primary,
+                  foregroundColor: Colors.white,
+                ),
+                child: const Text('SUBMIT REVIEW'),
+              ),
+            ],
+            actionsPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          );
+        },
+      ),
+    );
+  }
+
+  void _rebookBooking(Map<String, dynamic> booking) {
+    final salonData = {
+      'id': booking['salon_id'],
+      'name': booking['salon_name'],
+    };
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => BookingFlowScreen(initialSalon: salonData),
+      ),
+    );
+  }
+
+  Future<void> _submitReview({
+    required int bookingId,
+    required int rating,
+    required String review,
+  }) async {
+    try {
+      final user = supabase.auth.currentUser;
+      if (user == null) return;
+
+      // ✅ Get customer role ID dynamically
+      final roleResponse = await supabase
+          .from('roles')
+          .select('id')
+          .eq('name', 'customer')
+          .single();
+
+      final customerRoleId = roleResponse['id'];
+
+      // ✅ Check if user has active customer role
+      final roleCheck = await supabase
+          .from('user_roles')
+          .select('status')
+          .eq('user_id', user.id)
+          .eq('role_id', customerRoleId)
+          .maybeSingle();
+
+      if (roleCheck == null || roleCheck['status'] != 'active') {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Your account is not active'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
+      }
+
+      final appointment = await supabase
+          .from('appointments')
+          .select('barber_id, salon_id')
+          .eq('id', bookingId)
+          .single();
+
+      final existingReview = await supabase
+          .from('reviews')
+          .select('id')
+          .eq('appointment_id', bookingId)
+          .maybeSingle();
+
+      if (!mounted) return;
+
+      if (existingReview != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('You already reviewed this appointment'),
+            backgroundColor: Colors.orange,
           ),
+        );
+        return;
+      }
+
+      await supabase.from('reviews').insert({
+        'appointment_id': bookingId,
+        'customer_id': user.id,
+        'barber_id': appointment['barber_id'],
+        'salon_id': appointment['salon_id'],
+        'overall_rating': rating,
+        'comment': review,
+        'created_at': DateTime.now().toIso8601String(),
+      });
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Row(
+            children: [
+              Icon(Icons.check_circle, color: Colors.white, size: 20),
+              SizedBox(width: 8),
+              Text('Thank you for your review!'),
+            ],
+          ),
+          backgroundColor: Colors.green,
         ),
-        backgroundColor: _primaryColor,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
+      );
+
+      await _loadData();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to submit review: $e'),
+          backgroundColor: Colors.red,
         ),
-        bottom: TabBar(
-          controller: _tabController,
-          indicatorColor: Colors.white,
-          labelColor: Colors.white,
-          unselectedLabelColor: Colors.white70,
-          tabs: const [
-            Tab(text: 'UPCOMING'),
-            Tab(text: 'COMPLETED'),
-            Tab(text: 'CANCELLED'),
+      );
+    }
+  }
+
+  // =====================================================
+  // BOOKING DETAILS BOTTOM SHEET
+  // =====================================================
+  void _showBookingDetails(Map<String, dynamic> booking) {
+    final isDark = context.isDarkMode;
+    final isVip = booking['is_vip'] ?? false;
+    final detailColor = isVip ? _vipColor : AppTheme.primary;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      isScrollControlled: true,
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 50,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: isDark ? Colors.grey[700] : Colors.grey[300],
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: detailColor.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    Icons.receipt_long,
+                    color: detailColor,
+                    size: 28,
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Booking ${booking['booking_number']}',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
+                      ),
+                      Text(
+                        DateFormat(
+                          'MMM dd, yyyy • hh:mm a',
+                        ).format(DateTime.parse(booking['appointment_date'])),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: isDark ? Colors.white60 : Colors.grey[600],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            _buildDetailRow('Salon', booking['salon_name']),
+            _buildDetailRow('Address', booking['salon_address'] ?? 'N/A'),
+            _buildDetailRow('Barber', booking['barber_name']),
+            _buildDetailRow('Service', booking['service_name']),
+            _buildDetailRow('Duration', '${booking['duration']} minutes'),
+            _buildDetailRow(
+              'Price',
+              'Rs. ${(booking['price'] as num?)?.toStringAsFixed(2) ?? '0.00'}',
+            ),
+            if (booking['child_name'] != null &&
+                booking['child_name'].toString().isNotEmpty)
+              _buildDetailRow('Booked For', booking['child_name']),
+            if (booking['display_queue_number'] != null &&
+                booking['display_queue_number'].isNotEmpty)
+              _buildDetailRow('Queue Number', booking['display_queue_number']),
+            if (booking['queue_position'] != null)
+              _buildDetailRow('Queue Position', '#${booking['queue_position']}'),
+            if (booking['is_vip'] == true)
+              _buildDetailRow('Booking Type', 'VIP'),
+            if (booking['travel_time_minutes'] != null &&
+                booking['travel_time_minutes'] > 0)
+              _buildDetailRow(
+                'Travel Time',
+                '${booking['travel_time_minutes']} minutes',
+              ),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () => Navigator.pop(context),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: detailColor,
+                  foregroundColor: Colors.white,
+                ),
+                child: const Text(
+                  'CLOSE',
+                  style: TextStyle(color: Colors.white),
+                ),
+              ),
+            ),
           ],
         ),
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _error != null
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.error_outline, size: 64, color: Colors.grey[400]),
-                  const SizedBox(height: 16),
-                  Text(_error!, style: TextStyle(color: Colors.grey[600])),
-                  const SizedBox(height: 16),
-                  ElevatedButton(
-                    onPressed: _loadData,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: _primaryColor,
-                    ),
-                    child: const Text('TRY AGAIN'),
-                  ),
-                ],
+    );
+  }
+
+  Widget _buildDetailRow(String label, String value) {
+    final isDark = context.isDarkMode;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 100,
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 14,
+                color: isDark ? Colors.white60 : Colors.grey[600],
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // =====================================================
+  // UI BUILDERS
+  // =====================================================
+
+  Widget _buildCancelButton(Map<String, dynamic> booking) {
+    return OutlinedButton(
+      onPressed: _isCancelling ? null : () => _cancelBooking(booking),
+      style: OutlinedButton.styleFrom(
+        side: const BorderSide(color: Colors.red, width: 1.5),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        padding: const EdgeInsets.symmetric(vertical: 12),
+      ),
+      child: _isCancelling
+          ? const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.red),
               ),
             )
-          : RefreshIndicator(
-              onRefresh: _loadData,
-              color: _primaryColor,
-              child: TabBarView(
-                controller: _tabController,
-                children: [
-                  _buildBookingList(_upcomingBookings, isUpcoming: true),
-                  _buildBookingList(_completedBookings, isUpcoming: false),
-                  _buildBookingList(_cancelledBookings, isUpcoming: false),
-                ],
+          : const Text(
+              'CANCEL',
+              style: TextStyle(
+                color: Colors.red,
+                fontWeight: FontWeight.w600,
+                fontSize: 14,
               ),
             ),
     );
   }
 
-  Widget _buildBookingList(
-    List<Map<String, dynamic>> bookings, {
-    required bool isUpcoming,
-  }) {
-    if (bookings.isEmpty && _overflowNotifications.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              isUpcoming ? Icons.event_available : Icons.history,
-              size: 64,
-              color: Colors.grey[300],
+  Widget _buildReviewButton(Map<String, dynamic> booking) {
+    return OutlinedButton(
+      onPressed: () => _showLeaveReviewDialog(booking),
+      style: OutlinedButton.styleFrom(
+        side: const BorderSide(color: Colors.amber, width: 1.5),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        padding: const EdgeInsets.symmetric(vertical: 12),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: const [
+          Icon(Icons.star_outline, color: Colors.amber, size: 18),
+          SizedBox(width: 8),
+          Text(
+            'REVIEW',
+            style: TextStyle(
+              color: Colors.amber,
+              fontWeight: FontWeight.w600,
+              fontSize: 14,
             ),
-            const SizedBox(height: 16),
-            Text(
-              isUpcoming ? 'No upcoming bookings' : 'No bookings found',
-              style: TextStyle(color: Colors.grey[500], fontSize: 16),
-            ),
-            if (isUpcoming) const SizedBox(height: 16),
-            if (isUpcoming)
-              ElevatedButton(
-                onPressed: () => Navigator.pop(context),
-                style: ElevatedButton.styleFrom(backgroundColor: _primaryColor),
-                child: const Text(
-                  'BOOK NOW',
-                  style: TextStyle(color: Colors.white),
-                ),
-              ),
-          ],
-        ),
-      );
-    }
+          ),
+        ],
+      ),
+    );
+  }
 
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: bookings.length + _overflowNotifications.length,
-      itemBuilder: (context, index) {
-        if (isUpcoming && index < _overflowNotifications.length) {
-          return _buildOverflowCard(_overflowNotifications[index]);
-        }
-        final bookingIndex = isUpcoming
-            ? index - _overflowNotifications.length
-            : index;
-        if (bookingIndex < 0 || bookingIndex >= bookings.length) {
-          return const SizedBox.shrink();
-        }
-        return _buildBookingCard(bookings[bookingIndex], isUpcoming);
-      },
+  Widget _buildRebookButton(Map<String, dynamic> booking) {
+    final isVip = booking['is_vip'] ?? false;
+    final buttonColor = isVip ? _vipColor : AppTheme.primary;
+
+    return OutlinedButton(
+      onPressed: () => _rebookBooking(booking),
+      style: OutlinedButton.styleFrom(
+        side: BorderSide(color: buttonColor, width: 1.5),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        padding: const EdgeInsets.symmetric(vertical: 12),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.refresh, color: buttonColor, size: 18),
+          const SizedBox(width: 8),
+          Text(
+            'BOOK AGAIN',
+            style: TextStyle(
+              color: buttonColor,
+              fontWeight: FontWeight.w600,
+              fontSize: 14,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
   Widget _buildOverflowCard(Map<String, dynamic> notification) {
+    final isDark = context.isDarkMode;
     final apt = notification['appointment'];
     final excessMinutes = notification['excess_minutes'];
     final estimatedEnd = notification['estimated_end'];
@@ -962,12 +1464,15 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
       elevation: 2,
+      color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Container(
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),
-          color: Colors.orange.shade50,
-          border: Border.all(color: Colors.orange.shade300),
+          color: isDark ? Colors.orange.withValues(alpha: 0.1) : Colors.orange.shade50,
+          border: Border.all(
+            color: isDark ? Colors.orange.withValues(alpha: 0.3) : Colors.orange.shade300,
+          ),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -975,7 +1480,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.orange.shade100,
+                color: isDark ? Colors.orange.withValues(alpha: 0.15) : Colors.orange.shade100,
                 borderRadius: const BorderRadius.only(
                   topLeft: Radius.circular(16),
                   topRight: Radius.circular(16),
@@ -987,7 +1492,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                     width: 45,
                     height: 45,
                     decoration: BoxDecoration(
-                      color: Colors.orange.shade200,
+                      color: isDark ? Colors.orange.withValues(alpha: 0.2) : Colors.orange.shade200,
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: const Icon(
@@ -1001,19 +1506,20 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
+                        Text(
                           '⚠️ ACTION REQUIRED',
                           style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.bold,
-                            color: Colors.orange,
+                            color: isDark ? Colors.orange.shade300 : Colors.orange,
                           ),
                         ),
                         Text(
                           apt['salon_name'],
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
+                            color: isDark ? Colors.white : Colors.black87,
                           ),
                         ),
                       ],
@@ -1025,7 +1531,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                       vertical: 4,
                     ),
                     decoration: BoxDecoration(
-                      color: Colors.red.shade100,
+                      color: isDark ? Colors.red.withValues(alpha: 0.2) : Colors.red.shade100,
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Text(
@@ -1033,7 +1539,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
-                        color: Colors.red.shade700,
+                        color: isDark ? Colors.red.shade300 : Colors.red.shade700,
                       ),
                     ),
                   ),
@@ -1050,12 +1556,15 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                       Icon(
                         Icons.calendar_today,
                         size: 16,
-                        color: Colors.grey[600],
+                        color: isDark ? Colors.white60 : Colors.grey[600],
                       ),
                       const SizedBox(width: 8),
                       Text(
                         apt['appointment_date'],
-                        style: TextStyle(fontSize: 14, color: Colors.grey[700]),
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: isDark ? Colors.white70 : Colors.grey[700],
+                        ),
                       ),
                     ],
                   ),
@@ -1065,7 +1574,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                       Icon(
                         Icons.access_time,
                         size: 16,
-                        color: Colors.grey[600],
+                        color: isDark ? Colors.white60 : Colors.grey[600],
                       ),
                       const SizedBox(width: 8),
                       Text(
@@ -1073,6 +1582,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w500,
+                          color: isDark ? Colors.white : Colors.black87,
                         ),
                       ),
                     ],
@@ -1101,7 +1611,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                               ' (Position ${apt['queue_position']})',
                               style: TextStyle(
                                 fontSize: 12,
-                                color: Colors.grey[600],
+                                color: isDark ? Colors.white60 : Colors.grey[600],
                               ),
                             ),
                         ],
@@ -1111,7 +1621,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Column(
@@ -1121,14 +1631,14 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                           '⚠️ Schedule Overflow Detected',
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
-                            color: Colors.orange.shade800,
+                            color: isDark ? Colors.orange.shade300 : Colors.orange.shade800,
                           ),
                         ),
                         const SizedBox(height: 6),
                         Text(
                           'Your appointment may be delayed by approximately $excessMinutes minutes.',
                           style: TextStyle(
-                            color: Colors.grey.shade700,
+                            color: isDark ? Colors.white70 : Colors.grey.shade700,
                             fontSize: 13,
                           ),
                         ),
@@ -1137,7 +1647,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                           'Estimated end: $estimatedEnd | Salon closes: $salonClose',
                           style: TextStyle(
                             fontSize: 12,
-                            color: Colors.grey.shade600,
+                            color: isDark ? Colors.white60 : Colors.grey.shade600,
                           ),
                         ),
                       ],
@@ -1167,7 +1677,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                     '⚠️ If no response within 30 minutes, this appointment will be auto-cancelled.',
                     style: TextStyle(
                       fontSize: 12,
-                      color: Colors.orange.shade600,
+                      color: isDark ? Colors.orange.shade300 : Colors.orange.shade600,
                     ),
                     textAlign: TextAlign.center,
                   ),
@@ -1181,6 +1691,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
   }
 
   Widget _buildBookingCard(Map<String, dynamic> booking, bool isUpcoming) {
+    final isDark = context.isDarkMode;
     final appointmentDateRaw = DateTime.parse(booking['appointment_date']);
     final appointmentDate = DateTime(
       appointmentDateRaw.year,
@@ -1253,25 +1764,25 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
       elevation: 2,
+      color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Container(
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),
-          color: Colors.white,
+          color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
           border: isVip
-              ? Border.all(color: _vipColor.withValues(alpha:0.3), width: 1)
+              ? Border.all(color: _vipColor.withValues(alpha: 0.3), width: 1)
               : null,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
                 color: isVip
-                    ? _vipColor.withValues(alpha:0.05)
-                    : _primaryColor.withValues(alpha:0.05),
+                    ? _vipColor.withValues(alpha: 0.05)
+                    : AppTheme.primary.withValues(alpha: 0.05),
                 borderRadius: const BorderRadius.only(
                   topLeft: Radius.circular(16),
                   topRight: Radius.circular(16),
@@ -1284,13 +1795,13 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                     height: 45,
                     decoration: BoxDecoration(
                       color: isVip
-                          ? _vipColor.withValues(alpha:0.1)
-                          : _primaryColor.withValues(alpha:0.1),
+                          ? _vipColor.withValues(alpha: 0.1)
+                          : AppTheme.primary.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: isVip
                         ? Icon(Icons.star, color: _vipColor, size: 24)
-                        : Icon(Icons.store, color: _primaryColor, size: 24),
+                        : Icon(Icons.store, color: AppTheme.primary, size: 24),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -1301,9 +1812,10 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                           children: [
                             Text(
                               booking['salon_name'],
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.bold,
+                                color: isDark ? Colors.white : Colors.black87,
                               ),
                             ),
                             if (isVip)
@@ -1333,7 +1845,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                             booking['salon_address'],
                             style: TextStyle(
                               fontSize: 12,
-                              color: Colors.grey[600],
+                              color: isDark ? Colors.white60 : Colors.grey[600],
                             ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
@@ -1347,9 +1859,9 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                       vertical: 4,
                     ),
                     decoration: BoxDecoration(
-                      color: statusColor.withValues(alpha:0.1),
+                      color: statusColor.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: statusColor.withValues(alpha:0.3)),
+                      border: Border.all(color: statusColor.withValues(alpha: 0.3)),
                     ),
                     child: Text(
                       statusText,
@@ -1364,7 +1876,6 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
               ),
             ),
 
-            // Details
             Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
@@ -1375,14 +1886,17 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                       Icon(
                         Icons.calendar_today,
                         size: 16,
-                        color: Colors.grey[600],
+                        color: isDark ? Colors.white60 : Colors.grey[600],
                       ),
                       const SizedBox(width: 8),
                       Text(
                         DateFormat(
                           'EEEE, MMM dd, yyyy',
                         ).format(appointmentDateRaw),
-                        style: TextStyle(fontSize: 14, color: Colors.grey[700]),
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: isDark ? Colors.white70 : Colors.grey[700],
+                        ),
                       ),
                     ],
                   ),
@@ -1392,7 +1906,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                       Icon(
                         Icons.access_time,
                         size: 16,
-                        color: Colors.grey[600],
+                        color: isDark ? Colors.white60 : Colors.grey[600],
                       ),
                       const SizedBox(width: 8),
                       Text(
@@ -1400,6 +1914,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w500,
+                          color: isDark ? Colors.white : Colors.black87,
                         ),
                       ),
                     ],
@@ -1429,7 +1944,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                               ' (Position ${booking['queue_position']})',
                               style: TextStyle(
                                 fontSize: 12,
-                                color: Colors.grey[600],
+                                color: isDark ? Colors.white60 : Colors.grey[600],
                               ),
                             ),
                         ],
@@ -1441,13 +1956,16 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                       Icon(
                         Icons.content_cut,
                         size: 16,
-                        color: Colors.grey[600],
+                        color: isDark ? Colors.white60 : Colors.grey[600],
                       ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           booking['service_name'],
-                          style: const TextStyle(fontSize: 14),
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: isDark ? Colors.white : Colors.black87,
+                          ),
                         ),
                       ),
                     ],
@@ -1455,12 +1973,15 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                   const SizedBox(height: 8),
                   Row(
                     children: [
-                      Icon(Icons.person, size: 16, color: Colors.grey[600]),
+                      Icon(Icons.person, size: 16, color: isDark ? Colors.white60 : Colors.grey[600]),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           booking['barber_name'],
-                          style: const TextStyle(fontSize: 14),
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: isDark ? Colors.white : Colors.black87,
+                          ),
                         ),
                       ),
                     ],
@@ -1471,11 +1992,14 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                       padding: const EdgeInsets.only(top: 8),
                       child: Row(
                         children: [
-                          Icon(Icons.badge, size: 16, color: Colors.grey[600]),
+                          Icon(Icons.badge, size: 16, color: isDark ? Colors.white60 : Colors.grey[600]),
                           const SizedBox(width: 8),
                           Text(
                             'Booking for: ${booking['child_name']}',
-                            style: const TextStyle(fontSize: 14),
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: isDark ? Colors.white : Colors.black87,
+                            ),
                           ),
                         ],
                       ),
@@ -1492,7 +2016,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                             '${booking['duration']} min',
                             style: TextStyle(
                               fontSize: 14,
-                              color: Colors.grey[700],
+                              color: isDark ? Colors.white70 : Colors.grey[700],
                             ),
                           ),
                         ],
@@ -1502,7 +2026,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
-                          color: queueColor,
+                          color: isDark ? Colors.white : queueColor,
                         ),
                       ),
                     ],
@@ -1516,14 +2040,14 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                           Icon(
                             Icons.directions_car,
                             size: 14,
-                            color: Colors.grey[500],
+                            color: isDark ? Colors.white70 : Colors.grey[500],
                           ),
                           const SizedBox(width: 4),
                           Text(
                             'Travel time: ${booking['travel_time_minutes']} min',
                             style: TextStyle(
                               fontSize: 12,
-                              color: Colors.grey[500],
+                              color: isDark ? Colors.white70 : Colors.grey[500],
                             ),
                           ),
                         ],
@@ -1538,7 +2062,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.grey[50],
+                  color: isDark ? const Color(0xFF1E1E1E) : Colors.grey[50],
                   borderRadius: const BorderRadius.only(
                     bottomLeft: Radius.circular(16),
                     bottomRight: Radius.circular(16),
@@ -1550,15 +2074,17 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                     const SizedBox(width: 12),
                     Container(
                       decoration: BoxDecoration(
-                        color: Colors.grey[100],
+                        color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[100],
                         borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: Colors.grey[300]!),
+                        border: Border.all(
+                          color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                        ),
                       ),
                       child: IconButton(
                         onPressed: () => _showBookingDetails(booking),
                         icon: Icon(
                           Icons.info_outline,
-                          color: isVip ? _vipColor : _primaryColor,
+                          color: isVip ? _vipColor : AppTheme.primary,
                           size: 22,
                         ),
                         tooltip: 'View Details',
@@ -1573,7 +2099,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.grey[50],
+                  color: isDark ? const Color(0xFF1E1E1E) : Colors.grey[50],
                   borderRadius: const BorderRadius.only(
                     bottomLeft: Radius.circular(16),
                     bottomRight: Radius.circular(16),
@@ -1593,214 +2119,114 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
     );
   }
 
-  Widget _buildCancelButton(Map<String, dynamic> booking) {
-    return OutlinedButton(
-      onPressed: _isCancelling ? null : () => _cancelBooking(booking),
-      style: OutlinedButton.styleFrom(
-        side: const BorderSide(color: Colors.red, width: 1.5),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        padding: const EdgeInsets.symmetric(vertical: 12),
-      ),
-      child: _isCancelling
-          ? const SizedBox(
-              width: 20,
-              height: 20,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                valueColor: AlwaysStoppedAnimation<Color>(Colors.red),
-              ),
-            )
-          : const Text(
-              'CANCEL',
-              style: TextStyle(
-                color: Colors.red,
-                fontWeight: FontWeight.w600,
-                fontSize: 14,
-              ),
-            ),
-    );
-  }
+  Widget _buildBookingList(
+    List<Map<String, dynamic>> bookings, {
+    required bool isUpcoming,
+  }) {
+    final isDark = context.isDarkMode;
+    final totalItems = bookings.length + (isUpcoming ? _overflowNotifications.length : 0);
 
-  Widget _buildReviewButton(Map<String, dynamic> booking) {
-    return OutlinedButton(
-      onPressed: () => _showLeaveReviewDialog(booking),
-      style: OutlinedButton.styleFrom(
-        side: const BorderSide(color: Colors.amber, width: 1.5),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        padding: const EdgeInsets.symmetric(vertical: 12),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: const [
-          Icon(Icons.star_outline, color: Colors.amber, size: 18),
-          SizedBox(width: 8),
-          Text(
-            'REVIEW',
-            style: TextStyle(
-              color: Colors.amber,
-              fontWeight: FontWeight.w600,
-              fontSize: 14,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildRebookButton(Map<String, dynamic> booking) {
-    final isVip = booking['is_vip'] ?? false;
-    final buttonColor = isVip ? _vipColor : _primaryColor;
-    
-    return OutlinedButton(
-      onPressed: () => _rebookBooking(booking),
-      style: OutlinedButton.styleFrom(
-        side: BorderSide(color: buttonColor, width: 1.5),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        padding: const EdgeInsets.symmetric(vertical: 12),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.refresh, color: buttonColor, size: 18),
-          const SizedBox(width: 8),
-          Text(
-            'BOOK AGAIN',
-            style: TextStyle(
-              color: buttonColor,
-              fontWeight: FontWeight.w600,
-              fontSize: 14,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showBookingDetails(Map<String, dynamic> booking) {
-    final isVip = booking['is_vip'] ?? false;
-    final detailColor = isVip ? _vipColor : _primaryColor;
-
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      isScrollControlled: true,
-      builder: (context) => Container(
-        padding: const EdgeInsets.all(20),
+    // ✅ Empty state check - FIXES "Cannot hit test a render box with no size"
+    if (totalItems == 0) {
+      return Center(
         child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Center(
-              child: Container(
-                width: 50,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Colors.grey[300],
-                  borderRadius: BorderRadius.circular(2),
-                ),
+            Icon(
+              isUpcoming ? Icons.event_available : Icons.history,
+              size: 64,
+              color: isDark ? Colors.white30 : Colors.grey[300],
+            ),
+            const SizedBox(height: 16),
+            Text(
+              isUpcoming ? 'No upcoming bookings' : 'No bookings found',
+              style: TextStyle(
+                color: isDark ? Colors.white60 : Colors.grey[500],
+                fontSize: 16,
               ),
             ),
-            const SizedBox(height: 20),
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: detailColor.withValues(alpha:0.1),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(
-                    Icons.receipt_long,
-                    color: detailColor,
-                    size: 28,
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Booking ${booking['booking_number']}',
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      Text(
-                        DateFormat(
-                          'MMM dd, yyyy • hh:mm a',
-                        ).format(DateTime.parse(booking['appointment_date'])),
-                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
-            _buildDetailRow('Salon', booking['salon_name']),
-            _buildDetailRow('Address', booking['salon_address'] ?? 'N/A'),
-            _buildDetailRow('Barber', booking['barber_name']),
-            _buildDetailRow('Service', booking['service_name']),
-            _buildDetailRow('Duration', '${booking['duration']} minutes'),
-            _buildDetailRow(
-              'Price',
-              'Rs. ${(booking['price'] as num?)?.toStringAsFixed(2) ?? '0.00'}',
-            ),
-            if (booking['child_name'] != null &&
-                booking['child_name'].toString().isNotEmpty)
-              _buildDetailRow('Booked For', booking['child_name']),
-            if (booking['display_queue_number'] != null &&
-                booking['display_queue_number'].isNotEmpty)
-              _buildDetailRow('Queue Number', booking['display_queue_number']),
-            if (booking['queue_position'] != null)
-              _buildDetailRow('Queue Position', '#${booking['queue_position']}'),
-            if (booking['is_vip'] == true)
-              _buildDetailRow('Booking Type', 'VIP'),
-            if (booking['travel_time_minutes'] != null &&
-                booking['travel_time_minutes'] > 0)
-              _buildDetailRow(
-                'Travel Time',
-                '${booking['travel_time_minutes']} minutes',
-              ),
-            const SizedBox(height: 20),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
+            if (isUpcoming) ...[
+              const SizedBox(height: 16),
+              ElevatedButton(
                 onPressed: () => Navigator.pop(context),
-                style: ElevatedButton.styleFrom(backgroundColor: detailColor),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primary,
+                  foregroundColor: Colors.white,
+                ),
                 child: const Text(
-                  'CLOSE',
+                  'BOOK NOW',
                   style: TextStyle(color: Colors.white),
                 ),
               ),
-            ),
+            ],
           ],
         ),
-      ),
+      );
+    }
+
+    return ListView.builder(
+      shrinkWrap: true,  // ✅ Fix: Prevents render box size error
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.all(16),
+      itemCount: totalItems,
+      itemBuilder: (context, index) {
+        if (isUpcoming && index < _overflowNotifications.length) {
+          return _buildOverflowCard(_overflowNotifications[index]);
+        }
+        final bookingIndex = isUpcoming
+            ? index - _overflowNotifications.length
+            : index;
+        if (bookingIndex < 0 || bookingIndex >= bookings.length) {
+          return const SizedBox.shrink();
+        }
+        return _buildBookingCard(bookings[bookingIndex], isUpcoming);
+      },
     );
   }
 
-  Widget _buildDetailRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+  // ✅ EMPTY STATE WIDGET
+  Widget _buildEmptyState() {
+    final isDark = context.isDarkMode;
+
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          SizedBox(
-            width: 100,
-            child: Text(
-              label,
-              style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+          Icon(
+            Icons.event_busy,
+            size: 80,
+            color: isDark ? Colors.white30 : Colors.grey[300],
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'No bookings found',
+            style: TextStyle(
+              fontSize: 20,
+              color: isDark ? Colors.white60 : Colors.grey[600],
             ),
           ),
-          Expanded(
-            child: Text(
-              value,
-              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+          const SizedBox(height: 8),
+          Text(
+            'Start booking appointments at your favorite salons',
+            style: TextStyle(
+              fontSize: 14,
+              color: isDark ? Colors.white70 : Colors.grey[500],
+            ),
+          ),
+          const SizedBox(height: 24),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.primary,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: const Text(
+              'BOOK NOW',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
             ),
           ),
         ],
@@ -1808,271 +2234,215 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
     );
   }
 
-  void _showLeaveReviewDialog(Map<String, dynamic> booking) {
-    int selectedRating = 0;
-    String reviewText = '';
-    final TextEditingController reviewController = TextEditingController();
+  // ✅ WEB LAYOUT - With Scrollbar and Empty State
+  Widget _buildWebLayout() {
+    final isDark = context.isDarkMode;
+    final totalUpcoming = _upcomingBookings.length + _overflowNotifications.length;
+    final totalCompleted = _completedBookings.length;
+    final totalCancelled = _cancelledBookings.length;
 
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setStateDialog) {
-          return AlertDialog(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(24),
-            ),
-            title: Row(
-              children: [
-                Icon(Icons.star_rate_rounded, color: Colors.amber, size: 28),
-                const SizedBox(width: 10),
-                const Text(
-                  'Leave a Review',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                ),
-              ],
-            ),
-            content: SizedBox(
-              width: MediaQuery.of(context).size.width * 0.8,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.grey[50],
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          booking['salon_name'],
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Barber: ${booking['barber_name']}',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: Colors.grey[600],
-                          ),
-                        ),
-                        Text(
-                          'Service: ${booking['service_name']}',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: Colors.grey[600],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  const Text(
-                    'Your Rating',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: List.generate(5, (index) {
-                      return IconButton(
-                        onPressed: () =>
-                            setStateDialog(() => selectedRating = index + 1),
-                        icon: Icon(
-                          index < selectedRating
-                              ? Icons.star
-                              : Icons.star_border,
-                          color: Colors.amber,
-                          size: 36,
-                        ),
-                      );
-                    }),
-                  ),
-                  const SizedBox(height: 8),
-                  Center(
-                    child: Text(
-                      selectedRating == 0
-                          ? 'Tap to rate'
-                          : 'You rated: $selectedRating/5',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: selectedRating == 0
-                            ? Colors.grey[500]
-                            : Colors.amber[700],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  const Text(
-                    'Your Review (Optional)',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: reviewController,
-                    maxLines: 4,
-                    maxLength: 500,
-                    decoration: InputDecoration(
-                      hintText: 'Share your experience...',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(color: _primaryColor, width: 2),
-                      ),
-                      filled: true,
-                      fillColor: Colors.grey[50],
-                    ),
-                    onChanged: (value) => reviewText = value,
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('CANCEL'),
-              ),
-              ElevatedButton(
-                onPressed: selectedRating == 0
-                    ? null
-                    : () async {
-                        if (selectedRating > 0) {
-                          await _submitReview(
-                            bookingId: booking['id'],
-                            rating: selectedRating,
-                            review: reviewText,
-                          );
-                          if (context.mounted) Navigator.pop(context);
-                        }
-                      },
-                style: ElevatedButton.styleFrom(backgroundColor: _primaryColor),
-                child: const Text('SUBMIT REVIEW'),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  void _rebookBooking(Map<String, dynamic> booking) {
-    final salonData = {
-      'id': booking['salon_id'],
-      'name': booking['salon_name'],
-    };
-
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => BookingFlowScreen(initialSalon: salonData),
-      ),
-    );
-  }
-
-  Future<void> _submitReview({
-    required int bookingId,
-    required int rating,
-    required String review,
-  }) async {
-    try {
-      final user = supabase.auth.currentUser;
-      if (user == null) return;
-
-      // ✅ Get customer role ID dynamically
-      final roleResponse = await supabase
-          .from('roles')
-          .select('id')
-          .eq('name', 'customer')
-          .single();
-      
-      final customerRoleId = roleResponse['id'];
-
-      // ✅ Check if user has active customer role
-      final roleCheck = await supabase
-          .from('user_roles')
-          .select('status')
-          .eq('user_id', user.id)
-          .eq('role_id', customerRoleId)
-          .maybeSingle();
-
-      if (roleCheck == null || roleCheck['status'] != 'active') {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Your account is not active'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-        return;
-      }
-
-      final appointment = await supabase
-          .from('appointments')
-          .select('barber_id, salon_id')
-          .eq('id', bookingId)
-          .single();
-
-      final existingReview = await supabase
-          .from('reviews')
-          .select('id')
-          .eq('appointment_id', bookingId)
-          .maybeSingle();
-      
-      if (!mounted) return;
-      
-      if (existingReview != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('You already reviewed this appointment'),
-            backgroundColor: Colors.orange,
-          ),
-        );
-        return;
-      }
-
-      await supabase.from('reviews').insert({
-        'appointment_id': bookingId,
-        'customer_id': user.id,
-        'barber_id': appointment['barber_id'],
-        'salon_id': appointment['salon_id'],
-        'overall_rating': rating,
-        'comment': review,
-        'created_at': DateTime.now().toIso8601String(),
-      });
-      
-      if (!mounted) return;
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Row(
-            children: [
-              Icon(Icons.check_circle, color: Colors.white, size: 20),
-              SizedBox(width: 8),
-              Text('Thank you for your review!'),
-            ],
-          ),
-          backgroundColor: Colors.green,
-        ),
-      );
-
-      await _loadData();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to submit review: $e'),
-          backgroundColor: Colors.red,
+    // ✅ If all tabs are empty, show single empty state
+    if (totalUpcoming == 0 && totalCompleted == 0 && totalCancelled == 0) {
+      return Center(
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 600),
+          child: _buildEmptyState(),
         ),
       );
     }
+
+    return Container(
+      color: isDark ? const Color(0xFF121212) : const Color(0xFFF8F9FA),
+      child: Center(
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 1200),
+          child: Column(
+            children: [
+              // ✅ Tab Bar for Web
+              Container(
+                color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: TabBar(
+                  controller: _tabController,
+                  indicatorColor: AppTheme.primary,
+                  labelColor: isDark ? Colors.white : Colors.black87,
+                  unselectedLabelColor: isDark ? Colors.white60 : Colors.grey[600],
+                  tabs: [
+                    Tab(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.calendar_today, size: 16),
+                          const SizedBox(width: 8),
+                          Text('Upcoming (${_upcomingBookings.length + _overflowNotifications.length})'),
+                        ],
+                      ),
+                    ),
+                    Tab(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.check_circle, size: 16),
+                          const SizedBox(width: 8),
+                          Text('Completed (${_completedBookings.length})'),
+                        ],
+                      ),
+                    ),
+                    Tab(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.cancel, size: 16),
+                          const SizedBox(width: 8),
+                          Text('Cancelled (${_cancelledBookings.length})'),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // ✅ Tab Content
+              Expanded(
+                child: Scrollbar(
+                  controller: _scrollController,
+                  thumbVisibility: true,
+                  trackVisibility: true,
+                  thickness: 8.0,
+                  radius: const Radius.circular(10),
+                  scrollbarOrientation: ScrollbarOrientation.right,
+                  child: SingleChildScrollView(
+                    controller: _scrollController,
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.all(16),
+                    child: SizedBox(
+                      height: MediaQuery.of(context).size.height - 250,
+                      child: TabBarView(
+                        controller: _tabController,
+                        children: [
+                          _buildBookingList(_upcomingBookings, isUpcoming: true),
+                          _buildBookingList(_completedBookings, isUpcoming: false),
+                          _buildBookingList(_cancelledBookings, isUpcoming: false),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ✅ MOBILE LAYOUT
+  Widget _buildMobileLayout() {
+    final totalUpcoming = _upcomingBookings.length + _overflowNotifications.length;
+    final totalCompleted = _completedBookings.length;
+    final totalCancelled = _cancelledBookings.length;
+
+    // ✅ If all tabs are empty, show single empty state
+    if (totalUpcoming == 0 && totalCompleted == 0 && totalCancelled == 0) {
+      return _buildEmptyState();
+    }
+
+    return TabBarView(
+      controller: _tabController,
+      children: [
+        _buildBookingList(_upcomingBookings, isUpcoming: true),
+        _buildBookingList(_completedBookings, isUpcoming: false),
+        _buildBookingList(_cancelledBookings, isUpcoming: false),
+      ],
+    );
+  }
+
+  // =====================================================
+  // ✅ MAIN BUILD METHOD - Complete
+  // =====================================================
+  @override
+  Widget build(BuildContext context) {
+    final isDark = context.isDarkMode;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isWeb = screenWidth > 800;
+
+    final totalUpcoming = _upcomingBookings.length + _overflowNotifications.length;
+    final totalCompleted = _completedBookings.length;
+    final totalCancelled = _cancelledBookings.length;
+    final hasAnyBookings = totalUpcoming > 0 || totalCompleted > 0 || totalCancelled > 0;
+
+    return Scaffold(
+      backgroundColor: isDark ? const Color(0xFF121212) : const Color(0xFFF8F9FA),
+      appBar: AppBar(
+        title: Text(
+          'My Bookings',
+          style: TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.w600,
+            color: Colors.white,
+          ),
+        ),
+        backgroundColor: AppTheme.primary,
+        elevation: 0,
+        centerTitle: isWeb,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+        ),
+        // ✅ Show Tab Bar only if there are bookings
+        bottom: hasAnyBookings
+            ? TabBar(
+                controller: _tabController,
+                indicatorColor: Colors.white,
+                labelColor: Colors.white,
+                unselectedLabelColor: Colors.white70,
+                tabs: const [
+                  Tab(text: 'UPCOMING'),
+                  Tab(text: 'COMPLETED'),
+                  Tab(text: 'CANCELLED'),
+                ],
+              )
+            : null,
+      ),
+      body: _isLoading
+          ? Center(
+              child: CircularProgressIndicator(
+                color: AppTheme.primary,
+              ),
+            )
+          : _error != null
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.error_outline,
+                    size: 64,
+                    color: isDark ? Colors.white70 : Colors.grey[400],
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    _error!,
+                    style: TextStyle(
+                      color: isDark ? Colors.white60 : Colors.grey[600],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton(
+                    onPressed: _loadData,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.primary,
+                      foregroundColor: Colors.white,
+                    ),
+                    child: const Text('TRY AGAIN'),
+                  ),
+                ],
+              ),
+            )
+          : RefreshIndicator(
+              onRefresh: _loadData,
+              color: AppTheme.primary,
+              child: isWeb ? _buildWebLayout() : _buildMobileLayout(),
+            ),
+    );
   }
 }

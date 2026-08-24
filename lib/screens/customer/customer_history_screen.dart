@@ -3,6 +3,8 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
+import 'package:flutter_application_1/theme/app_theme.dart';
+import 'package:flutter_application_1/extensions/context_extensions.dart';
 
 class CustomerHistoryScreen extends StatefulWidget {
   const CustomerHistoryScreen({super.key});
@@ -21,8 +23,8 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
   String _searchQuery = '';
 
   // Filter options
-  String _selectedFilter = 'All'; // All, Completed, Cancelled, No Show
-  String _selectedPeriod = 'All'; // All, This Month, Last 3 Months, This Year
+  String _selectedFilter = 'All';
+  String _selectedPeriod = 'All';
 
   // Tab controller
   late TabController _tabController;
@@ -34,14 +36,16 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
   int _noShowCount = 0;
   int _totalSpent = 0;
 
+  // ✅ Web Scroll Controller
+  final ScrollController _scrollController = ScrollController();
+
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
     _tabController.addListener(() {
       if (_tabController.indexIsChanging) {
-        setState(() {
-        });
+        setState(() {});
       }
     });
     _loadHistory();
@@ -50,6 +54,7 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
   @override
   void dispose() {
     _tabController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -69,16 +74,45 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
         return;
       }
 
+      // ✅ Get customer role ID dynamically
+      final roleResponse = await supabase
+          .from('roles')
+          .select('id')
+          .eq('name', 'customer')
+          .single();
+
+      final customerRoleId = roleResponse['id'];
+
+      // ✅ Check if user has active customer role
+      final roleCheck = await supabase
+          .from('user_roles')
+          .select('status')
+          .eq('user_id', currentUser.id)
+          .eq('role_id', customerRoleId)
+          .maybeSingle();
+
+      if (roleCheck == null || roleCheck['status'] != 'active') {
+        setState(() {
+          _errorMessage = 'Your account is not active. Please contact support.';
+          _isLoading = false;
+        });
+        return;
+      }
+
       // Build date filter
       String? startDate;
       final now = DateTime.now();
 
       switch (_selectedPeriod) {
         case 'This Month':
-          startDate = DateFormat('yyyy-MM-dd').format(DateTime(now.year, now.month, 1));
+          startDate = DateFormat(
+            'yyyy-MM-dd',
+          ).format(DateTime(now.year, now.month, 1));
           break;
         case 'Last 3 Months':
-          startDate = DateFormat('yyyy-MM-dd').format(now.subtract(const Duration(days: 90)));
+          startDate = DateFormat(
+            'yyyy-MM-dd',
+          ).format(now.subtract(const Duration(days: 90)));
           break;
         case 'This Year':
           startDate = DateFormat('yyyy-MM-dd').format(DateTime(now.year, 1, 1));
@@ -125,8 +159,6 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
           .eq('customer_id', currentUser.id)
           .inFilter('status', ['completed', 'cancelled', 'no_show']);
 
-      // ✅ FIXED: apply .gte() BEFORE .order(). .order() returns a
-      // PostgrestTransformBuilder which does not have .gte() anymore.
       if (startDate != null) {
         query = query.gte('appointment_date', startDate);
       }
@@ -135,7 +167,6 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
 
       final List<Map<String, dynamic>> historyList = [];
 
-      // Reset stats before recomputing (avoids double-counting on reload)
       int totalBookings = 0;
       int completedCount = 0;
       int cancelledCount = 0;
@@ -172,7 +203,6 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
           'is_past': DateTime.parse(date).isBefore(DateTime.now()),
         });
 
-        // Update stats
         totalBookings++;
         totalSpent += price.toInt();
 
@@ -200,7 +230,6 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
       });
 
       debugPrint('✅ Loaded ${historyList.length} history records');
-
     } catch (e) {
       debugPrint('❌ Error loading history: $e');
       setState(() {
@@ -243,13 +272,15 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
   List<Map<String, dynamic>> get _filteredHistory {
     var filtered = List<Map<String, dynamic>>.from(_history);
 
-    // Search filter
     if (_searchQuery.isNotEmpty) {
       filtered = filtered.where((item) {
-        final serviceName = (item['service_name'] as String?)?.toLowerCase() ?? '';
+        final serviceName =
+            (item['service_name'] as String?)?.toLowerCase() ?? '';
         final salonName = (item['salon_name'] as String?)?.toLowerCase() ?? '';
-        final barberName = (item['barber_name'] as String?)?.toLowerCase() ?? '';
-        final bookingNumber = (item['booking_number'] as String?)?.toLowerCase() ?? '';
+        final barberName =
+            (item['barber_name'] as String?)?.toLowerCase() ?? '';
+        final bookingNumber =
+            (item['booking_number'] as String?)?.toLowerCase() ?? '';
         final query = _searchQuery.toLowerCase();
         return serviceName.contains(query) ||
             salonName.contains(query) ||
@@ -258,7 +289,6 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
       }).toList();
     }
 
-    // Status filter
     if (_selectedFilter != 'All') {
       filtered = filtered.where((item) {
         final status = item['status'] as String? ?? '';
@@ -270,12 +300,15 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
   }
 
   // ============================================================
-  // VIEW BOOKING DETAILS
+  // VIEW BOOKING DETAILS - WITH DARK MODE
   // ============================================================
   void _viewBookingDetails(Map<String, dynamic> booking) {
+    final isDark = context.isDarkMode;
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -286,23 +319,31 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
   // ============================================================
   // BUILD METHODS
   // ============================================================
-
   @override
   Widget build(BuildContext context) {
-    final filteredHistory = _filteredHistory;
+    final isDark = context.isDarkMode;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isWeb = screenWidth > 800;
 
     return Scaffold(
+      backgroundColor: isDark ? const Color(0xFF121212) : Colors.white,
       appBar: AppBar(
-        title: const Text(
+        title: Text(
           'My History',
           style: TextStyle(
             fontSize: 18,
             fontWeight: FontWeight.bold,
+            color: Colors.white,
           ),
         ),
-        backgroundColor: const Color(0xFFFF6B8B),
+        backgroundColor: AppTheme.primary,
         foregroundColor: Colors.white,
         elevation: 0,
+        centerTitle: isWeb,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+        ),
         bottom: TabBar(
           controller: _tabController,
           indicatorColor: Colors.white,
@@ -315,80 +356,152 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
         ),
       ),
       body: _isLoading
-          ? const Center(
+          ? Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  CircularProgressIndicator(color: Color(0xFFFF6B8B)),
-                  SizedBox(height: 16),
-                  Text('Loading history...'),
+                  CircularProgressIndicator(color: AppTheme.primary),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Loading history...',
+                    style: TextStyle(
+                      color: isDark ? Colors.white60 : Colors.black87,
+                    ),
+                  ),
                 ],
               ),
             )
           : _errorMessage != null
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.error_outline, size: 64, color: Colors.grey[400]),
-                      const SizedBox(height: 16),
-                      Text(
-                        _errorMessage!,
-                        style: TextStyle(color: Colors.grey[600]),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 24),
-                      ElevatedButton(
-                        onPressed: _loadHistory,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFFF6B8B),
-                          foregroundColor: Colors.white,
-                        ),
-                        child: const Text('Retry'),
-                      ),
-                    ],
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.error_outline,
+                    size: 64,
+                    color: isDark ? Colors.white70 : Colors.grey[400],
                   ),
-                )
-              : TabBarView(
+                  const SizedBox(height: 16),
+                  Text(
+                    _errorMessage!,
+                    style: TextStyle(
+                      color: isDark ? Colors.white60 : Colors.grey[600],
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 24),
+                  ElevatedButton(
+                    onPressed: _loadHistory,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.primary,
+                      foregroundColor: Colors.white,
+                    ),
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
+            )
+          : isWeb
+          ? _buildWebLayout()
+          : _buildMobileLayout(),
+    );
+  }
+
+  // ✅ WEB LAYOUT
+  Widget _buildWebLayout() {
+    final isDark = context.isDarkMode;
+    final filteredHistory = _filteredHistory;
+
+    return Container(
+      color: isDark ? const Color(0xFF121212) : Colors.white,
+      child: Center(
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 1200),
+          child: Column(
+            children: [
+              // Filters
+              _buildFilters(),
+              // Content
+              Expanded(
+                child: TabBarView(
                   controller: _tabController,
                   children: [
                     // History Tab
-                    Column(
-                      children: [
-                        // Filters
-                        _buildFilters(),
-                        // History list
-                        Expanded(
-                          child: filteredHistory.isEmpty
-                              ? _buildEmptyState()
-                              : ListView.builder(
-                                  padding: const EdgeInsets.all(16),
-                                  itemCount: filteredHistory.length,
-                                  itemBuilder: (context, index) {
-                                    final booking = filteredHistory[index];
-                                    return _buildHistoryCard(booking);
-                                  },
-                                ),
-                        ),
-                      ],
-                    ),
+                    filteredHistory.isEmpty
+                        ? _buildEmptyState()
+                        : Scrollbar(
+                            controller: _scrollController,
+                            thumbVisibility: true,
+                            trackVisibility: true,
+                            thickness: 8.0,
+                            radius: const Radius.circular(10),
+                            scrollbarOrientation: ScrollbarOrientation.right,
+                            child: ListView.builder(
+                              controller: _scrollController,
+                              padding: const EdgeInsets.all(16),
+                              itemCount: filteredHistory.length,
+                              itemBuilder: (context, index) {
+                                final booking = filteredHistory[index];
+                                return _buildHistoryCard(booking);
+                              },
+                            ),
+                          ),
                     // Stats Tab
                     _buildStatsTab(),
                   ],
                 ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ✅ MOBILE LAYOUT
+  Widget _buildMobileLayout() {
+    final filteredHistory = _filteredHistory;
+
+    return Column(
+      children: [
+        // Filters
+        _buildFilters(),
+        // Content
+        Expanded(
+          child: TabBarView(
+            controller: _tabController,
+            children: [
+              // History Tab
+              filteredHistory.isEmpty
+                  ? _buildEmptyState()
+                  : ListView.builder(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: filteredHistory.length,
+                      itemBuilder: (context, index) {
+                        final booking = filteredHistory[index];
+                        return _buildHistoryCard(booking);
+                      },
+                    ),
+              // Stats Tab
+              _buildStatsTab(),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
   // ============================================================
-  // BUILD FILTERS
+  // BUILD FILTERS - WITH DARK MODE
   // ============================================================
   Widget _buildFilters() {
+    final isDark = context.isDarkMode;
     final statuses = ['All', 'Completed', 'Cancelled', 'No Show'];
     final periods = ['All', 'This Month', 'Last 3 Months', 'This Year'];
 
     return Container(
       padding: const EdgeInsets.all(12),
-      color: Colors.white,
+      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       child: Column(
         children: [
           // Search
@@ -398,20 +511,40 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
                 _searchQuery = value;
               });
             },
+            style: TextStyle(color: isDark ? Colors.white : Colors.black87),
             decoration: InputDecoration(
               hintText: 'Search by service, salon, barber...',
-              hintStyle: TextStyle(color: Colors.grey[400]),
-              prefixIcon: const Icon(Icons.search, color: Colors.grey),
+              hintStyle: TextStyle(
+                color: isDark ? Colors.white70 : Colors.grey[400],
+              ),
+              prefixIcon: Icon(
+                Icons.search,
+                color: isDark ? Colors.white70 : Colors.grey,
+              ),
               filled: true,
-              fillColor: Colors.grey[50],
+              fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
                 borderSide: BorderSide.none,
               ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(
+                  color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                ),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: AppTheme.primary, width: 2),
+              ),
               contentPadding: const EdgeInsets.symmetric(horizontal: 16),
               suffixIcon: _searchQuery.isNotEmpty
                   ? IconButton(
-                      icon: const Icon(Icons.clear, size: 18),
+                      icon: Icon(
+                        Icons.clear,
+                        color: isDark ? Colors.white70 : Colors.grey,
+                        size: 18,
+                      ),
                       onPressed: () {
                         setState(() {
                           _searchQuery = '';
@@ -426,9 +559,13 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
           // Status filter
           Row(
             children: [
-              const Text(
+              Text(
                 'Status:',
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: isDark ? Colors.white60 : Colors.black87,
+                ),
               ),
               const SizedBox(width: 8),
               Expanded(
@@ -444,7 +581,11 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
                             status,
                             style: TextStyle(
                               fontSize: 10,
-                              color: isSelected ? Colors.white : Colors.grey[700],
+                              color: isSelected
+                                  ? Colors.white
+                                  : (isDark
+                                        ? Colors.white70
+                                        : Colors.grey[700]),
                             ),
                           ),
                           selected: isSelected,
@@ -453,11 +594,14 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
                               _selectedFilter = selected ? status : 'All';
                             });
                           },
-                          backgroundColor: Colors.grey[100],
-                          selectedColor: const Color(0xFFFF6B8B),
+                          backgroundColor: isDark
+                              ? const Color(0xFF2A2A2A)
+                              : Colors.grey[100],
+                          selectedColor: AppTheme.primary,
                           checkmarkColor: Colors.white,
                           padding: const EdgeInsets.symmetric(horizontal: 6),
-                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          materialTapTargetSize:
+                              MaterialTapTargetSize.shrinkWrap,
                         ),
                       );
                     }).toList(),
@@ -471,9 +615,13 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
           // Period filter
           Row(
             children: [
-              const Text(
+              Text(
                 'Period:',
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: isDark ? Colors.white60 : Colors.black87,
+                ),
               ),
               const SizedBox(width: 8),
               Expanded(
@@ -489,7 +637,11 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
                             period,
                             style: TextStyle(
                               fontSize: 10,
-                              color: isSelected ? Colors.white : Colors.grey[700],
+                              color: isSelected
+                                  ? Colors.white
+                                  : (isDark
+                                        ? Colors.white70
+                                        : Colors.grey[700]),
                             ),
                           ),
                           selected: isSelected,
@@ -499,11 +651,14 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
                             });
                             _loadHistory();
                           },
-                          backgroundColor: Colors.grey[100],
-                          selectedColor: const Color(0xFFFF6B8B),
+                          backgroundColor: isDark
+                              ? const Color(0xFF2A2A2A)
+                              : Colors.grey[100],
+                          selectedColor: AppTheme.primary,
                           checkmarkColor: Colors.white,
                           padding: const EdgeInsets.symmetric(horizontal: 6),
-                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          materialTapTargetSize:
+                              MaterialTapTargetSize.shrinkWrap,
                         ),
                       );
                     }).toList(),
@@ -518,9 +673,10 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
   }
 
   // ============================================================
-  // BUILD HISTORY CARD
+  // BUILD HISTORY CARD - WITH DARK MODE
   // ============================================================
   Widget _buildHistoryCard(Map<String, dynamic> booking) {
+    final isDark = context.isDarkMode;
     final status = booking['status'] as String? ?? 'pending';
     final isCompleted = status == 'completed';
     final isCancelled = status == 'cancelled';
@@ -548,7 +704,8 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
       statusIcon = Icons.help;
     }
 
-    final serviceName = booking['service_name']?.toString() ?? 'Unknown Service';
+    final serviceName =
+        booking['service_name']?.toString() ?? 'Unknown Service';
     final salonName = booking['salon_name']?.toString() ?? 'Unknown Salon';
     final barberName = booking['barber_name']?.toString() ?? 'Unknown Barber';
     final displayDate = booking['display_date']?.toString() ?? '';
@@ -559,12 +716,10 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       elevation: 2,
+      color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        side: BorderSide(
-          color: statusColor.withValues(alpha: 0.3),
-          width: 1.5,
-        ),
+        side: BorderSide(color: statusColor.withValues(alpha: 0.3), width: 1.5),
       ),
       child: InkWell(
         onTap: () => _viewBookingDetails(booking),
@@ -589,11 +744,7 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(
-                          statusIcon,
-                          size: 14,
-                          color: statusColor,
-                        ),
+                        Icon(statusIcon, size: 14, color: statusColor),
                         const SizedBox(width: 4),
                         Text(
                           statusLabel,
@@ -611,7 +762,7 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
                     displayDate,
                     style: TextStyle(
                       fontSize: 12,
-                      color: Colors.grey[600],
+                      color: isDark ? Colors.white60 : Colors.grey[600],
                     ),
                   ),
                 ],
@@ -625,7 +776,7 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
                     width: 50,
                     height: 50,
                     decoration: BoxDecoration(
-                      color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                      color: AppTheme.primary.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(12),
                       image: booking['salon_logo'] != null
                           ? DecorationImage(
@@ -643,7 +794,7 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
                               style: TextStyle(
                                 fontSize: 22,
                                 fontWeight: FontWeight.bold,
-                                color: const Color(0xFFFF6B8B),
+                                color: AppTheme.primary,
                               ),
                             ),
                           )
@@ -656,9 +807,10 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
                       children: [
                         Text(
                           serviceName,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.w600,
+                            color: isDark ? Colors.white : Colors.black87,
                           ),
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -666,7 +818,7 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
                           salonName,
                           style: TextStyle(
                             fontSize: 13,
-                            color: Colors.grey[600],
+                            color: isDark ? Colors.white60 : Colors.grey[600],
                           ),
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -675,14 +827,16 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
                             Icon(
                               Icons.person,
                               size: 12,
-                              color: Colors.grey[500],
+                              color: isDark ? Colors.white70 : Colors.grey[500],
                             ),
                             const SizedBox(width: 4),
                             Text(
                               barberName,
                               style: TextStyle(
                                 fontSize: 12,
-                                color: Colors.grey[500],
+                                color: isDark
+                                    ? Colors.white70
+                                    : Colors.grey[500],
                               ),
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -718,7 +872,7 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
                         const SizedBox(width: 4),
                         Text(
                           'Rs. ${price.toStringAsFixed(0)}',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
                             color: Colors.green,
@@ -740,15 +894,11 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(
-                          Icons.timer,
-                          size: 14,
-                          color: Colors.blue,
-                        ),
+                        const Icon(Icons.timer, size: 14, color: Colors.blue),
                         const SizedBox(width: 4),
                         Text(
                           '$duration min',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
                             color: Colors.blue,
@@ -763,7 +913,7 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
                       '#$bookingNumber',
                       style: TextStyle(
                         fontSize: 11,
-                        color: Colors.grey[500],
+                        color: isDark ? Colors.white70 : Colors.grey[500],
                       ),
                     ),
                 ],
@@ -776,9 +926,11 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
   }
 
   // ============================================================
-  // BUILD STATS TAB
+  // BUILD STATS TAB - WITH DARK MODE
   // ============================================================
   Widget _buildStatsTab() {
+    final isDark = context.isDarkMode;
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -810,6 +962,7 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
           // Status Distribution
           Card(
             elevation: 2,
+            color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
             ),
@@ -818,11 +971,12 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  Text(
                     'Status Distribution',
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
+                      color: isDark ? Colors.white : Colors.black87,
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -855,6 +1009,7 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
           // Recent Activity
           Card(
             elevation: 2,
+            color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
             ),
@@ -863,21 +1018,24 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  Text(
                     'Recent Activity',
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
+                      color: isDark ? Colors.white : Colors.black87,
                     ),
                   ),
                   const SizedBox(height: 12),
                   if (_history.isEmpty)
-                    const Center(
+                    Center(
                       child: Padding(
-                        padding: EdgeInsets.all(20),
+                        padding: const EdgeInsets.all(20),
                         child: Text(
                           'No activity yet',
-                          style: TextStyle(color: Colors.grey),
+                          style: TextStyle(
+                            color: isDark ? Colors.white70 : Colors.grey,
+                          ),
                         ),
                       ),
                     )
@@ -927,9 +1085,12 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
                                 children: [
                                   Text(
                                     service,
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       fontSize: 14,
                                       fontWeight: FontWeight.w500,
+                                      color: isDark
+                                          ? Colors.white
+                                          : Colors.black87,
                                     ),
                                     overflow: TextOverflow.ellipsis,
                                   ),
@@ -937,7 +1098,9 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
                                     date,
                                     style: TextStyle(
                                       fontSize: 12,
-                                      color: Colors.grey[500],
+                                      color: isDark
+                                          ? Colors.white60
+                                          : Colors.grey[500],
                                     ),
                                   ),
                                 ],
@@ -980,11 +1143,12 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
     required IconData icon,
     required Color color,
   }) {
+    final isDark = context.isDarkMode;
+
     return Card(
       elevation: 2,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-      ),
+      color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -1004,7 +1168,7 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
               title,
               style: TextStyle(
                 fontSize: 12,
-                color: Colors.grey[600],
+                color: isDark ? Colors.white60 : Colors.grey[600],
               ),
               textAlign: TextAlign.center,
             ),
@@ -1020,6 +1184,7 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
     required int total,
     required Color color,
   }) {
+    final isDark = context.isDarkMode;
     final percentage = total > 0 ? (count / total * 100) : 0.0;
 
     return Column(
@@ -1030,13 +1195,12 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
           children: [
             Text(
               label,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w500,
+                color: isDark ? Colors.white : Colors.black87,
               ),
             ),
-            // ✅ FIXED: `.toStringAsFixed(1)` needs to be inside the
-            // `${...}` interpolation block, otherwise it prints as literal text.
             Text(
               '$count (${percentage.toStringAsFixed(1)}%)',
               style: TextStyle(
@@ -1051,7 +1215,7 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
         Container(
           height: 8,
           decoration: BoxDecoration(
-            color: Colors.grey[200],
+            color: isDark ? Colors.grey[800] : Colors.grey[200],
             borderRadius: BorderRadius.circular(4),
           ),
           child: FractionallySizedBox(
@@ -1069,9 +1233,11 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
   }
 
   // ============================================================
-  // BUILD EMPTY STATE
+  // BUILD EMPTY STATE - WITH DARK MODE
   // ============================================================
   Widget _buildEmptyState() {
+    final isDark = context.isDarkMode;
+
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -1079,7 +1245,7 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
           Icon(
             Icons.history,
             size: 80,
-            color: Colors.grey[300],
+            color: isDark ? Colors.white30 : Colors.grey[300],
           ),
           const SizedBox(height: 16),
           Text(
@@ -1088,7 +1254,7 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
                 : 'No booking history yet',
             style: TextStyle(
               fontSize: 16,
-              color: Colors.grey[600],
+              color: isDark ? Colors.white60 : Colors.grey[600],
             ),
           ),
           const SizedBox(height: 8),
@@ -1096,7 +1262,7 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
             'Your past bookings will appear here',
             style: TextStyle(
               fontSize: 14,
-              color: Colors.grey[400],
+              color: isDark ? Colors.white70 : Colors.grey[400],
             ),
           ),
           if (_searchQuery.isNotEmpty)
@@ -1106,7 +1272,10 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
                   _searchQuery = '';
                 });
               },
-              child: const Text('Clear Search'),
+              child: Text(
+                'Clear Search',
+                style: TextStyle(color: AppTheme.primary),
+              ),
             ),
         ],
       ),
@@ -1115,7 +1284,7 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
 }
 
 // ============================================================
-// BOOKING DETAILS SHEET
+// BOOKING DETAILS SHEET - WITH DARK MODE
 // ============================================================
 class _BookingDetailsSheet extends StatelessWidget {
   final Map<String, dynamic> booking;
@@ -1124,6 +1293,7 @@ class _BookingDetailsSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = context.isDarkMode;
     final serviceName = booking['service_name']?.toString() ?? 'Unknown';
     final salonName = booking['salon_name']?.toString() ?? 'Unknown';
     final barberName = booking['barber_name']?.toString() ?? 'Unknown';
@@ -1165,9 +1335,9 @@ class _BookingDetailsSheet extends StatelessWidget {
       builder: (context, scrollController) {
         return Container(
           padding: const EdgeInsets.all(20),
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
           ),
           child: Column(
             children: [
@@ -1178,7 +1348,7 @@ class _BookingDetailsSheet extends StatelessWidget {
                   height: 4,
                   margin: const EdgeInsets.only(bottom: 16),
                   decoration: BoxDecoration(
-                    color: Colors.grey[300],
+                    color: isDark ? Colors.grey[700] : Colors.grey[300],
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
@@ -1191,7 +1361,7 @@ class _BookingDetailsSheet extends StatelessWidget {
                     width: 60,
                     height: 60,
                     decoration: BoxDecoration(
-                      color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                      color: AppTheme.primary.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(16),
                       image: booking['salon_logo'] != null
                           ? DecorationImage(
@@ -1209,7 +1379,7 @@ class _BookingDetailsSheet extends StatelessWidget {
                               style: TextStyle(
                                 fontSize: 24,
                                 fontWeight: FontWeight.bold,
-                                color: const Color(0xFFFF6B8B),
+                                color: AppTheme.primary,
                               ),
                             ),
                           )
@@ -1222,9 +1392,10 @@ class _BookingDetailsSheet extends StatelessWidget {
                       children: [
                         Text(
                           salonName,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
+                            color: isDark ? Colors.white : Colors.black87,
                           ),
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -1232,7 +1403,7 @@ class _BookingDetailsSheet extends StatelessWidget {
                           serviceName,
                           style: TextStyle(
                             fontSize: 14,
-                            color: Colors.grey[600],
+                            color: isDark ? Colors.white60 : Colors.grey[600],
                           ),
                         ),
                         Row(
@@ -1261,7 +1432,9 @@ class _BookingDetailsSheet extends StatelessWidget {
                                 '#$bookingNumber',
                                 style: TextStyle(
                                   fontSize: 11,
-                                  color: Colors.grey[500],
+                                  color: isDark
+                                      ? Colors.white70
+                                      : Colors.grey[500],
                                 ),
                               ),
                             ],
@@ -1281,27 +1454,33 @@ class _BookingDetailsSheet extends StatelessWidget {
                 child: ListView(
                   controller: scrollController,
                   children: [
+                    // ✅ Pass context to each call
                     _buildDetailRow(
+                      context, // ← Pass context
                       icon: Icons.calendar_today,
                       label: 'Date',
                       value: displayDate,
                     ),
                     _buildDetailRow(
+                      context, // ← Pass context
                       icon: Icons.access_time,
                       label: 'Time',
                       value: '$startTime - $endTime',
                     ),
                     _buildDetailRow(
+                      context, // ← Pass context
                       icon: Icons.person,
                       label: 'Barber',
                       value: barberName,
                     ),
                     _buildDetailRow(
+                      context, // ← Pass context
                       icon: Icons.timer,
                       label: 'Duration',
                       value: '$duration minutes',
                     ),
                     _buildDetailRow(
+                      context, // ← Pass context
                       icon: Icons.attach_money,
                       label: 'Price',
                       value: 'Rs. ${price.toStringAsFixed(0)}',
@@ -1309,6 +1488,7 @@ class _BookingDetailsSheet extends StatelessWidget {
                     ),
                     if (cancelReason != null && cancelReason.isNotEmpty)
                       _buildDetailRow(
+                        context, // ← Pass context
                         icon: Icons.info_outline,
                         label: 'Cancellation Reason',
                         value: cancelReason,
@@ -1325,7 +1505,7 @@ class _BookingDetailsSheet extends StatelessWidget {
                 child: ElevatedButton(
                   onPressed: () => Navigator.pop(context),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFFF6B8B),
+                    backgroundColor: AppTheme.primary,
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(
@@ -1342,12 +1522,16 @@ class _BookingDetailsSheet extends StatelessWidget {
     );
   }
 
-  Widget _buildDetailRow({
+  // ✅ Fixed: Add context parameter
+  Widget _buildDetailRow(
+    BuildContext context, {
     required IconData icon,
     required String label,
     required String value,
     Color? valueColor,
   }) {
+    final isDark = context.isDarkMode;
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
@@ -1355,10 +1539,10 @@ class _BookingDetailsSheet extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+              color: AppTheme.primary.withValues(alpha: 0.1),
               shape: BoxShape.circle,
             ),
-            child: Icon(icon, size: 18, color: const Color(0xFFFF6B8B)),
+            child: Icon(icon, size: 18, color: AppTheme.primary),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -1369,7 +1553,7 @@ class _BookingDetailsSheet extends StatelessWidget {
                   label,
                   style: TextStyle(
                     fontSize: 12,
-                    color: Colors.grey[500],
+                    color: isDark ? Colors.white60 : Colors.grey[500],
                   ),
                 ),
                 Text(
@@ -1377,7 +1561,9 @@ class _BookingDetailsSheet extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w500,
-                    color: valueColor ?? Colors.grey[800],
+                    color:
+                        valueColor ??
+                        (isDark ? Colors.white : Colors.grey[800]),
                   ),
                 ),
               ],
