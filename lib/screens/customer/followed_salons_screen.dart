@@ -6,6 +6,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_application_1/theme/app_theme.dart';
 import 'package:flutter_application_1/extensions/context_extensions.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../../services/timezone_service.dart';
 
 class FollowedSalonsScreen extends StatefulWidget {
   const FollowedSalonsScreen({super.key});
@@ -31,10 +33,16 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
   // ✅ Focus Node for search
   final FocusNode _searchFocusNode = FocusNode();
 
+  // ============================================
+  // ✅ TIMEZONE VARIABLES
+  // ============================================
+  String _userTimezone = '';
+  bool _isTimezoneLoaded = false;
+
   @override
   void initState() {
     super.initState();
-    _loadFollowedSalons();
+    _initializeTimezone();
   }
 
   @override
@@ -44,7 +52,69 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
     super.dispose();
   }
 
+  // ============================================
+  // ✅ TIMEZONE INITIALIZATION
+  // ============================================
+
+  Future<void> _initializeTimezone() async {
+    await TimezoneService.initialize();
+
+    final prefs = await SharedPreferences.getInstance();
+    _userTimezone =
+        prefs.getString('cached_timezone') ??
+        TimezoneService.getCurrentTimezone();
+    await TimezoneService.setTimezone(_userTimezone);
+
+    setState(() {
+      _isTimezoneLoaded = true;
+    });
+
+    debugPrint('✅ User timezone: $_userTimezone');
+
+    await _loadFollowedSalons();
+  }
+
+  // ============================================
+  // ✅ TIMEZONE HELPER METHODS
+  // ============================================
+
+  /// Convert UTC time string to user's local time string
+  String _utcToLocalTimeString(String? utcTime) {
+    if (utcTime == null || utcTime.isEmpty) return '--:--';
+    try {
+      // If time is already in HH:MM format, add seconds
+      String timeStr = utcTime;
+      if (timeStr.length == 5) {
+        timeStr = '$timeStr:00';
+      }
+      return TimezoneService.utcToLocalTime(timeStr, DateTime.now());
+    } catch (e) {
+      debugPrint('Error converting UTC to local: $e');
+      return _formatTimeFallback(utcTime);
+    }
+  }
+
+  /// Format time fallback
+  String _formatTimeFallback(String timeStr) {
+    try {
+      final parts = timeStr.split(':');
+      final hour = int.parse(parts[0]);
+      final minute = int.parse(parts[1]);
+      final period = hour >= 12 ? 'PM' : 'AM';
+      final displayHour = hour % 12 == 0 ? 12 : hour % 12;
+      return '$displayHour:${minute.toString().padLeft(2, '0')} $period';
+    } catch (e) {
+      return timeStr;
+    }
+  }
+
+  // ============================================================
+  // LOAD FOLLOWED SALONS
+  // ============================================================
+
   Future<void> _loadFollowedSalons() async {
+    if (!_isTimezoneLoaded) return;
+
     setState(() {
       _isLoading = true;
       _errorMessage = null;
@@ -91,6 +161,7 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
   // ============================================================
   // FILTER AND SEARCH
   // ============================================================
+
   List<Map<String, dynamic>> get _filteredSalons {
     var filtered = List<Map<String, dynamic>>.from(_followedSalons);
 
@@ -125,6 +196,7 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
   // ============================================================
   // UNFOLLOW SALON
   // ============================================================
+
   Future<void> _unfollowSalon(int salonId, String salonName) async {
     final isDark = context.isDarkMode;
 
@@ -202,6 +274,7 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
   // ============================================================
   // VIEW SALON DETAILS
   // ============================================================
+
   void _viewSalonDetails(Map<String, dynamic> salon) {
     context.push('/customer/salon-profile', extra: salon);
   }
@@ -209,6 +282,7 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
   // ============================================================
   // BOOK APPOINTMENT
   // ============================================================
+
   void _bookAppointment(Map<String, dynamic> salon) {
     context.push('/customer/booking-flow', extra: salon);
   }
@@ -224,11 +298,46 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
     final isWeb = screenWidth > 800;
     final filteredSalons = _filteredSalons;
 
+    if (!_isTimezoneLoaded) {
+      return Scaffold(
+        backgroundColor: isDark
+            ? const Color(0xFF121212)
+            : const Color(0xFFF8F9FA),
+        appBar: AppBar(
+          title: Text(
+            'My Salons',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          ),
+          backgroundColor: AppTheme.primary,
+          foregroundColor: Colors.white,
+          elevation: 0,
+          centerTitle: isWeb,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back_ios, color: Colors.white),
+            onPressed: () => Navigator.pop(context),
+          ),
+        ),
+        body: const Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(color: AppTheme.primary),
+              SizedBox(height: 16),
+              Text('Loading timezone...'),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: isDark
           ? const Color(0xFF121212)
           : const Color(0xFFF8F9FA),
-      // ✅ App Bar - No Search Bar
       appBar: AppBar(
         title: Text(
           'My Salons',
@@ -253,7 +362,6 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
           ),
         ],
       ),
-      // ✅ EDGE-TO-EDGE: SafeArea with Web Layout
       body: SafeArea(
         child: _isLoading
             ? Center(
@@ -619,18 +727,23 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
   }
 
   // ============================================================
-  // BUILD SALON CARD
+  // ✅ BUILD SALON CARD WITH TIMEZONE CONVERTED TIMES
   // ============================================================
+
   Widget _buildSalonCard(Map<String, dynamic> salon) {
     final isDark = context.isDarkMode;
     final name = salon['name']?.toString() ?? 'Salon';
     final address = salon['address']?.toString() ?? '';
     final logoUrl = salon['logo_url']?.toString();
-    final openTime = salon['open_time']?.toString() ?? '09:00';
-    final closeTime = salon['close_time']?.toString() ?? '18:00';
     final followerCount = salon['follower_count'] as int? ?? 0;
     final bookingCount = salon['booking_count'] as int? ?? 0;
     final salonId = salon['id'] as int? ?? 0;
+
+    // ✅ Convert UTC times to local time
+    final openTimeLocal = _utcToLocalTimeString(salon['open_time']?.toString());
+    final closeTimeLocal = _utcToLocalTimeString(
+      salon['close_time']?.toString(),
+    );
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -724,6 +837,7 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
                               ),
                             ],
                           ),
+                        // ✅ Display LOCAL times with timezone info
                         Row(
                           children: [
                             Icon(
@@ -733,13 +847,19 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
                             ),
                             const SizedBox(width: 4),
                             Text(
-                              '$openTime - $closeTime',
+                              '$openTimeLocal - $closeTimeLocal',
                               style: TextStyle(
                                 fontSize: 12,
                                 color: isDark
                                     ? Colors.white70
                                     : Colors.grey[600],
                               ),
+                            ),
+                            // ✅ Add timezone flag
+                            const SizedBox(width: 6),
+                            Text(
+                              TimezoneService.getCurrentFlag(),
+                              style: const TextStyle(fontSize: 12),
                             ),
                           ],
                         ),
