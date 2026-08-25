@@ -1,9 +1,9 @@
-// side menue
-
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter_application_1/theme/app_theme.dart';
+import 'package:flutter_application_1/extensions/context_extensions.dart';
 
 class BarberReviewsScreen extends StatefulWidget {
   final String? salonId;
@@ -47,6 +47,13 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
   int? _replyingToReviewId;
   final TextEditingController _replyController = TextEditingController();
 
+  // ✅ Web Scroll Controller
+  final ScrollController _scrollController = ScrollController();
+
+  // ✅ Responsive
+  bool _isWeb = false;
+  bool _isTablet = false;
+
   @override
   void initState() {
     super.initState();
@@ -56,9 +63,29 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _checkScreenSize();
+  }
+
+  void _checkScreenSize() {
+    final size = MediaQuery.of(context).size;
+    final isWeb = size.width > 800;
+    final isTablet = size.shortestSide >= 600;
+
+    if (_isWeb != isWeb || _isTablet != isTablet) {
+      setState(() {
+        _isWeb = isWeb;
+        _isTablet = isTablet;
+      });
+    }
+  }
+
+  @override
   void dispose() {
     _tabController.dispose();
     _replyController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -106,7 +133,6 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
 
       final barberId = widget.barberId ?? currentUser.id;
 
-      // ✅ FIXED: Simple query without complex joins
       var query = supabase
           .from('reviews')
           .select('''
@@ -144,14 +170,12 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
           .eq('barber_id', barberId)
           .eq('status', 'published');
 
-      // Apply salon filter if provided
       if (widget.salonId != null) {
         query = query.eq('salon_id', int.parse(widget.salonId!));
       }
 
       final response = await query.order('created_at', ascending: false);
 
-      // ✅ Process data and fetch customer details separately
       final List<Map<String, dynamic>> reviewsList = [];
       int totalRating = 0;
       int fiveStar = 0;
@@ -160,7 +184,6 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
       int twoStar = 0;
       int oneStar = 0;
 
-      // Get unique customer IDs
       final Set<String> customerIds = {};
       for (var item in response) {
         final customerId = item['customer_id'] as String?;
@@ -169,7 +192,6 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
         }
       }
 
-      // ✅ Fetch customer profiles separately
       Map<String, Map<String, dynamic>> customerProfiles = {};
       if (customerIds.isNotEmpty) {
         final profilesResponse = await supabase
@@ -187,7 +209,6 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
         }
       }
 
-      // ✅ Get salon names
       final Set<int> salonIds = {};
       for (var item in response) {
         final salonId = item['salon_id'] as int?;
@@ -298,7 +319,6 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
   List<Map<String, dynamic>> get _filteredReviews {
     var filtered = List<Map<String, dynamic>>.from(_reviews);
 
-    // Rating filter
     if (_selectedRatingFilter != 'All') {
       final rating = int.parse(_selectedRatingFilter);
       filtered = filtered.where((review) {
@@ -307,7 +327,6 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
       }).toList();
     }
 
-    // Search filter
     if (_searchQuery.isNotEmpty) {
       filtered = filtered.where((review) {
         final customerName =
@@ -322,7 +341,6 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
       }).toList();
     }
 
-    // Sort
     switch (_selectedSort) {
       case 'Newest':
         filtered.sort(
@@ -410,105 +428,201 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
 
   @override
   Widget build(BuildContext context) {
+    final isDark = context.isDarkMode;
     final filteredReviews = _filteredReviews;
 
+    _checkScreenSize();
+
     return Scaffold(
+      backgroundColor: isDark ? const Color(0xFF121212) : Colors.white,
       appBar: AppBar(
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               'My Reviews',
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                fontSize: _isWeb ? 22 : 18,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
             ),
             if (_barberName.isNotEmpty)
               Text(
                 _barberName,
-                style: const TextStyle(
-                  fontSize: 12,
+                style: TextStyle(
+                  fontSize: _isWeb ? 14 : 12,
                   fontWeight: FontWeight.normal,
                   color: Colors.white70,
                 ),
               ),
           ],
         ),
-        backgroundColor: const Color(0xFFFF6B8B),
+        backgroundColor: AppTheme.primary,
         foregroundColor: Colors.white,
         elevation: 0,
+        centerTitle: _isWeb,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+          tooltip: 'Back',
+        ),
         bottom: TabBar(
           controller: _tabController,
           indicatorColor: Colors.white,
           labelColor: Colors.white,
           unselectedLabelColor: Colors.white70,
+          indicatorSize: TabBarIndicatorSize.label,
           tabs: const [
             Tab(text: 'Reviews'),
             Tab(text: 'Stats'),
           ],
         ),
-        actions: [
-          IconButton(icon: const Icon(Icons.refresh), onPressed: _loadReviews),
-        ],
+        // ✅ REMOVED: Refresh button from AppBar
       ),
-      body: _isLoading
-          ? const Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  CircularProgressIndicator(color: Color(0xFFFF6B8B)),
-                  SizedBox(height: 16),
-                  Text('Loading reviews...'),
-                ],
-              ),
-            )
-          : _errorMessage != null
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.error_outline, size: 64, color: Colors.grey[400]),
-                  const SizedBox(height: 16),
-                  Text(
-                    _errorMessage!,
-                    style: TextStyle(color: Colors.grey[600]),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 24),
-                  ElevatedButton(
-                    onPressed: _loadReviews,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFFF6B8B),
-                      foregroundColor: Colors.white,
-                    ),
-                    child: const Text('Retry'),
-                  ),
-                ],
-              ),
-            )
-          : TabBarView(
-              controller: _tabController,
-              children: [
-                // Reviews Tab
-                Column(
+      body: SafeArea(
+        child: _isLoading
+            ? Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    _buildFilters(),
-                    Expanded(
-                      child: filteredReviews.isEmpty
-                          ? _buildEmptyState()
-                          : ListView.builder(
-                              padding: const EdgeInsets.all(16),
-                              itemCount: filteredReviews.length,
-                              itemBuilder: (context, index) {
-                                final review = filteredReviews[index];
-                                return _buildReviewCard(review);
-                              },
-                            ),
+                    CircularProgressIndicator(color: AppTheme.primary),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Loading reviews...',
+                      style: TextStyle(
+                        color: isDark ? Colors.white60 : Colors.grey[600],
+                      ),
                     ),
                   ],
                 ),
-                // Stats Tab
-                _buildStatsTab(),
-              ],
+              )
+            : _errorMessage != null
+            ? Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.error_outline,
+                      size: 64,
+                      color: isDark ? Colors.white70 : Colors.grey[400],
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      _errorMessage!,
+                      style: TextStyle(
+                        color: isDark ? Colors.white60 : Colors.grey[600],
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 24),
+                    ElevatedButton(
+                      onPressed: _loadReviews,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.primary,
+                        foregroundColor: Colors.white,
+                      ),
+                      child: const Text('Retry'),
+                    ),
+                  ],
+                ),
+              )
+            : _isWeb
+            ? _buildWebLayout(filteredReviews, isDark)
+            : _buildMobileLayout(filteredReviews, isDark),
+      ),
+    );
+  }
+
+  // ✅ WEB LAYOUT
+  Widget _buildWebLayout(List<Map<String, dynamic>> filteredReviews, bool isDark) {
+    return Center(
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 1000),
+        child: Scrollbar(
+          controller: _scrollController,
+          thumbVisibility: true,
+          trackVisibility: true,
+          thickness: 8.0,
+          radius: const Radius.circular(10),
+          scrollbarOrientation: ScrollbarOrientation.right,
+          child: TabBarView(
+            controller: _tabController,
+            children: [
+              // Reviews Tab - Web
+              Column(
+                children: [
+                  _buildFilters(),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      controller: _scrollController,
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.all(16),
+                      child: filteredReviews.isEmpty
+                          ? _buildEmptyState()
+                          : _isTablet
+                              ? GridView.builder(
+                                  shrinkWrap: true,
+                                  physics: const NeverScrollableScrollPhysics(),
+                                  gridDelegate:
+                                      const SliverGridDelegateWithFixedCrossAxisCount(
+                                    crossAxisCount: 2,
+                                    crossAxisSpacing: 16,
+                                    mainAxisSpacing: 16,
+                                    childAspectRatio: 1.2,
+                                  ),
+                                  itemCount: filteredReviews.length,
+                                  itemBuilder: (context, index) =>
+                                      _buildReviewCard(
+                                        filteredReviews[index],
+                                        isDark,
+                                      ),
+                                )
+                              : Column(
+                                  children: filteredReviews
+                                      .map((review) => _buildReviewCard(
+                                            review,
+                                            isDark,
+                                          ))
+                                      .toList(),
+                                ),
+                    ),
+                  ),
+                ],
+              ),
+              // Stats Tab - Web
+              _buildStatsTab(),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ✅ MOBILE LAYOUT
+  Widget _buildMobileLayout(List<Map<String, dynamic>> filteredReviews, bool isDark) {
+    return TabBarView(
+      controller: _tabController,
+      children: [
+        // Reviews Tab - Mobile
+        Column(
+          children: [
+            _buildFilters(),
+            Expanded(
+              child: filteredReviews.isEmpty
+                  ? _buildEmptyState()
+                  : ListView.builder(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: filteredReviews.length,
+                      itemBuilder: (context, index) =>
+                          _buildReviewCard(filteredReviews[index], isDark),
+                    ),
             ),
+          ],
+        ),
+        // Stats Tab - Mobile
+        _buildStatsTab(),
+      ],
     );
   }
 
@@ -516,12 +630,13 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
   // BUILD FILTERS
   // ============================================================
   Widget _buildFilters() {
+    final isDark = context.isDarkMode;
     final ratingOptions = ['All', '5', '4', '3', '2', '1'];
     final sortOptions = ['Newest', 'Oldest', 'Highest Rated', 'Lowest Rated'];
 
     return Container(
       padding: const EdgeInsets.all(12),
-      color: Colors.white,
+      color: isDark ? const Color(0xFF1A1A1A) : Colors.white,
       child: Column(
         children: [
           // Search
@@ -531,12 +646,18 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
                 _searchQuery = value;
               });
             },
+            style: TextStyle(color: isDark ? Colors.white : Colors.black87),
             decoration: InputDecoration(
               hintText: 'Search by customer or comment...',
-              hintStyle: TextStyle(color: Colors.grey[400]),
-              prefixIcon: const Icon(Icons.search, color: Colors.grey),
+              hintStyle: TextStyle(
+                color: isDark ? Colors.white70 : Colors.grey[400],
+              ),
+              prefixIcon: Icon(
+                Icons.search,
+                color: isDark ? Colors.white70 : Colors.grey,
+              ),
               filled: true,
-              fillColor: Colors.grey[50],
+              fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
                 borderSide: BorderSide.none,
@@ -544,7 +665,11 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
               contentPadding: const EdgeInsets.symmetric(horizontal: 16),
               suffixIcon: _searchQuery.isNotEmpty
                   ? IconButton(
-                      icon: const Icon(Icons.clear, size: 18),
+                      icon: Icon(
+                        Icons.clear,
+                        size: 18,
+                        color: isDark ? Colors.white70 : Colors.grey,
+                      ),
                       onPressed: () {
                         setState(() {
                           _searchQuery = '';
@@ -559,9 +684,13 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
           // Rating filter
           Row(
             children: [
-              const Text(
+              Text(
                 'Rating:',
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: isDark ? Colors.white60 : Colors.black87,
+                ),
               ),
               const SizedBox(width: 8),
               Expanded(
@@ -579,7 +708,7 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
                               fontSize: 10,
                               color: isSelected
                                   ? Colors.white
-                                  : Colors.grey[700],
+                                  : (isDark ? Colors.white60 : Colors.grey[700]),
                             ),
                           ),
                           selected: isSelected,
@@ -588,8 +717,10 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
                               _selectedRatingFilter = selected ? rating : 'All';
                             });
                           },
-                          backgroundColor: Colors.grey[100],
-                          selectedColor: const Color(0xFFFF6B8B),
+                          backgroundColor: isDark
+                              ? Colors.grey[800]
+                              : Colors.grey[100],
+                          selectedColor: AppTheme.primary,
                           checkmarkColor: Colors.white,
                           padding: const EdgeInsets.symmetric(horizontal: 6),
                           materialTapTargetSize:
@@ -607,9 +738,13 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
           // Sort
           Row(
             children: [
-              const Text(
+              Text(
                 'Sort:',
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: isDark ? Colors.white60 : Colors.black87,
+                ),
               ),
               const SizedBox(width: 8),
               Expanded(
@@ -627,7 +762,7 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
                               fontSize: 10,
                               color: isSelected
                                   ? Colors.white
-                                  : Colors.grey[700],
+                                  : (isDark ? Colors.white60 : Colors.grey[700]),
                             ),
                           ),
                           selected: isSelected,
@@ -636,8 +771,10 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
                               _selectedSort = selected ? sort : 'Newest';
                             });
                           },
-                          backgroundColor: Colors.grey[100],
-                          selectedColor: const Color(0xFFFF6B8B),
+                          backgroundColor: isDark
+                              ? Colors.grey[800]
+                              : Colors.grey[100],
+                          selectedColor: AppTheme.primary,
                           checkmarkColor: Colors.white,
                           padding: const EdgeInsets.symmetric(horizontal: 6),
                           materialTapTargetSize:
@@ -658,7 +795,7 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
   // ============================================================
   // BUILD REVIEW CARD
   // ============================================================
-  Widget _buildReviewCard(Map<String, dynamic> review) {
+  Widget _buildReviewCard(Map<String, dynamic> review, bool isDark) {
     final rating = review['overall_rating'] as double? ?? 0;
     final customerName = review['customer_name']?.toString() ?? 'Anonymous';
     final customerAvatar = review['customer_avatar']?.toString();
@@ -671,6 +808,7 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
+      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
@@ -683,9 +821,7 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
               children: [
                 CircleAvatar(
                   radius: 20,
-                  backgroundColor: const Color(
-                    0xFFFF6B8B,
-                  ).withValues(alpha: 0.1),
+                  backgroundColor: AppTheme.primary.withValues(alpha: 0.1),
                   backgroundImage:
                       customerAvatar != null && customerAvatar.isNotEmpty
                       ? CachedNetworkImageProvider(customerAvatar)
@@ -698,7 +834,7 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
                           style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
-                            color: const Color(0xFFFF6B8B),
+                            color: AppTheme.primary,
                           ),
                         )
                       : null,
@@ -710,9 +846,10 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
                     children: [
                       Text(
                         customerName,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w600,
+                          color: isDark ? Colors.white : Colors.black87,
                         ),
                       ),
                       Row(
@@ -721,17 +858,22 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
                             serviceName,
                             style: TextStyle(
                               fontSize: 12,
-                              color: Colors.grey[600],
+                              color: isDark ? Colors.white60 : Colors.grey[600],
                             ),
                           ),
                           const SizedBox(width: 8),
-                          Text('•', style: TextStyle(color: Colors.grey[400])),
+                          Text(
+                            '•',
+                            style: TextStyle(
+                              color: isDark ? Colors.white30 : Colors.grey[400],
+                            ),
+                          ),
                           const SizedBox(width: 8),
                           Text(
                             _formatDate(createdAt),
                             style: TextStyle(
                               fontSize: 11,
-                              color: Colors.grey[500],
+                              color: isDark ? Colors.white70 : Colors.grey[500],
                             ),
                           ),
                         ],
@@ -747,7 +889,9 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
                     return Icon(
                       isFilled ? Icons.star : Icons.star_border,
                       size: 16,
-                      color: isFilled ? Colors.amber : Colors.grey[300],
+                      color: isFilled
+                          ? Colors.amber
+                          : (isDark ? Colors.white30 : Colors.grey[300]),
                     );
                   }),
                 ),
@@ -763,7 +907,7 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: Colors.grey[50],
+                  color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Row(
@@ -773,19 +917,23 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
                       label: 'Service',
                       value:
                           (review['service_quality'] as double?)?.toInt() ?? 0,
+                      isDark: isDark,
                     ),
                     _buildRatingChip(
                       label: 'Punctuality',
                       value: (review['punctuality'] as double?)?.toInt() ?? 0,
+                      isDark: isDark,
                     ),
                     _buildRatingChip(
                       label: 'Professional',
                       value:
                           (review['professionalism'] as double?)?.toInt() ?? 0,
+                      isDark: isDark,
                     ),
                     _buildRatingChip(
                       label: 'Cleanliness',
                       value: (review['cleanliness'] as double?)?.toInt() ?? 0,
+                      isDark: isDark,
                     ),
                   ],
                 ),
@@ -794,7 +942,14 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
 
             // Comment
             if (comment != null && comment.isNotEmpty)
-              Text(comment, style: const TextStyle(fontSize: 14, height: 1.4)),
+              Text(
+                comment,
+                style: TextStyle(
+                  fontSize: 14,
+                  height: 1.4,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
+              ),
             const SizedBox(height: 8),
 
             // Pros & Cons
@@ -878,7 +1033,9 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
                 decoration: BoxDecoration(
                   color: Colors.blue.withValues(alpha: 0.05),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.blue.withValues(alpha: 0.2)),
+                  border: Border.all(
+                    color: Colors.blue.withValues(alpha: 0.2),
+                  ),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -887,7 +1044,7 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
                       children: [
                         const Icon(Icons.reply, size: 14, color: Colors.blue),
                         const SizedBox(width: 8),
-                        const Text(
+                        Text(
                           'Your Reply',
                           style: TextStyle(
                             fontSize: 12,
@@ -900,7 +1057,10 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
                     const SizedBox(height: 4),
                     Text(
                       barberResponse,
-                      style: TextStyle(fontSize: 13, color: Colors.grey[800]),
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: isDark ? Colors.white : Colors.grey[800],
+                      ),
                     ),
                   ],
                 ),
@@ -912,7 +1072,7 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
                 margin: const EdgeInsets.only(top: 8),
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: Colors.grey[50],
+                  color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Column(
@@ -920,12 +1080,32 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
                     TextField(
                       controller: _replyController,
                       maxLines: 3,
+                      style: TextStyle(
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
                       decoration: InputDecoration(
                         hintText: 'Write your reply...',
+                        hintStyle: TextStyle(
+                          color: isDark ? Colors.white70 : Colors.grey[400],
+                        ),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                          ),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(
+                            color: AppTheme.primary,
+                            width: 2,
+                          ),
                         ),
                         contentPadding: const EdgeInsets.all(12),
+                        fillColor: isDark
+                            ? const Color(0xFF1A1A1A)
+                            : Colors.white,
+                        filled: true,
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -939,13 +1119,18 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
                               _replyController.clear();
                             });
                           },
-                          child: const Text('Cancel'),
+                          child: Text(
+                            'Cancel',
+                            style: TextStyle(
+                              color: isDark ? Colors.white60 : Colors.grey[600],
+                            ),
+                          ),
                         ),
                         const SizedBox(width: 8),
                         ElevatedButton(
                           onPressed: () => _submitReply(review['id']),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFFFF6B8B),
+                            backgroundColor: AppTheme.primary,
                             foregroundColor: Colors.white,
                           ),
                           child: const Text('Submit Reply'),
@@ -977,20 +1162,24 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
                             ? Icons.close
                             : Icons.reply,
                         size: 18,
-                        color: const Color(0xFFFF6B8B),
+                        color: AppTheme.primary,
                       ),
                       tooltip: 'Reply to review',
                     ),
                     const Spacer(),
                     Row(
                       children: [
-                        Icon(Icons.thumb_up, size: 14, color: Colors.grey[500]),
+                        Icon(
+                          Icons.thumb_up,
+                          size: 14,
+                          color: isDark ? Colors.white70 : Colors.grey[500],
+                        ),
                         const SizedBox(width: 4),
                         Text(
                           '$helpfulCount',
                           style: TextStyle(
                             fontSize: 12,
-                            color: Colors.grey[500],
+                            color: isDark ? Colors.white70 : Colors.grey[500],
                           ),
                         ),
                       ],
@@ -1004,11 +1193,21 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
     );
   }
 
-  Widget _buildRatingChip({required String label, required int value}) {
+  Widget _buildRatingChip({
+    required String label,
+    required int value,
+    required bool isDark,
+  }) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(label, style: TextStyle(fontSize: 10, color: Colors.grey[500])),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 10,
+            color: isDark ? Colors.white70 : Colors.grey[500],
+          ),
+        ),
         const SizedBox(width: 4),
         Row(
           children: List.generate(5, (index) {
@@ -1016,7 +1215,9 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
             return Icon(
               isFilled ? Icons.star : Icons.star_border,
               size: 10,
-              color: isFilled ? Colors.amber : Colors.grey[300],
+              color: isFilled
+                  ? Colors.amber
+                  : (isDark ? Colors.white30 : Colors.grey[300]),
             );
           }),
         ),
@@ -1028,6 +1229,8 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
   // BUILD STATS TAB
   // ============================================================
   Widget _buildStatsTab() {
+    final isDark = context.isDarkMode;
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -1035,6 +1238,7 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
           // Overall Rating
           Card(
             elevation: 2,
+            color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
             ),
@@ -1042,17 +1246,20 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
               padding: const EdgeInsets.all(20),
               child: Column(
                 children: [
-                  const Text(
+                  Text(
                     'Overall Rating',
-                    style: TextStyle(fontSize: 14, color: Colors.grey),
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: isDark ? Colors.white60 : Colors.grey,
+                    ),
                   ),
                   const SizedBox(height: 8),
                   Text(
                     _averageRating.toStringAsFixed(1),
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 48,
                       fontWeight: FontWeight.bold,
-                      color: Color(0xFFFF6B8B),
+                      color: AppTheme.primary,
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -1063,14 +1270,19 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
                       return Icon(
                         isFilled ? Icons.star : Icons.star_border,
                         size: 28,
-                        color: isFilled ? Colors.amber : Colors.grey[300],
+                        color: isFilled
+                            ? Colors.amber
+                            : (isDark ? Colors.white30 : Colors.grey[300]),
                       );
                     }),
                   ),
                   const SizedBox(height: 8),
                   Text(
                     '$_totalReviews reviews',
-                    style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: isDark ? Colors.white60 : Colors.grey[600],
+                    ),
                   ),
                 ],
               ),
@@ -1081,6 +1293,7 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
           // Rating Distribution
           Card(
             elevation: 2,
+            color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
             ),
@@ -1089,9 +1302,13 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  Text(
                     'Rating Distribution',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
                   ),
                   const SizedBox(height: 16),
                   _buildRatingBar(
@@ -1099,6 +1316,7 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
                     count: _fiveStarCount,
                     total: _totalReviews,
                     color: Colors.green,
+                    isDark: isDark,
                   ),
                   const SizedBox(height: 8),
                   _buildRatingBar(
@@ -1106,6 +1324,7 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
                     count: _fourStarCount,
                     total: _totalReviews,
                     color: Colors.lightGreen,
+                    isDark: isDark,
                   ),
                   const SizedBox(height: 8),
                   _buildRatingBar(
@@ -1113,6 +1332,7 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
                     count: _threeStarCount,
                     total: _totalReviews,
                     color: Colors.amber,
+                    isDark: isDark,
                   ),
                   const SizedBox(height: 8),
                   _buildRatingBar(
@@ -1120,6 +1340,7 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
                     count: _twoStarCount,
                     total: _totalReviews,
                     color: Colors.orange,
+                    isDark: isDark,
                   ),
                   const SizedBox(height: 8),
                   _buildRatingBar(
@@ -1127,6 +1348,7 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
                     count: _oneStarCount,
                     total: _totalReviews,
                     color: Colors.red,
+                    isDark: isDark,
                   ),
                 ],
               ),
@@ -1137,6 +1359,7 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
           // Quick Stats
           Card(
             elevation: 2,
+            color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
             ),
@@ -1145,9 +1368,13 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  Text(
                     'Quick Stats',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
                   ),
                   const SizedBox(height: 12),
                   Row(
@@ -1158,6 +1385,7 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
                           value: '$_totalReviews',
                           icon: Icons.reviews,
                           color: Colors.blue,
+                          isDark: isDark,
                         ),
                       ),
                       Expanded(
@@ -1166,6 +1394,7 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
                           value: _averageRating.toStringAsFixed(1),
                           icon: Icons.star,
                           color: Colors.amber,
+                          isDark: isDark,
                         ),
                       ),
                     ],
@@ -1179,6 +1408,7 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
                           value: '$_fiveStarCount',
                           icon: Icons.star,
                           color: Colors.green,
+                          isDark: isDark,
                         ),
                       ),
                       Expanded(
@@ -1187,6 +1417,7 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
                           value: '$_fourStarCount',
                           icon: Icons.star,
                           color: Colors.lightGreen,
+                          isDark: isDark,
                         ),
                       ),
                     ],
@@ -1200,6 +1431,7 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
                           value: '$_threeStarCount',
                           icon: Icons.star,
                           color: Colors.amber,
+                          isDark: isDark,
                         ),
                       ),
                       Expanded(
@@ -1208,6 +1440,7 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
                           value: '$_twoStarCount',
                           icon: Icons.star,
                           color: Colors.orange,
+                          isDark: isDark,
                         ),
                       ),
                     ],
@@ -1221,6 +1454,7 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
                           value: '$_oneStarCount',
                           icon: Icons.star,
                           color: Colors.red,
+                          isDark: isDark,
                         ),
                       ),
                     ],
@@ -1239,6 +1473,7 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
     required int count,
     required int total,
     required Color color,
+    required bool isDark,
   }) {
     final percentage = total > 0 ? (count / total * 100) : 0;
 
@@ -1250,10 +1485,14 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
           children: [
             Text(
               label,
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
             ),
             Text(
-              '$count ($percentage.toStringAsFixed(1)%)',
+              '$count (${percentage.toStringAsFixed(1)}%)',
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w500,
@@ -1266,7 +1505,7 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
         Container(
           height: 8,
           decoration: BoxDecoration(
-            color: Colors.grey[200],
+            color: isDark ? Colors.grey[800] : Colors.grey[200],
             borderRadius: BorderRadius.circular(4),
           ),
           child: FractionallySizedBox(
@@ -1288,11 +1527,14 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
     required String value,
     required IconData icon,
     required Color color,
+    required bool isDark,
   }) {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
+        color: isDark
+            ? color.withValues(alpha: 0.15)
+            : color.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
@@ -1307,7 +1549,13 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
               color: color,
             ),
           ),
-          Text(label, style: TextStyle(fontSize: 10, color: Colors.grey[600])),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 10,
+              color: isDark ? Colors.white70 : Colors.grey[600],
+            ),
+          ),
         ],
       ),
     );
@@ -1342,22 +1590,34 @@ class _BarberReviewsScreenState extends State<BarberReviewsScreen>
   }
 
   Widget _buildEmptyState() {
+    final isDark = context.isDarkMode;
+
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.reviews, size: 80, color: Colors.grey[300]),
+          Icon(
+            Icons.reviews,
+            size: 80,
+            color: isDark ? Colors.white70 : Colors.grey[300],
+          ),
           const SizedBox(height: 16),
           Text(
             _searchQuery.isNotEmpty
                 ? 'No reviews found matching "$_searchQuery"'
                 : 'No reviews yet',
-            style: TextStyle(fontSize: 16, color: Colors.grey[600]),
+            style: TextStyle(
+              fontSize: 16,
+              color: isDark ? Colors.white60 : Colors.grey[600],
+            ),
           ),
           const SizedBox(height: 8),
           Text(
             'Reviews from your customers will appear here',
-            style: TextStyle(fontSize: 14, color: Colors.grey[400]),
+            style: TextStyle(
+              fontSize: 14,
+              color: isDark ? Colors.white70 : Colors.grey[400],
+            ),
           ),
           if (_searchQuery.isNotEmpty)
             TextButton(

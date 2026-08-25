@@ -5,6 +5,8 @@ import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../services/timezone_service.dart';
+import '../../theme/app_theme.dart';
+import '../../extensions/context_extensions.dart';
 
 class BarberScheduleViewScreen extends StatefulWidget {
   final String? salonId;
@@ -42,6 +44,14 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
   Map<int, List<Map<String, dynamic>>> _groupedSchedules = {};
   Map<int, List<Map<String, dynamic>>> _groupedBreaks = {};
 
+  // ✅ Android 16: Responsive variables
+  bool _isLargeScreen = false;
+  bool _isTablet = false;
+  bool _isWeb = false;
+
+  // ✅ Web Scroll Controller
+  final ScrollController _scrollController = ScrollController();
+
   final Map<int, String> _dayNames = {
     1: 'Monday',
     2: 'Tuesday',
@@ -58,6 +68,34 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
     _initializeTimezones();
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _checkScreenSize();
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  // ✅ Android 16: Check screen size for responsive layout
+  void _checkScreenSize() {
+    final size = MediaQuery.of(context).size;
+    final isLarge = size.width > 800 || size.height > 800;
+    final isTablet = size.shortestSide >= 600;
+    final isWeb = size.width > 800;
+
+    if (_isLargeScreen != isLarge || _isTablet != isTablet || _isWeb != isWeb) {
+      setState(() {
+        _isLargeScreen = isLarge;
+        _isTablet = isTablet;
+        _isWeb = isWeb;
+      });
+    }
+  }
+
   // ============================================================
   // TIMEZONE INITIALIZATION
   // ============================================================
@@ -65,11 +103,8 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
   Future<void> _initializeTimezones() async {
     await TimezoneService.initialize();
 
-    // Get user timezone from shared preferences (or use device timezone)
-    // For simplicity, we'll use device timezone
     _userTimezone = TimezoneService.getCurrentTimezone();
 
-    // Load salon timezone
     if (widget.salonId != null) {
       try {
         final salonIdInt = int.parse(widget.salonId!);
@@ -114,7 +149,6 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
 
       _barberId = currentUser.id;
 
-      // Get salon name if not already loaded
       if (widget.salonId != null && _salonName == null) {
         final salonResponse = await supabase
             .from('salons')
@@ -147,7 +181,6 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
 
     final salonIdInt = int.parse(widget.salonId!);
 
-    // 1. Load Regular Schedules
     final schedulesResponse = await supabase
         .from('barber_schedules')
         .select()
@@ -157,7 +190,6 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
 
     _regularSchedules = List<Map<String, dynamic>>.from(schedulesResponse);
 
-    // Group schedules by day
     _groupedSchedules = {};
     for (var schedule in _regularSchedules) {
       final day = schedule['day_of_week'] as int;
@@ -167,7 +199,6 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
       _groupedSchedules[day]!.add(schedule);
     }
 
-    // 2. Load Regular Breaks
     final breaksResponse = await supabase
         .from('barber_breaks')
         .select()
@@ -177,7 +208,6 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
 
     _regularBreaks = List<Map<String, dynamic>>.from(breaksResponse);
 
-    // Group breaks by day
     _groupedBreaks = {};
     for (var breakItem in _regularBreaks) {
       final day = breakItem['day_of_week'] as int;
@@ -187,7 +217,6 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
       _groupedBreaks[day]!.add(breakItem);
     }
 
-    // 3. Load Special Schedules
     final specialSchedulesResponse = await supabase
         .from('barber_special_schedules')
         .select()
@@ -199,7 +228,6 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
       specialSchedulesResponse,
     );
 
-    // 4. Load Special Breaks
     final specialBreaksResponse = await supabase
         .from('barber_special_breaks')
         .select()
@@ -209,7 +237,6 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
 
     _specialBreaks = List<Map<String, dynamic>>.from(specialBreaksResponse);
 
-    // 5. Load Appointments for selected date
     await _loadAppointments();
 
     debugPrint('✅ Loaded all data successfully');
@@ -324,7 +351,6 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
     try {
       return TimezoneService.utcToLocalTimeRecurring(utcTime);
     } catch (e) {
-      // Fallback
       final parts = utcTime.split(':');
       final hour = int.parse(parts[0]);
       final minute = int.parse(parts[1]);
@@ -369,6 +395,17 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
       initialDate: _selectedDate,
       firstDate: DateTime.now().subtract(const Duration(days: 30)),
       lastDate: DateTime.now().add(const Duration(days: 90)),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: AppTheme.primary,
+              brightness: Theme.of(context).brightness,
+            ),
+          ),
+          child: child!,
+        );
+      },
     );
 
     if (picked != null) {
@@ -401,128 +438,34 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
   }
 
   // ============================================================
-  // BUILD METHODS
+  // ✅ BUILD: DETAIL CHIP
   // ============================================================
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'My Schedule',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            if (_salonName != null)
-              Text(
-                _salonName!,
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.normal,
-                  color: Colors.white70,
-                ),
-              ),
-          ],
-        ),
-        backgroundColor: const Color(0xFFFF6B8B),
-        foregroundColor: Colors.white,
-        elevation: 0,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.calendar_today),
-            onPressed: _selectDate,
-            tooltip: 'Select Date',
-          ),
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadAllData,
-          ),
-        ],
+  Widget _buildDetailChip({
+    required IconData icon,
+    required String label,
+    required Color color,
+  }) {
+    final isDark = context.isDarkMode;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(8),
       ),
-      body: _isLoading
-          ? const Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  CircularProgressIndicator(color: Color(0xFFFF6B8B)),
-                  SizedBox(height: 16),
-                  Text('Loading schedule...'),
-                ],
-              ),
-            )
-          : _errorMessage != null
-              ? _buildErrorState()
-              : SingleChildScrollView(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Timezone info
-                        _buildTimezoneInfoCard(),
-                        const SizedBox(height: 16),
-
-                        // Date Navigator
-                        _buildDateNavigator(),
-                        const SizedBox(height: 16),
-
-                        // Today's Appointments
-                        _buildAppointmentsSection(),
-                        const SizedBox(height: 16),
-
-                        // Regular Schedule (All days)
-                        _buildRegularScheduleSection(),
-                        const SizedBox(height: 16),
-
-                        // Special Schedules
-                        if (_specialSchedules.isNotEmpty)
-                          _buildSpecialSchedulesSection(),
-                        const SizedBox(height: 16),
-
-                        // Regular Breaks
-                        if (_regularBreaks.isNotEmpty)
-                          _buildRegularBreaksSection(),
-                        const SizedBox(height: 16),
-
-                        // Special Breaks
-                        if (_specialBreaks.isNotEmpty)
-                          _buildSpecialBreaksSection(),
-                      ],
-                    ),
-                  ),
-                ),
-    );
-  }
-
-  // ============================================================
-  // BUILD: ERROR STATE
-  // ============================================================
-
-  Widget _buildErrorState() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.error_outline, size: 64, color: Colors.grey[400]),
-          const SizedBox(height: 16),
+          Icon(icon, size: 10, color: color),
+          const SizedBox(width: 3),
           Text(
-            _errorMessage!,
-            style: TextStyle(color: Colors.grey[600]),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 24),
-          ElevatedButton(
-            onPressed: _loadBarberData,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFFF6B8B),
-              foregroundColor: Colors.white,
+            label,
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w500,
+              color: isDark ? Colors.white : color,
             ),
-            child: const Text('Retry'),
           ),
         ],
       ),
@@ -530,212 +473,11 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
   }
 
   // ============================================================
-  // BUILD: TIMEZONE INFO
-  // ============================================================
-
-  Widget _buildTimezoneInfoCard() {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.grey[100],
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[300]!),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.access_time, size: 16, color: Colors.grey),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              '⏰ Times shown in: ${_getTimezoneDisplay()}',
-              style: const TextStyle(fontSize: 12, color: Colors.grey),
-            ),
-          ),
-          if (_salonTimezone.isNotEmpty && _salonTimezone != _userTimezone)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.orange.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Text(
-                'Salon: ${_salonTimezone.split('/').last}',
-                style: const TextStyle(fontSize: 10, color: Colors.orange),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  // ============================================================
-  // BUILD: DATE NAVIGATOR
-  // ============================================================
-
-  Widget _buildDateNavigator() {
-    final isToday = _selectedDate.isAtSameMomentAs(
-      DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day),
-    );
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withValues(alpha: 0.1),
-            spreadRadius: 2,
-            blurRadius: 8,
-          ),
-        ],
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          IconButton(
-            icon: const Icon(Icons.chevron_left, size: 28),
-            onPressed: _previousDate,
-            color: const Color(0xFFFF6B8B),
-          ),
-          Expanded(
-            child: GestureDetector(
-              onTap: _selectDate,
-              child: Column(
-                children: [
-                  Text(
-                    DateFormat('EEEE, MMM dd, yyyy').format(_selectedDate),
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  if (!isToday)
-                    TextButton(
-                      onPressed: _goToToday,
-                      style: TextButton.styleFrom(
-                        padding: EdgeInsets.zero,
-                        minimumSize: const Size(0, 20),
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                      child: const Text(
-                        'Go to Today',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Color(0xFFFF6B8B),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.chevron_right, size: 28),
-            onPressed: _nextDate,
-            color: const Color(0xFFFF6B8B),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ============================================================
-  // BUILD: APPOINTMENTS SECTION
-  // ============================================================
-
-  Widget _buildAppointmentsSection() {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withValues(alpha: 0.1),
-            spreadRadius: 2,
-            blurRadius: 8,
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                const Icon(Icons.calendar_today, color: Color(0xFFFF6B8B)),
-                const SizedBox(width: 8),
-                const Text(
-                  "Today's Appointments",
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const Spacer(),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    '${_appointments.length}',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFFFF6B8B),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          if (_appointments.isEmpty)
-            Padding(
-              padding: const EdgeInsets.all(32),
-              child: Center(
-                child: Column(
-                  children: [
-                    Icon(
-                      Icons.event_busy,
-                      size: 48,
-                      color: Colors.grey[300],
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'No appointments today',
-                      style: TextStyle(color: Colors.grey[500]),
-                    ),
-                  ],
-                ),
-              ),
-            )
-          else
-            ListView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              itemCount: _appointments.length,
-              itemBuilder: (context, index) {
-                final appointment = _appointments[index];
-                return _buildAppointmentCard(appointment);
-              },
-            ),
-          const SizedBox(height: 8),
-        ],
-      ),
-    );
-  }
-
-  // ============================================================
-  // BUILD: APPOINTMENT CARD
+  // ✅ BUILD: APPOINTMENT CARD
   // ============================================================
 
   Widget _buildAppointmentCard(Map<String, dynamic> appointment) {
+    final isDark = context.isDarkMode;
     final status = appointment['status'] as String? ?? 'pending';
     final (statusColor, statusLabel, statusIcon) = _getStatusInfo(status);
     final isVip = appointment['is_vip'] == true;
@@ -743,6 +485,7 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       elevation: 0,
+      color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
         side: BorderSide(
@@ -764,7 +507,7 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
                     vertical: 4,
                   ),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+                    color: AppTheme.primary.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Row(
@@ -773,7 +516,7 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
                       const Icon(
                         Icons.access_time,
                         size: 12,
-                        color: Color(0xFFFF6B8B),
+                        color: AppTheme.primary,
                       ),
                       const SizedBox(width: 4),
                       Text(
@@ -781,7 +524,7 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
                         style: const TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
-                          color: Color(0xFFFF6B8B),
+                          color: AppTheme.primary,
                         ),
                       ),
                     ],
@@ -826,7 +569,7 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
               children: [
                 CircleAvatar(
                   radius: 20,
-                  backgroundColor: Colors.grey[200],
+                  backgroundColor: isDark ? Colors.grey[800] : Colors.grey[200],
                   backgroundImage: appointment['customer_avatar'] != null
                       ? CachedNetworkImageProvider(
                           appointment['customer_avatar'])
@@ -839,7 +582,7 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
                           style: const TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
-                            color: Color(0xFFFF6B8B),
+                            color: AppTheme.primary,
                           ),
                         )
                       : null,
@@ -855,9 +598,10 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
                             child: Text(
                               appointment['customer_name'] ??
                                   'Unknown Customer',
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 14,
                                 fontWeight: FontWeight.w600,
+                                color: isDark ? Colors.white : Colors.black87,
                               ),
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -898,7 +642,7 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
                         appointment['service_name'] ?? 'Unknown Service',
                         style: TextStyle(
                           fontSize: 12,
-                          color: Colors.grey[600],
+                          color: isDark ? Colors.white60 : Colors.grey[600],
                         ),
                       ),
                     ],
@@ -943,129 +687,23 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
     );
   }
 
-  Widget _buildDetailChip({
-    required IconData icon,
-    required String label,
-    required Color color,
-  }) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 10, color: color),
-          const SizedBox(width: 3),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w500,
-              color: color,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   // ============================================================
-  // BUILD: REGULAR SCHEDULE SECTION
+  // ✅ BUILD: SCHEDULE DAY ITEM
   // ============================================================
-
-  Widget _buildRegularScheduleSection() {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withValues(alpha: 0.1),
-            spreadRadius: 2,
-            blurRadius: 8,
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                const Icon(Icons.schedule, color: Colors.green),
-                const SizedBox(width: 8),
-                const Text(
-                  'Regular Schedule',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const Spacer(),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.green.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    '${_regularSchedules.length} days',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.green,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          if (_regularSchedules.isEmpty)
-            const Padding(
-              padding: EdgeInsets.all(24),
-              child: Center(
-                child: Text(
-                  'No regular schedule set up yet',
-                  style: TextStyle(color: Colors.grey),
-                ),
-              ),
-            )
-          else
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Column(
-                children: _dayNames.entries.map((entry) {
-                  final day = entry.key;
-                  final dayName = entry.value;
-                  final schedules = _groupedSchedules[day] ?? [];
-
-                  if (schedules.isEmpty) return const SizedBox.shrink();
-
-                  return _buildScheduleDayItem(dayName, schedules);
-                }).toList(),
-              ),
-            ),
-          const SizedBox(height: 8),
-        ],
-      ),
-    );
-  }
 
   Widget _buildScheduleDayItem(
       String dayName, List<Map<String, dynamic>> schedules) {
+    final isDark = context.isDarkMode;
+
     return Container(
       margin: const EdgeInsets.only(bottom: 6),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: Colors.grey[50],
+        color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey[200]!),
+        border: Border.all(
+          color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
+        ),
       ),
       child: Row(
         children: [
@@ -1073,9 +711,10 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
             width: 90,
             child: Text(
               dayName,
-              style: const TextStyle(
+              style: TextStyle(
                 fontWeight: FontWeight.w600,
                 fontSize: 13,
+                color: isDark ? Colors.white : Colors.black87,
               ),
             ),
           ),
@@ -1117,7 +756,9 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
                         '$startTime - $endTime',
                         style: TextStyle(
                           fontSize: 11,
-                          color: isWorking ? Colors.grey[700] : Colors.grey[500],
+                          color: isWorking
+                              ? (isDark ? Colors.white70 : Colors.grey[700])
+                              : (isDark ? Colors.white70 : Colors.grey[500]),
                           decoration:
                               isWorking ? null : TextDecoration.lineThrough,
                         ),
@@ -1134,17 +775,332 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
   }
 
   // ============================================================
-  // BUILD: SPECIAL SCHEDULES SECTION
+  // ✅ BUILD: TIMEZONE INFO CARD
   // ============================================================
 
-  Widget _buildSpecialSchedulesSection() {
+  Widget _buildTimezoneInfoCard() {
+    final isDark = context.isDarkMode;
+
     return Container(
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isDark ? const Color(0xFF1E1E1E) : Colors.grey[100],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.access_time,
+            size: 16,
+            color: isDark ? Colors.white60 : Colors.grey,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '⏰ Times shown in: ${_getTimezoneDisplay()}',
+              style: TextStyle(
+                fontSize: 12,
+                color: isDark ? Colors.white60 : Colors.grey,
+              ),
+            ),
+          ),
+          if (_salonTimezone.isNotEmpty && _salonTimezone != _userTimezone)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.orange.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                'Salon: ${_salonTimezone.split('/').last}',
+                style: TextStyle(
+                  fontSize: 10,
+                  color: isDark ? Colors.orange[300] : Colors.orange,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  // ============================================================
+  // ✅ BUILD: DATE NAVIGATOR
+  // ============================================================
+
+  Widget _buildDateNavigator() {
+    final isDark = context.isDarkMode;
+    final isToday = _selectedDate.isAtSameMomentAs(
+      DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day),
+    );
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withValues(alpha: 0.1),
+            color: Colors.black.withValues(alpha: 0.05),
+            spreadRadius: 2,
+            blurRadius: 8,
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          IconButton(
+            icon: const Icon(Icons.chevron_left, size: 28),
+            onPressed: _previousDate,
+            color: AppTheme.primary,
+          ),
+          Expanded(
+            child: GestureDetector(
+              onTap: _selectDate,
+              child: Column(
+                children: [
+                  Text(
+                    DateFormat('EEEE, MMM dd, yyyy').format(_selectedDate),
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
+                  ),
+                  if (!isToday)
+                    TextButton(
+                      onPressed: _goToToday,
+                      style: TextButton.styleFrom(
+                        padding: EdgeInsets.zero,
+                        minimumSize: const Size(0, 20),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: Text(
+                        'Go to Today',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: AppTheme.primary,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.chevron_right, size: 28),
+            onPressed: _nextDate,
+            color: AppTheme.primary,
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ============================================================
+  // ✅ BUILD: APPOINTMENTS SECTION
+  // ============================================================
+
+  Widget _buildAppointmentsSection() {
+    final isDark = context.isDarkMode;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            spreadRadius: 2,
+            blurRadius: 8,
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                const Icon(Icons.calendar_today, color: AppTheme.primary),
+                const SizedBox(width: 8),
+                Text(
+                  "Today's Appointments",
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
+                ),
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primary.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    '${_appointments.length}',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: AppTheme.primary,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (_appointments.isEmpty)
+            Padding(
+              padding: const EdgeInsets.all(32),
+              child: Center(
+                child: Column(
+                  children: [
+                    Icon(
+                      Icons.event_busy,
+                      size: 48,
+                      color: isDark ? Colors.white30 : Colors.grey[300],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'No appointments today',
+                      style: TextStyle(
+                        color: isDark ? Colors.white70 : Colors.grey[500],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else
+            ListView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              itemCount: _appointments.length,
+              itemBuilder: (context, index) {
+                final appointment = _appointments[index];
+                return _buildAppointmentCard(appointment);
+              },
+            ),
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+
+  // ============================================================
+  // ✅ BUILD: REGULAR SCHEDULE SECTION
+  // ============================================================
+
+  Widget _buildRegularScheduleSection() {
+    final isDark = context.isDarkMode;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            spreadRadius: 2,
+            blurRadius: 8,
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                const Icon(Icons.schedule, color: Colors.green),
+                const SizedBox(width: 8),
+                Text(
+                  'Regular Schedule',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
+                ),
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.green.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    '${_regularSchedules.length} days',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.green,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (_regularSchedules.isEmpty)
+            Padding(
+              padding: const EdgeInsets.all(24),
+              child: Center(
+                child: Text(
+                  'No regular schedule set up yet',
+                  style: TextStyle(
+                    color: isDark ? Colors.white70 : Colors.grey,
+                  ),
+                ),
+              ),
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Column(
+                children: _dayNames.entries.map((entry) {
+                  final day = entry.key;
+                  final dayName = entry.value;
+                  final schedules = _groupedSchedules[day] ?? [];
+
+                  if (schedules.isEmpty) return const SizedBox.shrink();
+
+                  return _buildScheduleDayItem(dayName, schedules);
+                }).toList(),
+              ),
+            ),
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+
+  // ============================================================
+  // ✅ BUILD: SPECIAL SCHEDULES SECTION
+  // ============================================================
+
+  Widget _buildSpecialSchedulesSection() {
+    final isDark = context.isDarkMode;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
             spreadRadius: 2,
             blurRadius: 8,
           ),
@@ -1159,11 +1115,12 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
               children: [
                 const Icon(Icons.event, color: Colors.purple),
                 const SizedBox(width: 8),
-                const Text(
+                Text(
                   'Special Schedules',
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : Colors.black87,
                   ),
                 ),
                 const Spacer(),
@@ -1280,7 +1237,7 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
                                   '$startTime - $endTime',
                                   style: TextStyle(
                                     fontSize: 11,
-                                    color: Colors.blue[700],
+                                    color: isDark ? Colors.blue[300] : Colors.blue[700],
                                   ),
                                 ),
                               ),
@@ -1291,7 +1248,7 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
                                 reason,
                                 style: TextStyle(
                                   fontSize: 11,
-                                  color: Colors.grey[500],
+                                  color: isDark ? Colors.white70 : Colors.grey[500],
                                 ),
                               ),
                             ],
@@ -1311,17 +1268,19 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
   }
 
   // ============================================================
-  // BUILD: REGULAR BREAKS SECTION
+  // ✅ BUILD: REGULAR BREAKS SECTION
   // ============================================================
 
   Widget _buildRegularBreaksSection() {
+    final isDark = context.isDarkMode;
+
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withValues(alpha: 0.1),
+            color: Colors.black.withValues(alpha: 0.05),
             spreadRadius: 2,
             blurRadius: 8,
           ),
@@ -1336,11 +1295,12 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
               children: [
                 const Icon(Icons.free_breakfast, color: Colors.orange),
                 const SizedBox(width: 8),
-                const Text(
+                Text(
                   'Regular Breaks',
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : Colors.black87,
                   ),
                 ),
                 const Spacer(),
@@ -1445,14 +1405,14 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
                                       vertical: 2,
                                     ),
                                     decoration: BoxDecoration(
-                                      color: Colors.grey[200],
+                                      color: isDark ? Colors.grey[800] : Colors.grey[200],
                                       borderRadius: BorderRadius.circular(4),
                                     ),
                                     child: Text(
                                       breakType,
                                       style: TextStyle(
                                         fontSize: 8,
-                                        color: Colors.grey[600],
+                                        color: isDark ? Colors.white60 : Colors.grey[600],
                                       ),
                                     ),
                                   ),
@@ -1475,17 +1435,19 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
   }
 
   // ============================================================
-  // BUILD: SPECIAL BREAKS SECTION
+  // ✅ BUILD: SPECIAL BREAKS SECTION
   // ============================================================
 
   Widget _buildSpecialBreaksSection() {
+    final isDark = context.isDarkMode;
+
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withValues(alpha: 0.1),
+            color: Colors.black.withValues(alpha: 0.05),
             spreadRadius: 2,
             blurRadius: 8,
           ),
@@ -1500,11 +1462,12 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
               children: [
                 const Icon(Icons.event_busy, color: Colors.teal),
                 const SizedBox(width: 8),
-                const Text(
+                Text(
                   'Special Breaks',
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : Colors.black87,
                   ),
                 ),
                 const Spacer(),
@@ -1607,7 +1570,7 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
                                     '$startTime - $endTime',
                                     style: TextStyle(
                                       fontSize: 11,
-                                      color: Colors.teal[700],
+                                      color: isDark ? Colors.teal[300] : Colors.teal[700],
                                     ),
                                   ),
                                   const SizedBox(width: 4),
@@ -1617,14 +1580,14 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
                                       vertical: 2,
                                     ),
                                     decoration: BoxDecoration(
-                                      color: Colors.grey[200],
+                                      color: isDark ? Colors.grey[800] : Colors.grey[200],
                                       borderRadius: BorderRadius.circular(4),
                                     ),
                                     child: Text(
                                       breakTypeLabel,
                                       style: TextStyle(
                                         fontSize: 8,
-                                        color: Colors.grey[600],
+                                        color: isDark ? Colors.white60 : Colors.grey[600],
                                       ),
                                     ),
                                   ),
@@ -1643,6 +1606,179 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
           const SizedBox(height: 8),
         ],
       ),
+    );
+  }
+
+  // ============================================================
+  // ✅ BUILD: ERROR STATE
+  // ============================================================
+
+  Widget _buildErrorState() {
+    final isDark = context.isDarkMode;
+
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.error_outline,
+            size: 64,
+            color: isDark ? Colors.white70 : Colors.grey[400],
+          ),
+          const SizedBox(height: 16),
+          Text(
+            _errorMessage!,
+            style: TextStyle(
+              color: isDark ? Colors.white60 : Colors.grey[600],
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 24),
+          ElevatedButton(
+            onPressed: _loadBarberData,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.primary,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Retry'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ============================================================
+  // ✅ BUILD: DASHBOARD CONTENT
+  // ============================================================
+
+  Widget _buildContent() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Timezone info
+        _buildTimezoneInfoCard(),
+        const SizedBox(height: 16),
+
+        // Date Navigator
+        _buildDateNavigator(),
+        const SizedBox(height: 16),
+
+        // Today's Appointments
+        _buildAppointmentsSection(),
+        const SizedBox(height: 16),
+
+        // Regular Schedule (All days)
+        _buildRegularScheduleSection(),
+        const SizedBox(height: 16),
+
+        // Special Schedules
+        if (_specialSchedules.isNotEmpty) _buildSpecialSchedulesSection(),
+        const SizedBox(height: 16),
+
+        // Regular Breaks
+        if (_regularBreaks.isNotEmpty) _buildRegularBreaksSection(),
+        const SizedBox(height: 16),
+
+        // Special Breaks
+        if (_specialBreaks.isNotEmpty) _buildSpecialBreaksSection(),
+      ],
+    );
+  }
+
+  // ============================================================
+  // ✅ BUILD METHOD - WITH WEB FRAME
+  // ============================================================
+
+  @override
+  Widget build(BuildContext context) {
+    _checkScreenSize();
+    final isDark = context.isDarkMode;
+    final isWeb = _isWeb;
+
+    return Scaffold(
+      backgroundColor: isDark ? const Color(0xFF121212) : Colors.white,
+      appBar: AppBar(
+        title: Text(
+          _salonName != null ? 'My Schedule - $_salonName' : 'My Schedule',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+        ),
+        backgroundColor: AppTheme.primary,
+        foregroundColor: Colors.white,
+        elevation: 0,
+        centerTitle: isWeb,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+          tooltip: 'Back',
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.calendar_today, color: Colors.white),
+            onPressed: _selectDate,
+            tooltip: 'Select Date',
+          ),
+          // ✅ Refresh button removed from AppBar
+        ],
+      ),
+      body: SafeArea(
+        child: _isLoading
+            ? Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const CircularProgressIndicator(color: AppTheme.primary),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Loading schedule...',
+                      style: TextStyle(
+                        color: isDark ? Colors.white60 : Colors.grey[600],
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            : _errorMessage != null
+            ? _buildErrorState()
+            : isWeb
+            ? _buildWebLayout()
+            : _buildMobileLayout(),
+      ),
+    );
+  }
+
+  // ✅ WEB LAYOUT - Centered with Scrollbar
+  Widget _buildWebLayout() {
+    return Center(
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 1000),
+        child: Scrollbar(
+          controller: _scrollController,
+          thumbVisibility: true,
+          trackVisibility: true,
+          thickness: 8.0,
+          radius: const Radius.circular(10),
+          scrollbarOrientation: ScrollbarOrientation.right,
+          child: SingleChildScrollView(
+            controller: _scrollController,
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.all(24),
+            child: _buildContent(),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ✅ MOBILE LAYOUT
+  Widget _buildMobileLayout() {
+    return SingleChildScrollView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.all(16),
+      child: _buildContent(),
     );
   }
 }
