@@ -68,9 +68,9 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
   // Timezone
   String _currentTimezone = '';
-  String _currentTimezoneFlag = '';
-  String _currentTimezoneOffset = '';
-  String _currentDate = '';
+  String currentTimezoneFlag = '';
+  String currentTimezoneOffset = '';
+  String currentDate = '';
 
   // Onboarding steps
   int _completedSteps = 0;
@@ -545,25 +545,31 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   }
 
   // ============================================================
-  // ✅ TIMEZONE SELECTOR
+  // ✅ TIMEZONE SELECTOR (App Bar) — full dark-mode aware design
   // ============================================================
 
   Widget _buildTimezoneSelector() {
     final isDSTActive = TimezoneService.isDST();
     final flag = TimezoneService.getCurrentFlag();
     final displayName = TimezoneService.getTimezoneDisplayName();
+    final isDark = context.isDarkMode;
 
     return GestureDetector(
       onTap: _changeTimezone,
       child: Container(
         margin: const EdgeInsets.only(right: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.2),
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.08)
+              : Colors.white.withValues(alpha: 0.2),
           borderRadius: BorderRadius.circular(16),
           border: isDSTActive
               ? Border.all(color: Colors.amber, width: 1)
-              : null,
+              : Border.all(
+                  color: Colors.white.withValues(alpha: isDark ? 0.12 : 0.0),
+                  width: 1,
+                ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -583,14 +589,16 @@ class _OwnerDashboardState extends State<OwnerDashboard>
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
                 decoration: BoxDecoration(
-                  color: Colors.amber.shade100,
+                  color: isDark ? Colors.amber.shade900 : Colors.amber.shade100,
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Text(
                   'DST',
                   style: TextStyle(
                     fontSize: 7,
-                    color: Colors.amber.shade800,
+                    color: isDark
+                        ? Colors.amber.shade100
+                        : Colors.amber.shade800,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
@@ -1273,7 +1281,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     ];
 
     final weekdayIndex = now.weekday % 7;
-    _currentDate =
+    currentDate =
         '${weekdays[weekdayIndex]}, ${months[now.month - 1]} ${now.day}, ${now.year}';
   }
 
@@ -1289,14 +1297,15 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       await prefs.setString('cached_timezone', _currentTimezone);
     }
 
-    _currentTimezoneFlag = TimezoneService.getCurrentFlag();
-    _currentTimezoneOffset = TimezoneService.getUtcOffsetString();
+    currentTimezoneFlag = TimezoneService.getCurrentFlag();
+    currentTimezoneOffset = TimezoneService.getUtcOffsetString();
     _updateCurrentDate();
   }
 
   Future<void> _changeTimezone() async {
     final allTimezones = TimezoneService.getAllAvailableTimezones();
     final continentGroups = _groupTimezonesByContinent(allTimezones);
+    final isDark = context.isDarkMode;
 
     final List<Map<String, dynamic>> searchableList = [];
     for (var entry in continentGroups.entries) {
@@ -1305,13 +1314,14 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         final displayName = tz.split('/').last.replaceAll('_', ' ');
         final countryCode = _extractCountryCode(tz);
         final flag = _getFlagByCountryCode(countryCode);
+        final countryName = _getCountryNameByCode(countryCode);
 
         final searchText = [
           continent.toLowerCase(),
           displayName.toLowerCase(),
           tz.toLowerCase(),
           countryCode.toLowerCase(),
-          displayName.toLowerCase(),
+          countryName.toLowerCase(),
         ].join(' ');
 
         searchableList.add({
@@ -1319,6 +1329,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           'displayName': displayName,
           'continent': continent,
           'flag': flag,
+          'countryName': countryName,
           'searchText': searchText,
         });
       }
@@ -1333,24 +1344,50 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
         return StatefulBuilder(
           builder: (context, setDialogState) {
+            // ✅ Search query එක අනුව filter කරන්න
             List<Map<String, dynamic>> filteredList = searchableList;
-            if (searchQuery.isNotEmpty) {
-              final query = searchQuery.toLowerCase();
-              filteredList = searchableList
-                  .where((item) => item['searchText'].contains(query))
-                  .toList();
+            bool hasSearchQuery = searchQuery.isNotEmpty;
+
+            if (hasSearchQuery) {
+              final query = searchQuery.toLowerCase().trim();
+              filteredList =
+                  searchableList
+                      .where(
+                        (item) =>
+                            (item['searchText'] as String).contains(query),
+                      )
+                      .toList()
+                    ..sort((a, b) {
+                      int score(Map<String, dynamic> item) {
+                        final country = (item['countryName'] as String)
+                            .toLowerCase();
+                        final display = (item['displayName'] as String)
+                            .toLowerCase();
+                        if (country == query) return 0;
+                        if (country.startsWith(query)) return 1;
+                        if (display.startsWith(query)) return 2;
+                        if (country.contains(query)) return 3;
+                        return 4;
+                      }
+
+                      return score(a).compareTo(score(b));
+                    });
             }
 
+            // ✅ Search results group කරන්න
             Map<String, List<Map<String, dynamic>>> filteredGroups = {};
-            for (var item in filteredList) {
-              final continent = item['continent'];
-              if (!filteredGroups.containsKey(continent)) {
-                filteredGroups[continent] = [];
+            if (hasSearchQuery && filteredList.isNotEmpty) {
+              for (var item in filteredList) {
+                final continent = item['continent'];
+                if (!filteredGroups.containsKey(continent)) {
+                  filteredGroups[continent] = [];
+                }
+                filteredGroups[continent]!.add(item);
               }
-              filteredGroups[continent]!.add(item);
             }
 
             return Dialog(
+              backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(24),
               ),
@@ -1361,12 +1398,15 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                 child: Column(
                   children: [
                     _buildDialogHeader(),
-                    const Divider(),
+                    Divider(color: isDark ? Colors.white12 : null),
                     Container(
                       margin: const EdgeInsets.symmetric(vertical: 12),
                       child: TextField(
                         controller: searchController,
                         autofocus: false,
+                        style: TextStyle(
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
                         onChanged: (value) {
                           setDialogState(() {
                             searchQuery = value;
@@ -1375,16 +1415,20 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                         decoration: InputDecoration(
                           hintText:
                               '🔍 Search by country, city, or timezone...',
-                          hintStyle: TextStyle(color: Colors.grey[400]),
-                          prefixIcon: const Icon(
+                          hintStyle: TextStyle(
+                            color: isDark ? Colors.white38 : Colors.grey[400],
+                          ),
+                          prefixIcon: Icon(
                             Icons.search,
-                            color: Colors.grey,
+                            color: isDark ? Colors.white38 : Colors.grey,
                           ),
                           suffixIcon: searchQuery.isNotEmpty
                               ? IconButton(
-                                  icon: const Icon(
+                                  icon: Icon(
                                     Icons.clear,
-                                    color: Colors.grey,
+                                    color: isDark
+                                        ? Colors.white38
+                                        : Colors.grey,
                                   ),
                                   onPressed: () {
                                     searchController.clear();
@@ -1399,7 +1443,9 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                             borderSide: BorderSide.none,
                           ),
                           filled: true,
-                          fillColor: Colors.grey[100],
+                          fillColor: isDark
+                              ? Colors.white.withValues(alpha: 0.06)
+                              : Colors.grey[100],
                           contentPadding: const EdgeInsets.symmetric(
                             horizontal: 16,
                             vertical: 14,
@@ -1407,20 +1453,146 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                         ),
                       ),
                     ),
+                    // ✅ Search results count
                     if (searchQuery.isNotEmpty)
                       Padding(
                         padding: const EdgeInsets.only(bottom: 8),
-                        child: Text(
-                          'Found ${filteredList.length} timezone${filteredList.length != 1 ? 's' : ''}',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[600],
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            'Found ${filteredList.length} timezone${filteredList.length != 1 ? 's' : ''}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: isDark ? Colors.white54 : Colors.grey[600],
+                            ),
                           ),
                         ),
                       ),
                     Expanded(
-                      child: searchQuery.isEmpty
-                          ? DefaultTabController(
+                      child: hasSearchQuery
+                          ? filteredList.isNotEmpty
+                                ? ListView.builder(
+                                    itemCount: filteredGroups.keys.length,
+                                    itemBuilder: (context, index) {
+                                      final continent = filteredGroups.keys
+                                          .elementAt(index);
+                                      final items = filteredGroups[continent]!;
+                                      return Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 8,
+                                              vertical: 12,
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Text(
+                                                  _getContinentEmoji(continent),
+                                                  style: const TextStyle(
+                                                    fontSize: 18,
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 8),
+                                                Text(
+                                                  continent,
+                                                  style: TextStyle(
+                                                    fontWeight: FontWeight.bold,
+                                                    fontSize: 14,
+                                                    color: isDark
+                                                        ? Colors.white
+                                                        : Colors.black87,
+                                                  ),
+                                                ),
+                                                Container(
+                                                  margin: const EdgeInsets.only(
+                                                    left: 8,
+                                                  ),
+                                                  padding:
+                                                      const EdgeInsets.symmetric(
+                                                        horizontal: 6,
+                                                        vertical: 2,
+                                                      ),
+                                                  decoration: BoxDecoration(
+                                                    color: isDark
+                                                        ? Colors.white12
+                                                        : Colors.grey[200],
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          10,
+                                                        ),
+                                                  ),
+                                                  child: Text(
+                                                    '${items.length}',
+                                                    style: TextStyle(
+                                                      fontSize: 10,
+                                                      color: isDark
+                                                          ? Colors.white60
+                                                          : Colors.grey[600],
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                          ...items.map(
+                                            (item) => _buildTimezoneTile(
+                                              item['timezone'],
+                                              item['displayName'],
+                                              item['flag'],
+                                              isDark,
+                                            ),
+                                          ),
+                                          if (index !=
+                                              filteredGroups.keys.length - 1)
+                                            Divider(
+                                              color: isDark
+                                                  ? Colors.white12
+                                                  : null,
+                                            ),
+                                        ],
+                                      );
+                                    },
+                                  )
+                                : Center(
+                                    child: Column(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        Icon(
+                                          Icons.search_off,
+                                          size: 64,
+                                          color: isDark
+                                              ? Colors.white24
+                                              : Colors.grey[400],
+                                        ),
+                                        const SizedBox(height: 16),
+                                        Text(
+                                          'No timezones found',
+                                          style: TextStyle(
+                                            fontSize: 16,
+                                            color: isDark
+                                                ? Colors.white60
+                                                : Colors.grey[600],
+                                          ),
+                                        ),
+                                        const SizedBox(height: 8),
+                                        Text(
+                                          'Try "Sri Lanka", "Tokyo", "London", or "New York"',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: isDark
+                                                ? Colors.white38
+                                                : Colors.grey[500],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  )
+                          // ✅ Search query නැති විට TabBar එක පෙන්වන්න
+                          : DefaultTabController(
                               length: continentGroups.keys.length,
                               child: Column(
                                 children: [
@@ -1429,7 +1601,9 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                                     child: TabBar(
                                       isScrollable: true,
                                       labelColor: AppTheme.primary,
-                                      unselectedLabelColor: Colors.grey,
+                                      unselectedLabelColor: isDark
+                                          ? Colors.white54
+                                          : Colors.grey,
                                       indicatorColor: AppTheme.primary,
                                       labelStyle: const TextStyle(
                                         fontWeight: FontWeight.w600,
@@ -1465,108 +1639,11 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                                               tz,
                                               displayName,
                                               flag,
+                                              isDark,
                                             );
                                           },
                                         );
                                       }).toList(),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            )
-                          : filteredList.isNotEmpty
-                          ? ListView.builder(
-                              itemCount: filteredGroups.keys.length,
-                              itemBuilder: (context, index) {
-                                final continent = filteredGroups.keys.elementAt(
-                                  index,
-                                );
-                                final items = filteredGroups[continent]!;
-                                return Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 8,
-                                        vertical: 12,
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Text(
-                                            _getContinentEmoji(continent),
-                                            style: const TextStyle(
-                                              fontSize: 18,
-                                            ),
-                                          ),
-                                          const SizedBox(width: 8),
-                                          Text(
-                                            continent,
-                                            style: const TextStyle(
-                                              fontWeight: FontWeight.bold,
-                                              fontSize: 14,
-                                            ),
-                                          ),
-                                          Container(
-                                            margin: const EdgeInsets.only(
-                                              left: 8,
-                                            ),
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 6,
-                                              vertical: 2,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: Colors.grey[200],
-                                              borderRadius:
-                                                  BorderRadius.circular(10),
-                                            ),
-                                            child: Text(
-                                              '${items.length}',
-                                              style: TextStyle(
-                                                fontSize: 10,
-                                                color: Colors.grey[600],
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    ...items.map(
-                                      (item) => _buildTimezoneTile(
-                                        item['timezone'],
-                                        item['displayName'],
-                                        item['flag'],
-                                      ),
-                                    ),
-                                    if (index != filteredGroups.keys.length - 1)
-                                      const Divider(),
-                                  ],
-                                );
-                              },
-                            )
-                          : Center(
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(
-                                    Icons.search_off,
-                                    size: 64,
-                                    color: Colors.grey[400],
-                                  ),
-                                  const SizedBox(height: 16),
-                                  Text(
-                                    'No timezones found',
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      color: Colors.grey[600],
-                                    ),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    'Try "Sri Lanka", "Tokyo", "London", or "New York"',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.grey[500],
                                     ),
                                   ),
                                 ],
@@ -1598,8 +1675,8 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       await prefs.setString('cached_timezone', newTimezone);
 
       _currentTimezone = newTimezone;
-      _currentTimezoneFlag = TimezoneService.getCurrentFlag();
-      _currentTimezoneOffset = TimezoneService.getUtcOffsetString();
+      currentTimezoneFlag = TimezoneService.getCurrentFlag();
+      currentTimezoneOffset = TimezoneService.getUtcOffsetString();
 
       await _loadAllData();
 
@@ -1690,6 +1767,56 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     return '';
   }
 
+  // ✅ Full country names so searching "Sri Lanka" (not just "LK")
+  // correctly matches Asia/Colombo and keeps it visible & tappable.
+  String _getCountryNameByCode(String countryCode) {
+    final names = {
+      'LK': 'Sri Lanka',
+      'JP': 'Japan',
+      'KR': 'South Korea Korea',
+      'CN': 'China',
+      'HK': 'Hong Kong',
+      'TW': 'Taiwan',
+      'IN': 'India',
+      'AE': 'United Arab Emirates Dubai UAE',
+      'SG': 'Singapore',
+      'MY': 'Malaysia',
+      'TH': 'Thailand',
+      'ID': 'Indonesia',
+      'PH': 'Philippines',
+      'VN': 'Vietnam',
+      'BD': 'Bangladesh',
+      'PK': 'Pakistan',
+      'NP': 'Nepal',
+      'SA': 'Saudi Arabia',
+      'KW': 'Kuwait',
+      'QA': 'Qatar',
+      'GB': 'United Kingdom England Britain UK',
+      'FR': 'France',
+      'DE': 'Germany',
+      'IT': 'Italy',
+      'ES': 'Spain',
+      'NL': 'Netherlands Holland',
+      'CH': 'Switzerland',
+      'RU': 'Russia',
+      'US': 'United States America USA',
+      'CA': 'Canada',
+      'MX': 'Mexico',
+      'BR': 'Brazil',
+      'AU': 'Australia',
+      'NZ': 'New Zealand',
+      'ZA': 'South Africa',
+      'EG': 'Egypt',
+      'NG': 'Nigeria',
+      'KE': 'Kenya',
+      'AR': 'Argentina',
+      'CL': 'Chile',
+      'CO': 'Colombia',
+      'PE': 'Peru',
+    };
+    return names[countryCode] ?? '';
+  }
+
   String _getFlagByCountryCode(String countryCode) {
     final flags = {
       'LK': '🇱🇰',
@@ -1757,31 +1884,45 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     return groups;
   }
 
-  Widget _buildTimezoneTile(String tz, String displayName, String flag) {
+  Widget _buildTimezoneTile(
+    String tz,
+    String displayName,
+    String flag, [
+    bool isDark = false,
+  ]) {
     final isSelected = tz == _currentTimezone;
 
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 2),
-      decoration: BoxDecoration(
-        color: isSelected ? AppTheme.primary.withValues(alpha: 0.1) : null,
-        borderRadius: BorderRadius.circular(12),
-      ),
+    // ✅ හරි විදිය - Material wrapper එක ඇතුළේ ListTile එක දාන්න
+    // Container එකේ decoration color එක ඉවත් කරලා Material එකේ color එක use කරන්න
+    return Material(
+      color: isSelected
+          ? AppTheme.primary.withValues(alpha: isDark ? 0.18 : 0.1)
+          : Colors.transparent,
+      borderRadius: BorderRadius.circular(12),
+      clipBehavior: Clip.antiAlias,
       child: ListTile(
         leading: CircleAvatar(
           radius: 20,
-          backgroundColor: isSelected ? AppTheme.primary : Colors.grey[200],
+          backgroundColor: isSelected
+              ? AppTheme.primary
+              : (isDark ? Colors.white12 : Colors.grey[200]),
           child: Text(flag, style: const TextStyle(fontSize: 16)),
         ),
         title: Text(
           displayName,
           style: TextStyle(
             fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-            color: isSelected ? AppTheme.primary : null,
+            color: isSelected
+                ? AppTheme.primary
+                : (isDark ? Colors.white : Colors.black87),
           ),
         ),
         subtitle: Text(
           tz,
-          style: const TextStyle(fontSize: 11),
+          style: TextStyle(
+            fontSize: 11,
+            color: isDark ? Colors.white54 : Colors.grey[600],
+          ),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
@@ -1789,68 +1930,18 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             ? const Icon(Icons.check_circle, color: AppTheme.primary)
             : null,
         onTap: () => Navigator.of(context).pop(tz),
+        splashColor: AppTheme.primary.withValues(alpha: 0.15),
+        hoverColor: AppTheme.primary.withValues(alpha: 0.05),
+        // ✅ margin එක add කරන්න
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
     );
   }
 
-  Widget _buildCurrentTimezoneInfo() {
-    final displayName = _currentTimezone.split('/').last.replaceAll('_', ' ');
-    final offset = TimezoneService.getUtcOffsetString();
-    final flag = TimezoneService.getCurrentFlag();
-
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.grey[50],
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[200]!),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(flag, style: const TextStyle(fontSize: 24)),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Current: $displayName',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 13,
-                  ),
-                ),
-                Text(
-                  _currentTimezone,
-                  style: const TextStyle(fontSize: 10, color: Colors.grey),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: AppTheme.primary.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Text(
-              offset,
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 11,
-                color: AppTheme.primary,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
+  // Dialog Header
   Widget _buildDialogHeader() {
+    final isDark = context.isDarkMode;
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 12),
       child: Row(
@@ -1859,7 +1950,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: AppTheme.primary.withValues(alpha: 0.1),
+              color: AppTheme.primary.withValues(alpha: isDark ? 0.18 : 0.1),
               borderRadius: BorderRadius.circular(12),
             ),
             child: const Icon(
@@ -1880,7 +1971,10 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             ),
           ),
           IconButton(
-            icon: const Icon(Icons.close),
+            icon: Icon(
+              Icons.close,
+              color: isDark ? Colors.white70 : Colors.black87,
+            ),
             onPressed: () => Navigator.pop(context),
           ),
         ],
@@ -1888,6 +1982,70 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     );
   }
 
+  // Current Timezone Info
+  Widget _buildCurrentTimezoneInfo() {
+    final displayName = _currentTimezone.split('/').last.replaceAll('_', ' ');
+    final offset = TimezoneService.getUtcOffsetString();
+    final flag = TimezoneService.getCurrentFlag();
+    final isDark = context.isDarkMode;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.grey[50],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: isDark ? Colors.white12 : Colors.grey[200]!),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(flag, style: const TextStyle(fontSize: 24)),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Current: $displayName',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
+                ),
+                Text(
+                  _currentTimezone,
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: isDark ? Colors.white54 : Colors.grey,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: AppTheme.primary.withValues(alpha: isDark ? 0.18 : 0.1),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text(
+              offset,
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 11,
+                color: AppTheme.primary,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Continent Emoji
   String _getContinentEmoji(String continent) {
     final emojis = {
       'Asia': '🌏',
@@ -2403,42 +2561,71 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   }) {
     final isDark = context.isDarkMode;
 
-    return GestureDetector(
-      onTap: enabled ? onTap : null,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        decoration: BoxDecoration(
-          color: enabled
-              ? color.withValues(alpha: 0.1)
-              : (isDark
-                    ? Colors.grey[800]
-                    : Colors.grey.withValues(alpha: 0.05)),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              icon,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: enabled ? onTap : null,
+        borderRadius: BorderRadius.circular(14),
+        splashColor: color.withValues(alpha: 0.15),
+        highlightColor: color.withValues(alpha: 0.08),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+          decoration: BoxDecoration(
+            color: enabled
+                ? (isDark
+                      ? color.withValues(alpha: 0.14)
+                      : color.withValues(alpha: 0.08))
+                : (isDark
+                      ? Colors.white.withValues(alpha: 0.03)
+                      : Colors.grey.withValues(alpha: 0.05)),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
               color: enabled
-                  ? color
-                  : (isDark ? Colors.grey[600] : Colors.grey[400]),
-              size: 28,
+                  ? color.withValues(alpha: isDark ? 0.35 : 0.18)
+                  : (isDark
+                        ? Colors.white12
+                        : Colors.grey.withValues(alpha: 0.12)),
+              width: 1,
             ),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 12,
-                color: enabled
-                    ? color
-                    : (isDark ? Colors.grey[500] : Colors.grey[500]),
-                fontWeight: FontWeight.w500,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: enabled
+                      ? color.withValues(alpha: isDark ? 0.28 : 0.15)
+                      : (isDark
+                            ? Colors.white10
+                            : Colors.grey.withValues(alpha: 0.12)),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  icon,
+                  color: enabled
+                      ? color
+                      : (isDark ? Colors.grey[600] : Colors.grey[400]),
+                  size: 20,
+                ),
               ),
-              textAlign: TextAlign.center,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ],
+              const SizedBox(height: 8),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: enabled
+                      ? (isDark ? color.withValues(alpha: 0.95) : color)
+                      : (isDark ? Colors.grey[500] : Colors.grey[500]),
+                  fontWeight: FontWeight.w600,
+                ),
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -2502,7 +2689,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             children: [
               Expanded(
                 child: DashboardStatCard(
-                  title: "Today's Appointments",
+                  title: "Today's",
                   value: '$_todayAppointments',
                   icon: Icons.calendar_today,
                   color: Colors.blue,
@@ -2612,7 +2799,10 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                 ),
               ),
             const Spacer(),
-            if (_ownerSalons.length > 1) _buildSalonSelectorChip(),
+            // ✅ Only show this chip on mobile — on web the salon selector
+            // already appears in the AppBar actions, so showing both was
+            // producing two salon selectors in the app bar.
+            if (!isWeb && _ownerSalons.length > 1) _buildSalonSelectorChip(),
           ],
         ),
         actions: [
@@ -2673,6 +2863,9 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         profileImageUrl: _profileImageUrl,
         selectedSalonId: _selectedSalonId,
         onMenuItemSelected: () => _refreshAllData(),
+        onSalonChanged: (String salonId) {
+          _switchSalon(salonId); // Public method එක call කරන්න
+        },
       ),
       // ✅ EDGE-TO-EDGE: SafeArea with responsive body
       body: SafeArea(
@@ -2740,7 +2933,8 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             message: _permissionManager.getPermissionCardMessage(),
             compact: true,
           ),
-        _buildSimpleHeader(),
+
+        const SizedBox(height: 8),
 
         if (_completedSteps < _totalSteps) _buildStepFlow(),
 
@@ -2801,252 +2995,307 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
         const SizedBox(height: 16),
 
-        // ✅ MANAGEMENT CARD
-        Container(
-          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.1),
-                blurRadius: 8.0,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.settings, size: 20, color: AppTheme.primary),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Management',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: isDark ? Colors.white : Colors.black87,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Salon Management',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: isDark ? Colors.white60 : Colors.grey,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  SizedBox(
-                    width: isDesktop ? 120 : double.infinity,
-                    child: _buildQuickAction(
-                      icon: Icons.add_business,
-                      label: 'Create Salon',
-                      color: AppTheme.primary,
-                      onTap: _navigateToCreateSalon,
-                    ),
-                  ),
-                  SizedBox(
-                    width: isDesktop ? 120 : double.infinity,
-                    child: _buildQuickAction(
-                      icon: Icons.edit,
-                      label: 'Edit Salon',
-                      color: Colors.blue,
-                      onTap: _navigateToEditSalon,
-                      enabled: _ownerSalons.isNotEmpty,
-                    ),
-                  ),
-                  SizedBox(
-                    width: isDesktop ? 120 : double.infinity,
-                    child: _buildQuickAction(
-                      icon: Icons.beach_access,
-                      label: 'Holidays',
-                      color: Colors.teal,
-                      onTap: _viewSalonHolidays,
-                      enabled: _ownerSalons.isNotEmpty,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Service Management',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: isDark ? Colors.white60 : Colors.grey,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  SizedBox(
-                    width: isDesktop ? 120 : double.infinity,
-                    child: _buildQuickAction(
-                      icon: Icons.build,
-                      label: 'Add Service',
-                      color: Colors.green,
-                      onTap: _navigateToAddService,
-                      enabled: _ownerSalons.isNotEmpty,
-                    ),
-                  ),
-                  SizedBox(
-                    width: isDesktop ? 120 : double.infinity,
-                    child: _buildQuickAction(
-                      icon: Icons.list,
-                      label: 'Service List',
-                      color: Colors.cyan,
-                      onTap: _navigateToServiceList,
-                      enabled: _ownerSalons.isNotEmpty,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Barber Management',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: isDark ? Colors.white60 : Colors.grey,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  SizedBox(
-                    width: isDesktop ? 120 : double.infinity,
-                    child: _buildQuickAction(
-                      icon: Icons.person_add,
-                      label: 'Add Barber',
-                      color: Colors.purple,
-                      onTap: _navigateToAddBarber,
-                      enabled: _ownerSalons.isNotEmpty,
-                    ),
-                  ),
-                  SizedBox(
-                    width: isDesktop ? 120 : double.infinity,
-                    child: _buildQuickAction(
-                      icon: Icons.calendar_month,
-                      label: 'Schedule',
-                      color: Colors.teal,
-                      onTap: _navigateToBarberSchedule,
-                      enabled: _ownerSalons.isNotEmpty,
-                    ),
-                  ),
-                  SizedBox(
-                    width: isDesktop ? 120 : double.infinity,
-                    child: _buildQuickAction(
-                      icon: Icons.beach_access,
-                      label: 'Leaves',
-                      color: Colors.orange,
-                      onTap: _navigateToBarberLeaves,
-                      enabled: _ownerSalons.isNotEmpty,
-                    ),
-                  ),
-                  SizedBox(
-                    width: isDesktop ? 120 : double.infinity,
-                    child: _buildQuickAction(
-                      icon: Icons.list,
-                      label: 'Barber List',
-                      color: Colors.indigo,
-                      onTap: _navigateToBarberList,
-                      enabled: _ownerSalons.isNotEmpty,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Offers & Promotions',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: isDark ? Colors.white60 : Colors.grey,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  SizedBox(
-                    width: isDesktop ? 120 : double.infinity,
-                    child: _buildQuickAction(
-                      icon: Icons.local_offer,
-                      label: 'Manage Offers',
-                      color: AppTheme.primary,
-                      onTap: _navigateToOffers,
-                      enabled: _ownerSalons.isNotEmpty,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Reports',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: isDark ? Colors.white60 : Colors.grey,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  SizedBox(
-                    width: isDesktop ? 120 : double.infinity,
-                    child: _buildQuickAction(
-                      icon: Icons.bar_chart,
-                      label: 'Reports',
-                      color: Colors.deepOrange,
-                      onTap: _viewReports,
-                    ),
-                  ),
-                  SizedBox(
-                    width: isDesktop ? 120 : double.infinity,
-                    child: _buildQuickAction(
-                      icon: Icons.analytics,
-                      label: 'Analytics',
-                      color: Colors.indigoAccent,
-                      onTap: _viewAnalytics,
-                    ),
-                  ),
-                  SizedBox(
-                    width: isDesktop ? 120 : double.infinity,
-                    child: _buildQuickAction(
-                      icon: Icons.settings,
-                      label: 'Settings',
-                      color: Colors.grey,
-                      onTap: _viewSettings,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-            ],
-          ),
-        ),
+        _buildManagementSection(isDesktop: isDesktop, isDark: isDark),
+
         const SizedBox(height: 80),
       ],
+    );
+  }
+
+  // ============================================================
+  // ✅ MANAGEMENT SECTION — fully responsive redesign
+  // ============================================================
+
+  Widget _buildManagementSection({
+    required bool isDesktop,
+    required bool isDark,
+  }) {
+    final categories = <_ManagementCategory>[
+      _ManagementCategory(
+        title: 'Salon Management',
+        icon: Icons.storefront_rounded,
+        color: AppTheme.primary,
+        actions: [
+          _ManagementAction(
+            icon: Icons.add_business,
+            label: 'Create Salon',
+            color: AppTheme.primary,
+            onTap: _navigateToCreateSalon,
+          ),
+          _ManagementAction(
+            icon: Icons.edit,
+            label: 'Edit Salon',
+            color: Colors.blue,
+            onTap: _navigateToEditSalon,
+            enabled: _ownerSalons.isNotEmpty,
+          ),
+          _ManagementAction(
+            icon: Icons.beach_access,
+            label: 'Holidays',
+            color: Colors.teal,
+            onTap: _viewSalonHolidays,
+            enabled: _ownerSalons.isNotEmpty,
+          ),
+        ],
+      ),
+      _ManagementCategory(
+        title: 'Service Management',
+        icon: Icons.design_services_rounded,
+        color: Colors.green,
+        actions: [
+          _ManagementAction(
+            icon: Icons.build,
+            label: 'Add Service',
+            color: Colors.green,
+            onTap: _navigateToAddService,
+            enabled: _ownerSalons.isNotEmpty,
+          ),
+          _ManagementAction(
+            icon: Icons.list,
+            label: 'Service List',
+            color: Colors.cyan,
+            onTap: _navigateToServiceList,
+            enabled: _ownerSalons.isNotEmpty,
+          ),
+        ],
+      ),
+      _ManagementCategory(
+        title: 'Barber Management',
+        icon: Icons.content_cut_rounded,
+        color: Colors.purple,
+        actions: [
+          _ManagementAction(
+            icon: Icons.person_add,
+            label: 'Add Barber',
+            color: Colors.purple,
+            onTap: _navigateToAddBarber,
+            enabled: _ownerSalons.isNotEmpty,
+          ),
+          _ManagementAction(
+            icon: Icons.calendar_month,
+            label: 'Schedule',
+            color: Colors.teal,
+            onTap: _navigateToBarberSchedule,
+            enabled: _ownerSalons.isNotEmpty,
+          ),
+          _ManagementAction(
+            icon: Icons.beach_access,
+            label: 'Leaves',
+            color: Colors.orange,
+            onTap: _navigateToBarberLeaves,
+            enabled: _ownerSalons.isNotEmpty,
+          ),
+          _ManagementAction(
+            icon: Icons.list,
+            label: 'Barber List',
+            color: Colors.indigo,
+            onTap: _navigateToBarberList,
+            enabled: _ownerSalons.isNotEmpty,
+          ),
+        ],
+      ),
+      _ManagementCategory(
+        title: 'Offers & Promotions',
+        icon: Icons.local_offer_rounded,
+        color: Colors.pinkAccent,
+        actions: [
+          _ManagementAction(
+            icon: Icons.local_offer,
+            label: 'Manage Offers',
+            color: AppTheme.primary,
+            onTap: _navigateToOffers,
+            enabled: _ownerSalons.isNotEmpty,
+          ),
+        ],
+      ),
+      _ManagementCategory(
+        title: 'Reports & Insights',
+        icon: Icons.insights_rounded,
+        color: Colors.deepOrange,
+        actions: [
+          _ManagementAction(
+            icon: Icons.bar_chart,
+            label: 'Reports',
+            color: Colors.deepOrange,
+            onTap: _viewReports,
+          ),
+          _ManagementAction(
+            icon: Icons.analytics,
+            label: 'Analytics',
+            color: Colors.indigoAccent,
+            onTap: _viewAnalytics,
+          ),
+          _ManagementAction(
+            icon: Icons.settings,
+            label: 'Settings',
+            color: Colors.grey,
+            onTap: _viewSettings,
+          ),
+        ],
+      ),
+    ];
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.06)
+              : Colors.transparent,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.08),
+            blurRadius: 16.0,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: AppTheme.primary.withValues(alpha: isDark ? 0.2 : 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.settings_suggest_rounded,
+                  size: 20,
+                  color: AppTheme.primary,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                'Management',
+                style: TextStyle(
+                  fontSize: 19,
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Everything you need to run your salon, organised by category.',
+            style: TextStyle(
+              fontSize: 12.5,
+              color: isDark ? Colors.white54 : Colors.grey[600],
+            ),
+          ),
+          const SizedBox(height: 18),
+          ...categories.map(
+            (category) => Padding(
+              padding: const EdgeInsets.only(bottom: 18),
+              child: _buildManagementCategoryCard(
+                category: category,
+                isDesktop: isDesktop,
+                isDark: isDark,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildManagementCategoryCard({
+    required _ManagementCategory category,
+    required bool isDesktop,
+    required bool isDark,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: isDark
+            ? Colors.white.withValues(alpha: 0.03)
+            : category.color.withValues(alpha: 0.035),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.06)
+              : category.color.withValues(alpha: 0.12),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 28,
+                height: 28,
+                decoration: BoxDecoration(
+                  color: category.color.withValues(alpha: isDark ? 0.24 : 0.14),
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: Icon(category.icon, size: 15, color: category.color),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  category.title,
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w700,
+                    color: isDark ? Colors.white70 : Colors.grey[800],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // ✅ Fully responsive grid — item width adapts to available
+          // content width instead of a fixed column count, so it looks
+          // right from a narrow phone up to a wide desktop screen.
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final maxWidth = constraints.maxWidth;
+              final minTileWidth = isDesktop ? 128.0 : 96.0;
+              // ✅ Column count depends ONLY on available width — never on
+              // how many actions a category has. This is what previously
+              // threw `Invalid argument: 2` (clamp(2, 1) is invalid when a
+              // category like "Offers & Promotions" has just 1 action), and
+              // it's also why tile sizes looked different from category to
+              // category. Now every tile is the same size everywhere.
+              int columns = (maxWidth / minTileWidth).floor();
+              if (columns < 1) columns = 1;
+              if (columns > 6) columns = 6;
+              const spacing = 10.0;
+              final tileWidth = (maxWidth - spacing * (columns - 1)) / columns;
+
+              return Wrap(
+                spacing: spacing,
+                runSpacing: spacing,
+                children: category.actions
+                    .map(
+                      (action) => SizedBox(
+                        width: tileWidth,
+                        child: _buildQuickAction(
+                          icon: action.icon,
+                          label: action.label,
+                          color: action.color,
+                          onTap: action.onTap,
+                          enabled: action.enabled,
+                        ),
+                      ),
+                    )
+                    .toList(),
+              );
+            },
+          ),
+        ],
+      ),
     );
   }
 
@@ -3146,206 +3395,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           ),
         ],
       ),
-    );
-  }
-
-  // ============================================================
-  // ✅ DRAWER & LOGOUT
-  // ============================================================
-
-
-
-
-  // ============================================================
-  // ✅ SIMPLE HEADER
-  // ============================================================
-
-  Widget _buildSimpleHeader() {
-    final isWeb = MediaQuery.of(context).size.width > 800;
-    final isDark = context.isDarkMode;
-
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: isWeb
-          ? Row(
-              mainAxisSize: MainAxisSize.min,
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 10,
-                  ),
-                  decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.1),
-                        blurRadius: 8,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      GestureDetector(
-                        onTap: _changeTimezone,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 5,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AppTheme.primary.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                _currentTimezoneFlag,
-                                style: const TextStyle(fontSize: 14),
-                              ),
-                              const SizedBox(width: 6),
-                              Flexible(
-                                child: Text(
-                                  _currentTimezone
-                                      .split('/')
-                                      .last
-                                      .replaceAll('_', ' '),
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w500,
-                                    color: AppTheme.primary,
-                                  ),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                              const SizedBox(width: 4),
-                              Text(
-                                _currentTimezoneOffset,
-                                style: const TextStyle(
-                                  fontSize: 10,
-                                  color: Colors.grey,
-                                ),
-                              ),
-                              const Icon(
-                                Icons.arrow_drop_down,
-                                size: 16,
-                                color: AppTheme.primary,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      const Icon(
-                        Icons.calendar_today,
-                        size: 14,
-                        color: Colors.grey,
-                      ),
-                      const SizedBox(width: 6),
-                      Flexible(
-                        child: Text(
-                          _currentDate,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            )
-          : Container(
-              margin: const EdgeInsets.symmetric(horizontal: 16),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.1),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(
-                        Icons.calendar_today,
-                        size: 12,
-                        color: Colors.grey,
-                      ),
-                      const SizedBox(width: 4),
-                      Flexible(
-                        child: Text(
-                          _currentDate,
-                          style: const TextStyle(
-                            fontSize: 10,
-                            color: Colors.grey,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                  GestureDetector(
-                    onTap: _changeTimezone,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 5,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppTheme.primary.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            _currentTimezoneFlag,
-                            style: const TextStyle(fontSize: 12),
-                          ),
-                          const SizedBox(width: 4),
-                          Flexible(
-                            child: Text(
-                              _currentTimezone
-                                  .split('/')
-                                  .last
-                                  .replaceAll('_', ' '),
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w500,
-                                color: AppTheme.primary,
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          const Icon(
-                            Icons.arrow_drop_down,
-                            size: 14,
-                            color: AppTheme.primary,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
     );
   }
 
@@ -3790,4 +3839,38 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       ),
     ),
   );
+}
+
+// ============================================================
+// ✅ Small data holders for the responsive Management section
+// ============================================================
+
+class _ManagementCategory {
+  final String title;
+  final IconData icon;
+  final Color color;
+  final List<_ManagementAction> actions;
+
+  _ManagementCategory({
+    required this.title,
+    required this.icon,
+    required this.color,
+    required this.actions,
+  });
+}
+
+class _ManagementAction {
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+  final bool enabled;
+
+  _ManagementAction({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.onTap,
+    this.enabled = true,
+  });
 }

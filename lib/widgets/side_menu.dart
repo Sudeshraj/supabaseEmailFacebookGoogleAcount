@@ -16,6 +16,11 @@ class SideMenu extends StatefulWidget {
   final String? profileImageUrl;
   final String? selectedSalonId;
   final VoidCallback? onMenuItemSelected;
+  // ✅ NEW: lets the parent (e.g. OwnerDashboard) know exactly which salon
+  // was picked from the side menu, so it can update its own selected-salon
+  // state and reload the correct data. Without this the menu only knew
+  // about its own local selection and the dashboard never found out.
+  final void Function(String salonId)? onSalonChanged;
 
   const SideMenu({
     super.key,
@@ -25,6 +30,7 @@ class SideMenu extends StatefulWidget {
     this.profileImageUrl,
     this.selectedSalonId,
     this.onMenuItemSelected,
+    this.onSalonChanged,
   });
 
   @override
@@ -43,6 +49,10 @@ class _SideMenuState extends State<SideMenu> {
 
   // ✅ Owner salons
   List<Map<String, dynamic>> _ownerSalons = [];
+  
+  // ✅ Barber salons (multiple salon support for barber)
+  List<Map<String, dynamic>> _barberSalons = [];
+  
   String? _selectedSalonId;
   String? _selectedSalonName;
 
@@ -65,7 +75,7 @@ class _SideMenuState extends State<SideMenu> {
         if (widget.userRole == 'owner') {
           _loadOwnerSalons();
         } else if (widget.userRole == 'barber') {
-          _loadBarberSalon();
+          _loadBarberSalons();
         }
       }
     });
@@ -96,7 +106,7 @@ class _SideMenuState extends State<SideMenu> {
           if (widget.userRole == 'owner') {
             _loadOwnerSalons();
           } else if (widget.userRole == 'barber') {
-            _loadBarberSalon();
+            _loadBarberSalons();
           }
         }
       });
@@ -118,64 +128,97 @@ class _SideMenuState extends State<SideMenu> {
   }
 
   // ============================================================
-  // 🔥 LOAD BARBER'S SALON
+  // 🔥 LOAD BARBER SALONS (Multiple salons support)
   // ============================================================
-  Future<void> _loadBarberSalon() async {
+  Future<void> _loadBarberSalons() async {
     if (widget.userRole != 'barber') return;
 
     try {
       final currentUser = supabase.auth.currentUser;
       if (currentUser == null) return;
 
-      final salonBarberResponse = await supabase
+      debugPrint('📋 Loading barber salons for user: ${currentUser.id}');
+
+      final response = await supabase
           .from('salon_barbers')
           .select('''
+            id,
             salon_id,
+            status,
             salons!inner (
               id,
               name,
               logo_url,
               address,
               open_time,
-              close_time
+              close_time,
+              is_active
             )
           ''')
           .eq('barber_id', currentUser.id)
-          .eq('status', 'active')
-          .maybeSingle();
+          .eq('status', 'active');
 
-      if (salonBarberResponse != null) {
-        final salon = salonBarberResponse['salons'] as Map?;
-        if (salon != null) {
-          setState(() {
-            _selectedSalonId = salon['id'].toString();
-            _selectedSalonName = salon['name']?.toString();
-            _ownerSalons = [
-              {
-                'id': salon['id'],
-                'name': salon['name'],
-                'logo_url': salon['logo_url'],
-                'address': salon['address'],
-                'open_time': salon['open_time'],
-                'close_time': salon['close_time'],
-              },
-            ];
-          });
+      debugPrint('📊 Found ${response.length} assigned salons for barber');
 
-          if (_selectedSalonId != null) {
-            await SessionManager.saveSalonId(_selectedSalonId!);
-          }
-          if (_selectedSalonName != null) {
-            await SessionManager.saveSalonName(_selectedSalonName!);
+      if (response.isNotEmpty) {
+        final List<Map<String, dynamic>> salons = [];
+        for (var item in response) {
+          final salon = item['salons'] as Map?;
+          if (salon != null && salon['is_active'] == true) {
+            salons.add({
+              'id': salon['id'].toString(),
+              'name': salon['name']?.toString() ?? 'Unknown Salon',
+              'logo_url': salon['logo_url'],
+              'address': salon['address'],
+              'open_time': salon['open_time'],
+              'close_time': salon['close_time'],
+            });
           }
         }
-      }
 
-      debugPrint(
-        '✅ Barber salon loaded: $_selectedSalonName (ID: $_selectedSalonId)',
-      );
+        setState(() {
+          _barberSalons = salons;
+        });
+
+        // Set selected salon
+        if (_selectedSalonId == null && salons.isNotEmpty) {
+          _selectedSalonId = salons[0]['id'];
+          _selectedSalonName = salons[0]['name'];
+        } else if (salons.isNotEmpty) {
+          final selected = salons.firstWhere(
+            (s) => s['id'] == _selectedSalonId,
+            orElse: () => {},
+          );
+          if (selected.isNotEmpty) {
+            _selectedSalonName = selected['name'];
+          } else {
+            _selectedSalonId = salons[0]['id'];
+            _selectedSalonName = salons[0]['name'];
+          }
+        }
+
+        if (_selectedSalonId != null) {
+          await SessionManager.saveSalonId(_selectedSalonId!);
+        }
+        if (_selectedSalonName != null) {
+          await SessionManager.saveSalonName(_selectedSalonName!);
+        }
+
+        debugPrint('✅ Selected barber salon: $_selectedSalonName (ID: $_selectedSalonId)');
+        debugPrint('✅ Total barber salons: ${_barberSalons.length}');
+      } else {
+        setState(() {
+          _barberSalons = [];
+          _selectedSalonId = null;
+          _selectedSalonName = null;
+        });
+        debugPrint('⚠️ No active salons assigned to this barber');
+      }
     } catch (e) {
-      debugPrint('❌ Error loading barber salon: $e');
+      debugPrint('❌ Error loading barber salons: $e');
+      setState(() {
+        _barberSalons = [];
+      });
     }
   }
 
@@ -238,9 +281,9 @@ class _SideMenuState extends State<SideMenu> {
   }
 
   // ============================================================
-  // 🔥 ON SALON CHANGED
+  // 🔥 ON SALON CHANGED - Owner
   // ============================================================
-  void _onSalonChanged(String? newSalonId) async {
+  void _onOwnerSalonChanged(String? newSalonId) async {
     if (widget.userRole != 'owner') return;
     if (newSalonId == null || newSalonId == _selectedSalonId) return;
 
@@ -260,7 +303,47 @@ class _SideMenuState extends State<SideMenu> {
 
     await _loadNotificationCounts();
 
-    if (widget.onMenuItemSelected != null) {
+    if (widget.onSalonChanged != null) {
+      widget.onSalonChanged!(newSalonId);
+    } else if (widget.onMenuItemSelected != null) {
+      widget.onMenuItemSelected!();
+    }
+
+    if (mounted) {
+      Navigator.pop(context);
+    }
+  }
+
+  // ============================================================
+  // 🔥 ON SALON CHANGED - Barber
+  // ============================================================
+  void _onBarberSalonChanged(String? newSalonId) async {
+    if (widget.userRole != 'barber') return;
+    if (newSalonId == null || newSalonId == _selectedSalonId) return;
+
+    final selectedSalon = _barberSalons.firstWhere(
+      (s) => s['id'] == newSalonId,
+      orElse: () => {},
+    );
+
+    if (selectedSalon.isEmpty) return;
+
+    setState(() {
+      _selectedSalonId = newSalonId;
+      _selectedSalonName = selectedSalon['name'];
+    });
+
+    await SessionManager.saveSalonId(_selectedSalonId!);
+    if (_selectedSalonName != null) {
+      await SessionManager.saveSalonName(_selectedSalonName!);
+    }
+
+    await _loadNotificationCounts();
+
+    // Notify parent dashboard
+    if (widget.onSalonChanged != null) {
+      widget.onSalonChanged!(newSalonId);
+    } else if (widget.onMenuItemSelected != null) {
       widget.onMenuItemSelected!();
     }
 
@@ -531,16 +614,6 @@ class _SideMenuState extends State<SideMenu> {
       if (!mounted) return;
 
       Navigator.pop(context);
-
-      // ScaffoldMessenger.of(context).showSnackBar(
-      //   SnackBar(
-      //     content: Text(
-      //       'Switched to ${_getRoleDisplayName(profile['role'])} profile',
-      //     ),
-      //     backgroundColor: Colors.green,
-      //     duration: const Duration(seconds: 2),
-      //   ),
-      // );
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -1537,15 +1610,13 @@ class _SideMenuState extends State<SideMenu> {
   }
 
   // ============================================================
-  // 🔥 BUILD SALON SELECTOR ITEM
+  // 🔥 BUILD SALON SELECTOR ITEM - Works for both Owner and Barber
   // ============================================================
   Widget _buildSalonSelectorItem(Map<String, dynamic> item) {
     final salons = item['salons'] as List<Map<String, dynamic>>;
     final selectedId = item['selectedSalonId'] as String?;
     final onChanged = item['onSalonChanged'] as Function(String?)?;
     final isDark = context.isDarkMode;
-
-    if (widget.userRole != 'owner') return const SizedBox.shrink();
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -1583,52 +1654,61 @@ class _SideMenuState extends State<SideMenu> {
             final isSelected = salon['id'].toString() == selectedId;
             final salonName = salon['name']?.toString() ?? 'Salon';
 
-            return ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(
-                isSelected
-                    ? Icons.radio_button_checked
-                    : Icons.radio_button_unchecked,
-                color: isSelected ? const Color(0xFFFF6B8B) : Colors.grey[400],
-                size: 18,
-              ),
-              title: Text(
-                salonName,
-                style: TextStyle(
-                  fontSize: _isTablet ? 15 : 14,
-                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+            return Material(
+              color: Colors.transparent,
+              borderRadius: BorderRadius.circular(8),
+              clipBehavior: Clip.antiAlias,
+              child: ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(
+                  isSelected
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_unchecked,
                   color: isSelected
                       ? const Color(0xFFFF6B8B)
-                      : (isDark ? Colors.white70 : Colors.grey[800]),
+                      : Colors.grey[400],
+                  size: 18,
                 ),
-                overflow: TextOverflow.ellipsis,
-              ),
-              trailing: isSelected
-                  ? Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 3,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.green.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: const Text(
-                        'Active',
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: Colors.green,
-                          fontWeight: FontWeight.w600,
+                title: Text(
+                  salonName,
+                  style: TextStyle(
+                    fontSize: _isTablet ? 15 : 14,
+                    fontWeight: isSelected
+                        ? FontWeight.w600
+                        : FontWeight.normal,
+                    color: isSelected
+                        ? const Color(0xFFFF6B8B)
+                        : (isDark ? Colors.white70 : Colors.grey[800]),
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                trailing: isSelected
+                    ? Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 3,
                         ),
-                      ),
-                    )
-                  : null,
-              onTap: () {
-                if (onChanged != null) {
-                  onChanged(salon['id'].toString());
-                }
-              },
-              dense: true,
+                        decoration: BoxDecoration(
+                          color: Colors.green.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Text(
+                          'Active',
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: Colors.green,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      )
+                    : null,
+                onTap: () {
+                  if (onChanged != null) {
+                    onChanged(salon['id'].toString());
+                  }
+                },
+                dense: true,
+              ),
             );
           }),
         ],
@@ -1661,7 +1741,7 @@ class _SideMenuState extends State<SideMenu> {
                 ),
                 child: Icon(
                   item['icon'] as IconData? ?? Icons.store,
-                  color: const Color(0xFFFF6B8B),
+                  color: salonId != null ? const Color(0xFFFF6B8B) : Colors.grey,
                   size: 18,
                 ),
               ),
@@ -1731,7 +1811,7 @@ class _SideMenuState extends State<SideMenu> {
   }
 
   // ============================================================
-  // 🔥 GET MENU ITEMS
+  // 🔥 GET MENU ITEMS - Owner
   // ============================================================
   List<Map<String, dynamic>> _getOwnerMenuItems() {
     return [
@@ -1748,7 +1828,7 @@ class _SideMenuState extends State<SideMenu> {
           'isSalonSelector': true,
           'salons': _ownerSalons,
           'selectedSalonId': _selectedSalonId,
-          'onSalonChanged': _onSalonChanged,
+          'onSalonChanged': _onOwnerSalonChanged,
           'color': Colors.blueGrey,
         },
       {
@@ -1803,22 +1883,56 @@ class _SideMenuState extends State<SideMenu> {
     ];
   }
 
+  // ============================================================
+  // 🔥 GET MENU ITEMS - Barber (with Salon Selector)
+  // ============================================================
   List<Map<String, dynamic>> _getBarberMenuItems() {
-    return [
+    final List<Map<String, dynamic>> items = [
       {
         'icon': Icons.dashboard_outlined,
         'title': 'My Dashboard',
         'route': '/barber',
         'color': Colors.blue,
       },
-      {
+    ];
+
+    // ✅ Salon Selector - if barber has multiple salons
+    if (_barberSalons.length > 1) {
+      items.add({
+        'icon': Icons.swap_horiz,
+        'title': 'Switch Salon',
+        'isSalonSelector': true,
+        'salons': _barberSalons,
+        'selectedSalonId': _selectedSalonId,
+        'onSalonChanged': _onBarberSalonChanged,
+        'color': Colors.blueGrey,
+      });
+    } 
+    // ✅ Single Salon Info - if barber has exactly one salon
+    else if (_barberSalons.length == 1 && _selectedSalonName != null) {
+      items.add({
         'icon': Icons.store_outlined,
         'title': 'My Salon',
-        'subtitle': _selectedSalonName ?? 'No salon assigned',
+        'subtitle': _selectedSalonName,
         'color': const Color(0xFFFF6B8B),
         'isSalonInfo': true,
         'salonId': _selectedSalonId,
-      },
+      });
+    } 
+    // ✅ No Salon Assigned
+    else {
+      items.add({
+        'icon': Icons.store_outlined,
+        'title': 'No Salon Assigned',
+        'subtitle': 'Contact your owner',
+        'color': Colors.grey,
+        'isSalonInfo': true,
+        'salonId': null,
+      });
+    }
+
+    // ✅ Add remaining menu items
+    items.addAll([
       {
         'icon': Icons.calendar_month_outlined,
         'title': 'My Schedule',
@@ -1852,9 +1966,14 @@ class _SideMenuState extends State<SideMenu> {
         'badge': _unreadNotificationCount > 0 ? _unreadNotificationCount : null,
       },
       {'divider': true},
-    ];
+    ]);
+
+    return items;
   }
 
+  // ============================================================
+  // 🔥 GET MENU ITEMS - Customer
+  // ============================================================
   List<Map<String, dynamic>> _getCustomerMenuItems() {
     return [
       {
@@ -1876,7 +1995,7 @@ class _SideMenuState extends State<SideMenu> {
         'route': '/customer/history',
         'color': Colors.orange,
       },
-        {
+      {
         'icon': Icons.favorite_outline,
         'title': 'My Salons',
         'route': '/customer/my-salons',
@@ -1893,6 +2012,9 @@ class _SideMenuState extends State<SideMenu> {
     ];
   }
 
+  // ============================================================
+  // 🔥 GET COMMON MENU ITEMS
+  // ============================================================
   List<Map<String, dynamic>> _getCommonMenuItems() {
     return [
       {
@@ -2081,10 +2203,12 @@ class _SideMenuState extends State<SideMenu> {
     items.addAll(_getCommonMenuItems());
 
     return items.map((item) {
-      if (item['isSalonSelector'] == true && widget.userRole == 'owner') {
+      // ✅ Salon Selector - Works for both Owner and Barber
+      if (item['isSalonSelector'] == true) {
         return _buildSalonSelectorItem(item);
       }
 
+      // ✅ Salon Info - Works for both Owner and Barber
       if (item['isSalonInfo'] == true) {
         return _buildSalonInfoItem(item);
       }
