@@ -22,7 +22,13 @@ class CustomerDashboard extends StatefulWidget {
 }
 
 class _CustomerDashboardState extends State<CustomerDashboard>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, AutomaticKeepAliveClientMixin {
+  // ⚠️ FIX: keeps this screen's state alive when the outer bottom-nav /
+  // IndexedStack switches to another tab and back, so it does NOT get
+  // disposed + recreated (which was re-running initState() -> a full
+  // reload) every time the user revisits the Dashboard tab.
+  @override
+  bool get wantKeepAlive => true;
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   final NotificationService _notificationService = NotificationService();
@@ -34,6 +40,13 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   bool _showPermissionCard = false;
   bool _isLoading = true;
   bool _isActive = false;
+  // ⚠️ FIX: tracks whether _checkCustomerStatus() has finished at least
+  // once. _isActive starts as false, and without this flag the "Profile
+  // Inactive / Check Status" screen would flash briefly on every load
+  // (before the server confirms the account IS active), which looked
+  // broken. Now a loading screen shows instead until the first check
+  // completes.
+  bool _isCheckingStatus = true;
 
   // Customer Data
   String _customerName = 'Guest User';
@@ -104,17 +117,25 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   void didChangeDependencies() {
     super.didChangeDependencies();
     _checkScreenSize();
-    _checkForUpdates();
     _checkTimezoneChange();
+    // ⚠️ FIX: Previously this called _checkForUpdates() -> _loadDashboardData()
+    // on EVERY dependency change (keyboard open/close, rotation, theme change,
+    // etc). That caused the dashboard to reload constantly. Dashboard data is
+    // now only reloaded on app resume (see didChangeAppLifecycleState) and
+    // after returning from a booking flow with a successful result.
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
     if (state == AppLifecycleState.resumed) {
+      // ⚠️ FIX: previously this also called _loadDashboardData() here,
+      // which re-fetched everything (and flashed the loading spinner)
+      // every single time the phone was unlocked / app brought back from
+      // sleep. Only the lightweight unread-count + active-status checks
+      // run now - no full dashboard reload on resume.
       debugPrint('🔄 App resumed - refreshing notification count');
       _loadUnreadCount();
-      _loadDashboardData();
       _checkCustomerStatus();
     }
   }
@@ -143,14 +164,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         _isWeb = isWeb;
       });
     }
-  }
-
-  void _checkForUpdates() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && _isTimezoneLoaded) {
-        _loadDashboardData();
-      }
-    });
   }
 
   // ============================================================
@@ -231,6 +244,14 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     } catch (e) {
       debugPrint('❌ Error checking customer status: $e');
       setState(() => _isActive = false);
+    } finally {
+      // ⚠️ FIX: no matter which branch above returned, mark the first
+      // status check as complete so build() can stop showing the loading
+      // screen and move to either the real dashboard or the genuine
+      // "Profile Inactive" screen - never a flash of the wrong one.
+      if (mounted && _isCheckingStatus) {
+        setState(() => _isCheckingStatus = false);
+      }
     }
   }
 
@@ -346,34 +367,49 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   // 🔥 CONTEXTUAL ACTIONS
   // ============================================================
 
-  void _bookAppointment() {
+  // ⚠️ FIX: now awaits the pushed route and only reloads the dashboard
+  // when the booking flow reports success (Navigator.pop(context, true)).
+  Future<void> _bookAppointment() async {
     if (!_hasPermission) {
       _showPermissionCardContext(action: 'booking');
       if (_showPermissionCard) {
         return;
       }
     }
-    context.push('/customer/booking-flow');
+    final result = await context.push('/customer/booking-flow');
+    if (result == true && mounted) {
+      debugPrint('✅ Returned from booking flow with success - refreshing dashboard');
+      _loadDashboardData();
+    }
   }
 
-  void _createVipBooking() {
+  // ⚠️ FIX: same pattern for VIP booking.
+  Future<void> _createVipBooking() async {
     if (!_hasPermission) {
       _showPermissionCardContext(action: 'vip');
       if (_showPermissionCard) {
         return;
       }
     }
-    context.push('/customer/vip-booking');
+    final result = await context.push('/customer/vip-booking');
+    if (result == true && mounted) {
+      debugPrint('✅ Returned from VIP booking with success - refreshing dashboard');
+      _loadDashboardData();
+    }
   }
 
-  void _viewAllOffers() {
+  // ⚠️ FIX: refresh dashboard only if something changed on the offers screen.
+  Future<void> _viewAllOffers() async {
     if (!_hasPermission) {
       _showPermissionCardContext(action: 'offer');
       if (_showPermissionCard) {
         return;
       }
     }
-    context.push('/customer/offers');
+    final result = await context.push('/customer/offers');
+    if (result == true && mounted) {
+      _loadDashboardData();
+    }
   }
 
   Future<void> _viewNotifications() async {
@@ -1346,7 +1382,15 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       }
 
       if (mounted) {
-        context.push('/customer/booking-flow', extra: {'offer': offer});
+        // ⚠️ FIX: wait for the booking flow result and only reload the
+        // dashboard if a booking was actually completed.
+        final result = await context.push(
+          '/customer/booking-flow',
+          extra: {'offer': offer},
+        );
+        if (result == true && mounted) {
+          _loadDashboardData();
+        }
       }
     } catch (e) {
       debugPrint('Error applying offer: $e');
@@ -1628,6 +1672,58 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     return flags[countryCode] ?? '🌐';
   }
 
+  // ⚠️ FIX: this was missing entirely, which is why searching the timezone
+  // picker by country name (e.g. "Sri Lanka", "Japan", "United States")
+  // never matched anything - only the 2-letter country CODE ("LK", "JP")
+  // was included in the search text, not the actual country name.
+  String _getCountryNameByCode(String countryCode) {
+    final names = {
+      'LK': 'Sri Lanka',
+      'JP': 'Japan',
+      'KR': 'South Korea',
+      'CN': 'China',
+      'HK': 'Hong Kong',
+      'TW': 'Taiwan',
+      'IN': 'India',
+      'AE': 'United Arab Emirates',
+      'SG': 'Singapore',
+      'MY': 'Malaysia',
+      'TH': 'Thailand',
+      'ID': 'Indonesia',
+      'PH': 'Philippines',
+      'VN': 'Vietnam',
+      'BD': 'Bangladesh',
+      'PK': 'Pakistan',
+      'NP': 'Nepal',
+      'SA': 'Saudi Arabia',
+      'KW': 'Kuwait',
+      'QA': 'Qatar',
+      'GB': 'United Kingdom',
+      'FR': 'France',
+      'DE': 'Germany',
+      'IT': 'Italy',
+      'ES': 'Spain',
+      'NL': 'Netherlands',
+      'CH': 'Switzerland',
+      'RU': 'Russia',
+      'US': 'United States',
+      'CA': 'Canada',
+      'MX': 'Mexico',
+      'BR': 'Brazil',
+      'AU': 'Australia',
+      'NZ': 'New Zealand',
+      'ZA': 'South Africa',
+      'EG': 'Egypt',
+      'NG': 'Nigeria',
+      'KE': 'Kenya',
+      'AR': 'Argentina',
+      'CL': 'Chile',
+      'CO': 'Colombia',
+      'PE': 'Peru',
+    };
+    return names[countryCode] ?? '';
+  }
+
   String _getContinentEmoji(String continent) {
     final emojis = {
       'Asia': '🌏',
@@ -1802,13 +1898,17 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         final displayName = tz.split('/').last.replaceAll('_', ' ');
         final countryCode = _extractCountryCode(tz);
         final flag = _getFlagByCountryCode(countryCode);
+        // ⚠️ FIX: added the full country name here so typing "Sri Lanka",
+        // "Japan", etc. actually finds a match - previously only the
+        // 2-letter code ("LK") was searchable, not the country name.
+        final countryName = _getCountryNameByCode(countryCode);
 
         final searchText = [
           continent.toLowerCase(),
           displayName.toLowerCase(),
           tz.toLowerCase(),
           countryCode.toLowerCase(),
-          displayName.toLowerCase(),
+          countryName.toLowerCase(),
         ].join(' ');
 
         searchableList.add({
@@ -2392,9 +2492,21 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     }
   }
 
-  void _navigateToSalonProfile(Map<String, dynamic> salon) {
+  // ⚠️ FIX: the salon profile screen can change dashboard-relevant state
+  // in more than one way - following/unfollowing the salon, booking a
+  // service, applying an offer - and not all of those necessarily pop
+  // with `true` (e.g. tapping "Follow" usually doesn't pop the screen at
+  // all with a result). Waiting for `result == true` meant a newly
+  // followed salon would silently not show up until a manual pull-to-
+  // refresh. So: always refresh once the user comes back from this flow,
+  // regardless of what (if anything) was returned.
+  Future<void> _navigateToSalonProfile(Map<String, dynamic> salon) async {
     debugPrint('🎯 Navigating to salon profile: ${salon['name']}');
-    context.push('/customer/salon-profile', extra: salon);
+    await context.push('/customer/salon-profile', extra: salon);
+    if (mounted) {
+      debugPrint('✅ Returned from salon profile - refreshing dashboard');
+      _loadDashboardData();
+    }
   }
 
   // ============================================================
@@ -2405,6 +2517,11 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     final isDSTActive = TimezoneService.isDST();
     final flag = TimezoneService.getCurrentFlag();
     final displayName = TimezoneService.getTimezoneDisplayName();
+
+    // ⚠️ FIX: on mobile, only the flag emoji is shown (no country/timezone
+    // name text) to save space in the app bar. Tapping it still opens the
+    // same timezone picker dialog. On tablet/web the full name still shows.
+    final bool showName = _isTablet;
 
     return GestureDetector(
       onTap: _showAdvancedTimezonePicker,
@@ -2422,15 +2539,17 @@ class _CustomerDashboardState extends State<CustomerDashboard>
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(flag, style: const TextStyle(fontSize: 12)),
-            const SizedBox(width: 4),
-            Text(
-              displayName,
-              style: const TextStyle(
-                fontSize: 10,
-                color: Colors.white,
-                fontWeight: FontWeight.w500,
+            if (showName) ...[
+              const SizedBox(width: 4),
+              Text(
+                displayName,
+                style: const TextStyle(
+                  fontSize: 10,
+                  color: Colors.white,
+                  fontWeight: FontWeight.w500,
+                ),
               ),
-            ),
+            ],
             if (isDSTActive) ...[
               const SizedBox(width: 4),
               Container(
@@ -3446,12 +3565,22 @@ class _CustomerDashboardState extends State<CustomerDashboard>
 
   @override
   Widget build(BuildContext context) {
+    super.build(context); // required by AutomaticKeepAliveClientMixin
     final screenWidth = MediaQuery.of(context).size.width;
     final bool isWeb = screenWidth > 800;
 
     _checkScreenSize();
 
-    if (!_isTimezoneLoaded) {
+    // ⚠️ FIX: previously this only waited for _isTimezoneLoaded, so as
+    // soon as timezone init finished (usually near-instant), build()
+    // moved on to the `!_isActive` check below - and since _isActive
+    // still defaults to false until _checkCustomerStatus() finishes, the
+    // "Profile Inactive / Check Status" screen flashed on screen for a
+    // moment before the real dashboard loaded. Now we also wait for
+    // _isCheckingStatus to clear, so the user only ever sees one loading
+    // screen and then the correct final screen - never the wrong one in
+    // between.
+    if (!_isTimezoneLoaded || _isCheckingStatus) {
       return Scaffold(
         key: _scaffoldKey,
         appBar: AppBar(
@@ -3467,14 +3596,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
               iconSize: 28,
             ),
           ),
-          title: Text(
-            'Dashboard',
-            style: TextStyle(
-              fontSize: isWeb ? 20 : 16,
-              fontWeight: FontWeight.w600,
-              color: Colors.white,
-            ),
-          ),
+          title: null,
           actions: [_buildProfilePhoto()],
         ),
         body: const Center(
@@ -3483,7 +3605,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
             children: [
               CircularProgressIndicator(color: AppTheme.primary),
               SizedBox(height: 16),
-              Text('Loading timezone...'),
+              Text('Loading your dashboard...'),
             ],
           ),
         ),
@@ -3505,14 +3627,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
               iconSize: 28,
             ),
           ),
-          title: Text(
-            'Dashboard',
-            style: TextStyle(
-              fontSize: isWeb ? 20 : 16,
-              fontWeight: FontWeight.w600,
-              color: Colors.white,
-            ),
-          ),
+          title: null,
           actions: [_buildProfilePhoto()],
         ),
         body: Center(
@@ -3573,14 +3688,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
             iconSize: 28,
           ),
         ),
-        title: Text(
-          'Dashboard',
-          style: TextStyle(
-            fontSize: isWeb ? 20 : 16,
-            fontWeight: FontWeight.w600,
-            color: Colors.white,
-          ),
-        ),
+        title: null,
         actions: [
           _buildTimezoneSelector(),
           _buildOffersButton(),
@@ -3593,7 +3701,14 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         userName: _customerName,
         userEmail: _customerEmail,
         profileImageUrl: _customerImage,
-        onMenuItemSelected: () => _loadDashboardData(),
+        // ⚠️ FIX: previously this called _loadDashboardData() on every
+        // single drawer item tap (Profile, Settings, Logout, etc.), even
+        // when that item had nothing to do with dashboard data. That was
+        // the "click karaddi refresh venawa" bug. The drawer just closes
+        // itself now; the dashboard only reloads on app resume or after a
+        // successful booking (see _bookAppointment / _createVipBooking /
+        // _navigateToSalonProfile / _viewAllOffers above).
+        onMenuItemSelected: () {},
       ),
       body: SafeArea(
         child: isWeb ? _buildWebLayout() : _buildMobileLayout(),

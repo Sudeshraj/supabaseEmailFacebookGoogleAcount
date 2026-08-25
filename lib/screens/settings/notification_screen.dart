@@ -44,6 +44,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
   int _currentPage = 0;
   static const int _pageSize = 20;
 
+  // ✅ Scroll Controller
   final ScrollController _scrollController = ScrollController();
 
   bool _isTimezoneLoaded = false;
@@ -73,7 +74,6 @@ class _NotificationScreenState extends State<NotificationScreen> {
     super.dispose();
   }
 
-  // ✅ Check screen size for responsive layout
   void _checkScreenSize() {
     final size = MediaQuery.of(context).size;
     final isWeb = size.width > 800;
@@ -90,7 +90,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
   }
 
   // ============================================
-  // 🔥 PERMISSION CHECK
+  // PERMISSION CHECK
   // ============================================
 
   Future<void> _checkPermission() async {
@@ -117,10 +117,6 @@ class _NotificationScreenState extends State<NotificationScreen> {
     
     if (mounted) setState(() {});
   }
-
-  // ============================================
-  // 🔥 ENABLE NOTIFICATIONS
-  // ============================================
 
   Future<void> _enableNotifications({String? action}) async {
     setState(() => _showPermissionCard = false);
@@ -209,10 +205,6 @@ class _NotificationScreenState extends State<NotificationScreen> {
       }
     }
   }
-
-  // ============================================
-  // 🔥 SHOW WEB PERMISSION HELP
-  // ============================================
 
   void _showWebPermissionHelp() {
     if (!mounted) return;
@@ -395,7 +387,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
   }
 
   // ============================================
-  // TIME FORMATTING WITH TIMEZONESERVICE
+  // TIME FORMATTING
   // ============================================
 
   String _formatTime(String createdAt) {
@@ -428,7 +420,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
   }
 
   // ============================================
-  // LOAD NOTIFICATIONS WITH ROLE SUPPORT
+  // LOAD NOTIFICATIONS
   // ============================================
 
   Future<void> _loadNotifications({bool refresh = false}) async {
@@ -443,8 +435,6 @@ class _NotificationScreenState extends State<NotificationScreen> {
 
     try {
       final user = supabase.auth.currentUser;
-      debugPrint('🔍 Current user: ${user?.id}');
-      debugPrint('🎯 Role: ${widget.role}');
 
       if (user == null) {
         if (!mounted) return;
@@ -462,8 +452,6 @@ class _NotificationScreenState extends State<NotificationScreen> {
         limit: _pageSize,
         unreadOnly: _selectedFilter == 'unread',
       );
-
-      debugPrint('✅ Loaded ${result.length} notifications for role: ${widget.role}');
 
       if (!mounted) return;
       setState(() {
@@ -543,8 +531,16 @@ class _NotificationScreenState extends State<NotificationScreen> {
     return _notifications;
   }
 
+  // ⚠️ FIX: the web-only Scrollbar needs an actual Scrollable (ListView)
+  // attached to _scrollController before it can paint. During loading /
+  // error / empty states, _buildNotificationList() returns a plain
+  // Center() with no ScrollPosition, which crashed the Scrollbar on web.
+  // This flag tells the web layout when it's safe to wrap the Scrollbar
+  // around the content.
+  bool get _hasScrollableList =>
+      !_isLoading && !_hasError && _filteredNotifications.isNotEmpty;
+
   Future<void> _markAsRead(int id) async {
-    debugPrint('🔍 Marking notification $id as read');
     final success = await _notificationService.markAsRead(id);
 
     if (success && mounted) {
@@ -554,9 +550,6 @@ class _NotificationScreenState extends State<NotificationScreen> {
           _notifications[index]['is_read'] = true;
         }
       });
-      debugPrint('✅ Notification $id marked as read');
-    } else {
-      debugPrint('❌ Failed to mark notification $id as read');
     }
   }
 
@@ -653,7 +646,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
   }
 
   // ============================================
-  // NAVIGATION WITH ROLE SUPPORT
+  // NAVIGATION
   // ============================================
 
   void _handleNotificationTap(Map<String, dynamic> notification) async {
@@ -885,7 +878,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
   }
 
   // ============================================
-  // BUILD METHODS
+  // ✅ MAIN BUILD
   // ============================================
 
   @override
@@ -1015,30 +1008,101 @@ class _NotificationScreenState extends State<NotificationScreen> {
     );
   }
 
-  // ✅ WEB LAYOUT - Centered with Scrollbar
+  // ============================================
+  // ✅ WEB LAYOUT
+  // ============================================
+
   Widget _buildWebLayout(bool isDark) {
     return Center(
       child: Container(
         constraints: const BoxConstraints(maxWidth: 800),
-        child: Scrollbar(
-          controller: _scrollController,
-          thumbVisibility: true,
-          trackVisibility: true,
-          thickness: 8.0,
-          radius: const Radius.circular(10),
-          scrollbarOrientation: ScrollbarOrientation.right,
-          child: SingleChildScrollView(
-            controller: _scrollController,
-            physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.all(24),
-            child: _buildContent(isDark),
-          ),
+        child: Column(
+          children: [
+            // Permission Card
+            if (_showPermissionCard && !_hasPermission)
+              PermissionCard(
+                onEnable: () => _enableNotifications(action: 'notification'),
+                onNotNow: _handleNotNow,
+                title: _permissionManager.getPermissionCardTitle(action: 'notification'),
+                message: _permissionManager.getPermissionCardMessage(action: 'notification'),
+                compact: true,
+                iconEmoji: _permissionManager.getPermissionCardIcon(action: 'notification'),
+              ),
+            
+            // Filter Bar
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 12,
+              ),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                border: Border(
+                  bottom: BorderSide(
+                    color: isDark ? Colors.grey[800]! : Colors.grey[200]!,
+                  ),
+                ),
+              ),
+              child: Row(
+                children: [
+                  _buildFilterChip('All', 'all', isDark),
+                  const SizedBox(width: 8),
+                  _buildFilterChip('Unread', 'unread', isDark),
+                  const SizedBox(width: 8),
+                  _buildFilterChip('Read', 'read', isDark),
+                  const Spacer(),
+                  if (_filteredNotifications.isEmpty &&
+                      _selectedFilter != 'all')
+                    Text(
+                      'No results',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isDark ? Colors.white70 : Colors.grey[500],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+
+            // ⚠️ FIX: only wrap with Scrollbar when there's an actual
+            // ListView attached to _scrollController (i.e. notifications
+            // have finished loading and there's something to show). During
+            // loading / error / empty states there is no ScrollPosition
+            // for the Scrollbar to attach to, which was crashing the web
+            // build with "ScrollController has no ScrollPosition attached".
+            Expanded(
+              child: RefreshIndicator(
+                onRefresh: _refreshNotifications,
+                color: _getAppBarColor(),
+                child: _hasScrollableList
+                    ? Scrollbar(
+                        controller: _scrollController,
+                        thumbVisibility: true,
+                        trackVisibility: true,
+                        thickness: 8.0,
+                        radius: const Radius.circular(10),
+                        scrollbarOrientation: ScrollbarOrientation.right,
+                        child: _buildNotificationList(
+                          isDark,
+                          controller: _scrollController,
+                        ),
+                      )
+                    : _buildNotificationList(
+                        isDark,
+                        controller: _scrollController,
+                      ),
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
 
+  // ============================================
   // ✅ MOBILE LAYOUT
+  // ============================================
+
   Widget _buildMobileLayout(bool isDark) {
     return Column(
       children: [
@@ -1088,73 +1152,30 @@ class _NotificationScreenState extends State<NotificationScreen> {
           ),
         ),
 
-        // Notifications List
+        // Notifications List (mobile has no Scrollbar, so this path is
+        // unaffected by the web fix above)
         Expanded(
-          child: _buildNotificationsList(isDark),
-        ),
-      ],
-    );
-  }
-
-  // ✅ CONTENT
-  Widget _buildContent(bool isDark) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Permission Card
-        if (_showPermissionCard && !_hasPermission)
-          PermissionCard(
-            onEnable: () => _enableNotifications(action: 'notification'),
-            onNotNow: _handleNotNow,
-            title: _permissionManager.getPermissionCardTitle(action: 'notification'),
-            message: _permissionManager.getPermissionCardMessage(action: 'notification'),
-            compact: true,
-            iconEmoji: _permissionManager.getPermissionCardIcon(action: 'notification'),
-          ),
-        
-        // Filter Bar
-        Container(
-          padding: const EdgeInsets.symmetric(
-            horizontal: 16,
-            vertical: 12,
-          ),
-          decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-            border: Border(
-              bottom: BorderSide(
-                color: isDark ? Colors.grey[800]! : Colors.grey[200]!,
-              ),
+          child: RefreshIndicator(
+            onRefresh: _refreshNotifications,
+            color: _getAppBarColor(),
+            child: _buildNotificationList(
+              isDark,
+              controller: _scrollController,
             ),
           ),
-          child: Row(
-            children: [
-              _buildFilterChip('All', 'all', isDark),
-              const SizedBox(width: 8),
-              _buildFilterChip('Unread', 'unread', isDark),
-              const SizedBox(width: 8),
-              _buildFilterChip('Read', 'read', isDark),
-              const Spacer(),
-              if (_filteredNotifications.isEmpty &&
-                  _selectedFilter != 'all')
-                Text(
-                  'No results',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: isDark ? Colors.white70 : Colors.grey[500],
-                  ),
-                ),
-            ],
-          ),
         ),
-
-        // Notifications List
-        _buildNotificationsList(isDark),
       ],
     );
   }
 
-  // ✅ NOTIFICATIONS LIST
-  Widget _buildNotificationsList(bool isDark) {
+  // ============================================
+  // ✅ NOTIFICATION LIST
+  // ============================================
+
+  Widget _buildNotificationList(
+    bool isDark, {
+    required ScrollController controller,  // ✅ REQUIRED
+  }) {
     if (_isLoading) {
       return const Center(
         child: Column(
@@ -1175,10 +1196,14 @@ class _NotificationScreenState extends State<NotificationScreen> {
           children: [
             Icon(Icons.error_outline, size: 64, color: isDark ? Colors.white70 : Colors.grey[400]),
             const SizedBox(height: 16),
-            Text(
-              _errorMessage,
-              style: TextStyle(
-                color: isDark ? Colors.white60 : Colors.grey[600],
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32),
+              child: Text(
+                _errorMessage,
+                style: TextStyle(
+                  color: isDark ? Colors.white60 : Colors.grey[600],
+                ),
+                textAlign: TextAlign.center,
               ),
             ),
             const SizedBox(height: 24),
@@ -1224,13 +1249,16 @@ class _NotificationScreenState extends State<NotificationScreen> {
               ),
             ),
             const SizedBox(height: 8),
-            Text(
-              _getEmptySubMessage(),
-              style: TextStyle(
-                fontSize: 14,
-                color: isDark ? Colors.white70 : Colors.grey[500],
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32),
+              child: Text(
+                _getEmptySubMessage(),
+                style: TextStyle(
+                  fontSize: 14,
+                  color: isDark ? Colors.white70 : Colors.grey[500],
+                ),
+                textAlign: TextAlign.center,
               ),
-              textAlign: TextAlign.center,
             ),
           ],
         ),
@@ -1261,75 +1289,75 @@ class _NotificationScreenState extends State<NotificationScreen> {
       );
     }
 
-    return RefreshIndicator(
-      onRefresh: _refreshNotifications,
-      color: _getAppBarColor(),
-      child: ListView.builder(
-        controller: _scrollController,
-        physics: const BouncingScrollPhysics(),
-        itemCount:
-            _filteredNotifications.length +
-            (_isLoadingMore ? 1 : 0),
-        itemBuilder: (context, index) {
-          if (index == _filteredNotifications.length &&
-              _isLoadingMore) {
-            return Padding(
-              padding: const EdgeInsets.all(16),
-              child: Center(
-                child: SizedBox(
-                  width: 24,
-                  height: 24,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: AppTheme.primary,
-                  ),
+    // ✅ FIXED: ListView with controller
+    return ListView.builder(
+      controller: controller,  // ✅ USE CONTROLLER
+      physics: const BouncingScrollPhysics(),
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      itemCount:
+          _filteredNotifications.length +
+          (_isLoadingMore ? 1 : 0),
+      itemBuilder: (context, index) {
+        if (index == _filteredNotifications.length &&
+            _isLoadingMore) {
+          return Padding(
+            padding: const EdgeInsets.all(16),
+            child: Center(
+              child: SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: AppTheme.primary,
                 ),
               ),
-            );
-          }
-
-          final notification = _filteredNotifications[index];
-          final originalIndex = _notifications.indexWhere(
-            (n) => n['id'] == notification['id'],
-          );
-          final isUnread = notification['is_read'] == false;
-          final icon = _getNotificationIcon(notification['type']);
-          final iconColor = _getNotificationColor(notification['type']);
-          final timeAgo = _formatTime(notification['created_at']);
-
-          return Dismissible(
-            key: Key(notification['id'].toString()),
-            direction: DismissDirection.endToStart,
-            background: Container(
-              alignment: Alignment.centerRight,
-              padding: const EdgeInsets.only(right: 20),
-              decoration: BoxDecoration(
-                color: Colors.red,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const Icon(
-                Icons.delete,
-                color: Colors.white,
-              ),
             ),
-            onDismissed: (direction) {
-              _deleteNotification(notification['id'], originalIndex);
-            },
+          );
+        }
+
+        final notification = _filteredNotifications[index];
+        final originalIndex = _notifications.indexWhere(
+          (n) => n['id'] == notification['id'],
+        );
+        final isUnread = notification['is_read'] == false;
+        final icon = _getNotificationIcon(notification['type']);
+        final iconColor = _getNotificationColor(notification['type']);
+        final timeAgo = _formatTime(notification['created_at']);
+
+        return Dismissible(
+          key: Key(notification['id'].toString()),
+          direction: DismissDirection.endToStart,
+          background: Container(
+            alignment: Alignment.centerRight,
+            padding: const EdgeInsets.only(right: 20),
+            decoration: BoxDecoration(
+              color: Colors.red,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(
+              Icons.delete,
+              color: Colors.white,
+            ),
+          ),
+          onDismissed: (direction) {
+            _deleteNotification(notification['id'], originalIndex);
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 4,
+            ),
             child: Material(
-              color: isUnread
-                  ? _getAppBarColor().withValues(alpha: 0.05)
-                  : (isDark ? const Color(0xFF1E1E1E) : Colors.white),
+              color: Colors.transparent,
               child: InkWell(
                 onTap: () => _handleNotificationTap(notification),
                 borderRadius: BorderRadius.circular(12),
                 child: Container(
                   padding: const EdgeInsets.all(16),
-                  margin: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 4,
-                  ),
                   decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                    color: isUnread
+                        ? _getAppBarColor().withValues(alpha: 0.08)
+                        : (isDark ? const Color(0xFF2A2A2A) : Colors.white),
                     borderRadius: BorderRadius.circular(12),
                     boxShadow: [
                       BoxShadow(
@@ -1341,6 +1369,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
                     border: isUnread
                         ? Border.all(
                             color: _getAppBarColor().withValues(alpha: 0.3),
+                            width: 1.5,
                           )
                         : null,
                   ),
@@ -1407,6 +1436,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
                         Container(
                           width: 8,
                           height: 8,
+                          margin: const EdgeInsets.only(top: 4),
                           decoration: const BoxDecoration(
                             color: AppTheme.primary,
                             shape: BoxShape.circle,
@@ -1417,11 +1447,15 @@ class _NotificationScreenState extends State<NotificationScreen> {
                 ),
               ),
             ),
-          );
-        },
-      ),
+          ),
+        );
+      },
     );
   }
+
+  // ============================================
+  // ✅ FILTER CHIP
+  // ============================================
 
   Widget _buildFilterChip(String label, String value, bool isDark) {
     final isSelected = _selectedFilter == value;
