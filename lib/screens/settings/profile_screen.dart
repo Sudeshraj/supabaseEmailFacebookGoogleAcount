@@ -426,7 +426,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _isImageRemoved = false;
     });
 
-    _showSnackBar('📸 Image selected. Tap Save to update.', Colors.blue);
   }
 
   void _handleRemoveImage() {
@@ -435,7 +434,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _hasImageChanged = true;
       _isImageRemoved = true;
     });
-    _showSnackBar('🗑️ Image will be removed on Save.', Colors.orange);
   }
 
   // =====================================================
@@ -470,19 +468,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
           await _profileService.deleteOldImage(_avatarUrl);
         }
         newAvatarUrl = '';
-        _showSnackBar('🔄 Removing old image...', Colors.orange);
       } else if (_hasImageChanged && _tempSelectedImage != null) {
         _showSavingDialog();
 
-        String? fileName;
-        if (kIsWeb && _tempSelectedImage is Uint8List) {
-          fileName = '${_userId}_${DateTime.now().millisecondsSinceEpoch}.jpg';
-        }
-
+        // ✅ uploadProfileImage() always writes to a fixed path
+        // ('$userId/avatar.jpg') with upsert:true, so it
+        // automatically replaces the previous image - no need to
+        // generate a unique fileName or call deleteOldImage() here.
         final imageUrl = await _profileService.uploadProfileImage(
           userId: _userId,
           imageFile: _tempSelectedImage!,
-          fileName: fileName,
         );
 
         if (mounted && Navigator.canPop(context)) {
@@ -533,8 +528,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
         );
 
         await SessionManager.forceSyncAvailableProfiles();
-
-        _showSnackBar('✅ Profile updated successfully', Colors.green);
       } else {
         setState(() => _isSaving = false);
         _showSnackBar('Failed to update profile', Colors.red);

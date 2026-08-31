@@ -3,7 +3,6 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:path/path.dart' as path;
 
 class ProfileService {
   final SupabaseClient _supabase = Supabase.instance.client;
@@ -52,6 +51,18 @@ class ProfileService {
     String? avatarUrl,
   }) async {
     try {
+      // ✅ avatar_url එක අපේම Supabase storage domain එකෙන්ම ආවේද කියලා validate කරනවා
+      if (avatarUrl != null && avatarUrl.isNotEmpty) {
+        final supabaseUrl = _supabase.storage.from('profiles').getPublicUrl('');
+        final expectedHost = Uri.parse(supabaseUrl).host;
+        final providedHost = Uri.tryParse(avatarUrl)?.host;
+
+        if (providedHost != expectedHost) {
+          debugPrint('❌ Rejected invalid avatar_url host: $providedHost');
+          return false;
+        }
+      }
+
       final Map<String, dynamic> updates = {};
       if (fullName != null) updates['full_name'] = fullName;
       if (phone != null) updates['phone'] = phone;
@@ -74,26 +85,21 @@ class ProfileService {
   // ============================================================
 
   /// ✅ Upload profile image - Cross platform
+  /// Fixed filename ('$userId/avatar.jpg') + upsert:true so every
+  /// re-upload REPLACES the previous image instead of creating a
+  /// new orphan file in storage. Extension is always forced to
+  /// .jpg (regardless of source file type) so switching between
+  /// gallery/camera or image formats never leaves stale files
+  /// behind under a different extension.
   Future<String?> uploadProfileImage({
     required String userId,
     required dynamic imageFile, // File (mobile) or Uint8List (web)
-    String? fileName,
+    String? fileName, // kept for backward compatibility, not used
   }) async {
     try {
-      // Determine file name
-      String finalFileName;
-      if (fileName != null) {
-        finalFileName = fileName;
-      } else if (imageFile is File) {
-        final extension = path.extension(imageFile.path);
-        finalFileName =
-            '${userId}_${DateTime.now().millisecondsSinceEpoch}$extension';
-      } else {
-        finalFileName =
-            '${userId}_${DateTime.now().millisecondsSinceEpoch}.jpg';
-      }
-
-      final filePath = 'profiles/$finalFileName';
+      // ✅ Fixed filename + fixed extension - always the same path
+      const finalFileName = 'avatar.jpg';
+      final filePath = '$userId/$finalFileName';
 
       // Upload based on platform
       if (kIsWeb) {
@@ -103,7 +109,14 @@ class ProfileService {
         }
         await _supabase.storage
             .from('profiles')
-            .uploadBinary(filePath, imageFile);
+            .uploadBinary(
+              filePath,
+              imageFile,
+              fileOptions: const FileOptions(
+                upsert: true, // ✅ replace old image at the same path
+                contentType: 'image/jpeg',
+              ),
+            );
       } else {
         // Mobile: Upload File
         if (imageFile is! File) {
@@ -116,13 +129,23 @@ class ProfileService {
           throw Exception('Image must be less than 5MB');
         }
 
-        await _supabase.storage.from('profiles').upload(filePath, imageFile);
+        await _supabase.storage
+            .from('profiles')
+            .upload(
+              filePath,
+              imageFile,
+              fileOptions: const FileOptions(
+                upsert: true, // ✅ replace old image at the same path
+                contentType: 'image/jpeg',
+              ),
+            );
       }
 
       // Get public URL
-      final publicUrl = _supabase.storage
-          .from('profiles')
-          .getPublicUrl(filePath);
+      // ✅ Same path every time -> append a cache-busting query param
+      // so the CDN/browser doesn't keep showing the old cached image.
+      final baseUrl = _supabase.storage.from('profiles').getPublicUrl(filePath);
+      final publicUrl = '$baseUrl?t=${DateTime.now().millisecondsSinceEpoch}';
 
       // Update profile with new image URL
       await _supabase
@@ -143,13 +166,25 @@ class ProfileService {
   /// ✅ Delete old profile image
   Future<void> deleteOldImage(String imageUrl) async {
     try {
+      // Strip query params (?t=...) - only need the path portion
       final uri = Uri.parse(imageUrl);
       final pathSegments = uri.path.split('/');
-      final fileName = pathSegments.last;
 
-      if (fileName.isNotEmpty) {
-        final filePath = 'profiles/$fileName';
+      // Public URL structure: .../storage/v1/object/public/profiles/userId/avatar.jpg
+      // Find the bucket name ('profiles') and take everything after it
+      // (userId/avatar.jpg) as the storage path.
+      final bucketIndex = pathSegments.indexOf('profiles');
+
+      if (bucketIndex == -1 || bucketIndex + 1 >= pathSegments.length) {
+        debugPrint('⚠️ Could not parse storage path from URL: $imageUrl');
+        return;
+      }
+
+      final filePath = pathSegments.sublist(bucketIndex + 1).join('/');
+
+      if (filePath.isNotEmpty) {
         await _supabase.storage.from('profiles').remove([filePath]);
+        debugPrint('✅ Deleted old image: $filePath');
       }
     } catch (e) {
       debugPrint('⚠️ Could not delete old image: $e');
