@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/alertBox/show_logout_conf.dart';
 import 'package:flutter_application_1/main.dart';
+import 'package:flutter_application_1/services/notification_service.dart';
 import 'package:flutter_application_1/services/session_manager.dart';
 import 'package:flutter_application_1/utils/app_version.dart';
 import 'package:flutter_application_1/theme/app_theme.dart';
@@ -49,10 +50,10 @@ class _SideMenuState extends State<SideMenu> {
 
   // ✅ Owner salons
   List<Map<String, dynamic>> _ownerSalons = [];
-  
+
   // ✅ Barber salons (multiple salon support for barber)
   List<Map<String, dynamic>> _barberSalons = [];
-  
+
   String? _selectedSalonId;
   String? _selectedSalonName;
 
@@ -61,6 +62,8 @@ class _SideMenuState extends State<SideMenu> {
   bool _isLargeScreen = false;
 
   final supabase = Supabase.instance.client;
+
+  final NotificationService _notificationService = NotificationService();
 
   @override
   void initState() {
@@ -204,7 +207,9 @@ class _SideMenuState extends State<SideMenu> {
           await SessionManager.saveSalonName(_selectedSalonName!);
         }
 
-        debugPrint('✅ Selected barber salon: $_selectedSalonName (ID: $_selectedSalonId)');
+        debugPrint(
+          '✅ Selected barber salon: $_selectedSalonName (ID: $_selectedSalonId)',
+        );
         debugPrint('✅ Total barber salons: ${_barberSalons.length}');
       } else {
         setState(() {
@@ -358,17 +363,28 @@ class _SideMenuState extends State<SideMenu> {
   Future<void> _loadNotificationCounts() async {
     try {
       final currentUser = supabase.auth.currentUser;
-      if (currentUser == null) return;
+      if (currentUser == null) {
+        debugPrint('❌ No user logged in');
+        return;
+      }
 
-      final notificationResponse = await supabase
-          .from('notifications')
-          .select('id')
-          .eq('user_id', currentUser.id)
-          .eq('is_read', false);
+      debugPrint('📬 [SideMenu] Current User ID: ${currentUser.id}');
+      debugPrint('📬 [SideMenu] Current Role: ${widget.userRole}');
+      debugPrint('📬 [SideMenu] Selected Salon ID: $_selectedSalonId');
 
-      final unreadCount = notificationResponse.length;
+      // ✅ Use NotificationService - Same as Dashboard App Bar
+      final unreadCount = await _notificationService.getUnreadCountWithRole(
+        userId: currentUser.id,
+        role: widget.userRole,
+      );
+
+      debugPrint(
+        '📬 [SideMenu] Unread Notifications for ${widget.userRole}: $unreadCount',
+      );
+
       int pendingBookings = 0;
 
+      // ✅ Count pending bookings based on CURRENT role only
       if (widget.userRole == 'customer') {
         final bookingsResponse = await supabase
             .from('appointments')
@@ -376,6 +392,7 @@ class _SideMenuState extends State<SideMenu> {
             .eq('customer_id', currentUser.id)
             .inFilter('status', ['pending', 'confirmed']);
         pendingBookings = bookingsResponse.length;
+        debugPrint('📬 [SideMenu] Customer pending bookings: $pendingBookings');
       } else if (widget.userRole == 'barber') {
         final bookingsResponse = await supabase
             .from('appointments')
@@ -383,6 +400,7 @@ class _SideMenuState extends State<SideMenu> {
             .eq('barber_id', currentUser.id)
             .inFilter('status', ['pending', 'confirmed']);
         pendingBookings = bookingsResponse.length;
+        debugPrint('📬 [SideMenu] Barber pending bookings: $pendingBookings');
       } else if (widget.userRole == 'owner') {
         if (_selectedSalonId != null) {
           final bookingsResponse = await supabase
@@ -391,11 +409,15 @@ class _SideMenuState extends State<SideMenu> {
               .eq('salon_id', int.parse(_selectedSalonId!))
               .inFilter('status', ['pending', 'confirmed']);
           pendingBookings = bookingsResponse.length;
+          debugPrint(
+            '📬 [SideMenu] Owner pending bookings for selected salon: $pendingBookings',
+          );
         } else {
           final salonsResponse = await supabase
               .from('salons')
               .select('id')
-              .eq('owner_id', currentUser.id);
+              .eq('owner_id', currentUser.id)
+              .eq('is_active', true);
 
           final List<int> salonIds = salonsResponse
               .map<int>((s) => s['id'] as int)
@@ -411,6 +433,9 @@ class _SideMenuState extends State<SideMenu> {
                 )
                 .inFilter('status', ['pending', 'confirmed']);
             pendingBookings = bookingsResponse.length;
+            debugPrint(
+              '📬 [SideMenu] Owner pending bookings for all salons: $pendingBookings',
+            );
           }
         }
       }
@@ -423,10 +448,10 @@ class _SideMenuState extends State<SideMenu> {
       }
 
       debugPrint(
-        '📬 Unread: $_unreadNotificationCount, Pending: $_pendingBookingsCount',
+        '📬 [SideMenu FINAL] Role: ${widget.userRole}, Unread: $_unreadNotificationCount, Pending: $_pendingBookingsCount',
       );
     } catch (e) {
-      debugPrint('❌ Error loading notification counts: $e');
+      debugPrint('❌ [SideMenu] Error loading notification counts: $e');
     }
   }
 
@@ -1741,7 +1766,9 @@ class _SideMenuState extends State<SideMenu> {
                 ),
                 child: Icon(
                   item['icon'] as IconData? ?? Icons.store,
-                  color: salonId != null ? const Color(0xFFFF6B8B) : Colors.grey,
+                  color: salonId != null
+                      ? const Color(0xFFFF6B8B)
+                      : Colors.grey,
                   size: 18,
                 ),
               ),
@@ -1907,7 +1934,7 @@ class _SideMenuState extends State<SideMenu> {
         'onSalonChanged': _onBarberSalonChanged,
         'color': Colors.blueGrey,
       });
-    } 
+    }
     // ✅ Single Salon Info - if barber has exactly one salon
     else if (_barberSalons.length == 1 && _selectedSalonName != null) {
       items.add({
@@ -1918,7 +1945,7 @@ class _SideMenuState extends State<SideMenu> {
         'isSalonInfo': true,
         'salonId': _selectedSalonId,
       });
-    } 
+    }
     // ✅ No Salon Assigned
     else {
       items.add({
