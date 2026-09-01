@@ -6,7 +6,6 @@ import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
 import 'package:flutter_application_1/extensions/context_extensions.dart';
 import 'package:flutter_application_1/theme/app_theme.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:path/path.dart' as path;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:image_cropper/image_cropper.dart';
@@ -2572,62 +2571,101 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     });
   }
 
-  Future<String?> _uploadLogo() async {
+  // ✅ Fixed path per SALON: 'salons/{userId}/{salonId}/logo.jpg'. This is the
+  // EXACT SAME path scheme EditSalonScreen uses, so a logo uploaded here at
+  // creation time is the same storage object that a later edit will replace
+  // via upsert:true - never a separate orphan file. Requires the salon row
+  // to already exist (see _createSalon(), which inserts the row first to
+  // obtain a real salonId before calling this).
+  Future<String?> _uploadLogo(int salonId) async {
     if (_logoFile == null && _logoWebBytes == null) return null;
     setState(() => _isUploadingLogo = true);
     try {
       final userId = supabase.auth.currentUser?.id;
       if (userId == null) throw Exception('Not logged in');
-      String fileName;
+
+      final filePath = 'salons/$userId/$salonId/logo.jpg';
+
       if (kIsWeb && _logoWebBytes != null) {
-        fileName = 'logo_${DateTime.now().millisecondsSinceEpoch}.png';
-        final filePath = 'salons/$userId/$fileName';
         await supabase.storage
             .from('salon-images')
-            .uploadBinary(filePath, _logoWebBytes!);
-        return supabase.storage.from('salon-images').getPublicUrl(filePath);
+            .uploadBinary(
+              filePath,
+              _logoWebBytes!,
+              fileOptions: const FileOptions(
+                upsert: true,
+                contentType: 'image/jpeg',
+              ),
+            );
       } else if (_logoFile != null) {
-        final fileExt = path.extension(_logoFile!.path);
-        fileName = 'logo_${DateTime.now().millisecondsSinceEpoch}$fileExt';
-        final filePath = 'salons/$userId/$fileName';
         await supabase.storage
             .from('salon-images')
-            .upload(filePath, _logoFile!);
-        return supabase.storage.from('salon-images').getPublicUrl(filePath);
+            .upload(
+              filePath,
+              _logoFile!,
+              fileOptions: const FileOptions(
+                upsert: true,
+                contentType: 'image/jpeg',
+              ),
+            );
+      } else {
+        return null;
       }
-      return null;
+
+      final baseUrl = supabase.storage
+          .from('salon-images')
+          .getPublicUrl(filePath);
+      return '$baseUrl?t=${DateTime.now().millisecondsSinceEpoch}';
     } catch (e) {
+      debugPrint('❌ Error uploading logo: $e');
       return null;
     } finally {
       if (mounted) setState(() => _isUploadingLogo = false);
     }
   }
 
-  Future<String?> _uploadCover() async {
+  // ✅ Same fixed-path-per-salon + upsert pattern as _uploadLogo() above.
+  Future<String?> _uploadCover(int salonId) async {
     if (_coverFile == null && _coverWebBytes == null) return null;
     setState(() => _isUploadingCover = true);
     try {
       final userId = supabase.auth.currentUser?.id;
       if (userId == null) throw Exception('Not logged in');
-      String fileName;
+
+      final filePath = 'salons/$userId/$salonId/cover.jpg';
+
       if (kIsWeb && _coverWebBytes != null) {
-        fileName = 'cover_${DateTime.now().millisecondsSinceEpoch}.png';
-        final filePath = 'salons/$userId/$fileName';
         await supabase.storage
             .from('salon-images')
-            .uploadBinary(filePath, _coverWebBytes!);
-        return supabase.storage.from('salon-images').getPublicUrl(filePath);
+            .uploadBinary(
+              filePath,
+              _coverWebBytes!,
+              fileOptions: const FileOptions(
+                upsert: true,
+                contentType: 'image/jpeg',
+              ),
+            );
       } else if (_coverFile != null) {
-        final fileExt = path.extension(_coverFile!.path);
-        fileName = 'cover_${DateTime.now().millisecondsSinceEpoch}$fileExt';
-        final filePath = 'salons/$userId/$fileName';
         await supabase.storage
             .from('salon-images')
-            .upload(filePath, _coverFile!);
-        return supabase.storage.from('salon-images').getPublicUrl(filePath);
+            .upload(
+              filePath,
+              _coverFile!,
+              fileOptions: const FileOptions(
+                upsert: true,
+                contentType: 'image/jpeg',
+              ),
+            );
+      } else {
+        return null;
       }
-      return null;
+
+      final baseUrl = supabase.storage
+          .from('salon-images')
+          .getPublicUrl(filePath);
+      return '$baseUrl?t=${DateTime.now().millisecondsSinceEpoch}';
     } catch (e) {
+      debugPrint('❌ Error uploading cover: $e');
       return null;
     } finally {
       if (mounted) setState(() => _isUploadingCover = false);
@@ -2794,13 +2832,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     setState(() => _isLoading = true);
 
     try {
-      String? logoUrl = (_logoFile != null || _logoWebBytes != null)
-          ? await _uploadLogo()
-          : null;
-      String? coverUrl = (_coverFile != null || _coverWebBytes != null)
-          ? await _uploadCover()
-          : null;
-
       final prefs = await SharedPreferences.getInstance();
       final userTimezone =
           prefs.getString('user_timezone') ??
@@ -2812,6 +2843,11 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
         'user_timezone': userTimezone,
       };
 
+      // ✅ Step 1: insert the salon row WITHOUT logo/cover first, so we get
+      // a real salonId. Images are uploaded to a path keyed by that salonId
+      // (see below) - the EXACT SAME path scheme EditSalonScreen uses, so a
+      // later edit's upsert replaces this same file instead of creating a
+      // separate orphan.
       final salonData = {
         'name': _nameController.text.trim(),
         'address': _addressController.text.trim().isEmpty
@@ -2827,8 +2863,8 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
         'description': _descriptionController.text.trim().isEmpty
             ? null
             : _descriptionController.text.trim(),
-        'logo_url': logoUrl,
-        'cover_url': coverUrl,
+        'logo_url': null,
+        'cover_url': null,
         'open_time': _openTimeUtc,
         'close_time': _closeTimeUtc,
         'timezone': _salonTimezone,
@@ -2850,6 +2886,25 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
       final salonId = response['id'] as int;
 
       debugPrint('✅ Salon created with ID: $salonId');
+
+      // ✅ Step 2: now that salonId exists, upload logo/cover to
+      // 'salons/{userId}/{salonId}/logo.jpg' (and cover.jpg) - same path
+      // EditSalonScreen will reuse for this salon going forward.
+      String? logoUrl = (_logoFile != null || _logoWebBytes != null)
+          ? await _uploadLogo(salonId)
+          : null;
+      String? coverUrl = (_coverFile != null || _coverWebBytes != null)
+          ? await _uploadCover(salonId)
+          : null;
+
+      // ✅ Step 3: patch the row with the uploaded URLs, if any.
+      if (logoUrl != null || coverUrl != null) {
+        final imageUpdate = <String, dynamic>{};
+        if (logoUrl != null) imageUpdate['logo_url'] = logoUrl;
+        if (coverUrl != null) imageUpdate['cover_url'] = coverUrl;
+        await supabase.from('salons').update(imageUpdate).eq('id', salonId);
+        debugPrint('✅ Salon images saved: logo=$logoUrl, cover=$coverUrl');
+      }
 
       for (int i = 0; i < _selectedGenderIds.length; i++) {
         final genderId = _selectedGenderIds[i];

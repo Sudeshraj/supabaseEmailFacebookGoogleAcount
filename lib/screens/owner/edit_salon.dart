@@ -6,7 +6,6 @@ import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
 import 'package:flutter_application_1/extensions/context_extensions.dart';
 import 'package:flutter_application_1/theme/app_theme.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:path/path.dart' as path;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:image_cropper/image_cropper.dart';
@@ -516,6 +515,12 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   bool _isUploadingLogo = false;
   bool _isUploadingCover = false;
 
+  // ✅ Track explicit "Remove" taps separately from "never touched".
+  // Needed so Save can tell "user wants the logo/cover deleted" apart
+  // from "user didn't change anything, keep what's already there".
+  bool _logoRemoved = false;
+  bool _coverRemoved = false;
+
   // ============================================
   // TIMEZONE VARIABLES
   // ============================================
@@ -989,6 +994,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
           setState(() {
             _logoWebBytes = bytes;
             _logoFile = null;
+            _logoRemoved = false; // ✅ picking a new logo cancels a pending removal
           });
         } else {
           final croppedFile = await ImageCropper().cropImage(
@@ -1010,6 +1016,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             setState(() {
               _logoFile = File(croppedFile.path);
               _logoWebBytes = null;
+              _logoRemoved = false; // ✅ picking a new logo cancels a pending removal
             });
           }
         }
@@ -1035,6 +1042,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
           setState(() {
             _logoWebBytes = bytes;
             _logoFile = null;
+            _logoRemoved = false;
           });
         } else {
           final croppedFile = await ImageCropper().cropImage(
@@ -1055,6 +1063,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             setState(() {
               _logoFile = File(croppedFile.path);
               _logoWebBytes = null;
+              _logoRemoved = false;
             });
           }
         }
@@ -1070,6 +1079,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       _logoFile = null;
       _logoWebBytes = null;
       _currentLogoUrl = null;
+      _logoRemoved = true; // ✅ marks that Save should delete the stored logo
     });
   }
 
@@ -1088,6 +1098,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
           setState(() {
             _coverWebBytes = bytes;
             _coverFile = null;
+            _coverRemoved = false;
           });
         } else {
           final croppedFile = await ImageCropper().cropImage(
@@ -1109,6 +1120,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             setState(() {
               _coverFile = File(croppedFile.path);
               _coverWebBytes = null;
+              _coverRemoved = false;
             });
           }
         }
@@ -1134,6 +1146,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
           setState(() {
             _coverWebBytes = bytes;
             _coverFile = null;
+            _coverRemoved = false;
           });
         } else {
           final croppedFile = await ImageCropper().cropImage(
@@ -1154,6 +1167,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             setState(() {
               _coverFile = File(croppedFile.path);
               _coverWebBytes = null;
+              _coverRemoved = false;
             });
           }
         }
@@ -1169,33 +1183,62 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       _coverFile = null;
       _coverWebBytes = null;
       _currentCoverUrl = null;
+      _coverRemoved = true; // ✅ marks that Save should delete the stored cover
     });
   }
 
+  // ✅ Fixed path per SALON (not per session): 'salons/{userId}/{salonId}/logo.jpg'.
+  // Because this ties to the salon's permanent id, re-uploading in this or any
+  // future edit session always hits the same path - upsert:true replaces it,
+  // so no orphan files ever accumulate in storage for this salon's logo.
+  // If the user tapped "Remove Logo" and didn't pick a replacement, the
+  // stored object is deleted and null is returned/saved.
   Future<String?> _uploadLogo() async {
-    if (_logoFile == null && _logoWebBytes == null) return _currentLogoUrl;
+    final userId = supabase.auth.currentUser?.id;
+    if (userId == null) throw Exception('Not logged in');
+    final filePath = 'salons/$userId/${widget.salonId}/logo.jpg';
+
+    // No new file picked
+    if (_logoFile == null && _logoWebBytes == null) {
+      if (_logoRemoved) {
+        try {
+          await supabase.storage.from('salon-images').remove([filePath]);
+        } catch (e) {
+          debugPrint('⚠️ Could not delete old logo (may not exist): $e');
+        }
+        return null;
+      }
+      return _currentLogoUrl; // untouched - keep whatever was already saved
+    }
+
     setState(() => _isUploadingLogo = true);
     try {
-      final userId = supabase.auth.currentUser?.id;
-      if (userId == null) throw Exception('Not logged in');
-      String fileName;
       if (kIsWeb && _logoWebBytes != null) {
-        fileName = 'logo_${DateTime.now().millisecondsSinceEpoch}.png';
-        final filePath = 'salons/$userId/$fileName';
-        await supabase.storage
-            .from('salon-images')
-            .uploadBinary(filePath, _logoWebBytes!);
-        return supabase.storage.from('salon-images').getPublicUrl(filePath);
+        await supabase.storage.from('salon-images').uploadBinary(
+              filePath,
+              _logoWebBytes!,
+              fileOptions: const FileOptions(
+                upsert: true,
+                contentType: 'image/jpeg',
+              ),
+            );
       } else if (_logoFile != null) {
-        final fileExt = path.extension(_logoFile!.path);
-        fileName = 'logo_${DateTime.now().millisecondsSinceEpoch}$fileExt';
-        final filePath = 'salons/$userId/$fileName';
-        await supabase.storage
-            .from('salon-images')
-            .upload(filePath, _logoFile!);
-        return supabase.storage.from('salon-images').getPublicUrl(filePath);
+        await supabase.storage.from('salon-images').upload(
+              filePath,
+              _logoFile!,
+              fileOptions: const FileOptions(
+                upsert: true,
+                contentType: 'image/jpeg',
+              ),
+            );
+      } else {
+        return _currentLogoUrl;
       }
-      return _currentLogoUrl;
+
+      final baseUrl = supabase.storage
+          .from('salon-images')
+          .getPublicUrl(filePath);
+      return '$baseUrl?t=${DateTime.now().millisecondsSinceEpoch}';
     } catch (e) {
       debugPrint('❌ Error uploading logo: $e');
       return _currentLogoUrl;
@@ -1204,30 +1247,53 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     }
   }
 
+  // ✅ Same fixed-path-per-salon + upsert + delete-on-remove pattern as
+  // _uploadLogo() above.
   Future<String?> _uploadCover() async {
-    if (_coverFile == null && _coverWebBytes == null) return _currentCoverUrl;
-    setState(() => _isUploadingCover = true);
-    try {
-      final userId = supabase.auth.currentUser?.id;
-      if (userId == null) throw Exception('Not logged in');
-      String fileName;
-      if (kIsWeb && _coverWebBytes != null) {
-        fileName = 'cover_${DateTime.now().millisecondsSinceEpoch}.png';
-        final filePath = 'salons/$userId/$fileName';
-        await supabase.storage
-            .from('salon-images')
-            .uploadBinary(filePath, _coverWebBytes!);
-        return supabase.storage.from('salon-images').getPublicUrl(filePath);
-      } else if (_coverFile != null) {
-        final fileExt = path.extension(_coverFile!.path);
-        fileName = 'cover_${DateTime.now().millisecondsSinceEpoch}$fileExt';
-        final filePath = 'salons/$userId/$fileName';
-        await supabase.storage
-            .from('salon-images')
-            .upload(filePath, _coverFile!);
-        return supabase.storage.from('salon-images').getPublicUrl(filePath);
+    final userId = supabase.auth.currentUser?.id;
+    if (userId == null) throw Exception('Not logged in');
+    final filePath = 'salons/$userId/${widget.salonId}/cover.jpg';
+
+    if (_coverFile == null && _coverWebBytes == null) {
+      if (_coverRemoved) {
+        try {
+          await supabase.storage.from('salon-images').remove([filePath]);
+        } catch (e) {
+          debugPrint('⚠️ Could not delete old cover (may not exist): $e');
+        }
+        return null;
       }
       return _currentCoverUrl;
+    }
+
+    setState(() => _isUploadingCover = true);
+    try {
+      if (kIsWeb && _coverWebBytes != null) {
+        await supabase.storage.from('salon-images').uploadBinary(
+              filePath,
+              _coverWebBytes!,
+              fileOptions: const FileOptions(
+                upsert: true,
+                contentType: 'image/jpeg',
+              ),
+            );
+      } else if (_coverFile != null) {
+        await supabase.storage.from('salon-images').upload(
+              filePath,
+              _coverFile!,
+              fileOptions: const FileOptions(
+                upsert: true,
+                contentType: 'image/jpeg',
+              ),
+            );
+      } else {
+        return _currentCoverUrl;
+      }
+
+      final baseUrl = supabase.storage
+          .from('salon-images')
+          .getPublicUrl(filePath);
+      return '$baseUrl?t=${DateTime.now().millisecondsSinceEpoch}';
     } catch (e) {
       debugPrint('❌ Error uploading cover: $e');
       return _currentCoverUrl;
@@ -1535,6 +1601,20 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       setState(() => _isDeleting = true);
 
       try {
+        // ✅ Clean up the salon's stored logo/cover before deleting the row,
+        // so we don't leave orphan objects behind under its id forever.
+        final userId = supabase.auth.currentUser?.id;
+        if (userId != null) {
+          try {
+            await supabase.storage.from('salon-images').remove([
+              'salons/$userId/${widget.salonId}/logo.jpg',
+              'salons/$userId/${widget.salonId}/cover.jpg',
+            ]);
+          } catch (e) {
+            debugPrint('⚠️ Could not delete salon images (may not exist): $e');
+          }
+        }
+
         await supabase.from('salons').delete().eq('id', widget.salonId);
 
         if (mounted) {
