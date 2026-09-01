@@ -1759,37 +1759,49 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   Widget _buildTimezoneTile(String tz, String displayName, String flag) {
     final isSelected = tz == _userTimezone;
 
+    // ⚠️ FIX: previously the rounded background color was set via a plain
+    // Container's BoxDecoration wrapping the ListTile. ListTile paints its
+    // ink splash / highlight onto the nearest Material ancestor, and that
+    // splash was ending up UNDER the Container's opaque decoration layer -
+    // hence Flutter's "ListTile background color or ink splashes may be
+    // invisible" warning. The fix is to give the color + rounded shape to
+    // a Material widget instead, so the background color and the ink
+    // splash both belong to the same paint layer.
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 2),
-      decoration: BoxDecoration(
+      child: Material(
         color: isSelected
             ? AppTheme.primary.withValues(alpha: 0.1)
-            : null,
+            : Colors.transparent,
         borderRadius: BorderRadius.circular(12),
-      ),
-      child: ListTile(
-        leading: CircleAvatar(
-          radius: 20,
-          backgroundColor: isSelected ? AppTheme.primary : Colors.grey[200],
-          child: Text(flag, style: const TextStyle(fontSize: 16)),
-        ),
-        title: Text(
-          displayName,
-          style: TextStyle(
-            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-            color: isSelected ? AppTheme.primary : null,
+        clipBehavior: Clip.antiAlias,
+        child: ListTile(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
           ),
+          leading: CircleAvatar(
+            radius: 20,
+            backgroundColor: isSelected ? AppTheme.primary : Colors.grey[200],
+            child: Text(flag, style: const TextStyle(fontSize: 16)),
+          ),
+          title: Text(
+            displayName,
+            style: TextStyle(
+              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+              color: isSelected ? AppTheme.primary : null,
+            ),
+          ),
+          subtitle: Text(
+            tz,
+            style: const TextStyle(fontSize: 11),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          trailing: isSelected
+              ? const Icon(Icons.check_circle, color: AppTheme.primary)
+              : null,
+          onTap: () => Navigator.of(context).pop(tz),
         ),
-        subtitle: Text(
-          tz,
-          style: const TextStyle(fontSize: 11),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        trailing: isSelected
-            ? const Icon(Icons.check_circle, color: AppTheme.primary)
-            : null,
-        onTap: () => Navigator.of(context).pop(tz),
       ),
     );
   }
@@ -1926,10 +1938,21 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     final result = await showDialog<String>(
       context: context,
       builder: (context) {
-        String searchQuery = '';
-
+        // ⚠️ FIX: previously declared `String searchQuery = '';` right
+        // here. Flutter re-invokes this outer `builder` callback whenever
+        // the dialog's ModalRoute rebuilds (which happens on MediaQuery
+        // changes - e.g. the on-screen keyboard opening/adjusting while
+        // typing) - so that local variable was getting silently reset to
+        // '' mid-search, which is exactly why typed text vanished and the
+        // view snapped back to the tab list (first tab = Africa).
+        // `searchController` doesn't have this problem because it's
+        // declared OUTSIDE this builder (in _showAdvancedTimezonePicker's
+        // own scope, created once), so it survives every rebuild. We now
+        // read the query directly from `searchController.text` instead of
+        // a separate variable.
         return StatefulBuilder(
           builder: (context, setDialogState) {
+            final searchQuery = searchController.text;
             List<Map<String, dynamic>> filteredList = searchableList;
             if (searchQuery.isNotEmpty) {
               final query = searchQuery.toLowerCase();
@@ -1965,9 +1988,10 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                         controller: searchController,
                         autofocus: false,
                         onChanged: (value) {
-                          setDialogState(() {
-                            searchQuery = value;
-                          });
+                          // The controller already holds `value` - we just
+                          // need to trigger a rebuild of this StatefulBuilder
+                          // so the filtered list recalculates.
+                          setDialogState(() {});
                         },
                         decoration: InputDecoration(
                           hintText:
@@ -1985,9 +2009,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                                   ),
                                   onPressed: () {
                                     searchController.clear();
-                                    setDialogState(() {
-                                      searchQuery = '';
-                                    });
+                                    setDialogState(() {});
                                   },
                                 )
                               : null,
