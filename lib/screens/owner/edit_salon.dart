@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:image_cropper/image_cropper.dart';
 import '../../services/timezone_service.dart';
+import '../../utils/image_compression.dart';
 
 // ==================== ENHANCED TIME PICKER ====================
 class EnhancedTimePicker extends StatefulWidget {
@@ -983,16 +984,17 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     try {
       final XFile? pickedFile = await picker.pickImage(
         source: ImageSource.gallery,
-        maxWidth: 800,
-        maxHeight: 800,
-        imageQuality: 85,
+        maxWidth: 1600,
+        maxHeight: 1600,
+        imageQuality: 90,
       );
 
       if (pickedFile != null) {
         if (kIsWeb) {
-          final bytes = await pickedFile.readAsBytes();
+          final rawBytes = await pickedFile.readAsBytes();
+          final compressed = await compressAvatarBytes(rawBytes);
           setState(() {
-            _logoWebBytes = bytes;
+            _logoWebBytes = compressed;
             _logoFile = null;
             _logoRemoved = false; // ✅ picking a new logo cancels a pending removal
           });
@@ -1013,9 +1015,13 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
           );
 
           if (croppedFile != null) {
+            // ✅ Compress the cropped file's bytes - mobile ends up with the
+            // same small Uint8List that web produces.
+            final rawBytes = await File(croppedFile.path).readAsBytes();
+            final compressed = await compressAvatarBytes(rawBytes);
             setState(() {
-              _logoFile = File(croppedFile.path);
-              _logoWebBytes = null;
+              _logoWebBytes = compressed;
+              _logoFile = null;
               _logoRemoved = false; // ✅ picking a new logo cancels a pending removal
             });
           }
@@ -1031,16 +1037,17 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     try {
       final XFile? pickedFile = await picker.pickImage(
         source: ImageSource.camera,
-        maxWidth: 800,
-        maxHeight: 800,
-        imageQuality: 85,
+        maxWidth: 1600,
+        maxHeight: 1600,
+        imageQuality: 90,
       );
 
       if (pickedFile != null) {
         if (kIsWeb) {
-          final bytes = await pickedFile.readAsBytes();
+          final rawBytes = await pickedFile.readAsBytes();
+          final compressed = await compressAvatarBytes(rawBytes);
           setState(() {
-            _logoWebBytes = bytes;
+            _logoWebBytes = compressed;
             _logoFile = null;
             _logoRemoved = false;
           });
@@ -1060,9 +1067,11 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
           );
 
           if (croppedFile != null) {
+            final rawBytes = await File(croppedFile.path).readAsBytes();
+            final compressed = await compressAvatarBytes(rawBytes);
             setState(() {
-              _logoFile = File(croppedFile.path);
-              _logoWebBytes = null;
+              _logoWebBytes = compressed;
+              _logoFile = null;
               _logoRemoved = false;
             });
           }
@@ -1087,16 +1096,17 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     try {
       final XFile? pickedFile = await picker.pickImage(
         source: ImageSource.gallery,
-        maxWidth: 1920,
-        maxHeight: 1080,
-        imageQuality: 85,
+        maxWidth: 2400,
+        maxHeight: 1350,
+        imageQuality: 90,
       );
 
       if (pickedFile != null) {
         if (kIsWeb) {
-          final bytes = await pickedFile.readAsBytes();
+          final rawBytes = await pickedFile.readAsBytes();
+          final compressed = await compressCoverBytes(rawBytes);
           setState(() {
-            _coverWebBytes = bytes;
+            _coverWebBytes = compressed;
             _coverFile = null;
             _coverRemoved = false;
           });
@@ -1117,9 +1127,11 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
           );
 
           if (croppedFile != null) {
+            final rawBytes = await File(croppedFile.path).readAsBytes();
+            final compressed = await compressCoverBytes(rawBytes);
             setState(() {
-              _coverFile = File(croppedFile.path);
-              _coverWebBytes = null;
+              _coverWebBytes = compressed;
+              _coverFile = null;
               _coverRemoved = false;
             });
           }
@@ -1135,16 +1147,17 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     try {
       final XFile? pickedFile = await picker.pickImage(
         source: ImageSource.camera,
-        maxWidth: 1920,
-        maxHeight: 1080,
-        imageQuality: 85,
+        maxWidth: 2400,
+        maxHeight: 1350,
+        imageQuality: 90,
       );
 
       if (pickedFile != null) {
         if (kIsWeb) {
-          final bytes = await pickedFile.readAsBytes();
+          final rawBytes = await pickedFile.readAsBytes();
+          final compressed = await compressCoverBytes(rawBytes);
           setState(() {
-            _coverWebBytes = bytes;
+            _coverWebBytes = compressed;
             _coverFile = null;
             _coverRemoved = false;
           });
@@ -1164,9 +1177,11 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
           );
 
           if (croppedFile != null) {
+            final rawBytes = await File(croppedFile.path).readAsBytes();
+            final compressed = await compressCoverBytes(rawBytes);
             setState(() {
-              _coverFile = File(croppedFile.path);
-              _coverWebBytes = null;
+              _coverWebBytes = compressed;
+              _coverFile = null;
               _coverRemoved = false;
             });
           }
@@ -1213,7 +1228,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
 
     setState(() => _isUploadingLogo = true);
     try {
-      if (kIsWeb && _logoWebBytes != null) {
+      if (_logoWebBytes != null) {
         await supabase.storage.from('salon-images').uploadBinary(
               filePath,
               _logoWebBytes!,
@@ -1268,7 +1283,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
 
     setState(() => _isUploadingCover = true);
     try {
-      if (kIsWeb && _coverWebBytes != null) {
+      if (_coverWebBytes != null) {
         await supabase.storage.from('salon-images').uploadBinary(
               filePath,
               _coverWebBytes!,
@@ -2966,7 +2981,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   }
 
   ImageProvider _getCoverImageProvider() {
-    if (kIsWeb && _coverWebBytes != null) {
+    if (_coverWebBytes != null) {
       return MemoryImage(_coverWebBytes!);
     } else if (_coverFile != null) {
       return FileImage(_coverFile!);
@@ -3064,7 +3079,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   }
 
   ImageProvider _getLogoImageProvider() {
-    if (kIsWeb && _logoWebBytes != null) {
+    if (_logoWebBytes != null) {
       return MemoryImage(_logoWebBytes!);
     } else if (_logoFile != null) {
       return FileImage(_logoFile!);

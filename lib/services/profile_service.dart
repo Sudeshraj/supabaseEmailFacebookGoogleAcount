@@ -1,6 +1,4 @@
-import 'dart:io';
 import 'dart:typed_data';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -51,7 +49,9 @@ class ProfileService {
     String? avatarUrl,
   }) async {
     try {
-      // ✅ avatar_url එක අපේම Supabase storage domain එකෙන්ම ආවේද කියලා validate කරනවා
+      // ✅ avatar_url එක අපේම Supabase storage domain එකෙන්ම ආවේද කියලා validate කරනවා.
+      // Data-tampering/phishing risk එකක් වළක්වනවා - RLS එකෙන් check කරන්නේ
+      // "auth.uid() = id" විතරයි, URL format එක check කරන්නේ නෑ.
       if (avatarUrl != null && avatarUrl.isNotEmpty) {
         final supabaseUrl = _supabase.storage.from('profiles').getPublicUrl('');
         final expectedHost = Uri.parse(supabaseUrl).host;
@@ -84,67 +84,52 @@ class ProfileService {
   // ✅ PROFILE IMAGE UPLOAD
   // ============================================================
 
-  /// ✅ Upload profile image - Cross platform
-  /// Fixed filename ('$userId/avatar.jpg') + upsert:true so every
-  /// re-upload REPLACES the previous image instead of creating a
-  /// new orphan file in storage. Extension is always forced to
-  /// .jpg (regardless of source file type) so switching between
-  /// gallery/camera or image formats never leaves stale files
-  /// behind under a different extension.
+  /// ✅ Upload profile image - expects already-compressed bytes.
+  /// Compression (resize + quality reduction) happens upstream, in
+  /// profile_screen.dart, right after the image is picked - see
+  /// compressAvatarBytes() in utils/image_compression.dart. By the time
+  /// this runs, `imageFile` is always a Uint8List on every platform, so
+  /// there's no need to branch on kIsWeb / File vs Uint8List here anymore.
+  /// The path is fixed ('$userId/avatar.jpg') with upsert:true, so every
+  /// re-upload REPLACES the previous image instead of creating an orphan.
   Future<String?> uploadProfileImage({
     required String userId,
-    required dynamic imageFile, // File (mobile) or Uint8List (web)
+    required dynamic imageFile, // always Uint8List (compressed) by this point
     String? fileName, // kept for backward compatibility, not used
   }) async {
     try {
+      if (imageFile is! Uint8List) {
+        throw Exception('Expected compressed image bytes (Uint8List)');
+      }
+
+      // Safety net - compression should already keep this well under 5MB,
+      // but guard anyway in case compression silently fell back to the
+      // original bytes on an unsupported platform.
+      if (imageFile.lengthInBytes > 5 * 1024 * 1024) {
+        throw Exception('Image must be less than 5MB');
+      }
+
       // ✅ Fixed filename + fixed extension - always the same path
       const finalFileName = 'avatar.jpg';
       final filePath = '$userId/$finalFileName';
 
-      // Upload based on platform
-      if (kIsWeb) {
-        // Web: Upload bytes directly
-        if (imageFile is! Uint8List) {
-          throw Exception('Web upload requires Uint8List');
-        }
-        await _supabase.storage
-            .from('profiles')
-            .uploadBinary(
-              filePath,
-              imageFile,
-              fileOptions: const FileOptions(
-                upsert: true, // ✅ replace old image at the same path
-                contentType: 'image/jpeg',
-              ),
-            );
-      } else {
-        // Mobile: Upload File
-        if (imageFile is! File) {
-          throw Exception('Mobile upload requires File');
-        }
-        // Check file size (max 5MB)
-        final fileSize = await imageFile.length();
-
-        if (fileSize > 5 * 1024 * 1024) {
-          throw Exception('Image must be less than 5MB');
-        }
-
-        await _supabase.storage
-            .from('profiles')
-            .upload(
-              filePath,
-              imageFile,
-              fileOptions: const FileOptions(
-                upsert: true, // ✅ replace old image at the same path
-                contentType: 'image/jpeg',
-              ),
-            );
-      }
+      await _supabase.storage
+          .from('profiles')
+          .uploadBinary(
+            filePath,
+            imageFile,
+            fileOptions: const FileOptions(
+              upsert: true, // ✅ replace old image at the same path
+              contentType: 'image/jpeg',
+            ),
+          );
 
       // Get public URL
       // ✅ Same path every time -> append a cache-busting query param
       // so the CDN/browser doesn't keep showing the old cached image.
-      final baseUrl = _supabase.storage.from('profiles').getPublicUrl(filePath);
+      final baseUrl = _supabase.storage
+          .from('profiles')
+          .getPublicUrl(filePath);
       final publicUrl = '$baseUrl?t=${DateTime.now().millisecondsSinceEpoch}';
 
       // Update profile with new image URL
@@ -398,7 +383,8 @@ class ProfileService {
           .maybeSingle();
 
       if (response != null) {
-        final extraData = response['extra_data'] as Map<String, dynamic>? ?? {};
+        final extraData =
+            response['extra_data'] as Map<String, dynamic>? ?? {};
         final profileStatus =
             extraData['profile_status'] as Map<String, dynamic>?;
         if (profileStatus != null) {

@@ -61,7 +61,7 @@ dependencies:
   package_info_plus: ^10.2.0
   cached_network_image: ^3.4.1
   font_awesome_flutter: ^11.0.0
-
+  flutter_image_compress: ^2.5.1
   # ================================================================
   # 🔥 SOCIAL LOGIN
   # ================================================================
@@ -88,6 +88,7 @@ dependencies:
   google_fonts: ^8.1.0
   # Deep linking configuration for Android and iOS can be added here if needed.
   app_links: ^7.2.1
+
   
    
 

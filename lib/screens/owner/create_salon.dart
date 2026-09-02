@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:image_cropper/image_cropper.dart';
 import '../../services/timezone_service.dart';
+import '../../utils/image_compression.dart';
 
 // ==================== ENHANCED TIME PICKER ====================
 class EnhancedTimePicker extends StatefulWidget {
@@ -2100,7 +2101,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                 borderRadius: BorderRadius.circular(16),
                 image: (_coverFile != null || _coverWebBytes != null)
                     ? DecorationImage(
-                        image: kIsWeb && _coverWebBytes != null
+                        image: _coverWebBytes != null
                             ? MemoryImage(_coverWebBytes!)
                             : FileImage(_coverFile!) as ImageProvider,
                         fit: BoxFit.cover,
@@ -2187,7 +2188,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
             ],
             image: (_logoFile != null || _logoWebBytes != null)
                 ? DecorationImage(
-                    image: kIsWeb && _logoWebBytes != null
+                    image: _logoWebBytes != null
                         ? MemoryImage(_logoWebBytes!)
                         : FileImage(_logoFile!) as ImageProvider,
                     fit: BoxFit.cover,
@@ -2391,15 +2392,16 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     try {
       final XFile? pickedFile = await picker.pickImage(
         source: ImageSource.gallery,
-        maxWidth: 800,
-        maxHeight: 800,
-        imageQuality: 85,
+        maxWidth: 1600,
+        maxHeight: 1600,
+        imageQuality: 90,
       );
       if (pickedFile != null) {
         if (kIsWeb) {
-          final bytes = await pickedFile.readAsBytes();
+          final rawBytes = await pickedFile.readAsBytes();
+          final compressed = await compressAvatarBytes(rawBytes);
           setState(() {
-            _logoWebBytes = bytes;
+            _logoWebBytes = compressed;
             _logoFile = null;
           });
         } else {
@@ -2418,9 +2420,14 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
             ],
           );
           if (croppedFile != null) {
+            // ✅ Compress the cropped file's bytes before storing - same
+            // path as web, so both platforms end up with a small,
+            // upload-ready Uint8List regardless of the original photo size.
+            final rawBytes = await File(croppedFile.path).readAsBytes();
+            final compressed = await compressAvatarBytes(rawBytes);
             setState(() {
-              _logoFile = File(croppedFile.path);
-              _logoWebBytes = null;
+              _logoWebBytes = compressed;
+              _logoFile = null;
             });
           }
         }
@@ -2434,15 +2441,16 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     try {
       final XFile? pickedFile = await picker.pickImage(
         source: ImageSource.camera,
-        maxWidth: 800,
-        maxHeight: 800,
-        imageQuality: 85,
+        maxWidth: 1600,
+        maxHeight: 1600,
+        imageQuality: 90,
       );
       if (pickedFile != null) {
         if (kIsWeb) {
-          final bytes = await pickedFile.readAsBytes();
+          final rawBytes = await pickedFile.readAsBytes();
+          final compressed = await compressAvatarBytes(rawBytes);
           setState(() {
-            _logoWebBytes = bytes;
+            _logoWebBytes = compressed;
             _logoFile = null;
           });
         } else {
@@ -2460,9 +2468,11 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
             ],
           );
           if (croppedFile != null) {
+            final rawBytes = await File(croppedFile.path).readAsBytes();
+            final compressed = await compressAvatarBytes(rawBytes);
             setState(() {
-              _logoFile = File(croppedFile.path);
-              _logoWebBytes = null;
+              _logoWebBytes = compressed;
+              _logoFile = null;
             });
           }
         }
@@ -2483,15 +2493,16 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     try {
       final XFile? pickedFile = await picker.pickImage(
         source: ImageSource.gallery,
-        maxWidth: 1920,
-        maxHeight: 1080,
-        imageQuality: 85,
+        maxWidth: 2400,
+        maxHeight: 1350,
+        imageQuality: 90,
       );
       if (pickedFile != null) {
         if (kIsWeb) {
-          final bytes = await pickedFile.readAsBytes();
+          final rawBytes = await pickedFile.readAsBytes();
+          final compressed = await compressCoverBytes(rawBytes);
           setState(() {
-            _coverWebBytes = bytes;
+            _coverWebBytes = compressed;
             _coverFile = null;
           });
         } else {
@@ -2510,9 +2521,11 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
             ],
           );
           if (croppedFile != null) {
+            final rawBytes = await File(croppedFile.path).readAsBytes();
+            final compressed = await compressCoverBytes(rawBytes);
             setState(() {
-              _coverFile = File(croppedFile.path);
-              _coverWebBytes = null;
+              _coverWebBytes = compressed;
+              _coverFile = null;
             });
           }
         }
@@ -2526,15 +2539,16 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     try {
       final XFile? pickedFile = await picker.pickImage(
         source: ImageSource.camera,
-        maxWidth: 1920,
-        maxHeight: 1080,
-        imageQuality: 85,
+        maxWidth: 2400,
+        maxHeight: 1350,
+        imageQuality: 90,
       );
       if (pickedFile != null) {
         if (kIsWeb) {
-          final bytes = await pickedFile.readAsBytes();
+          final rawBytes = await pickedFile.readAsBytes();
+          final compressed = await compressCoverBytes(rawBytes);
           setState(() {
-            _coverWebBytes = bytes;
+            _coverWebBytes = compressed;
             _coverFile = null;
           });
         } else {
@@ -2552,9 +2566,11 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
             ],
           );
           if (croppedFile != null) {
+            final rawBytes = await File(croppedFile.path).readAsBytes();
+            final compressed = await compressCoverBytes(rawBytes);
             setState(() {
-              _coverFile = File(croppedFile.path);
-              _coverWebBytes = null;
+              _coverWebBytes = compressed;
+              _coverFile = null;
             });
           }
         }
@@ -2586,7 +2602,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
 
       final filePath = 'salons/$userId/$salonId/logo.jpg';
 
-      if (kIsWeb && _logoWebBytes != null) {
+      if (_logoWebBytes != null) {
         await supabase.storage
             .from('salon-images')
             .uploadBinary(
@@ -2634,7 +2650,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
 
       final filePath = 'salons/$userId/$salonId/cover.jpg';
 
-      if (kIsWeb && _coverWebBytes != null) {
+      if (_coverWebBytes != null) {
         await supabase.storage
             .from('salon-images')
             .uploadBinary(

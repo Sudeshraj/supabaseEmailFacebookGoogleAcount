@@ -11,6 +11,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../services/profile_service.dart';
+import '../../utils/image_compression.dart';
 
 // =====================================================
 // PROFILE IMAGE PICKER WIDGET - Cross Platform
@@ -78,17 +79,17 @@ class ProfileImagePicker extends StatelessWidget {
                 final picker = ImagePicker();
                 final image = await picker.pickImage(
                   source: ImageSource.gallery,
-                  maxWidth: 800,
-                  maxHeight: 800,
-                  imageQuality: 80,
+                  maxWidth: 1600,
+                  maxHeight: 1600,
+                  imageQuality: 90,
                 );
                 if (image != null) {
-                  if (kIsWeb) {
-                    final bytes = await image.readAsBytes();
-                    onImageSelected(bytes);
-                  } else {
-                    onImageSelected(File(image.path));
-                  }
+                  // ✅ readAsBytes works on every platform (web + mobile).
+                  final rawBytes = await image.readAsBytes();
+                  // ✅ Resize + re-encode so upload is small without a
+                  // visible quality drop - same approach WhatsApp uses.
+                  final compressed = await compressAvatarBytes(rawBytes);
+                  onImageSelected(compressed);
                 }
               },
             ),
@@ -103,17 +104,14 @@ class ProfileImagePicker extends StatelessWidget {
                 final picker = ImagePicker();
                 final image = await picker.pickImage(
                   source: ImageSource.camera,
-                  maxWidth: 800,
-                  maxHeight: 800,
-                  imageQuality: 80,
+                  maxWidth: 1600,
+                  maxHeight: 1600,
+                  imageQuality: 90,
                 );
                 if (image != null) {
-                  if (kIsWeb) {
-                    final bytes = await image.readAsBytes();
-                    onImageSelected(bytes);
-                  } else {
-                    onImageSelected(File(image.path));
-                  }
+                  final rawBytes = await image.readAsBytes();
+                  final compressed = await compressAvatarBytes(rawBytes);
+                  onImageSelected(compressed);
                 }
               },
             ),
@@ -426,6 +424,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _isImageRemoved = false;
     });
 
+    _showSnackBar('📸 Image selected. Tap Save to update.', Colors.blue);
   }
 
   void _handleRemoveImage() {
@@ -434,6 +433,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _hasImageChanged = true;
       _isImageRemoved = true;
     });
+    _showSnackBar('🗑️ Image will be removed on Save.', Colors.orange);
   }
 
   // =====================================================
@@ -468,6 +468,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           await _profileService.deleteOldImage(_avatarUrl);
         }
         newAvatarUrl = '';
+        _showSnackBar('🔄 Removing old image...', Colors.orange);
       } else if (_hasImageChanged && _tempSelectedImage != null) {
         _showSavingDialog();
 
@@ -528,6 +529,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
         );
 
         await SessionManager.forceSyncAvailableProfiles();
+
+        _showSnackBar('✅ Profile updated successfully', Colors.green);
       } else {
         setState(() => _isSaving = false);
         _showSnackBar('Failed to update profile', Colors.red);
