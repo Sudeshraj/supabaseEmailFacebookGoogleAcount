@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/main.dart';
+import 'package:flutter_application_1/extensions/context_extensions.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -29,6 +30,10 @@ class _EmailVerifyCheckerState extends State<EmailVerifyChecker>
 
   StreamSubscription<AuthState>? _authSub;
 
+  // ✅ API 36: Responsive variables
+  bool _isTablet = false;
+  bool _isWeb = false;
+
   // ------------------------------------------------------------
   // INIT
   // ------------------------------------------------------------
@@ -37,6 +42,30 @@ class _EmailVerifyCheckerState extends State<EmailVerifyChecker>
     super.initState();
     _setupAnimation();
     _restoreCooldown();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkScreenSize();
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _checkScreenSize();
+  }
+
+  // ✅ API 36: Check screen size for responsive layout
+  void _checkScreenSize() {
+    final size = MediaQuery.of(context).size;
+    final isTablet = size.shortestSide >= 600;
+    final isWeb = size.width > 800;
+
+    if (_isTablet != isTablet || _isWeb != isWeb) {
+      setState(() {
+        _isTablet = isTablet;
+        _isWeb = isWeb;
+      });
+    }
   }
 
   // ------------------------------------------------------------
@@ -84,7 +113,6 @@ class _EmailVerifyCheckerState extends State<EmailVerifyChecker>
     final user = supabase.auth.currentUser;
     if (user?.email != null) return user!.email;
 
-    // Try to get from SessionManager
     final recentUser = await SessionManager.getMostRecentUser();
     if (recentUser != null && recentUser['email'] != null) {
       return recentUser['email'] as String?;
@@ -133,9 +161,7 @@ class _EmailVerifyCheckerState extends State<EmailVerifyChecker>
     final email = await _resolveEmail();
     if (email == null) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Session expired. Please login again.")),
-      );
+      context.showErrorSnackBar("Session expired. Please login again.");
       return;
     }
 
@@ -151,67 +177,138 @@ class _EmailVerifyCheckerState extends State<EmailVerifyChecker>
       await prefs.setInt('lastVerificationSent', now);
       startCooldown(30);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Please wait before resending verification."),
-        ),
-      );
+      context.showWarningSnackBar("Please wait before resending verification.");
     }
   }
 
   // ------------------------------------------------------------
-  // LOGOUT - FIXED WITH MOUNTED CHECK
+  // LOGOUT
   // ------------------------------------------------------------
   Future<void> logout() async {
     try {
-      // Clear any saved verification timer
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('lastVerificationSent');
 
-      // Logout but keep profile for continue screen
       await SessionManager.logoutForContinue();
 
-      // Check if widget is still mounted before using context
       if (!mounted) return;
 
-      // Navigate to home
       appState.refreshState();
       context.go('/');
     } catch (e) {
       debugPrint('Logout error: $e');
 
-      // Check if widget is still mounted before using context
       if (!mounted) return;
 
-      // Navigate to home even on error
       context.go('/');
     }
   }
 
   // ------------------------------------------------------------
-  // OPEN EMAIL APP - FIXED WITH MOUNTED CHECK
+  // OPEN EMAIL APP
   // ------------------------------------------------------------
   Future<void> _openEmailApp() async {
     final email = await _resolveEmail();
 
-    // Check if widget is still mounted before using context
     if (!mounted) return;
 
     openEmailApp(context, email);
   }
 
   // ------------------------------------------------------------
-  // UI
+  // BUTTONS
+  // ------------------------------------------------------------
+  Widget _primaryButton({
+    required String text,
+    required IconData icon,
+    required VoidCallback? onPressed,
+    bool enabled = true,
+  }) {
+    final isDark = context.isDarkMode;
+    final primaryColor = context.primaryColor;
+
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton.icon(
+        icon: Icon(icon, color: Colors.white),
+        onPressed: enabled ? onPressed : null,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: primaryColor,
+          disabledBackgroundColor: isDark
+              ? Colors.white12
+              : Colors.grey.shade300,
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+          ),
+        ),
+        label: Text(
+          text,
+          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+        ),
+      ),
+    );
+  }
+
+  Widget _outlineButton({
+    required String text,
+    required IconData icon,
+    required VoidCallback onPressed,
+    Color? color,
+  }) {
+    final isDark = context.isDarkMode;
+    final primaryColor = context.primaryColor;
+    final buttonColor = color ?? primaryColor;
+
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        icon: Icon(icon, color: buttonColor),
+        onPressed: onPressed,
+        style: OutlinedButton.styleFrom(
+          side: BorderSide(
+            color: isDark
+                ? buttonColor.withValues(alpha: 0.5)
+                : buttonColor,
+          ),
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+          ),
+          backgroundColor: isDark
+              ? buttonColor.withValues(alpha: 0.1)
+              : buttonColor.withValues(alpha: 0.05),
+          foregroundColor: buttonColor,
+        ),
+        label: Text(
+          text,
+          style: TextStyle(
+            color: buttonColor,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------
+  // BUILD
   // ------------------------------------------------------------
   @override
   Widget build(BuildContext context) {
-    final bg = const Color(0xFF0F1820);
+    final isDark = context.isDarkMode;
+    final backgroundColor = context.backgroundColor;
+    final primaryColor = context.primaryColor;
+    final textColor = context.textColor;
+    final secondaryTextColor = context.secondaryTextColor;
+
     final size = MediaQuery.of(context).size;
     final bool isWeb = size.width > 700;
     final double maxWidth = isWeb ? 480 : double.infinity;
 
     return Scaffold(
-      backgroundColor: bg,
+      backgroundColor: backgroundColor,
       body: SafeArea(
         child: Center(
           child: FadeTransition(
@@ -228,20 +325,24 @@ class _EmailVerifyCheckerState extends State<EmailVerifyChecker>
                   ),
                   padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.03),
+                    color: isDark
+                        ? Colors.white.withValues(alpha: 0.03)
+                        : Colors.grey.shade50,
                     borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Colors.white12),
+                    border: Border.all(
+                      color: isDark ? Colors.white12 : Colors.grey.shade200,
+                    ),
                   ),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      // 🔙 Back Button (SignIn style)
+                      // 🔙 Back Button
                       Align(
                         alignment: Alignment.topLeft,
                         child: IconButton(
-                          icon: const Icon(
+                          icon: Icon(
                             Icons.arrow_back_ios_new_rounded,
-                            color: Colors.white,
+                            color: textColor,
                             size: 22,
                           ),
                           onPressed: () {
@@ -256,16 +357,16 @@ class _EmailVerifyCheckerState extends State<EmailVerifyChecker>
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            const Icon(
+                            Icon(
                               Icons.mark_email_read_rounded,
                               size: 70,
-                              color: Color(0xFF1877F3),
+                              color: primaryColor,
                             ),
                             const SizedBox(height: 24),
-                            const Text(
+                            Text(
                               "Verify your email",
                               style: TextStyle(
-                                color: Colors.white,
+                                color: textColor,
                                 fontSize: 22,
                                 fontWeight: FontWeight.bold,
                               ),
@@ -285,17 +386,15 @@ class _EmailVerifyCheckerState extends State<EmailVerifyChecker>
                                       "We've sent a verification link to:",
                                       textAlign: TextAlign.center,
                                       style: TextStyle(
-                                        color: Colors.white.withValues(
-                                          alpha: 0.8,
-                                        ),
+                                        color: secondaryTextColor,
                                       ),
                                     ),
                                     const SizedBox(height: 4),
                                     Text(
                                       emailText,
                                       textAlign: TextAlign.center,
-                                      style: const TextStyle(
-                                        color: Colors.blueAccent,
+                                      style: TextStyle(
+                                        color: primaryColor,
                                         fontWeight: FontWeight.w500,
                                       ),
                                     ),
@@ -304,9 +403,7 @@ class _EmailVerifyCheckerState extends State<EmailVerifyChecker>
                                       "Open it to continue.",
                                       textAlign: TextAlign.center,
                                       style: TextStyle(
-                                        color: Colors.white.withValues(
-                                          alpha: 0.7,
-                                        ),
+                                        color: secondaryTextColor,
                                       ),
                                     ),
                                   ],
@@ -316,19 +413,21 @@ class _EmailVerifyCheckerState extends State<EmailVerifyChecker>
                             const SizedBox(height: 24),
                             Row(
                               mainAxisAlignment: MainAxisAlignment.center,
-                              children: const [
+                              children: [
                                 SizedBox(
                                   width: 18,
                                   height: 18,
                                   child: CircularProgressIndicator(
                                     strokeWidth: 2,
-                                    color: Colors.white,
+                                    color: primaryColor,
                                   ),
                                 ),
-                                SizedBox(width: 12),
+                                const SizedBox(width: 12),
                                 Text(
                                   "Waiting for verification…",
-                                  style: TextStyle(color: Colors.white70),
+                                  style: TextStyle(
+                                    color: secondaryTextColor,
+                                  ),
                                 ),
                               ],
                             ),
@@ -366,64 +465,6 @@ class _EmailVerifyCheckerState extends State<EmailVerifyChecker>
               ),
             ),
           ),
-        ),
-      ),
-    );
-  }
-
-  // ------------------------------------------------------------
-  // BUTTONS
-  // ------------------------------------------------------------
-  Widget _primaryButton({
-    required String text,
-    required IconData icon,
-    required VoidCallback? onPressed,
-    bool enabled = true,
-  }) {
-    return SizedBox(
-      width: double.infinity,
-      child: ElevatedButton.icon(
-        icon: Icon(icon),
-        onPressed: enabled ? onPressed : null,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFF1877F3),
-          disabledBackgroundColor: Colors.white12,
-          foregroundColor: Colors.white,
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(24),
-          ),
-        ),
-        label: Text(
-          text,
-          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-        ),
-      ),
-    );
-  }
-
-  Widget _outlineButton({
-    required String text,
-    required IconData icon,
-    required VoidCallback onPressed,
-    Color color = const Color(0xFF1877F3),
-  }) {
-    return SizedBox(
-      width: double.infinity,
-      child: OutlinedButton.icon(
-        icon: Icon(icon, color: color),
-        onPressed: onPressed,
-        style: OutlinedButton.styleFrom(
-          side: BorderSide(color: color),
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(24),
-          ),
-          backgroundColor: color.withValues(alpha: 0.1),
-        ),
-        label: Text(
-          text,
-          style: TextStyle(color: color, fontWeight: FontWeight.bold),
         ),
       ),
     );

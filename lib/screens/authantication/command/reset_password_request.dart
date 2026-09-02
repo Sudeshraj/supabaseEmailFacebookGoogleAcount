@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter_application_1/extensions/context_extensions.dart';
 
 class ResetPasswordRequestScreen extends StatefulWidget {
   const ResetPasswordRequestScreen({super.key});
@@ -19,6 +20,37 @@ class _ResetPasswordRequestScreenState
   String? _emailError;
   final _formKey = GlobalKey<FormState>();
   final supabase = Supabase.instance.client;
+
+  // ✅ API 36: Responsive variables
+  bool _isTablet = false;
+  bool _isWeb = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkScreenSize();
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _checkScreenSize();
+  }
+
+  void _checkScreenSize() {
+    final size = MediaQuery.of(context).size;
+    final isTablet = size.shortestSide >= 600;
+    final isWeb = size.width > 800;
+
+    if (_isTablet != isTablet || _isWeb != isWeb) {
+      setState(() {
+        _isTablet = isTablet;
+        _isWeb = isWeb;
+      });
+    }
+  }
 
   bool _isValidEmailFormat(String value) {
     final emailRegex = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
@@ -42,116 +74,111 @@ class _ResetPasswordRequestScreenState
     });
   }
 
-Future<void> _sendResetEmail() async {
-  if (!_formKey.currentState!.validate()) return;
-  if (!_isValidEmail) return;
+  Future<void> _sendResetEmail() async {
+    if (!_formKey.currentState!.validate()) return;
+    if (!_isValidEmail) return;
 
-  setState(() => _loading = true);
+    setState(() => _loading = true);
 
-  try {
-    final email = _emailController.text.trim();
-    
-    debugPrint('Sending password reset email to: $email');
-    
-    // Determine redirect URL based on platform
-    String redirectUrl;
-    
-    if (kIsWeb) {
-      // For web - use current origin
-      final currentOrigin = Uri.base.origin;
-      redirectUrl = '$currentOrigin/auth/callback';
+    try {
+      final email = _emailController.text.trim();
       
-      // Local development check
-      if (kDebugMode) {
-        print('Web mode detected');
-        print('   Origin: $currentOrigin');
-        print('   Full URL: $redirectUrl');
-      }
-    } else {
-      // For mobile - use deep link
-      // IMPORTANT: Make sure this matches your app's URL scheme
-      redirectUrl = 'myapp://auth/callback';
+      debugPrint('Sending password reset email to: $email');
       
-      if (kDebugMode) {
-        print('Mobile mode detected');
-        print('   Deep link: $redirectUrl');
+      String redirectUrl;
+      
+      if (kIsWeb) {
+        final currentOrigin = Uri.base.origin;
+        redirectUrl = '$currentOrigin/auth/callback';
+        
+        if (kDebugMode) {
+          print('Web mode detected');
+          print('   Origin: $currentOrigin');
+          print('   Full URL: $redirectUrl');
+        }
+      } else {
+        redirectUrl = 'myapp://auth/callback';
+        
+        if (kDebugMode) {
+          print('Mobile mode detected');
+          print('   Deep link: $redirectUrl');
+        }
       }
-    }
-    
-    debugPrint('Using redirect URL: $redirectUrl');
-    
-    // Send reset email
-    await supabase.auth.resetPasswordForEmail(
-      email,
-      redirectTo: redirectUrl,
-    );
-    
-    debugPrint('Reset email sent successfully');
-
-    // Navigate to confirmation screen
-    if (mounted) {
-      context.go(
-        '/reset-password-confirm',
-        extra: {'email': email},
+      
+      debugPrint('Using redirect URL: $redirectUrl');
+      
+      await supabase.auth.resetPasswordForEmail(
+        email,
+        redirectTo: redirectUrl,
       );
-    }
-  } on AuthException catch (e) {
-    debugPrint('Auth error: ${e.message}');
-    
-    String errorMessage = 'Failed to send reset email';
-    
-    if (e.message.toLowerCase().contains('user not found')) {
-      errorMessage = 'No account found with this email';
-    } else if (e.message.toLowerCase().contains('rate limit')) {
-      errorMessage = 'Too many attempts. Please try again later.';
-    } else if (e.message.toLowerCase().contains('email')) {
-      errorMessage = 'Invalid email address';
-    }
-    
-    if (mounted) {
-      _showErrorSnackBar(errorMessage);
-    }
-  } catch (e) {
-    debugPrint('Error: $e');
-    if (mounted) {
-      _showErrorSnackBar('An unexpected error occurred');
-    }
-  } finally {
-    if (mounted) setState(() => _loading = false);
-  }
-}
+      
+      debugPrint('Reset email sent successfully');
 
-  void _showErrorSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red,
-        duration: const Duration(seconds: 3),
-      ),
-    );
+      if (mounted) {
+        context.go(
+          '/reset-password-confirm',
+          extra: {'email': email},
+        );
+      }
+    } on AuthException catch (e) {
+      debugPrint('Auth error: ${e.message}');
+      
+      String errorMessage = 'Failed to send reset email';
+      
+      if (e.message.toLowerCase().contains('user not found')) {
+        errorMessage = 'No account found with this email';
+      } else if (e.message.toLowerCase().contains('rate limit')) {
+        errorMessage = 'Too many attempts. Please try again later.';
+      } else if (e.message.toLowerCase().contains('email')) {
+        errorMessage = 'Invalid email address';
+      }
+      
+      if (mounted) {
+        context.showErrorSnackBar(errorMessage);
+      }
+    } catch (e) {
+      debugPrint('Error: $e');
+      if (mounted) {
+        context.showErrorSnackBar('An unexpected error occurred');
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
-
 
   @override
   Widget build(BuildContext context) {
+    final isDark = context.isDarkMode;
+    final backgroundColor = context.backgroundColor;
+    final primaryColor = context.primaryColor;
+    final textColor = context.textColor;
+    final secondaryTextColor = context.secondaryTextColor;
+    final errorColor = context.errorColor;
+    final successColor = context.successColor;
+
     final size = MediaQuery.of(context).size;
     final bool isWeb = size.width > 700;
     final double maxWidth = isWeb ? 480 : double.infinity;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0F1820),
+      backgroundColor: backgroundColor,
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
+            physics: const BouncingScrollPhysics(),
             child: ConstrainedBox(
               constraints: BoxConstraints(maxWidth: maxWidth),
               child: Container(
                 margin: const EdgeInsets.all(24),
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha:0.03),
+                  color: isDark
+                      ? Colors.white.withValues(alpha: 0.03)
+                      : Colors.grey.shade50,
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: Colors.white12),
+                  border: Border.all(
+                    color: isDark ? Colors.white12 : Colors.grey.shade200,
+                  ),
                 ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -160,9 +187,9 @@ Future<void> _sendResetEmail() async {
                     Align(
                       alignment: Alignment.topLeft,
                       child: IconButton(
-                        icon: const Icon(
+                        icon: Icon(
                           Icons.arrow_back_ios_new_rounded,
-                          color: Colors.white,
+                          color: textColor,
                           size: 22,
                         ),
                         onPressed: () => context.pop(),
@@ -177,15 +204,15 @@ Future<void> _sendResetEmail() async {
                       height: 80,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        color: const Color(0xFF1877F3).withValues(alpha:0.1),
+                        color: primaryColor.withValues(alpha: 0.1),
                         border: Border.all(
-                          color: const Color(0xFF1877F3),
+                          color: primaryColor,
                           width: 2,
                         ),
                       ),
-                      child: const Icon(
+                      child: Icon(
                         Icons.lock_reset_rounded,
-                        color: Color(0xFF1877F3),
+                        color: primaryColor,
                         size: 40,
                       ),
                     ),
@@ -193,10 +220,10 @@ Future<void> _sendResetEmail() async {
                     const SizedBox(height: 24),
 
                     // Title
-                    const Text(
+                    Text(
                       'Reset Password',
                       style: TextStyle(
-                        color: Colors.white,
+                        color: textColor,
                         fontSize: 24,
                         fontWeight: FontWeight.bold,
                       ),
@@ -204,11 +231,11 @@ Future<void> _sendResetEmail() async {
 
                     const SizedBox(height: 8),
 
-                    const Text(
+                    Text(
                       'Enter your email address and we\'ll send you a password reset link',
                       textAlign: TextAlign.center,
                       style: TextStyle(
-                        color: Colors.white70,
+                        color: secondaryTextColor,
                         fontSize: 15,
                       ),
                     ),
@@ -221,50 +248,62 @@ Future<void> _sendResetEmail() async {
                       child: TextField(
                         controller: _emailController,
                         onChanged: (value) => _validateEmail(),
-                        style: const TextStyle(color: Colors.white),
+                        style: TextStyle(color: textColor),
                         keyboardType: TextInputType.emailAddress,
                         autofocus: true,
                         decoration: InputDecoration(
                           labelText: 'Email Address',
-                          labelStyle: const TextStyle(color: Colors.white70),
+                          labelStyle: TextStyle(color: secondaryTextColor),
                           hintText: 'you@example.com',
-                          hintStyle: const TextStyle(color: Colors.white54),
+                          hintStyle: TextStyle(
+                            color: isDark
+                                ? Colors.white54
+                                : Colors.grey.shade400,
+                          ),
                           filled: true,
-                          fillColor: Colors.white.withValues(alpha:0.05),
+                          fillColor: isDark
+                              ? Colors.white.withValues(alpha: 0.05)
+                              : Colors.grey.shade50,
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
                             borderSide: BorderSide.none,
                           ),
                           enabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
-                            borderSide: const BorderSide(color: Colors.white24),
+                            borderSide: BorderSide(
+                              color: isDark
+                                  ? Colors.white24
+                                  : Colors.grey.shade300,
+                            ),
                           ),
                           focusedBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
                             borderSide: BorderSide(
                               color: _isValidEmail
-                                  ? const Color(0xFF1877F3)
-                                  : Colors.redAccent,
+                                  ? primaryColor
+                                  : errorColor,
                               width: 2,
                             ),
                           ),
-                          prefixIcon: const Icon(
+                          prefixIcon: Icon(
                             Icons.email_outlined,
-                            color: Colors.white54,
+                            color: isDark
+                                ? Colors.white54
+                                : Colors.grey.shade400,
                           ),
                           suffixIcon: _emailController.text.isEmpty
                               ? null
                               : _isValidEmail
-                                  ? const Icon(
+                                  ? Icon(
                                       Icons.check_circle,
-                                      color: Color(0xFF4CAF50),
+                                      color: successColor,
                                     )
-                                  : const Icon(
+                                  : Icon(
                                       Icons.error_outline,
-                                      color: Colors.redAccent,
+                                      color: errorColor,
                                     ),
                           errorText: _emailError,
-                          errorStyle: const TextStyle(color: Colors.redAccent),
+                          errorStyle: TextStyle(color: errorColor),
                         ),
                       ),
                     ),
@@ -275,17 +314,17 @@ Future<void> _sendResetEmail() async {
                     Container(
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF1877F3).withValues(alpha:0.1),
+                        color: primaryColor.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
-                          color: const Color(0xFF1877F3).withValues(alpha:0.3),
+                          color: primaryColor.withValues(alpha: 0.3),
                         ),
                       ),
                       child: Row(
                         children: [
-                          const Icon(
+                          Icon(
                             Icons.info_outline_rounded,
-                            color: Color(0xFF1877F3),
+                            color: primaryColor,
                             size: 20,
                           ),
                           const SizedBox(width: 12),
@@ -293,7 +332,7 @@ Future<void> _sendResetEmail() async {
                             child: Text(
                               'Check your spam folder if you don\'t see the email',
                               style: TextStyle(
-                                color: Colors.white.withValues(alpha:0.8),
+                                color: secondaryTextColor,
                                 fontSize: 13,
                               ),
                             ),
@@ -312,8 +351,10 @@ Future<void> _sendResetEmail() async {
                             ? _sendResetEmail
                             : null,
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF1877F3),
-                          disabledBackgroundColor: Colors.white12,
+                          backgroundColor: primaryColor,
+                          disabledBackgroundColor: isDark
+                              ? Colors.white12
+                              : Colors.grey.shade300,
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 16),
                           shape: RoundedRectangleBorder(
@@ -323,7 +364,7 @@ Future<void> _sendResetEmail() async {
                           shadowColor: Colors.transparent,
                         ),
                         child: _loading
-                            ? const SizedBox(
+                            ? SizedBox(
                                 width: 24,
                                 height: 24,
                                 child: CircularProgressIndicator(
@@ -331,11 +372,11 @@ Future<void> _sendResetEmail() async {
                                   strokeWidth: 2,
                                 ),
                               )
-                            : const Row(
+                            : Row(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
                                   Icon(Icons.send_rounded, size: 20),
-                                  SizedBox(width: 8),
+                                  const SizedBox(width: 8),
                                   Text(
                                     'Send Reset Link',
                                     style: TextStyle(
@@ -354,9 +395,9 @@ Future<void> _sendResetEmail() async {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Icon(
+                        Icon(
                           Icons.arrow_back_rounded,
-                          color: Colors.white70,
+                          color: secondaryTextColor,
                           size: 16,
                         ),
                         const SizedBox(width: 8),
@@ -367,10 +408,10 @@ Future<void> _sendResetEmail() async {
                             minimumSize: Size.zero,
                             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                           ),
-                          child: const Text(
+                          child: Text(
                             'Back to Login',
                             style: TextStyle(
-                              color: Colors.white70,
+                              color: secondaryTextColor,
                               fontSize: 15,
                               fontWeight: FontWeight.w500,
                             ),

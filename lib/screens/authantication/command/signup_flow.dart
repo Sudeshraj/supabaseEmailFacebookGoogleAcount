@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_application_1/screens/authantication/command/email_password_screen.dart';
+import 'package:flutter_application_1/extensions/context_extensions.dart';
 
 class SignupFlow extends StatefulWidget {
   const SignupFlow({super.key});
@@ -15,21 +16,21 @@ class _SignupFlowState extends State<SignupFlow> {
   String? _password;
   bool _isLoading = false;
 
-  // signup_flow.dart
   @override
   Widget build(BuildContext context) {
     debugPrint('SignupFlow building, isLoading: $_isLoading');
 
+    // ✅ AppTheme colors from context extensions
+    final backgroundColor = context.backgroundColor;
+
     return Scaffold(
-      backgroundColor: const Color(0xFF0F1820),
+      backgroundColor: backgroundColor,
       body: SafeArea(
         child: EmailPasswordScreen(
           initialEmail: _email,
           initialPassword: _password,
           onNext: _handleNextPressed,
           isLoading: _isLoading,
-          // Add callback for when screen is popped
-          // signup_flow.dart
           onBack: () {
             debugPrint('EmailPasswordScreen wants to go back');
 
@@ -38,20 +39,14 @@ class _SignupFlowState extends State<SignupFlow> {
               return;
             }
 
-            // Try multiple approaches
             try {
-              // Approach 1: Use Navigator instead of GoRouter
               if (Navigator.of(context).canPop()) {
                 debugPrint('Using Navigator.pop()');
                 Navigator.of(context).pop();
-              }
-              // Approach 2: Use GoRouter
-              else if (GoRouter.of(context).canPop()) {
+              } else if (GoRouter.of(context).canPop()) {
                 debugPrint('Using GoRouter.pop()');
                 GoRouter.of(context).pop();
-              }
-              // Approach 3: Direct navigation
-              else {
+              } else {
                 debugPrint('Directly going to /login');
                 GoRouter.of(context).go('/');
               }
@@ -80,7 +75,6 @@ class _SignupFlowState extends State<SignupFlow> {
     });
 
     try {
-      // Navigate to Data Consent Screen
       await _navigateToDataConsent(email, password);
     } catch (e) {
       debugPrint('Error in _handleNextPressed: $e');
@@ -92,13 +86,10 @@ class _SignupFlowState extends State<SignupFlow> {
     }
   }
 
-  // signup_flow.dart
-  // signup_flow.dart
   Future<void> _navigateToDataConsent(String email, String password) async {
     debugPrint('Navigating to DataConsentScreen...');
 
     try {
-      // Use push (not pushNamed) to get better control
       final result = await context.push<Map<String, dynamic>>(
         Uri(
           path: '/data-consent',
@@ -109,7 +100,6 @@ class _SignupFlowState extends State<SignupFlow> {
 
       debugPrint('Returned from DataConsentScreen: $result');
 
-      // Check what happened
       if (result != null && result['action'] == 'user_exists') {
         debugPrint('User exists - showing message');
         _showUserExistsMessage();
@@ -117,7 +107,6 @@ class _SignupFlowState extends State<SignupFlow> {
     } catch (e) {
       debugPrint('Navigation error: $e');
     } finally {
-      // ALWAYS reset loading state
       if (mounted) {
         setState(() {
           _isLoading = false;
@@ -128,11 +117,21 @@ class _SignupFlowState extends State<SignupFlow> {
   }
 
   void _showUserExistsMessage() {
+    // ✅ Use context for snackbar
+    final isDark = context.isDarkMode;
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: const Text('An account already exists with this email.'),
+        content: Text(
+          'An account already exists with this email.',
+          style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+        ),
         duration: const Duration(seconds: 3),
-        backgroundColor: Colors.orange,
+        backgroundColor: isDark ? Colors.orange.shade900 : Colors.orange,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
       ),
     );
   }

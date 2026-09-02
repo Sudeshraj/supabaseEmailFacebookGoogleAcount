@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_application_1/utils/policy_content.dart';
+import 'package:flutter_application_1/extensions/context_extensions.dart';
 
 class PolicyScreen extends StatelessWidget {
   final bool isPrivacyPolicy;
@@ -10,48 +11,57 @@ class PolicyScreen extends StatelessWidget {
     required this.isPrivacyPolicy,
   });
 
-    void _handleBack(BuildContext context) {
-    // Simply pop to go back to DataConsentScreen
-    // This preserves the state of DataConsentScreen
+  void _handleBack(BuildContext context) {
     if (GoRouter.of(context).canPop()) {
       GoRouter.of(context).pop();
     } else {
-      // Fallback navigation
       context.go('/');
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final isDark = context.isDarkMode;
+    final backgroundColor = context.backgroundColor;
+    final textColor = context.textColor;
+    final primaryColor = context.primaryColor;
+    final secondaryTextColor = context.secondaryTextColor;
+
     return Scaffold(
-      backgroundColor: const Color(0xFF0F1820),
+      backgroundColor: backgroundColor,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          icon: Icon(
+            Icons.arrow_back,
+            color: textColor,
+          ),
           onPressed: () => _handleBack(context),
         ),
         title: Text(
           isPrivacyPolicy 
               ? PolicyContent.privacyPolicyTitle 
               : PolicyContent.termsTitle,
-          style: const TextStyle(color: Colors.white),
+          style: TextStyle(
+            color: textColor,
+            fontWeight: FontWeight.bold,
+          ),
         ),
       ),
       body: SafeArea(
         child: Column(
           children: [
-            // Last Updated
+            // Last Updated - Using primaryColor
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(12),
-              color: const Color(0xFF1877F3).withValues(alpha: 0.1),
+              color: primaryColor.withValues(alpha: 0.1),
               child: Text(
                 PolicyContent.lastUpdated,
                 textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: Colors.white70,
+                style: TextStyle(
+                  color: secondaryTextColor,
                   fontSize: 12,
                 ),
               ),
@@ -64,15 +74,22 @@ class PolicyScreen extends StatelessWidget {
                 child: Container(
                   padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.03),
+                    color: isDark
+                        ? Colors.white.withValues(alpha: 0.03)
+                        : Colors.grey.shade50,
                     borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: isDark
+                          ? Colors.white.withValues(alpha: 0.05)
+                          : Colors.grey.shade200,
+                    ),
                   ),
                   child: Text(
                     isPrivacyPolicy 
                         ? PolicyContent.privacyContent 
                         : PolicyContent.termsContent,
-                    style: const TextStyle(
-                      color: Colors.white70,
+                    style: TextStyle(
+                      color: secondaryTextColor,
                       fontSize: 14,
                       height: 1.6,
                     ),

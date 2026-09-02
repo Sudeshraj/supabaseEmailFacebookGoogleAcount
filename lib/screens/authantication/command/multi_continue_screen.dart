@@ -7,6 +7,7 @@ import 'package:flutter_application_1/main.dart';
 import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
 import 'package:flutter_application_1/services/google_sign_in_service.dart';
 import 'package:flutter_application_1/services/session_manager.dart';
+import 'package:flutter_application_1/extensions/context_extensions.dart';
 import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
 import 'package:flutter_svg/svg.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
@@ -14,8 +15,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:go_router/go_router.dart';
 
 final supabase = Supabase.instance.client;
-final GoogleSignInService _googleSignInService =
-    GoogleSignInService(); // ✅ field එක තියෙනවා
+final GoogleSignInService _googleSignInService = GoogleSignInService();
 
 enum _OAuthAttemptResult { success, cancelled, failed }
 
@@ -39,24 +39,42 @@ class _ContinueScreenState extends State<ContinueScreen> {
   final Set<String> _selectedProfiles = {};
   int _selectedCount = 0;
 
+  // ✅ API 36: Responsive variables
+  bool _isTablet = false;
+  bool _isWeb = false;
+
   @override
   void initState() {
     super.initState();
     _profileLoadingStates.clear();
     _loadProfiles();
     _checkCompliance();
-    // FIX: Initialize Google Sign-In SDK here too. ContinueScreen
-    // can trigger native Google auth without the user ever visiting
-    // SignInScreen (where this was previously initialized), so
-    // GoogleSignIn.instance.initialize() must be guaranteed here as
-    // well - otherwise authenticate() throws LateInitializationError
-    // and the whole login silently fails after account picker.
     _googleSignInService.initialize();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkScreenSize();
+    });
   }
 
-  // ============================================================
-  // 🔥 GET DISPLAY NAME FROM PROFILE
-  // ============================================================
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _checkScreenSize();
+  }
+
+  void _checkScreenSize() {
+    final size = MediaQuery.of(context).size;
+    final isTablet = size.shortestSide >= 600;
+    final isWeb = size.width > 800;
+
+    if (_isTablet != isTablet || _isWeb != isWeb) {
+      setState(() {
+        _isTablet = isTablet;
+        _isWeb = isWeb;
+      });
+    }
+  }
+
   String _getDisplayName(Map<String, dynamic> profile) {
     final email = profile['email'] as String? ?? 'User';
 
@@ -99,7 +117,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
     return email.split('@').first;
   }
 
-  /// session validation add
   bool _hasValidSession() {
     try {
       final session = supabase.auth.currentSession;
@@ -117,23 +134,13 @@ class _ContinueScreenState extends State<ContinueScreen> {
     }
   }
 
-  // ============================================================
-  // 🔥 CHECK IF PROFILE HAS ACTIVE ROLES (SAFE VERSION)
-  // ============================================================
-  /// ✅ Check if profile has active roles - HYBRID VERSION
-  /// (informational filter for which profile cards to show in
-  /// this quick-access list - not an auth gate)
   Future<bool> _hasActiveRoles(String email, List<String> roles) async {
     try {
       if (roles.isEmpty) return false;
 
-      // ✅ Step 1: Check SessionManager (Fast - No network call)
       final availableProfiles = await SessionManager.getAvailableProfiles();
-      debugPrint(
-        '📊 Available profiles from SessionManager: $availableProfiles',
-      );
+      debugPrint('📊 Available profiles from SessionManager: $availableProfiles');
 
-      // Check if any role exists in available profiles
       for (String role in roles) {
         final exists = availableProfiles.any(
           (p) => p['email'] == email && p['role'] == role,
@@ -144,7 +151,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
         }
       }
 
-      // Check from SessionManager profiles
       final allProfiles = await SessionManager.getProfiles();
       for (var profile in allProfiles) {
         if (profile['email'] == email) {
@@ -156,12 +162,10 @@ class _ContinueScreenState extends State<ContinueScreen> {
         }
       }
 
-      // ✅ Step 2: If not found in SessionManager, check DB (Only if session is valid)
       final currentUser = supabase.auth.currentUser;
       final session = supabase.auth.currentSession;
 
       if (currentUser != null && session != null) {
-        // Check if session is valid
         bool sessionValid = true;
         if (session.expiresAt != null) {
           final expiryTime = DateTime.fromMillisecondsSinceEpoch(
@@ -189,7 +193,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
               }
             } catch (e) {
               debugPrint('⚠️ Error checking role $role in DB: $e');
-              // On error, count as active (safe fallback)
               activeCount++;
             }
           }
@@ -205,25 +208,15 @@ class _ContinueScreenState extends State<ContinueScreen> {
       return false;
     } catch (e) {
       debugPrint('❌ Error checking active roles: $e');
-      // Safe fallback - show profile
       return true;
     }
   }
 
-  // ============================================================
-  // 🔥 GET PROFILE STATUS FROM DB (SAFE VERSION)
-  // ============================================================
-  /// ✅ Get profile status - HYBRID VERSION
-  /// (informational only - drives the "Inactive"/"Deleting" badge
-  /// on the card. The actual restore/reactivate decision and
-  /// blocking/dialog logic lives centrally in AppState + the
-  /// GoRouter redirect in main.dart, not here.)
   Future<Map<String, dynamic>?> _getProfileStatus(
     String email,
     String role,
   ) async {
     try {
-      // ✅ Step 1: Check SessionManager first (Fast)
       final availableProfiles = await SessionManager.getAvailableProfiles();
 
       Map<String, dynamic>? cachedProfile = availableProfiles.firstWhere(
@@ -231,17 +224,14 @@ class _ContinueScreenState extends State<ContinueScreen> {
         orElse: () => {},
       );
 
-      // Step 2: If found in available profiles, use it
       if (cachedProfile.isNotEmpty) {
         final status = cachedProfile['status'] as String? ?? 'active';
 
-        // ✅ Step 3: If status is not 'active', check DB for latest
         if (status != 'active') {
           final currentUser = supabase.auth.currentUser;
           final session = supabase.auth.currentSession;
 
           if (currentUser != null && session != null) {
-            // Check if session is valid
             bool sessionValid = true;
             if (session.expiresAt != null) {
               final expiryTime = DateTime.fromMillisecondsSinceEpoch(
@@ -251,9 +241,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
             }
 
             if (sessionValid) {
-              debugPrint(
-                '🔄 Valid session found, checking DB for latest status...',
-              );
+              debugPrint('🔄 Valid session found, checking DB for latest status...');
               try {
                 final response = await supabase.rpc(
                   'get_role_status',
@@ -275,7 +263,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
           }
         }
 
-        // Return cached status (with extra data)
         return {
           'status': status,
           'days_remaining': cachedProfile['days_remaining'],
@@ -284,12 +271,10 @@ class _ContinueScreenState extends State<ContinueScreen> {
         };
       }
 
-      // ✅ Step 4: Not in available profiles, check all profiles
       final allProfiles = await SessionManager.getProfiles();
       for (var profile in allProfiles) {
         if (profile['email'] == email) {
-          final extraData =
-              profile['extra_data'] as Map<String, dynamic>? ?? {};
+          final extraData = profile['extra_data'] as Map<String, dynamic>? ?? {};
           final roleKey = 'profile_$role';
 
           if (extraData.containsKey(roleKey)) {
@@ -306,7 +291,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
         }
       }
 
-      // ✅ Step 5: If not found anywhere, try DB (Only if session is valid)
       final currentUser = supabase.auth.currentUser;
       final session = supabase.auth.currentSession;
 
@@ -336,7 +320,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
           }
         }
       }
-      // Final fallback
       return {'status': 'active', 'source': 'fallback'};
     } catch (e) {
       debugPrint('⚠️ Error getting profile status: $e');
@@ -344,26 +327,17 @@ class _ContinueScreenState extends State<ContinueScreen> {
     }
   }
 
-  // ============================================================
-  // 🔥 LOAD PROFILES (UPDATED - PRODUCTION READY)
-  // ============================================================
   Future<void> _loadProfiles() async {
     try {
       setState(() => _loading = true);
 
-      // FORCE SYNC: Update available profiles from saved_profiles
       await SessionManager.forceSyncAvailableProfiles();
 
-      // Check if session is valid
       final bool hasValidSession = _hasValidSession();
 
-      // Get ALL profiles from SessionManager
       final allProfiles = await SessionManager.getProfiles();
-
-      //  Get available profiles (now synced)
       final availableProfiles = await SessionManager.getAvailableProfiles();
 
-      // Create photo map from available profiles
       final Map<String, String> photoMap = {};
       for (var profile in availableProfiles) {
         final email = profile['email'] as String?;
@@ -377,13 +351,11 @@ class _ContinueScreenState extends State<ContinueScreen> {
           photoMap[key] = photo;
           debugPrint('📸 Photo map: $key -> $photo');
         }
-        // Also map just email for fallback
         if (email != null && photo != null && photo.isNotEmpty) {
           photoMap[email] = photo;
         }
       }
 
-      // Also get photo from saved profiles
       final Map<String, String> savedPhotoMap = {};
       for (var profile in allProfiles) {
         final email = profile['email'] as String?;
@@ -422,7 +394,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
           continue;
         }
 
-        // Only call _hasActiveRoles if session is valid
         bool hasActiveRoles = true;
         if (hasValidSession) {
           try {
@@ -432,9 +403,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
             hasActiveRoles = true;
           }
         } else {
-          debugPrint(
-            '⏭️ Skipping _hasActiveRoles (no valid session) for $email',
-          );
+          debugPrint('⏭️ Skipping _hasActiveRoles (no valid session) for $email');
         }
 
         if (!hasActiveRoles) {
@@ -450,7 +419,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
           newProfile['display_name'] = displayName;
           newProfile['roles'] = [roles.first];
 
-          // SYNC PHOTO: Use photo from available profiles if available
           String? syncedPhoto = photoMap[email];
           if (syncedPhoto == null || syncedPhoto.isEmpty) {
             syncedPhoto = savedPhotoMap[email];
@@ -464,7 +432,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
             debugPrint('📸 Using photo: $syncedPhoto for $email');
           }
 
-          // Only call _getProfileStatus if session is valid
           Map<String, dynamic>? statusInfo;
           if (hasValidSession) {
             try {
@@ -474,9 +441,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
               statusInfo = {'status': 'active'};
             }
           } else {
-            debugPrint(
-              '⏭️ Skipping _getProfileStatus (no valid session) for $email',
-            );
+            debugPrint('⏭️ Skipping _getProfileStatus (no valid session) for $email');
             statusInfo = {'status': 'active'};
           }
 
@@ -501,7 +466,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
             roleProfile['lastLogin'] = profileLastLogin;
             roleProfile['display_name'] = displayName;
 
-            // SYNC PHOTO: Use photo from available profiles if available
             String? syncedPhoto = photoMap[email];
             if (syncedPhoto == null || syncedPhoto.isEmpty) {
               syncedPhoto = savedPhotoMap[email];
@@ -515,7 +479,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
               debugPrint('📸 Using photo: $syncedPhoto for $email - $role');
             }
 
-            // Only call _getProfileStatus if session is valid
             Map<String, dynamic>? statusInfo;
             if (hasValidSession) {
               try {
@@ -531,8 +494,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
             if (statusInfo != null) {
               roleProfile['status'] = statusInfo['status'] ?? 'active';
               roleProfile['days_remaining'] = statusInfo['days_remaining'];
-              roleProfile['deletion_due_date'] =
-                  statusInfo['deletion_due_date'];
+              roleProfile['deletion_due_date'] = statusInfo['deletion_due_date'];
             } else {
               roleProfile['status'] = 'active';
             }
@@ -542,7 +504,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
         }
       }
 
-      // Sort profiles
       expandedProfiles.sort((a, b) {
         final aProvider = a['provider'] as String? ?? 'email';
         final bProvider = b['provider'] as String? ?? 'email';
@@ -551,7 +512,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
         return 0;
       });
 
-      // Optimize images
       for (var profile in expandedProfiles) {
         await _optimizeProfileImage(profile);
       }
@@ -606,8 +566,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
     }
     try {
       if (photoUrl.startsWith('//')) photoUrl = 'https:$photoUrl';
-      final hasSizeParam =
-          photoUrl.contains('=s96') ||
+      final hasSizeParam = photoUrl.contains('=s96') ||
           photoUrl.contains('=s') ||
           photoUrl.contains('?sz=') ||
           photoUrl.contains('/s96-c/');
@@ -650,22 +609,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
     if (!rememberMe) setState(() {});
   }
 
-  // ============================================================
-  // 🔥 HANDLE PROFILE LOGIN
-  // ✅ SIMPLIFIED: Removed the role-level "scheduled for deletion"
-  // restore dialog + cancelScheduledDeletion() call, and the
-  // "Profile Inactive - contact support" hard block. Those
-  // duplicated (and could conflict with / double-show alongside)
-  // the profile-level restore/reactivate confirmation dialogs now
-  // owned centrally by AppState + the GoRouter redirect in
-  // main.dart. This screen's job is just: authenticate, then hand
-  // off to the router. Status badges on the cards remain purely
-  // informational (see _buildProfileCard).
-  // ============================================================
-  /// Result of an OAuth attempt from the Continue screen - distinguishes
-  /// a genuine failure from a user-initiated cancellation so the caller
-  /// doesn't show a misleading "Login Failed" alert for a cancel.
-
   Future<void> _handleProfileLogin(
     Map<String, dynamic> profile,
     String role,
@@ -700,13 +643,8 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
     try {
       bool loginSuccess = false;
-      // ✅ NEW: user cancel කළාද කියලා වෙනම track කරනවා - cancel
-      // නම් "Login Failed" error popup එකක් පෙන්නන්නේ නෑ.
       bool userCancelled = false;
 
-      // ═══════════════════════════════════════════════════════════
-      // 🔥 STEP 1: Try Auto-Login (NO POPUP) - Mobile fixed!
-      // ═══════════════════════════════════════════════════════════
       debugPrint('🔄 Attempting auto login for: $email');
       loginSuccess = await SessionManager.tryAutoLogin(email);
 
@@ -717,9 +655,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
       } else {
         debugPrint('❌ Auto-login failed');
 
-        // ═══════════════════════════════════════════════════════════
-        // 🔥 STEP 2: Try Direct Session Restore (NO POPUP)
-        // ═══════════════════════════════════════════════════════════
         debugPrint('🔄 Trying direct session restore...');
         loginSuccess = await SessionManager.restoreSessionDirectly(email);
 
@@ -730,17 +665,12 @@ class _ContinueScreenState extends State<ContinueScreen> {
         } else {
           debugPrint('❌ Direct session restore failed');
 
-          // ═══════════════════════════════════════════════════════════
-          // 🔥 STEP 3: Only if both fail, show OAuth popup
-          // ═══════════════════════════════════════════════════════════
           if (provider == 'email') {
             debugPrint('🔐 Email login flow started');
             SessionManager.setLocationContinuesc(true);
             final password = await _showPasswordDialog(email);
 
             if (password == null) {
-              // ✅ User Cancel click කළා - error කියලා නෙවෙයි,
-              // cancel කියලා සලකනවා.
               debugPrint('⏭️ User cancelled password dialog');
               userCancelled = true;
             } else {
@@ -755,8 +685,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                 await SessionManager.saveUserProfile(
                   email: email,
                   userId: response.user!.id,
-                  name:
-                      response.user!.userMetadata?['full_name'] ??
+                  name: response.user!.userMetadata?['full_name'] ??
                       email.split('@').first,
                   photo: response.user!.userMetadata?['avatar_url'],
                   roles: [role],
@@ -768,9 +697,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
               }
             }
           } else {
-            debugPrint(
-              '🔐 OAuth login flow started for $provider (popup will show)',
-            );
+            debugPrint('🔐 OAuth login flow started for $provider (popup will show)');
             final oauthResult = await _handleOAuthLoginForProfile(profile);
             loginSuccess = oauthResult == _OAuthAttemptResult.success;
             userCancelled = oauthResult == _OAuthAttemptResult.cancelled;
@@ -782,11 +709,8 @@ class _ContinueScreenState extends State<ContinueScreen> {
       if (loginSuccess && mounted) {
         debugPrint('✅ Login successful for role: $role');
 
-        // ✅ Check if refresh token was saved
         final savedToken = await SessionManager.getRefreshToken(email);
-        debugPrint(
-          '🔑 Refresh token saved: ${savedToken != null ? "✅ YES" : "❌ NO"}',
-        );
+        debugPrint('🔑 Refresh token saved: ${savedToken != null ? "✅ YES" : "❌ NO"}');
 
         await SessionManager.setCurrentUser(email);
         await SessionManager.saveCurrentRole(role);
@@ -806,8 +730,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
         if (!mounted) return;
         context.go('/');
       } else if (userCancelled) {
-        // ✅ User intentionally cancel කළා - error alert එකක් නෑ,
-        // silently loading state එක clear කරලා screen එකේම ඉන්නවා.
         debugPrint('⏭️ Login cancelled by user - no error shown');
       } else {
         debugPrint('❌ Login failed for role: $role');
@@ -841,19 +763,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
     }
   }
 
-  // ============================================================
-  // FIXED: _handleOAuthLoginForProfile() in ContinueScreen
-  // Add these imports at the top of continue_screen.dart:
-  //
-  // import 'package:flutter/foundation.dart'
-  //     show defaultTargetPlatform, TargetPlatform;
-  // import 'package:flutter_application_1/services/google_sign_in_service.dart';
-  //
-  // Add this field inside _ContinueScreenState:
-  //
-  // final GoogleSignInService _googleSignInService = GoogleSignInService();
-  // ============================================================
-
   Future<_OAuthAttemptResult> _handleOAuthLoginForProfile(
     Map<String, dynamic> profile,
   ) async {
@@ -867,38 +776,27 @@ class _ContinueScreenState extends State<ContinueScreen> {
       final currentUser = supabase.auth.currentUser;
       if (currentUser?.email == email) return _OAuthAttemptResult.success;
 
-      // ✅ First try auto-login (no popup)
       final autoSuccess = await SessionManager.tryAutoLogin(email);
       if (autoSuccess) {
         debugPrint('✅ Auto-login successful from Continue screen!');
         return _OAuthAttemptResult.success;
       }
 
-      // ✅ Try direct session restore (no popup)
       final restored = await SessionManager.restoreSessionDirectly(email);
       if (restored) {
         debugPrint('✅ Direct session restore successful from Continue screen!');
         return _OAuthAttemptResult.success;
       }
 
-      // ═══════════════════════════════════════════════════════════
-      // 🔥 මෙතනට එනවා නම් (rare) - refresh token එකම invalid/expired.
-      // Provider-specific OAuth login එකක් අවශ්‍යයි. Mobile එකේදී
-      // Google/Facebook/Apple තුනටම native SDK එකක් තියෙනවා නම් ඒක
-      // ප්‍රථමයෙන් try කරනවා (sign_in_screen.dart එකේ pattern එකම).
-      // ═══════════════════════════════════════════════════════════
       await SessionManager.setPendingRoleSelection(email: email, role: role);
 
       switch (provider) {
         case 'google':
           if (defaultTargetPlatform == TargetPlatform.android ||
               defaultTargetPlatform == TargetPlatform.iOS) {
-            debugPrint(
-              '🔐 Continue screen - using native Google Sign-In (MOBILE)',
-            );
+            debugPrint('🔐 Continue screen - using native Google Sign-In (MOBILE)');
 
-            final authData = await _googleSignInService
-                .authenticateAndGetDetails();
+            final authData = await _googleSignInService.authenticateAndGetDetails();
 
             if (authData != null && authData['idToken'] != null) {
               try {
@@ -909,19 +807,15 @@ class _ContinueScreenState extends State<ContinueScreen> {
                 );
 
                 if (response.user != null) {
-                  debugPrint(
-                    '✅ Native Google sign-in successful (Continue screen)',
-                  );
+                  debugPrint('✅ Native Google sign-in successful (Continue screen)');
 
                   await SessionManager.saveUserProfile(
                     email: email,
                     userId: response.user!.id,
-                    name:
-                        response.user!.userMetadata?['full_name'] ??
+                    name: response.user!.userMetadata?['full_name'] ??
                         authData['displayName'] ??
                         email.split('@').first,
-                    photo:
-                        response.user!.userMetadata?['avatar_url'] ??
+                    photo: response.user!.userMetadata?['avatar_url'] ??
                         authData['photoUrl'],
                     roles: [role],
                     rememberMe: true,
@@ -940,26 +834,19 @@ class _ContinueScreenState extends State<ContinueScreen> {
                   await SessionManager.setCurrentUser(email);
                   await SessionManager.saveCurrentRole(role);
 
-                  debugPrint(
-                    '✅ Continue screen: Profile saved with refresh token',
-                  );
+                  debugPrint('✅ Continue screen: Profile saved with refresh token');
                   return _OAuthAttemptResult.success;
                 }
               } catch (e) {
-                debugPrint(
-                  '❌ Native Google sign-in failed (Continue screen): $e',
-                );
+                debugPrint('❌ Native Google sign-in failed (Continue screen): $e');
                 return _OAuthAttemptResult.failed;
               }
             }
 
-            // ✅ authData null - user cancel කළා. Browser popup එකට
-            // force fallback වෙන්නේ නෑ.
             debugPrint('⏭️ Native Google authentication cancelled');
             return _OAuthAttemptResult.cancelled;
           }
 
-          // Web - browser OAuth
           debugPrint('🔐 Continue screen - using browser OAuth (WEB)');
           await supabase.auth.signInWithOAuth(
             OAuthProvider.google,
@@ -970,16 +857,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
           break;
 
         case 'facebook':
-          // ═══════════════════════════════════════════════════════════
-          // 🔥 FIX: Mobile එකේදී sign_in_screen.dart එකේ පාවිච්චි කරන
-          // native FacebookAuth.login() එකම ප්‍රථමයෙන් try කරනවා -
-          // කලින් කෙළින්ම browser popup එකට යාම නවත්තලා.
-          // ═══════════════════════════════════════════════════════════
           if (defaultTargetPlatform == TargetPlatform.android ||
               defaultTargetPlatform == TargetPlatform.iOS) {
-            debugPrint(
-              '🔐 Continue screen - using native Facebook Sign-In (MOBILE)',
-            );
+            debugPrint('🔐 Continue screen - using native Facebook Sign-In (MOBILE)');
 
             try {
               final fbResult = await _facebookAuth.login(
@@ -994,15 +874,12 @@ class _ContinueScreenState extends State<ContinueScreen> {
                 );
 
                 if (response.user != null) {
-                  debugPrint(
-                    '✅ Native Facebook sign-in successful (Continue screen)',
-                  );
+                  debugPrint('✅ Native Facebook sign-in successful (Continue screen)');
 
                   await SessionManager.saveUserProfile(
                     email: email,
                     userId: response.user!.id,
-                    name:
-                        response.user!.userMetadata?['full_name'] ??
+                    name: response.user!.userMetadata?['full_name'] ??
                         email.split('@').first,
                     photo: response.user!.userMetadata?['avatar_url'],
                     roles: [role],
@@ -1025,12 +902,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
                   return _OAuthAttemptResult.success;
                 }
               } else if (fbResult.status == LoginStatus.cancelled) {
-                // ✅ Cancel කළොත් browser popup එකට force fallback
-                // වෙන්නේ නෑ.
                 debugPrint('⏭️ User cancelled native Facebook login');
                 return _OAuthAttemptResult.cancelled;
               }
-              // status == failed - genuine error, පහළින් web fallback
               debugPrint(
                 '⚠️ Native Facebook login failed (status: ${fbResult.status}), falling back to web',
               );
@@ -1039,7 +913,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
             }
           }
 
-          // Web fallback (හෝ native genuine failure එකකින් පස්සේ)
           debugPrint('🔐 Continue screen - using browser OAuth for Facebook');
           await supabase.auth.signInWithOAuth(
             OAuthProvider.facebook,
@@ -1050,12 +923,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
           break;
 
         case 'apple':
-          // ═══════════════════════════════════════════════════════════
-          // 🔥 FIX: iOS එකේදී native SignInWithApple එකම ප්‍රථමයෙන් try
-          // කරනවා - Android/Web දෙකෙටම browser OAuth එකම (Apple
-          // native support Android එකේ නෑ, sign_in_screen.dart එකේ
-          // pattern එකම).
-          // ═══════════════════════════════════════════════════════════
           if (defaultTargetPlatform == TargetPlatform.iOS) {
             debugPrint('🔐 Continue screen - using native Apple Sign-In (iOS)');
 
@@ -1074,9 +941,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                 );
 
                 if (response.user != null) {
-                  debugPrint(
-                    '✅ Native Apple sign-in successful (Continue screen)',
-                  );
+                  debugPrint('✅ Native Apple sign-in successful (Continue screen)');
 
                   if (credential.authorizationCode.isNotEmpty) {
                     try {
@@ -1087,17 +952,14 @@ class _ContinueScreenState extends State<ContinueScreen> {
                         },
                       );
                     } catch (e) {
-                      debugPrint(
-                        '⚠️ Failed to save Apple authorization code: $e',
-                      );
+                      debugPrint('⚠️ Failed to save Apple authorization code: $e');
                     }
                   }
 
                   await SessionManager.saveUserProfile(
                     email: email,
                     userId: response.user!.id,
-                    name:
-                        response.user!.userMetadata?['full_name'] ??
+                    name: response.user!.userMetadata?['full_name'] ??
                         email.split('@').first,
                     photo: response.user!.userMetadata?['avatar_url'],
                     roles: [role],
@@ -1120,7 +982,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
                   return _OAuthAttemptResult.success;
                 }
               }
-              // credential.identityToken null - edge case, web fallback
             } on SignInWithAppleAuthorizationException catch (e) {
               if (e.code == AuthorizationErrorCode.canceled) {
                 debugPrint('⏭️ User cancelled native Apple Sign-In');
@@ -1134,7 +995,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
             }
           }
 
-          // Web fallback (Android හෝ iOS native genuine failure)
           debugPrint('🔐 Continue screen - using browser OAuth for Apple');
           await supabase.auth.signInWithOAuth(
             OAuthProvider.apple,
@@ -1148,8 +1008,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
           return _OAuthAttemptResult.failed;
       }
 
-      // Browser OAuth - wait for callback (Google web / FB web-fallback /
-      // Apple web-fallback / Android Apple)
       for (int i = 0; i < 60; i++) {
         await Future.delayed(const Duration(milliseconds: 500));
         final user = supabase.auth.currentUser;
@@ -1174,7 +1032,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
         }
       }
 
-      // ✅ Timeout - cancel බව සහතික කරගන්න බැරි නිසා 'failed' කියලා සලකනවා
       return _OAuthAttemptResult.failed;
     } catch (e) {
       debugPrint('OAuth error: $e');
@@ -1182,9 +1039,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
     }
   }
 
-  /// ✅ NEW helper - available profiles list එකට entry එකක් add
-  /// කරන logic එක native Google/Facebook/Apple paths තුනටම
-  /// duplicate වෙච්ච එකක් - මෙතනට extract කළා.
   Future<void> _addToAvailableProfiles({
     required String email,
     required String role,
@@ -1217,9 +1071,14 @@ class _ContinueScreenState extends State<ContinueScreen> {
   }
 
   // ============================================================
-  // 🔥 HELPER METHODS
+  // ✅ HELPER METHODS - AppTheme based
   // ============================================================
+
   Color _getProviderColor(String? provider) {
+    final isDark = context.isDarkMode;
+    if (isDark) {
+      return Colors.white.withValues(alpha: 0.2);
+    }
     return const Color.fromARGB(255, 242, 241, 241);
   }
 
@@ -1279,6 +1138,11 @@ class _ContinueScreenState extends State<ContinueScreen> {
   }
 
   Widget _buildProviderIcon(String provider) {
+    final isDark = context.isDarkMode;
+    final color = isDark
+        ? Colors.white
+        : _getButtonColor(provider.toLowerCase());
+
     switch (provider.toLowerCase()) {
       case 'google':
         return SvgPicture.asset(
@@ -1299,11 +1163,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
           height: 20,
         );
       case 'email':
-        return Icon(
-          Icons.email_rounded,
-          size: 18,
-          color: _getButtonColor(provider.toLowerCase()),
-        );
+        return Icon(Icons.email_rounded, size: 18, color: color);
       default:
         return const SizedBox();
     }
@@ -1325,9 +1185,15 @@ class _ContinueScreenState extends State<ContinueScreen> {
   }
 
   // ============================================================
-  // 🔥 PROFILE CARD (Status badge remains informational-only)
+  // ✅ PROFILE CARD - AppTheme based
   // ============================================================
+
   Widget _buildProfileCard(Map<String, dynamic> profile, int index) {
+    final isDark = context.isDarkMode;
+    final primaryColor = context.primaryColor;
+    final textColor = context.textColor;
+    final backgroundColor = context.backgroundColor;
+
     final email = profile['email'] as String? ?? 'Unknown';
     final provider = profile['provider'] as String? ?? 'email';
     final roles = profile['roles'] as List? ?? [];
@@ -1336,8 +1202,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
     final isLoading = _profileLoadingStates[uniqueId] == true;
     final isSelected = _selectedProfiles.contains(uniqueId);
     final photoUrl = profile['photo'] as String?;
-    final displayName =
-        profile['display_name'] as String? ?? email.split('@').first;
+    final displayName = profile['display_name'] as String? ?? email.split('@').first;
 
     final hasPhoto = photoUrl != null && photoUrl.isNotEmpty;
     final lastLogin = profile['lastLogin'] as String?;
@@ -1346,13 +1211,25 @@ class _ContinueScreenState extends State<ContinueScreen> {
     final roleDisplayName = _getRoleDisplayName(profileRole);
     final providerColor = _getProviderColor(provider);
 
-    // ✅ Status badge is informational only - actual gating happens
-    // centrally after login (AppState + router), not here.
     final status = profile['status'] as String? ?? 'active';
     final isActive = status == 'active';
     final isScheduledForDeletion = status == 'scheduled_for_deletion';
     final isInactive = status == 'inactive';
     final daysRemaining = profile['days_remaining'] as int?;
+
+    final cardBgColor = isDark
+        ? (isSelected
+            ? roleColor.withValues(alpha: 0.2)
+            : backgroundColor.withValues(alpha: 0.05))
+        : (isSelected ? roleColor.withValues(alpha: 0.1) : Colors.grey.shade50);
+
+    final borderColor = isSelected
+        ? primaryColor.withValues(alpha: 0.3)
+        : isScheduledForDeletion
+        ? Colors.orange.withValues(alpha: 0.3)
+        : isInactive
+        ? Colors.grey.withValues(alpha: 0.2)
+        : (isDark ? Colors.white.withValues(alpha: 0.1) : Colors.grey.shade200);
 
     return GestureDetector(
       onTap: () {
@@ -1375,26 +1252,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
         curve: Curves.easeInOut,
         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: BoxDecoration(
-          color: isSelected
-              ? roleColor.withValues(alpha: 0.15)
-              : isLoading
-              ? roleColor.withValues(alpha: 0.1)
-              : isInactive
-              ? Colors.grey.withValues(alpha: 0.05)
-              : Colors.white.withValues(alpha: 0.05),
+          color: cardBgColor,
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: isLoading
-                ? roleColor
-                : isSelected
-                ? roleColor.withValues(alpha: 0.5)
-                : isScheduledForDeletion
-                ? Colors.orange.withValues(alpha: 0.3)
-                : isInactive
-                ? Colors.grey.withValues(alpha: 0.2)
-                : Colors.white.withValues(alpha: 0.1),
-            width: isLoading ? 2 : 1.5,
-          ),
+          border: Border.all(color: borderColor, width: isLoading ? 2 : 1.5),
         ),
         child: Padding(
           padding: const EdgeInsets.all(12),
@@ -1422,13 +1282,12 @@ class _ContinueScreenState extends State<ContinueScreen> {
                         ),
                         boxShadow: [
                           BoxShadow(
-                            color:
-                                (isScheduledForDeletion
-                                        ? Colors.orange
-                                        : isInactive
-                                        ? Colors.grey
-                                        : roleColor)
-                                    .withValues(alpha: 0.2),
+                            color: (isScheduledForDeletion
+                                    ? Colors.orange
+                                    : isInactive
+                                    ? Colors.grey
+                                    : roleColor)
+                                .withValues(alpha: 0.2),
                             blurRadius: 8,
                             spreadRadius: 0,
                           ),
@@ -1442,7 +1301,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                       ),
                     ),
 
-                    // Provider Icon Badge
+                    // Provider Icon Badge - Using backgroundColor
                     if (!isLoading && !_selectionMode)
                       Positioned(
                         top: -4,
@@ -1454,7 +1313,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                             shape: BoxShape.circle,
                             color: providerColor,
                             border: Border.all(
-                              color: const Color(0xFF0F1820),
+                              color: isDark ? Colors.grey[800]! : backgroundColor,
                               width: 2.5,
                             ),
                             boxShadow: [
@@ -1469,7 +1328,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                         ),
                       ),
 
-                    // Role Icon Badge
+                    // Role Icon Badge - Using backgroundColor
                     if (!isLoading && !_selectionMode)
                       Positioned(
                         bottom: -4,
@@ -1485,18 +1344,17 @@ class _ContinueScreenState extends State<ContinueScreen> {
                                 ? Colors.grey
                                 : roleColor,
                             border: Border.all(
-                              color: const Color(0xFF0F1820),
+                              color: isDark ? Colors.grey[800]! : backgroundColor,
                               width: 2.5,
                             ),
                             boxShadow: [
                               BoxShadow(
-                                color:
-                                    (isScheduledForDeletion
-                                            ? Colors.orange
-                                            : isInactive
-                                            ? Colors.grey
-                                            : roleColor)
-                                        .withValues(alpha: 0.5),
+                                color: (isScheduledForDeletion
+                                        ? Colors.orange
+                                        : isInactive
+                                        ? Colors.grey
+                                        : roleColor)
+                                    .withValues(alpha: 0.5),
                                 blurRadius: 4,
                                 spreadRadius: 0,
                               ),
@@ -1512,7 +1370,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                         ),
                       ),
 
-                    // Selection check badge
+                    // Selection check badge - Using primaryColor
                     if (isSelected && _selectionMode)
                       Positioned(
                         top: 0,
@@ -1522,9 +1380,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
                           height: 24,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            color: roleColor,
+                            color: primaryColor,
                             border: Border.all(
-                              color: const Color(0xFF0F1820),
+                              color: isDark ? Colors.grey[800]! : backgroundColor,
                               width: 2,
                             ),
                           ),
@@ -1566,7 +1424,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
               const SizedBox(width: 16),
 
-              // Profile Info
+              // Profile Info - Using textColor
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1578,7 +1436,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                           child: Text(
                             displayName,
                             style: TextStyle(
-                              color: isInactive ? Colors.grey : Colors.white,
+                              color: isInactive ? Colors.grey : textColor,
                               fontWeight: FontWeight.w600,
                               fontSize: 16,
                             ),
@@ -1631,13 +1489,12 @@ class _ContinueScreenState extends State<ContinueScreen> {
                             vertical: 2,
                           ),
                           decoration: BoxDecoration(
-                            color:
-                                (isScheduledForDeletion
-                                        ? Colors.orange
-                                        : isInactive
-                                        ? Colors.grey
-                                        : roleColor)
-                                    .withValues(alpha: 0.15),
+                            color: (isScheduledForDeletion
+                                    ? Colors.orange
+                                    : isInactive
+                                    ? Colors.grey
+                                    : roleColor)
+                                .withValues(alpha: 0.15),
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Text(
@@ -1659,7 +1516,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                             style: TextStyle(
                               color: isInactive
                                   ? Colors.grey.withValues(alpha: 0.5)
-                                  : Colors.white.withValues(alpha: 0.5),
+                                  : textColor.withValues(alpha: 0.5),
                               fontSize: 11,
                             ),
                           ),
@@ -1678,30 +1535,28 @@ class _ContinueScreenState extends State<ContinueScreen> {
                 ),
               ),
 
-              // Arrow indicator
+              // Arrow indicator - Using primaryColor
               if (!isLoading && !_selectionMode)
                 Container(
                   width: 32,
                   height: 32,
                   decoration: BoxDecoration(
-                    color:
-                        (isScheduledForDeletion
-                                ? Colors.orange
-                                : isInactive
-                                ? Colors.grey
-                                : roleColor)
-                            .withValues(alpha: 0.1),
+                    color: (isScheduledForDeletion
+                            ? Colors.orange
+                            : isInactive
+                            ? Colors.grey
+                            : roleColor)
+                        .withValues(alpha: 0.1),
                     shape: BoxShape.circle,
                   ),
                   child: Icon(
                     Icons.arrow_forward_ios,
-                    color:
-                        (isScheduledForDeletion
-                                ? Colors.orange
-                                : isInactive
-                                ? Colors.grey
-                                : roleColor)
-                            .withValues(alpha: 0.7),
+                    color: (isScheduledForDeletion
+                            ? Colors.orange
+                            : isInactive
+                            ? Colors.grey
+                            : primaryColor)
+                        .withValues(alpha: 0.7),
                     size: 14,
                   ),
                 ),
@@ -1718,7 +1573,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
     String? photoUrl,
     bool hasPhoto,
   ) {
+    final isDark = context.isDarkMode;
     final isGoogle = provider == 'google';
+
     if (isGoogle && _isGoogleImageRateLimited && hasPhoto) {
       return _getFallbackAvatar(profile, provider);
     }
@@ -1739,12 +1596,16 @@ class _ContinueScreenState extends State<ContinueScreen> {
                   height: 70,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: _getProviderColor(provider).withValues(alpha: 0.2),
+                    color: isDark
+                        ? Colors.grey[800]!.withValues(alpha: 0.3)
+                        : _getProviderColor(provider).withValues(alpha: 0.2),
                   ),
                   child: Center(
                     child: CircularProgressIndicator(
                       strokeWidth: 2,
-                      color: _getProviderColor(provider),
+                      color: isDark
+                          ? Colors.white54
+                          : _getProviderColor(provider),
                     ),
                   ),
                 ),
@@ -1770,9 +1631,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
   Widget _getFallbackAvatar(Map<String, dynamic> profile, String? provider) {
     final email = profile['email'] as String? ?? 'Unknown';
-    final displayName =
-        profile['display_name'] as String? ?? email.split('@').first;
+    final displayName = profile['display_name'] as String? ?? email.split('@').first;
     final isOAuth = provider != 'email';
+    final isDark = context.isDarkMode;
 
     if (isOAuth) {
       return Container(
@@ -1813,13 +1674,13 @@ class _ContinueScreenState extends State<ContinueScreen> {
       height: 70,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: Colors.blueAccent.withValues(alpha: 0.2),
+        color: isDark ? Colors.grey[800] : Colors.blueAccent.withValues(alpha: 0.2),
       ),
       child: Center(
         child: Text(
           displayName[0].toUpperCase(),
-          style: const TextStyle(
-            color: Colors.white,
+          style: TextStyle(
+            color: isDark ? Colors.white : Colors.white,
             fontWeight: FontWeight.bold,
             fontSize: 24,
           ),
@@ -1831,6 +1692,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
   // ============================================================
   // 🔥 SELECTION METHODS
   // ============================================================
+
   void _toggleProfileSelection(Map<String, dynamic> profile, String uniqueId) {
     setState(() {
       if (_selectedProfiles.contains(uniqueId)) {
@@ -1873,10 +1735,10 @@ class _ContinueScreenState extends State<ContinueScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1C1F26),
-        title: const Text(
+        backgroundColor: context.isDarkMode ? const Color(0xFF1E1E1E) : const Color(0xFF1C1F26),
+        title: Text(
           "Remove Selected Profiles?",
-          style: TextStyle(color: Colors.white),
+          style: TextStyle(color: context.textColor),
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1884,7 +1746,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
           children: [
             Text(
               "Remove $_selectedCount profile${_selectedCount == 1 ? '' : 's'} from this device?",
-              style: const TextStyle(color: Colors.white70),
+              style: TextStyle(color: context.secondaryTextColor),
             ),
             const SizedBox(height: 8),
             const Text(
@@ -1896,9 +1758,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text(
+            child: Text(
               "Cancel",
-              style: TextStyle(color: Colors.white70),
+              style: TextStyle(color: context.secondaryTextColor),
             ),
           ),
           TextButton(
@@ -1946,16 +1808,23 @@ class _ContinueScreenState extends State<ContinueScreen> {
   }
 
   // ============================================================
-  // 🔥 UI BUILD METHODS
+  // ✅ UI BUILD - AppTheme based, Edge-to-Edge, API 36
   // ============================================================
+
   @override
   Widget build(BuildContext context) {
+    final isDark = context.isDarkMode;
+    final backgroundColor = context.backgroundColor;
+    final cardColor = context.cardColor;
+    final textColor = context.textColor;
+    final primaryColor = context.primaryColor;
+
     final Size screenSize = MediaQuery.of(context).size;
     final bool isWeb = screenSize.width > 700;
     final double maxWidth = isWeb ? 450 : double.infinity;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0F1820),
+      backgroundColor: backgroundColor,
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
@@ -1965,9 +1834,19 @@ class _ContinueScreenState extends State<ContinueScreen> {
               margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.03),
+                color: cardColor,
                 borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: Colors.white12),
+                border: Border.all(
+                  color: isDark ? Colors.white12 : Colors.grey.shade200,
+                ),
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    cardColor,
+                    isDark ? Colors.white.withValues(alpha: 0.03) : Colors.grey.shade50,
+                  ],
+                ),
               ),
               child: Column(
                 children: [
@@ -1983,17 +1862,15 @@ class _ContinueScreenState extends State<ContinueScreen> {
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
                               border: Border.all(
-                                color: Colors.white24,
+                                color: isDark ? Colors.white24 : Colors.grey.shade300,
                                 width: 2,
                               ),
-                              gradient: const LinearGradient(
-                                colors: [Color(0xFF1877F2), Color(0xFF0A58CA)],
+                              gradient: LinearGradient(
+                                colors: [primaryColor, primaryColor.withValues(alpha: 0.7)],
                               ),
                               boxShadow: [
                                 BoxShadow(
-                                  color: const Color(
-                                    0xFF1877F2,
-                                  ).withValues(alpha: 0.4),
+                                  color: primaryColor.withValues(alpha: 0.4),
                                   blurRadius: 20,
                                   spreadRadius: 5,
                                 ),
@@ -2027,53 +1904,57 @@ class _ContinueScreenState extends State<ContinueScreen> {
                             height: 40,
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              color: Colors.white.withValues(alpha: 0.1),
+                              color: isDark ? Colors.white.withValues(alpha: 0.1) : Colors.grey.shade200,
                             ),
                             child: PopupMenuButton<String>(
-                              color: const Color(0xFF1C1F26),
+                              color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(12),
                                 side: BorderSide(
-                                  color: Colors.white.withValues(alpha: 0.1),
+                                  color: isDark ? Colors.white.withValues(alpha: 0.1) : Colors.grey.shade300,
                                 ),
                               ),
-                              icon: const Icon(
+                              icon: Icon(
                                 Icons.more_vert,
-                                color: Colors.white,
+                                color: textColor,
                                 size: 20,
                               ),
                               tooltip: 'Manage Profiles',
                               itemBuilder: (context) => [
-                                const PopupMenuItem<String>(
+                                PopupMenuItem<String>(
                                   value: 'select',
                                   child: Row(
                                     children: [
-                                      Icon(
+                                      const Icon(
                                         Icons.delete_outline,
                                         color: Colors.redAccent,
                                         size: 20,
                                       ),
-                                      SizedBox(width: 12),
+                                      const SizedBox(width: 12),
                                       Text(
                                         'Remove Selected',
-                                        style: TextStyle(color: Colors.white),
+                                        style: TextStyle(
+                                          color: isDark ? Colors.white : Colors.black87,
+                                        ),
                                       ),
                                     ],
                                   ),
                                 ),
-                                const PopupMenuItem<String>(
+                                PopupMenuItem<String>(
                                   value: 'remove',
                                   child: Row(
                                     children: [
-                                      Icon(
+                                      const Icon(
                                         Icons.manage_accounts,
                                         color: Colors.blueAccent,
                                         size: 20,
                                       ),
-                                      SizedBox(width: 12),
+                                      const SizedBox(width: 12),
                                       Text(
                                         'Manage Account Data',
-                                        style: TextStyle(color: Colors.white),
+                                        style: TextStyle(
+                                          color: isDark ? Colors.white : Colors.black87,
+                                        ),
                                       ),
                                     ],
                                   ),
@@ -2092,13 +1973,15 @@ class _ContinueScreenState extends State<ContinueScreen> {
                     ],
                   ),
 
-                  // Profiles list
+                  // Profiles list - Using cardColor
                   Expanded(
                     child: Container(
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.05),
+                        color: isDark ? cardColor.withValues(alpha: 0.5) : Colors.grey.shade100,
                         borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: Colors.white10),
+                        border: Border.all(
+                          color: isDark ? Colors.white10 : Colors.grey.shade200,
+                        ),
                       ),
                       child: Column(
                         children: [
@@ -2106,13 +1989,15 @@ class _ContinueScreenState extends State<ContinueScreen> {
                             Container(
                               padding: const EdgeInsets.all(16),
                               decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.03),
+                                color: isDark ? Colors.white.withValues(alpha: 0.03) : Colors.grey.shade100,
                                 borderRadius: const BorderRadius.only(
                                   topLeft: Radius.circular(16),
                                   topRight: Radius.circular(16),
                                 ),
-                                border: const Border(
-                                  bottom: BorderSide(color: Colors.white10),
+                                border: Border(
+                                  bottom: BorderSide(
+                                    color: isDark ? Colors.white10 : Colors.grey.shade200,
+                                  ),
                                 ),
                               ),
                               child: _buildSelectionModeHeader(),
@@ -2155,6 +2040,8 @@ class _ContinueScreenState extends State<ContinueScreen> {
   }
 
   Widget _buildLoadingState() {
+    final textColor = context.textColor;
+
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -2163,9 +2050,12 @@ class _ContinueScreenState extends State<ContinueScreen> {
             valueColor: AlwaysStoppedAnimation<Color>(Colors.blueAccent),
           ),
           const SizedBox(height: 15),
-          const Text(
+          Text(
             'Logging in...',
-            style: TextStyle(color: Colors.white70, fontSize: 14),
+            style: TextStyle(
+              color: textColor.withValues(alpha: 0.7),
+              fontSize: 14,
+            ),
           ),
           if (_selectedEmail != null)
             Padding(
@@ -2173,7 +2063,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
               child: Text(
                 _selectedEmail!,
                 style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.6),
+                  color: textColor.withValues(alpha: 0.6),
                   fontSize: 12,
                 ),
                 textAlign: TextAlign.center,
@@ -2185,6 +2075,10 @@ class _ContinueScreenState extends State<ContinueScreen> {
   }
 
   Widget _buildEmptyState() {
+    final isDark = context.isDarkMode;
+    final textColor = context.textColor;
+    final primaryColor = context.primaryColor;
+
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -2192,13 +2086,13 @@ class _ContinueScreenState extends State<ContinueScreen> {
           Icon(
             Icons.person_add_disabled,
             size: 60,
-            color: Colors.white.withValues(alpha: 0.3),
+            color: isDark ? Colors.white.withValues(alpha: 0.3) : Colors.grey.shade400,
           ),
           const SizedBox(height: 15),
-          const Text(
+          Text(
             'No Saved Profiles',
             style: TextStyle(
-              color: Colors.white,
+              color: textColor,
               fontSize: 16,
               fontWeight: FontWeight.w500,
             ),
@@ -2208,13 +2102,17 @@ class _ContinueScreenState extends State<ContinueScreen> {
             'Enable "Remember Me" during login\nto save your profile',
             textAlign: TextAlign.center,
             style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.6),
+              color: isDark ? Colors.white.withValues(alpha: 0.6) : Colors.grey.shade600,
               fontSize: 14,
             ),
           ),
           const SizedBox(height: 20),
           OutlinedButton(
             onPressed: () => context.go('/login'),
+            style: OutlinedButton.styleFrom(
+              side: BorderSide(color: primaryColor),
+              foregroundColor: primaryColor,
+            ),
             child: const Text('Go to Login'),
           ),
         ],
@@ -2223,11 +2121,15 @@ class _ContinueScreenState extends State<ContinueScreen> {
   }
 
   Widget _buildSelectionModeHeader() {
+    final isDark = context.isDarkMode;
+    final textColor = context.textColor;
+    final primaryColor = context.primaryColor;
+
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white, size: 24),
+          icon: Icon(Icons.arrow_back, color: textColor, size: 24),
           onPressed: _deselectAllProfiles,
           tooltip: 'Cancel Selection',
         ),
@@ -2236,8 +2138,8 @@ class _ContinueScreenState extends State<ContinueScreen> {
           children: [
             Text(
               '$_selectedCount selected',
-              style: const TextStyle(
-                color: Colors.white,
+              style: TextStyle(
+                color: textColor,
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
               ),
@@ -2245,7 +2147,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
             Text(
               'Tap to select/deselect',
               style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.7),
+                color: isDark ? Colors.white.withValues(alpha: 0.7) : Colors.grey.shade600,
                 fontSize: 12,
               ),
             ),
@@ -2255,10 +2157,8 @@ class _ContinueScreenState extends State<ContinueScreen> {
           children: [
             IconButton(
               icon: Icon(
-                _selectedCount == profiles.length
-                    ? Icons.deselect
-                    : Icons.select_all,
-                color: Colors.blueAccent,
+                _selectedCount == profiles.length ? Icons.deselect : Icons.select_all,
+                color: primaryColor,
                 size: 24,
               ),
               onPressed: _selectedCount == profiles.length
@@ -2285,6 +2185,10 @@ class _ContinueScreenState extends State<ContinueScreen> {
   }
 
   Widget _buildFooter() {
+    final isDark = context.isDarkMode;
+    final primaryColor = context.primaryColor;
+    final secondaryTextColor = context.secondaryTextColor;
+
     return Container(
       margin: const EdgeInsets.only(top: 20),
       child: Column(
@@ -2294,7 +2198,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
             child: ElevatedButton(
               onPressed: () => context.go('/login'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1877F2),
+                backgroundColor: primaryColor,
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 shape: RoundedRectangleBorder(
@@ -2313,7 +2217,8 @@ class _ContinueScreenState extends State<ContinueScreen> {
             child: OutlinedButton(
               onPressed: () => context.go('/signup'),
               style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: Color(0xFF1877F2)),
+                side: BorderSide(color: primaryColor),
+                foregroundColor: primaryColor,
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8),
@@ -2321,10 +2226,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
               ),
               child: const Text(
                 'Create New Account',
-                style: TextStyle(
-                  color: Color(0xFF1877F2),
-                  fontWeight: FontWeight.w600,
-                ),
+                style: TextStyle(fontWeight: FontWeight.w600),
               ),
             ),
           ),
@@ -2334,27 +2236,35 @@ class _ContinueScreenState extends State<ContinueScreen> {
             children: [
               TextButton(
                 onPressed: () => context.go('/privacy'),
-                child: const Text(
+                child: Text(
                   'Privacy',
-                  style: TextStyle(color: Colors.white70),
+                  style: TextStyle(color: secondaryTextColor),
                 ),
               ),
-              Container(width: 1, height: 12, color: Colors.white30),
+              Container(
+                width: 1,
+                height: 12,
+                color: isDark ? Colors.white30 : Colors.grey.shade400,
+              ),
               const SizedBox(width: 8),
               TextButton(
                 onPressed: () => context.go('/terms'),
-                child: const Text(
+                child: Text(
                   'Terms',
-                  style: TextStyle(color: Colors.white70),
+                  style: TextStyle(color: secondaryTextColor),
                 ),
               ),
-              Container(width: 1, height: 12, color: Colors.white30),
+              Container(
+                width: 1,
+                height: 12,
+                color: isDark ? Colors.white30 : Colors.grey.shade400,
+              ),
               const SizedBox(width: 8),
               TextButton(
                 onPressed: () => context.go('/help'),
-                child: const Text(
+                child: Text(
                   'Help',
-                  style: TextStyle(color: Colors.white70),
+                  style: TextStyle(color: secondaryTextColor),
                 ),
               ),
             ],
@@ -2366,11 +2276,13 @@ class _ContinueScreenState extends State<ContinueScreen> {
 }
 
 // ============================================================
-// 🔥 PASSWORD DIALOG
+// 🔥 PASSWORD DIALOG - AppTheme based
 // ============================================================
+
 class SecurityCompliantPasswordDialog extends StatefulWidget {
   final String email;
   const SecurityCompliantPasswordDialog({super.key, required this.email});
+
   @override
   State<SecurityCompliantPasswordDialog> createState() =>
       _SecurityCompliantPasswordDialogState();
@@ -2432,15 +2344,18 @@ class _SecurityCompliantPasswordDialogState
 
   @override
   Widget build(BuildContext context) {
+    final isDark = context.isDarkMode;
+    final backgroundColor = context.backgroundColor;
+    final primaryColor = context.primaryColor;
+    final textColor = context.textColor;
+
     final Size screenSize = MediaQuery.of(context).size;
     final bool isWeb = screenSize.width > 700;
-    double dialogWidth = isWeb
-        ? screenSize.width * 0.25
-        : screenSize.width * 0.85;
+    double dialogWidth = isWeb ? screenSize.width * 0.25 : screenSize.width * 0.85;
     final double calculatedWidth = dialogWidth.clamp(300.0, 400.0).toDouble();
 
     return Dialog(
-      backgroundColor: const Color(0xFF1C1F26),
+      backgroundColor: isDark ? backgroundColor : backgroundColor,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       insetPadding: EdgeInsets.symmetric(
         horizontal: isWeb ? (screenSize.width - calculatedWidth) / 2 : 20,
@@ -2449,6 +2364,10 @@ class _SecurityCompliantPasswordDialogState
       child: Container(
         width: calculatedWidth,
         padding: EdgeInsets.all(isWeb ? 24 : 20),
+        decoration: BoxDecoration(
+          color: isDark ? backgroundColor : backgroundColor,
+          borderRadius: BorderRadius.circular(16),
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -2459,10 +2378,10 @@ class _SecurityCompliantPasswordDialogState
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
+                      Text(
                         'Enter Password',
                         style: TextStyle(
-                          color: Colors.white,
+                          color: textColor,
                           fontSize: 20,
                           fontWeight: FontWeight.bold,
                         ),
@@ -2471,7 +2390,7 @@ class _SecurityCompliantPasswordDialogState
                       Text(
                         widget.email,
                         style: TextStyle(
-                          color: Colors.blueAccent,
+                          color: primaryColor,
                           fontSize: 14,
                           fontWeight: FontWeight.w500,
                         ),
@@ -2482,8 +2401,11 @@ class _SecurityCompliantPasswordDialogState
                 ),
                 if (_controller.text.isNotEmpty && !_isSubmitting)
                   IconButton(
-                    icon: const Icon(Icons.clear, size: 18),
-                    color: Colors.white70,
+                    icon: Icon(
+                      Icons.clear,
+                      size: 18,
+                      color: isDark ? Colors.white70 : Colors.grey.shade600,
+                    ),
                     onPressed: _clearPassword,
                     tooltip: 'Clear',
                   ),
@@ -2500,16 +2422,18 @@ class _SecurityCompliantPasswordDialogState
                       obscureText: _obscurePassword,
                       autofocus: true,
                       enabled: !_isSubmitting,
-                      style: const TextStyle(color: Colors.white, fontSize: 16),
+                      style: TextStyle(color: textColor, fontSize: 16),
                       decoration: InputDecoration(
                         labelText: 'Password',
-                        labelStyle: const TextStyle(color: Colors.white70),
+                        labelStyle: TextStyle(
+                          color: isDark ? Colors.white70 : Colors.grey.shade600,
+                        ),
                         hintText: 'Type at least 6 characters',
                         hintStyle: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.4),
+                          color: isDark ? Colors.white.withValues(alpha: 0.4) : Colors.grey.shade400,
                         ),
                         filled: true,
-                        fillColor: Colors.white.withValues(alpha: 0.08),
+                        fillColor: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.grey.shade50,
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(10),
                           borderSide: BorderSide.none,
@@ -2524,17 +2448,14 @@ class _SecurityCompliantPasswordDialogState
                             if (_controller.text.isNotEmpty)
                               IconButton(
                                 icon: Icon(
-                                  _obscurePassword
-                                      ? Icons.visibility_off
-                                      : Icons.visibility,
-                                  color: Colors.white70,
+                                  _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                                  color: isDark ? Colors.white70 : Colors.grey.shade600,
                                   size: 20,
                                 ),
                                 onPressed: _isSubmitting
                                     ? null
                                     : () => setState(
-                                        () => _obscurePassword =
-                                            !_obscurePassword,
+                                        () => _obscurePassword = !_obscurePassword,
                                       ),
                               ),
                             if (_isValid && !_isSubmitting)
@@ -2582,9 +2503,7 @@ class _SecurityCompliantPasswordDialogState
                         Expanded(
                           child: LinearProgressIndicator(
                             value: _controller.text.length / 6,
-                            backgroundColor: Colors.white.withValues(
-                              alpha: 0.1,
-                            ),
+                            backgroundColor: isDark ? Colors.white.withValues(alpha: 0.1) : Colors.grey.shade200,
                             valueColor: AlwaysStoppedAnimation<Color>(
                               _controller.text.length >= 6
                                   ? Colors.greenAccent
@@ -2599,7 +2518,7 @@ class _SecurityCompliantPasswordDialogState
                           style: TextStyle(
                             color: _controller.text.length >= 6
                                 ? Colors.greenAccent
-                                : Colors.white70,
+                                : isDark ? Colors.white70 : Colors.grey.shade600,
                             fontSize: 12,
                             fontWeight: FontWeight.w500,
                           ),
@@ -2651,14 +2570,13 @@ class _SecurityCompliantPasswordDialogState
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
                 TextButton(
-                  onPressed: _isSubmitting
-                      ? null
-                      : () => Navigator.pop(context, null),
+                  onPressed: _isSubmitting ? null : () => Navigator.pop(context, null),
                   style: TextButton.styleFrom(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 16,
                       vertical: 10,
                     ),
+                    foregroundColor: isDark ? Colors.white70 : Colors.grey.shade600,
                   ),
                   child: const Text(
                     'Cancel',
@@ -2667,15 +2585,11 @@ class _SecurityCompliantPasswordDialogState
                 ),
                 const SizedBox(width: 10),
                 ElevatedButton(
-                  onPressed: _isValid && !_isSubmitting
-                      ? _submitPassword
-                      : null,
+                  onPressed: _isValid && !_isSubmitting ? _submitPassword : null,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.blueAccent,
                     foregroundColor: Colors.white,
-                    disabledBackgroundColor: Colors.blueAccent.withValues(
-                      alpha: 0.5,
-                    ),
+                    disabledBackgroundColor: Colors.blueAccent.withValues(alpha: 0.5),
                     padding: const EdgeInsets.symmetric(
                       horizontal: 20,
                       vertical: 12,

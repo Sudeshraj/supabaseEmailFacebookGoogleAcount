@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/services/session_manager.dart';
+import 'package:flutter_application_1/extensions/context_extensions.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -29,12 +30,36 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
   String? _status;
   bool _hasError = false;
 
+  // ✅ API 36: Responsive variables
+  bool _isTablet = false;
+  bool _isWeb = false;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkScreenSize();
       _processAuthCallback();
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _checkScreenSize();
+  }
+
+  void _checkScreenSize() {
+    final size = MediaQuery.of(context).size;
+    final isTablet = size.shortestSide >= 600;
+    final isWeb = size.width > 800;
+
+    if (_isTablet != isTablet || _isWeb != isWeb) {
+      setState(() {
+        _isTablet = isTablet;
+        _isWeb = isWeb;
+      });
+    }
   }
 
   Future<void> _processAuthCallback() async {
@@ -51,11 +76,15 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
 
       setState(() => _status = 'Processing authentication...');
 
-      // **MAJOR FIX**: Use try-catch for getSessionFromUrl with better error handling
       bool sessionProcessed = false;
 
+      // ✅ Check widget parameters first
+      if (widget.error != null || widget.errorCode != null) {
+        _handleAuthError(widget.error ?? widget.errorDescription, widget.errorCode);
+        return;
+      }
+
       try {
-        // Check if this looks like a Supabase auth URL
         final hasAuthParams =
             uri.queryParameters.containsKey('access_token') ||
             uri.queryParameters.containsKey('refresh_token') ||
@@ -66,10 +95,8 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
         if (hasAuthParams) {
           debugPrint('Supabase auth URL detected, calling getSessionFromUrl');
 
-          // IMPORTANT: Parse fragment if it contains tokens
           String urlToProcess = uri.toString();
 
-          // If tokens are in fragment (common with OAuth), move them to query params
           if (uri.fragment.isNotEmpty &&
               uri.fragment.contains('access_token')) {
             if (kDebugMode) print('Tokens found in fragment, converting...');
@@ -95,10 +122,8 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
           print('getSessionFromUrl error: $e');
           print('Stack trace: $stack');
         }
-        // Continue anyway - might be a different type of callback
       }
 
-      // Get current session after processing
       final session = supabase.auth.currentSession;
       final user = supabase.auth.currentUser;
 
@@ -109,8 +134,6 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
         print('   Session processed: $sessionProcessed');
       }
 
-      // **IMPORTANT**: Handle GoRouter query parameters from deep link
-      // Get parameters from GoRouter state if available
       if (!mounted) return;
       final state = GoRouterState.of(context);
       final goRouterParams = state.uri.queryParameters;
@@ -119,10 +142,8 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
         debugPrint('   GoRouter params: $goRouterParams');
       }
 
-      // Combine both parameter sources
       final allParams = {...uri.queryParameters, ...goRouterParams};
 
-      // Handle errors FIRST (from any source)
       final error =
           allParams['error'] ??
           uri.queryParameters['error'] ??
@@ -143,13 +164,11 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
         return;
       }
 
-      // If session was processed successfully, handle success
       if (sessionProcessed && session != null && user != null) {
         await _handleSuccessfulAuth(user);
         return;
       }
 
-      // Handle specific callback types
       final type =
           allParams['type'] ??
           uri.queryParameters['type'] ??
@@ -170,7 +189,6 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
           break;
 
         default:
-          // Default handler for OAuth or general auth
           await _handleDefaultCallback();
           break;
       }
@@ -192,25 +210,12 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
       print('   Provider: ${user?.appMetadata['provider']}');
     }
 
-    // ✅ FIX: Web OAuth (සහ mobile browser-fallback OAuth) callback
-    // එකෙන් ආපු users ලාට profile එක local SessionManager storage
-    // එකට save කරනවා - SignInScreen එකේ _saveOAuthProfile() එකේ
-    // කරන දේම. මේක නැතුව Continue screen, Remember Me, සහ
-    // auto-login කිසිවක් web OAuth users ලාට වැඩ කරන්නේ නෑ.
     if (user != null && user.email != null) {
       await _saveProfileAfterOAuthCallback(user);
     }
 
     await Future.delayed(const Duration(seconds: 1));
 
-    // ✅ CLEANUP: '_checkIfNeedsProfileSetup()' කියන hardcoded-false
-    // dead code එක අයින් කළා. Profile-completion check එක ONE
-    // PLACE එකකින් විතරයි කරන්න ඕන - AppState._updateUserProfile()
-    // + main.dart router redirect() (appState.profileCompleted).
-    // ඒක duplicate කරන්න ගියොත්, දෙතැන කවදාහරි sync නොවී conflicting
-    // redirect logic එකක් හැදෙන්න පුළුවන් (කලින් auto-restore bug
-    // එක හැදුනේත් මේ විදිහටමයි). Router එකම හරි තැනට
-    // (dashboard/reg/role-selector/recoverable-roles) route කරයි.
     if (!mounted) return;
     context.go(
       '/',
@@ -218,11 +223,6 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
     );
   }
 
-  /// ✅ Web OAuth (සහ mobile browser-fallback OAuth) callback එකෙන්
-  /// ආපු users ලාට profile එක local SessionManager storage එකට
-  /// save කරනවා - SignInScreen එකේ _saveOAuthProfile() එකේ කරන
-  /// දේම. මේක නැතුව Continue screen, Remember Me, සහ auto-login
-  /// කිසිවක් web OAuth users ලාට වැඩ කරන්නේ නෑ.
   Future<void> _saveProfileAfterOAuthCallback(User user) async {
     try {
       final email = user.email!;
@@ -230,7 +230,6 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
       final userMetadata = user.userMetadata ?? {};
       final appMetadata = user.appMetadata;
 
-      // Provider එක ගන්නවා
       String provider = 'email';
       if (appMetadata['provider'] != null) {
         provider = appMetadata['provider'].toString();
@@ -238,7 +237,6 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
         provider = userMetadata['provider'].toString();
       }
 
-      // Photo url
       String? photoUrl;
       if (userMetadata['avatar_url'] != null &&
           userMetadata['avatar_url'].toString().isNotEmpty) {
@@ -248,7 +246,6 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
         photoUrl = userMetadata['picture'].toString();
       }
 
-      // Display name
       String name = email.split('@').first;
       if (userMetadata['full_name'] != null &&
           userMetadata['full_name'].toString().isNotEmpty) {
@@ -258,7 +255,6 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
         name = userMetadata['name'].toString();
       }
 
-      // ✅ Active roles fetch කරනවා (_saveOAuthProfile එකේ කරන විදිහටම)
       List<String> roles = [];
       try {
         final userRolesResponse = await supabase
@@ -277,33 +273,6 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
         debugPrint('⚠️ Error fetching roles in auth callback: $e');
       }
 
-      // ═══════════════════════════════════════════════════════════
-      // 🔥 FIX: rememberMe default handling.
-      //
-      // Web OAuth callback එකේදී SignInScreen එකේ dialog එක
-      // (Remember Me checkbox) bypass වෙනවා - browser redirect
-      // එකකින් page reload එකක් වෙන නිසා, ඒ dialog එකේ user
-      // ගත්ත තීරණය මේ callback screen එකට කවදාවත් pass වෙන්නේ
-      // නෑ.
-      //
-      // කලින් තිබ්බ code එකේ:
-      //   `SessionManager.isRememberMeEnabled()` කියලා GLOBAL
-      //   setting එකක් කියෙව්වා. First-time user කෙනෙක්ට (කිසිම
-      //   profile එකක් තාම save වෙලා නැති කෙනෙක්ට) මේ global
-      //   setting එකේ default එක 'false'. rememberMe==false නම්
-      //   SessionManager.saveUserProfile() එකේ:
-      //       if (rememberMe) { profiles.add(profileData); }
-      //   කියන check එකෙන් - profile එකම local storage එකට
-      //   කිසිසේත් save වෙන්නේ නැහැ! ඒ කියන්නේ web OAuth එකෙන්
-      //   පළමු වතාවට login කරන කෙනාගේ profile එකම හදිසියේම
-      //   අතුරුදහන් වුනා (Continue screen, auto-login කිසිවක්
-      //   ඒ user ට වැඩ කරන්නේ නෑ).
-      //
-      // FIX: existing profile එකක් තියෙනවා නම් ඒකේ saved
-      // preference එකම respect කරනවා. නැත්නම් (පළමු වතාවේ user
-      // කෙනෙක් නම්) default 'true' - මොකද 'Remember Me' කියන
-      // core purpose එකම, පළමු වතාවේම profile එක save කරගැනීමයි.
-      // ═══════════════════════════════════════════════════════════
       bool rememberMe = true;
       try {
         final existingProfile = await SessionManager.getProfileByEmail(email);
@@ -328,10 +297,6 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
         privacyAcceptedAt: DateTime.now(),
       );
 
-      // ✅ rememberMe true නම් auto-login/continue-screen flow
-      // එකට අවශ්‍ය current-user pointer එකත් මෙතනින්ම set කරනවා
-      // (SessionManager.saveUserProfile() එක ඇතුළතින්ම මේක කරනවා
-      // නම් duplicate වෙයි - නමුත් explicit කරන එක safe).
       if (rememberMe) {
         await SessionManager.setRememberMe(true);
       }
@@ -341,8 +306,6 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
       );
     } catch (e) {
       debugPrint('❌ Error saving profile in auth callback: $e');
-      // Non-fatal - user ට login කරන්න පුළුවන්, next login එකේදී
-      // profile sync වෙයි (SessionManager rememberMe logic එකෙන්)
     }
   }
 
@@ -350,17 +313,6 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
     setState(() => _status = 'Completing authentication...');
 
     try {
-      // ═══════════════════════════════════════════════════════════
-      // 🔥 NOTE: මේ path එක run වෙන්නේ 'sessionProcessed == false'
-      // වුනු විට විතරයි (i.e. getSessionFromUrl() fail වුනා /
-      // auth params නොතිබුනා). ඒ අවස්ථාවේ Supabase client එකේම
-      // දැනටමත් session එකක් තියෙනවා නම් විතරයි මේ no-argument
-      // refreshSession() එක success වෙන්නේ (refresh token එකක්
-      // explicit විදිහට අපිට මෙතන නෑ - Uri.base එකෙන් session
-      // සකසුනා නම් client එකේ already තියෙන session එකෙන්මයි
-      // refresh වෙන්නේ). මේක web browser-redirect callback
-      // path එකක් නිසා safe.
-      // ═══════════════════════════════════════════════════════════
       await supabase.auth.refreshSession();
 
       final user = supabase.auth.currentUser;
@@ -368,14 +320,13 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
       if (user != null) {
         await _handleSuccessfulAuth(user);
       } else {
-        // No user found - might be an error
         setState(() {
           _status = 'Authentication failed - No user found';
           _processing = false;
           _hasError = true;
         });
 
-        // await Future.delayed(const Duration(seconds: 2));
+        await Future.delayed(const Duration(seconds: 2));
 
         if (mounted) {
           context.go('/login');
@@ -383,13 +334,14 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
       }
     } catch (e) {
       debugPrint('Default callback error: $e');
-      // setState(() {
-      //   _status = 'Authentication failed';
-      //   _processing = false;
-      //   _hasError = true;
-      // });
 
-      // await Future.delayed(const Duration(seconds: 2));
+      setState(() {
+        _status = 'Authentication failed';
+        _processing = false;
+        _hasError = true;
+      });
+
+      await Future.delayed(const Duration(seconds: 2));
 
       if (mounted) {
         context.go('/login');
@@ -401,7 +353,6 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
     setState(() => _status = 'Setting up password reset...');
 
     try {
-      // Get current session
       final session = supabase.auth.currentSession;
       final user = supabase.auth.currentUser;
 
@@ -411,9 +362,7 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
         print('   User authenticated: ${user != null}');
       }
 
-      // Check if user is authenticated (session exists)
       if (session != null && user != null) {
-        // User is authenticated, navigate to password reset form
         setState(() => _status = 'Please set your new password');
 
         if (kDebugMode) {
@@ -426,7 +375,6 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
           context.go('/reset-password', extra: {'email': user.email});
         }
       } else {
-        // No valid session - might need to extract email from URL
         final uri = Uri.base;
         final email = uri.queryParameters['email'];
 
@@ -462,7 +410,6 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
     setState(() => _status = 'Verifying email...');
 
     try {
-      // Refresh session to verify email
       await supabase.auth.refreshSession();
 
       final user = supabase.auth.currentUser;
@@ -513,7 +460,6 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
     setState(() => _status = 'Completing magic link login...');
 
     try {
-      // Magic link should have created a session via getSessionFromUrl
       final user = supabase.auth.currentUser;
 
       if (user != null) {
@@ -547,6 +493,7 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
   }
 
   void _handleAuthError(String? error, String? errorCode) {
+
     String message = 'Authentication failed';
 
     if (errorCode == 'otp_expired') {
@@ -563,7 +510,6 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
       _hasError = true;
     });
 
-    // Navigate to appropriate screen
     Future.delayed(const Duration(seconds: 3), () {
       if (mounted) {
         if (errorCode == 'otp_expired' || error == 'access_denied') {
@@ -577,97 +523,132 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = context.isDarkMode;
+    final backgroundColor = context.backgroundColor;
+    final primaryColor = context.primaryColor;
+    final textColor = context.textColor;
+    final secondaryTextColor = context.secondaryTextColor;
+    final errorColor = context.errorColor;
+    final cardColor = context.cardColor;
+    final successColor = context.successColor;
+
+    final Size screenSize = MediaQuery.of(context).size;
+    final bool isWeb = screenSize.width > 700;
+    final double maxWidth = isWeb ? 400 : 300;
+
+    // Status color
+    final statusColor = _processing
+        ? primaryColor
+        : _hasError
+        ? errorColor
+        : successColor;
+
+    final statusBgColor = _processing
+        ? primaryColor.withValues(alpha: 0.1)
+        : _hasError
+        ? errorColor.withValues(alpha: 0.1)
+        : successColor.withValues(alpha: 0.1);
+
+    final statusIcon = _processing
+        ? null
+        : _hasError
+        ? Icons.error_outline_rounded
+        : Icons.check_circle_rounded;
+
     return Scaffold(
-      backgroundColor: const Color(0xFF0F1820),
-      body: Center(
-        child: Container(
-          width: 300,
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Animated icon
-              Container(
-                width: 80,
-                height: 80,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: _processing
-                      ? const Color(0xFF1877F3).withValues(alpha: 0.1)
-                      : _hasError
-                      ? const Color(0xFFF44336).withValues(alpha: 0.1)
-                      : const Color(0xFF4CAF50).withValues(alpha: 0.1),
-                  border: Border.all(
-                    color: _processing
-                        ? const Color(0xFF1877F3)
-                        : _hasError
-                        ? const Color(0xFFF44336)
-                        : const Color(0xFF4CAF50),
-                    width: 2,
+      backgroundColor: backgroundColor,
+      body: SafeArea(
+        child: Center(
+          child: Container(
+            width: maxWidth,
+            padding: const EdgeInsets.all(24),
+            margin: const EdgeInsets.symmetric(horizontal: 16),
+            decoration: BoxDecoration(
+              color: cardColor,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: isDark ? Colors.white12 : Colors.grey.shade200,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: isDark
+                      ? Colors.black.withValues(alpha: 0.3)
+                      : Colors.grey.withValues(alpha: 0.1),
+                  blurRadius: 10,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Status Icon
+                Container(
+                  width: 80,
+                  height: 80,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: statusBgColor,
+                    border: Border.all(
+                      color: statusColor,
+                      width: 2,
+                    ),
                   ),
+                  child: _processing
+                      ? CircularProgressIndicator(
+                          color: primaryColor,
+                          strokeWidth: 3,
+                        )
+                      : Icon(
+                          statusIcon!,
+                          color: statusColor,
+                          size: 40,
+                        ),
                 ),
-                child: _processing
-                    ? const CircularProgressIndicator(
-                        color: Color(0xFF1877F3),
-                        strokeWidth: 3,
-                      )
-                    : _hasError
-                    ? const Icon(
-                        Icons.error_outline_rounded,
-                        color: Color(0xFFF44336),
-                        size: 40,
-                      )
-                    : const Icon(
-                        Icons.check_circle_rounded,
-                        color: Color(0xFF4CAF50),
-                        size: 40,
-                      ),
-              ),
 
-              const SizedBox(height: 24),
+                const SizedBox(height: 24),
 
-              // Status text
-              Text(
-                _status ?? 'Processing...',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: _hasError ? const Color(0xFFF44336) : Colors.white,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-
-              const SizedBox(height: 8),
-
-              if (_processing)
+                // Status Text
                 Text(
-                  'Please wait...',
+                  _status ?? 'Processing...',
+                  textAlign: TextAlign.center,
                   style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.6),
-                    fontSize: 14,
+                    color: _hasError ? errorColor : textColor,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w500,
                   ),
                 ),
 
-              if (_hasError && !_processing)
-                Padding(
-                  padding: const EdgeInsets.only(top: 16),
-                  child: ElevatedButton(
-                    onPressed: () {
-                      context.go('/login');
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF1877F3),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                    child: const Text(
-                      'Go to Login',
-                      style: TextStyle(color: Colors.white),
+                const SizedBox(height: 8),
+
+                if (_processing)
+                  Text(
+                    'Please wait...',
+                    style: TextStyle(
+                      color: secondaryTextColor,
+                      fontSize: 14,
                     ),
                   ),
-                ),
-            ],
+
+                if (_hasError && !_processing)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 16),
+                    child: ElevatedButton(
+                      onPressed: () {
+                        context.go('/login');
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: primaryColor,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      child: const Text('Go to Login'),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       ),

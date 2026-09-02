@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_application_1/services/signup_serivce.dart';
+import 'package:flutter_application_1/extensions/context_extensions.dart';
 
 class DataConsentScreen extends StatefulWidget {
   final String email;
   final String password;
-  final String? source; // To know where it came from
+  final String? source;
 
   const DataConsentScreen({
     super.key,
@@ -33,11 +34,14 @@ class _DataConsentScreenState extends State<DataConsentScreen>
 
   final AuthService _authService = AuthService();
 
+  // ✅ API 36: Responsive variables
+  bool _isTablet = false;
+  bool _isWeb = false;
+
   @override
   void initState() {
     super.initState();
 
-    // Default values
     _rememberMe = true;
     _acceptedMarketing = false;
 
@@ -56,14 +60,35 @@ class _DataConsentScreenState extends State<DataConsentScreen>
     );
 
     _animationController.forward();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkScreenSize();
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _checkScreenSize();
+  }
+
+  void _checkScreenSize() {
+    final size = MediaQuery.of(context).size;
+    final isTablet = size.shortestSide >= 600;
+    final isWeb = size.width > 800;
+
+    if (_isTablet != isTablet || _isWeb != isWeb) {
+      setState(() {
+        _isTablet = isTablet;
+        _isWeb = isWeb;
+      });
+    }
   }
 
   bool get _isContinueEnabled {
     return _acceptedTerms && _acceptedPrivacy && !_isLoading;
   }
 
-  // data_consent_screen.dart - _handleContinue method
-  // data_consent_screen.dart - _handleContinue method
   Future<void> _handleContinue() async {
     if (!_isContinueEnabled || _isLoading) return;
 
@@ -75,7 +100,6 @@ class _DataConsentScreenState extends State<DataConsentScreen>
     try {
       debugPrint('Starting registration for: ${widget.email}');
 
-      // Call auth service
       await _authService.registerUser(
         context: context,
         email: widget.email,
@@ -85,20 +109,14 @@ class _DataConsentScreenState extends State<DataConsentScreen>
       );
 
       debugPrint('Registration completed');
-
-      // If we reach here, registration was successful
-      // AuthService will handle navigation
     } catch (e) {
       debugPrint('Registration error: $e');
 
-      // Reset loading state
       if (mounted) {
         setState(() {
           _isLoading = false;
         });
       }
-
-      // Don't show error - AuthService handles it
     }
   }
 
@@ -115,7 +133,6 @@ class _DataConsentScreenState extends State<DataConsentScreen>
   void _showPolicyDetails(bool isPrivacyPolicy) {
     final route = isPrivacyPolicy ? '/privacy' : '/terms';
 
-    // Use push to preserve current screen in navigation stack
     GoRouter.of(context).push(
       route,
       extra: {
@@ -138,12 +155,20 @@ class _DataConsentScreenState extends State<DataConsentScreen>
 
   @override
   Widget build(BuildContext context) {
+    final isDark = context.isDarkMode;
+    final backgroundColor = context.backgroundColor;
+    final primaryColor = context.primaryColor;
+    final textColor = context.textColor;
+    final secondaryTextColor = context.secondaryTextColor;
+    final errorColor = context.errorColor;
+    final successColor = context.successColor;
+
     final size = MediaQuery.of(context).size;
     final bool isWeb = size.width > 700;
     final double maxWidth = isWeb ? 480 : double.infinity;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0F1820),
+      backgroundColor: backgroundColor,
       body: SafeArea(
         child: Center(
           child: FadeTransition(
@@ -160,9 +185,13 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                   ),
                   padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.03),
+                    color: isDark
+                        ? Colors.white.withValues(alpha: 0.03)
+                        : Colors.grey.shade50,
                     borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Colors.white12),
+                    border: Border.all(
+                      color: isDark ? Colors.white12 : Colors.grey.shade200,
+                    ),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -171,18 +200,18 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                       Row(
                         children: [
                           IconButton(
-                            icon: const Icon(
+                            icon: Icon(
                               Icons.arrow_back_ios_new_rounded,
-                              color: Colors.white,
+                              color: textColor,
                               size: 22,
                             ),
                             onPressed: _isLoading ? null : _handleBackButton,
                           ),
                           const SizedBox(width: 8),
-                          const Text(
+                          Text(
                             'Complete Registration',
                             style: TextStyle(
-                              color: Colors.white,
+                              color: textColor,
                               fontSize: 18,
                               fontWeight: FontWeight.w500,
                             ),
@@ -192,21 +221,21 @@ class _DataConsentScreenState extends State<DataConsentScreen>
 
                       const SizedBox(height: 20),
 
-                      // Account Info Banner (Shows current email)
+                      // Account Info Banner
                       Container(
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: Colors.blue.withValues(alpha: 0.1),
+                          color: primaryColor.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(
-                            color: Colors.blue.withValues(alpha: 0.3),
+                            color: primaryColor.withValues(alpha: 0.3),
                           ),
                         ),
                         child: Row(
                           children: [
-                            const Icon(
+                            Icon(
                               Icons.email_outlined,
-                              color: Colors.blue,
+                              color: primaryColor,
                               size: 18,
                             ),
                             const SizedBox(width: 8),
@@ -214,17 +243,17 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const Text(
+                                  Text(
                                     'Registering email:',
                                     style: TextStyle(
-                                      color: Colors.white70,
+                                      color: secondaryTextColor,
                                       fontSize: 12,
                                     ),
                                   ),
                                   Text(
                                     widget.email,
-                                    style: const TextStyle(
-                                      color: Colors.white,
+                                    style: TextStyle(
+                                      color: textColor,
                                       fontSize: 14,
                                       fontWeight: FontWeight.w500,
                                     ),
@@ -246,35 +275,32 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              // Title
-                              const Text(
+                              Text(
                                 'Final Step: Review & Accept',
                                 style: TextStyle(
                                   fontSize: 26,
                                   fontWeight: FontWeight.bold,
-                                  color: Colors.white,
+                                  color: textColor,
                                 ),
                               ),
 
                               const SizedBox(height: 12),
 
-                              // Subtitle
-                              const Text(
+                              Text(
                                 'Please review and accept the following to create your account. All fields marked with * are required.',
                                 style: TextStyle(
                                   fontSize: 15,
-                                  color: Colors.white70,
+                                  color: secondaryTextColor,
                                   height: 1.5,
                                 ),
                               ),
 
                               const SizedBox(height: 32),
 
-                              // Required Consents Title
-                              const Text(
+                              Text(
                                 'Required Consents *',
                                 style: TextStyle(
-                                  color: Colors.white,
+                                  color: textColor,
                                   fontSize: 16,
                                   fontWeight: FontWeight.w600,
                                 ),
@@ -318,11 +344,10 @@ class _DataConsentScreenState extends State<DataConsentScreen>
 
                               const SizedBox(height: 32),
 
-                              // Optional Preferences Title
-                              const Text(
+                              Text(
                                 'Optional Preferences',
                                 style: TextStyle(
-                                  color: Colors.white,
+                                  color: textColor,
                                   fontSize: 16,
                                   fontWeight: FontWeight.w600,
                                 ),
@@ -334,9 +359,15 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                               Container(
                                 padding: const EdgeInsets.all(16),
                                 decoration: BoxDecoration(
-                                  color: Colors.white.withValues(alpha: 0.03),
+                                  color: isDark
+                                      ? Colors.white.withValues(alpha: 0.03)
+                                      : Colors.grey.shade50,
                                   borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: Colors.white24),
+                                  border: Border.all(
+                                    color: isDark
+                                        ? Colors.white24
+                                        : Colors.grey.shade300,
+                                  ),
                                 ),
                                 child: Row(
                                   children: [
@@ -349,7 +380,7 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                                                 _rememberMe = value ?? true;
                                               });
                                             },
-                                      activeColor: const Color(0xFF1877F3),
+                                      activeColor: primaryColor,
                                       checkColor: Colors.white,
                                     ),
                                     const SizedBox(width: 12),
@@ -358,10 +389,10 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                                         crossAxisAlignment:
                                             CrossAxisAlignment.start,
                                         children: [
-                                          const Text(
+                                          Text(
                                             'Keep me signed in',
                                             style: TextStyle(
-                                              color: Colors.white,
+                                              color: textColor,
                                               fontSize: 15,
                                               fontWeight: FontWeight.w500,
                                             ),
@@ -370,9 +401,7 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                                           Text(
                                             'Recommended for faster access. Uncheck if using a shared device.',
                                             style: TextStyle(
-                                              color: Colors.white.withValues(
-                                                alpha: 0.6,
-                                              ),
+                                              color: secondaryTextColor,
                                               fontSize: 13,
                                             ),
                                           ),
@@ -389,9 +418,15 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                               Container(
                                 padding: const EdgeInsets.all(16),
                                 decoration: BoxDecoration(
-                                  color: Colors.white.withValues(alpha: 0.03),
+                                  color: isDark
+                                      ? Colors.white.withValues(alpha: 0.03)
+                                      : Colors.grey.shade50,
                                   borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: Colors.white24),
+                                  border: Border.all(
+                                    color: isDark
+                                        ? Colors.white24
+                                        : Colors.grey.shade300,
+                                  ),
                                 ),
                                 child: Row(
                                   children: [
@@ -405,7 +440,7 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                                                     value ?? false;
                                               });
                                             },
-                                      activeColor: const Color(0xFF1877F3),
+                                      activeColor: primaryColor,
                                       checkColor: Colors.white,
                                     ),
                                     const SizedBox(width: 12),
@@ -414,10 +449,10 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                                         crossAxisAlignment:
                                             CrossAxisAlignment.start,
                                         children: [
-                                          const Text(
+                                          Text(
                                             'Marketing communications',
                                             style: TextStyle(
-                                              color: Colors.white,
+                                              color: textColor,
                                               fontSize: 15,
                                               fontWeight: FontWeight.w500,
                                             ),
@@ -426,9 +461,7 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                                           Text(
                                             'Receive updates, promotions, and news about our services. You can unsubscribe anytime.',
                                             style: TextStyle(
-                                              color: Colors.white.withValues(
-                                                alpha: 0.6,
-                                              ),
+                                              color: secondaryTextColor,
                                               fontSize: 13,
                                             ),
                                           ),
@@ -445,27 +478,27 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                               Container(
                                 padding: const EdgeInsets.all(16),
                                 decoration: BoxDecoration(
-                                  color: Colors.green.withValues(alpha: 0.1),
+                                  color: successColor.withValues(alpha: 0.1),
                                   borderRadius: BorderRadius.circular(12),
                                   border: Border.all(
-                                    color: Colors.green.withValues(alpha: 0.3),
+                                    color: successColor.withValues(alpha: 0.3),
                                   ),
                                 ),
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    const Row(
+                                    Row(
                                       children: [
                                         Icon(
                                           Icons.security,
-                                          color: Colors.green,
+                                          color: successColor,
                                           size: 18,
                                         ),
-                                        SizedBox(width: 8),
+                                        const SizedBox(width: 8),
                                         Text(
                                           'Your Data Rights',
                                           style: TextStyle(
-                                            color: Colors.white,
+                                            color: textColor,
                                             fontSize: 14,
                                             fontWeight: FontWeight.w600,
                                           ),
@@ -473,27 +506,34 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                                       ],
                                     ),
                                     const SizedBox(height: 8),
-                                    const Text(
+                                    Text(
                                       'You have the right to:',
                                       style: TextStyle(
-                                        color: Colors.white70,
+                                        color: secondaryTextColor,
                                         fontSize: 13,
                                       ),
                                     ),
                                     const SizedBox(height: 4),
                                     _buildBulletPoint(
                                       'Access your personal data',
+                                      successColor,
                                     ),
                                     _buildBulletPoint(
                                       'Correct inaccurate data',
+                                      successColor,
                                     ),
                                     _buildBulletPoint(
                                       'Delete your data anytime',
+                                      successColor,
                                     ),
                                     _buildBulletPoint(
                                       'Opt-out of communications',
+                                      successColor,
                                     ),
-                                    _buildBulletPoint('Export your data'),
+                                    _buildBulletPoint(
+                                      'Export your data',
+                                      successColor,
+                                    ),
                                   ],
                                 ),
                               ),
@@ -510,32 +550,32 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                                     color: Colors.orange.withValues(alpha: 0.3),
                                   ),
                                 ),
-                                child: const Column(
+                                child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Row(
                                       children: [
-                                        Icon(
+                                        const Icon(
                                           Icons.info_outline,
                                           color: Colors.orange,
                                           size: 18,
                                         ),
-                                        SizedBox(width: 8),
+                                        const SizedBox(width: 8),
                                         Text(
                                           'Important Notice',
                                           style: TextStyle(
-                                            color: Colors.white,
+                                            color: textColor,
                                             fontSize: 14,
                                             fontWeight: FontWeight.w600,
                                           ),
                                         ),
                                       ],
                                     ),
-                                    SizedBox(height: 8),
+                                    const SizedBox(height: 8),
                                     Text(
                                       'By creating an account, you acknowledge that you have read, understood, and agree to be bound by our Terms of Service and Privacy Policy.',
                                       style: TextStyle(
-                                        color: Colors.white70,
+                                        color: secondaryTextColor,
                                         fontSize: 13,
                                       ),
                                     ),
@@ -555,25 +595,25 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                           width: double.infinity,
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
-                            color: Colors.red.withValues(alpha: 0.1),
+                            color: errorColor.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(8),
                             border: Border.all(
-                              color: Colors.red.withValues(alpha: 0.3),
+                              color: errorColor.withValues(alpha: 0.3),
                             ),
                           ),
                           child: Row(
                             children: [
-                              const Icon(
+                              Icon(
                                 Icons.error_outline,
-                                color: Colors.red,
+                                color: errorColor,
                                 size: 16,
                               ),
                               const SizedBox(width: 8),
                               Expanded(
                                 child: Text(
                                   _errorMessage!,
-                                  style: const TextStyle(
-                                    color: Colors.red,
+                                  style: TextStyle(
+                                    color: errorColor,
                                     fontSize: 13,
                                   ),
                                 ),
@@ -594,8 +634,10 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                               : null,
                           style: ElevatedButton.styleFrom(
                             backgroundColor: _isContinueEnabled
-                                ? const Color(0xFF1877F3)
-                                : Colors.white12,
+                                ? primaryColor
+                                : (isDark
+                                    ? Colors.white12
+                                    : Colors.grey.shade300),
                             foregroundColor: Colors.white,
                             padding: const EdgeInsets.symmetric(vertical: 16),
                             shape: RoundedRectangleBorder(
@@ -603,7 +645,7 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                             ),
                           ),
                           child: _isLoading
-                              ? const SizedBox(
+                              ? SizedBox(
                                   width: 22,
                                   height: 22,
                                   child: CircularProgressIndicator(
@@ -616,7 +658,7 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                                   children: [
                                     const Icon(Icons.check_circle, size: 20),
                                     const SizedBox(width: 8),
-                                    const Text(
+                                    Text(
                                       'Create Account',
                                       style: TextStyle(
                                         fontSize: 16,
@@ -634,10 +676,10 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                       Center(
                         child: TextButton(
                           onPressed: _isLoading ? null : _handleBackButton,
-                          child: const Text(
+                          child: Text(
                             'Cancel Registration',
                             style: TextStyle(
-                              color: Colors.white70,
+                              color: secondaryTextColor,
                               fontSize: 14,
                             ),
                           ),
@@ -663,13 +705,22 @@ class _DataConsentScreenState extends State<DataConsentScreen>
     required VoidCallback onViewPressed,
     required bool isLoading,
   }) {
+    final isDark = context.isDarkMode;
+    final primaryColor = context.primaryColor;
+    final textColor = context.textColor;
+    final secondaryTextColor = context.secondaryTextColor;
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.03),
+        color: isDark
+            ? Colors.white.withValues(alpha: 0.03)
+            : Colors.grey.shade50,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: value ? Colors.green.withValues(alpha: 0.3) : Colors.white24,
+          color: value
+              ? Colors.green.withValues(alpha: 0.3)
+              : (isDark ? Colors.white24 : Colors.grey.shade300),
         ),
       ),
       child: Column(
@@ -684,7 +735,7 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                     : (newValue) {
                         onChanged(newValue);
                       },
-                activeColor: const Color(0xFF1877F3),
+                activeColor: primaryColor,
                 checkColor: Colors.white,
               ),
               Expanded(
@@ -695,8 +746,8 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                       children: [
                         Text(
                           title,
-                          style: const TextStyle(
-                            color: Colors.white,
+                          style: TextStyle(
+                            color: textColor,
                             fontSize: 15,
                             fontWeight: FontWeight.w500,
                           ),
@@ -714,7 +765,7 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                     Text(
                       description,
                       style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.6),
+                        color: secondaryTextColor,
                         fontSize: 13,
                       ),
                     ),
@@ -733,11 +784,14 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                   horizontal: 16,
                   vertical: 6,
                 ),
-                side: BorderSide(color: Colors.blue.withValues(alpha: 0.5)),
+                side: BorderSide(
+                  color: primaryColor.withValues(alpha: 0.5),
+                ),
+                foregroundColor: primaryColor,
               ),
               child: const Text(
                 'View Details',
-                style: TextStyle(color: Colors.blue, fontSize: 13),
+                style: TextStyle(fontSize: 13),
               ),
             ),
           ),
@@ -746,17 +800,22 @@ class _DataConsentScreenState extends State<DataConsentScreen>
     );
   }
 
-  Widget _buildBulletPoint(String text) {
+  Widget _buildBulletPoint(String text, Color color) {
+    final isDark = context.isDarkMode;
+
     return Padding(
       padding: const EdgeInsets.only(left: 8.0, top: 2),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('• ', style: TextStyle(color: Colors.green, fontSize: 14)),
+          Text('• ', style: TextStyle(color: color, fontSize: 14)),
           Expanded(
             child: Text(
               text,
-              style: const TextStyle(color: Colors.white70, fontSize: 13),
+              style: TextStyle(
+                color: isDark ? Colors.white70 : Colors.grey.shade700,
+                fontSize: 13,
+              ),
             ),
           ),
         ],

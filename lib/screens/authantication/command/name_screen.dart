@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_application_1/extensions/context_extensions.dart';
 
 class NameEntry extends StatefulWidget {
   final void Function(String, String) onNext;
@@ -28,6 +29,10 @@ class _NameEntryState extends State<NameEntry>
   bool _showError = false;
   bool _isValid = false;
 
+  // ✅ API 36: Responsive variables
+  bool _isTablet = false;
+  bool _isWeb = false;
+
   @override
   void initState() {
     super.initState();
@@ -50,6 +55,30 @@ class _NameEntryState extends State<NameEntry>
 
     _firstNameController.addListener(_validateFields);
     _lastNameController.addListener(_validateFields);
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkScreenSize();
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _checkScreenSize();
+  }
+
+  // ✅ API 36: Check screen size for responsive layout
+  void _checkScreenSize() {
+    final size = MediaQuery.of(context).size;
+    final isTablet = size.shortestSide >= 600;
+    final isWeb = size.width > 800;
+
+    if (_isTablet != isTablet || _isWeb != isWeb) {
+      setState(() {
+        _isTablet = isTablet;
+        _isWeb = isWeb;
+      });
+    }
   }
 
   void _validateFields() {
@@ -72,32 +101,36 @@ class _NameEntryState extends State<NameEntry>
     super.dispose();
   }
 
-  // void _handleBack(BuildContext context) {
-  //   // Simply pop to go back to DataConsentScreen
-  //   Navigator.of(context).pop();
-  // }
-
   @override
   Widget build(BuildContext context) {
+    final isDark = context.isDarkMode;
+    final backgroundColor = context.backgroundColor;
+    final primaryColor = context.primaryColor;
+    final textColor = context.textColor;
+    final secondaryTextColor = context.secondaryTextColor;
+    final errorColor = context.errorColor;
+
     final double screenWidth = MediaQuery.of(context).size.width;
-    final double maxWidth = screenWidth > 700 ? 480 : double.infinity;
+    final bool isWeb = screenWidth > 700;
+    final double maxWidth = isWeb ? 480 : double.infinity;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0F1820),
-
+      backgroundColor: backgroundColor,
       body: SafeArea(
         child: Center(
           child: Container(
             width: maxWidth,
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
             decoration: BoxDecoration(
-              color: screenWidth > 700
-                  ? const Color(0xFF131C27)
+              color: isWeb
+                  ? (isDark
+                      ? const Color(0xFF1A1A2E)
+                      : const Color(0xFF131C27))
                   : Colors.transparent,
-              borderRadius: screenWidth > 700
+              borderRadius: isWeb
                   ? BorderRadius.circular(16)
                   : null,
-              boxShadow: screenWidth > 700
+              boxShadow: isWeb
                   ? [
                       BoxShadow(
                         color: Colors.black.withValues(alpha: 0.3),
@@ -114,37 +147,36 @@ class _NameEntryState extends State<NameEntry>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    /// ⭐ BACK ARROW INSIDE FRAME ⭐
+                    /// ⭐ BACK ARROW
                     IconButton(
                       padding: EdgeInsets.zero,
                       alignment: Alignment.centerLeft,
-                      icon: const Icon(Icons.arrow_back, color: Colors.white),
-                      // onPressed: () {
-                      //   widget.controller.previousPage(
-                      //     duration: const Duration(milliseconds: 300),
-                      //     curve: Curves.ease,
-                      //   );
-                      // },
-                      // onPressed: () => _handleBack(context),
+                      icon: Icon(
+                        Icons.arrow_back,
+                        color: textColor,
+                      ),
                       onPressed: widget.onBack,
                     ),
 
                     const SizedBox(height: 10),
 
-                    const Text(
+                    Text(
                       "What's your name?",
                       style: TextStyle(
                         fontSize: 26,
                         fontWeight: FontWeight.bold,
-                        color: Colors.white,
+                        color: textColor,
                       ),
                     ),
 
                     const SizedBox(height: 8),
 
-                    const Text(
+                    Text(
                       "Enter the name you use in real life.",
-                      style: TextStyle(fontSize: 15, color: Colors.white70),
+                      style: TextStyle(
+                        fontSize: 15,
+                        color: secondaryTextColor,
+                      ),
                     ),
 
                     const SizedBox(height: 28),
@@ -154,35 +186,55 @@ class _NameEntryState extends State<NameEntry>
                         Expanded(
                           child: TextField(
                             controller: _firstNameController,
-                            style: const TextStyle(color: Colors.white),
+                            style: TextStyle(color: textColor),
                             decoration: InputDecoration(
                               hintText: "First name",
-                              hintStyle: const TextStyle(color: Colors.white54),
+                              hintStyle: TextStyle(
+                                color: isDark ? Colors.white54 : Colors.grey.shade500,
+                              ),
                               enabledBorder: OutlineInputBorder(
                                 borderSide: BorderSide(
-                                  color:
-                                      _showError &&
+                                  color: _showError &&
                                           _firstNameController.text
                                               .trim()
                                               .isEmpty
-                                      ? Colors.redAccent
-                                      : Colors.white24,
+                                      ? errorColor
+                                      : (isDark
+                                          ? Colors.white24
+                                          : Colors.grey.shade300),
                                 ),
                                 borderRadius: BorderRadius.circular(10),
                               ),
                               focusedBorder: OutlineInputBorder(
                                 borderSide: BorderSide(
-                                  color:
-                                      _showError &&
+                                  color: _showError &&
                                           _firstNameController.text
                                               .trim()
                                               .isEmpty
-                                      ? Colors.redAccent
-                                      : const Color(0xFF1877F3),
+                                      ? errorColor
+                                      : primaryColor,
                                   width: 1.5,
                                 ),
                                 borderRadius: BorderRadius.circular(10),
                               ),
+                              errorBorder: OutlineInputBorder(
+                                borderSide: const BorderSide(
+                                  color: Colors.redAccent,
+                                  width: 1.5,
+                                ),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              focusedErrorBorder: OutlineInputBorder(
+                                borderSide: const BorderSide(
+                                  color: Colors.redAccent,
+                                  width: 1.5,
+                                ),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              filled: true,
+                              fillColor: isDark
+                                  ? Colors.white.withValues(alpha: 0.05)
+                                  : Colors.grey.shade50,
                             ),
                           ),
                         ),
@@ -192,35 +244,55 @@ class _NameEntryState extends State<NameEntry>
                         Expanded(
                           child: TextField(
                             controller: _lastNameController,
-                            style: const TextStyle(color: Colors.white),
+                            style: TextStyle(color: textColor),
                             decoration: InputDecoration(
                               hintText: "Last name",
-                              hintStyle: const TextStyle(color: Colors.white54),
+                              hintStyle: TextStyle(
+                                color: isDark ? Colors.white54 : Colors.grey.shade500,
+                              ),
                               enabledBorder: OutlineInputBorder(
                                 borderSide: BorderSide(
-                                  color:
-                                      _showError &&
+                                  color: _showError &&
                                           _lastNameController.text
                                               .trim()
                                               .isEmpty
-                                      ? Colors.redAccent
-                                      : Colors.white24,
+                                      ? errorColor
+                                      : (isDark
+                                          ? Colors.white24
+                                          : Colors.grey.shade300),
                                 ),
                                 borderRadius: BorderRadius.circular(10),
                               ),
                               focusedBorder: OutlineInputBorder(
                                 borderSide: BorderSide(
-                                  color:
-                                      _showError &&
+                                  color: _showError &&
                                           _lastNameController.text
                                               .trim()
                                               .isEmpty
-                                      ? Colors.redAccent
-                                      : const Color(0xFF1877F3),
+                                      ? errorColor
+                                      : primaryColor,
                                   width: 1.5,
                                 ),
                                 borderRadius: BorderRadius.circular(10),
                               ),
+                              errorBorder: OutlineInputBorder(
+                                borderSide: const BorderSide(
+                                  color: Colors.redAccent,
+                                  width: 1.5,
+                                ),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              focusedErrorBorder: OutlineInputBorder(
+                                borderSide: const BorderSide(
+                                  color: Colors.redAccent,
+                                  width: 1.5,
+                                ),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              filled: true,
+                              fillColor: isDark
+                                  ? Colors.white.withValues(alpha: 0.05)
+                                  : Colors.grey.shade50,
                             ),
                           ),
                         ),
@@ -229,9 +301,12 @@ class _NameEntryState extends State<NameEntry>
 
                     if (_showError) ...[
                       const SizedBox(height: 8),
-                      const Text(
+                      Text(
                         "Please fill in both first and last name",
-                        style: TextStyle(color: Colors.redAccent, fontSize: 13),
+                        style: TextStyle(
+                          color: errorColor,
+                          fontSize: 13,
+                        ),
                       ),
                     ],
 
@@ -248,13 +323,16 @@ class _NameEntryState extends State<NameEntry>
                               )
                             : null,
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF1877F3),
-                          disabledBackgroundColor: Colors.white12,
+                          backgroundColor: primaryColor,
+                          disabledBackgroundColor: isDark
+                              ? Colors.white12
+                              : Colors.grey.shade300,
+                          foregroundColor: Colors.white,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(25),
                           ),
                         ),
-                        child: const Text(
+                        child: Text(
                           'Next',
                           style: TextStyle(
                             fontSize: 18,
@@ -267,10 +345,10 @@ class _NameEntryState extends State<NameEntry>
 
                     const SizedBox(height: 28),
 
-                    const Text(
+                    Text(
                       "Your name helps friends find you and ensures your account is secure.",
                       style: TextStyle(
-                        color: Colors.white70,
+                        color: secondaryTextColor,
                         fontSize: 14,
                         height: 1.4,
                       ),

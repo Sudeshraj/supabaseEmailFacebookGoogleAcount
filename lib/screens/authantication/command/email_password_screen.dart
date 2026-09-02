@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:flutter_application_1/extensions/context_extensions.dart';
 
 class EmailPasswordScreen extends StatefulWidget {
   final String? initialEmail;
@@ -36,11 +37,14 @@ class _EmailPasswordScreenState extends State<EmailPasswordScreen>
   late Animation<double> _fadeAnimation;
   late Animation<double> _scaleAnimation;
 
+  // ✅ API 36: Responsive variables
+  bool _isTablet = false;
+  bool _isWeb = false;
+
   @override
   void initState() {
     super.initState();
 
-    // Initialize with previous values if available
     if (widget.initialEmail != null) {
       _emailController.text = widget.initialEmail!;
     }
@@ -64,12 +68,33 @@ class _EmailPasswordScreenState extends State<EmailPasswordScreen>
 
     _animationController.forward();
 
-    // Add listeners to both controllers
     _emailController.addListener(_validateForm);
     _passwordController.addListener(_validateForm);
 
-    // Initial validation
     _validateForm();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkScreenSize();
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _checkScreenSize();
+  }
+
+  void _checkScreenSize() {
+    final size = MediaQuery.of(context).size;
+    final isTablet = size.shortestSide >= 600;
+    final isWeb = size.width > 800;
+
+    if (_isTablet != isTablet || _isWeb != isWeb) {
+      setState(() {
+        _isTablet = isTablet;
+        _isWeb = isWeb;
+      });
+    }
   }
 
   bool _isValidEmail(String value) {
@@ -82,7 +107,6 @@ class _EmailPasswordScreenState extends State<EmailPasswordScreen>
     final password = _passwordController.text.trim();
 
     setState(() {
-      // Validate email
       if (email.isEmpty) {
         _emailError = 'Enter your email address';
       } else if (!_isValidEmail(email)) {
@@ -91,7 +115,6 @@ class _EmailPasswordScreenState extends State<EmailPasswordScreen>
         _emailError = null;
       }
 
-      // Validate password
       if (password.isEmpty) {
         _passwordError = 'Enter your password';
       } else if (password.length < 6) {
@@ -100,12 +123,10 @@ class _EmailPasswordScreenState extends State<EmailPasswordScreen>
         _passwordError = null;
       }
 
-      // Enable next button only when both fields are valid
       _isValid = _emailError == null && _passwordError == null;
     });
   }
 
-  // email_password_screen.dart
   void _handleNextPressed() {
     if (!_isValid || _isProcessing || widget.isLoading) return;
 
@@ -116,7 +137,6 @@ class _EmailPasswordScreenState extends State<EmailPasswordScreen>
       _isProcessing = true;
     });
 
-    // Call the onNext callback
     widget.onNext(email, password);
   }
 
@@ -126,7 +146,6 @@ class _EmailPasswordScreenState extends State<EmailPasswordScreen>
     if (widget.onBack != null) {
       widget.onBack!();
     } else {
-      // Default back navigation
       if (GoRouter.of(context).canPop()) {
         GoRouter.of(context).pop();
       } else {
@@ -135,8 +154,6 @@ class _EmailPasswordScreenState extends State<EmailPasswordScreen>
     }
   }
 
-  // email_password_screen.dart
-  // email_password_screen.dart
   @override
   void didUpdateWidget(covariant EmailPasswordScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -145,14 +162,12 @@ class _EmailPasswordScreenState extends State<EmailPasswordScreen>
       'EmailPasswordScreen: isLoading changed from ${oldWidget.isLoading} to ${widget.isLoading}',
     );
 
-    // Sync with parent's loading state
     if (widget.isLoading != _isProcessing) {
       setState(() {
         _isProcessing = widget.isLoading;
       });
     }
 
-    // If parent just finished loading (true → false), also reset our state
     if (oldWidget.isLoading == true && widget.isLoading == false) {
       Future.delayed(const Duration(milliseconds: 100), () {
         if (mounted && _isProcessing) {
@@ -175,6 +190,13 @@ class _EmailPasswordScreenState extends State<EmailPasswordScreen>
 
   @override
   Widget build(BuildContext context) {
+    final isDark = context.isDarkMode;
+    final backgroundColor = context.backgroundColor;
+    final primaryColor = context.primaryColor;
+    final textColor = context.textColor;
+    final secondaryTextColor = context.secondaryTextColor;
+    final errorColor = context.errorColor;
+
     final size = MediaQuery.of(context).size;
     final bool isWeb = size.width > 700;
     final double maxWidth = isWeb ? 480 : double.infinity;
@@ -182,7 +204,7 @@ class _EmailPasswordScreenState extends State<EmailPasswordScreen>
     final bool showLoading = _isProcessing || widget.isLoading;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0F1820),
+      backgroundColor: backgroundColor,
       body: SafeArea(
         child: Center(
           child: FadeTransition(
@@ -199,9 +221,13 @@ class _EmailPasswordScreenState extends State<EmailPasswordScreen>
                   ),
                   padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.03),
+                    color: isDark
+                        ? Colors.white.withValues(alpha: 0.03)
+                        : Colors.grey.shade50,
                     borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Colors.white12),
+                    border: Border.all(
+                      color: isDark ? Colors.white12 : Colors.grey.shade200,
+                    ),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -212,7 +238,7 @@ class _EmailPasswordScreenState extends State<EmailPasswordScreen>
                         child: IconButton(
                           icon: Icon(
                             Icons.arrow_back_ios_new_rounded,
-                            color: showLoading ? Colors.white30 : Colors.white,
+                            color: showLoading ? secondaryTextColor : textColor,
                             size: 22,
                           ),
                           onPressed: showLoading ? null : _handleBackPressed,
@@ -221,22 +247,22 @@ class _EmailPasswordScreenState extends State<EmailPasswordScreen>
 
                       const SizedBox(height: 8),
 
-                      const Text(
+                      Text(
                         "Create Your Account",
                         style: TextStyle(
                           fontSize: 26,
                           fontWeight: FontWeight.bold,
-                          color: Colors.white,
+                          color: textColor,
                         ),
                       ),
 
                       const SizedBox(height: 12),
 
-                      const Text(
+                      Text(
                         "Enter your email and create a password to get started.",
                         style: TextStyle(
                           fontSize: 15,
-                          color: Colors.white70,
+                          color: secondaryTextColor,
                           height: 1.5,
                         ),
                       ),
@@ -248,37 +274,47 @@ class _EmailPasswordScreenState extends State<EmailPasswordScreen>
                         controller: _emailController,
                         keyboardType: TextInputType.emailAddress,
                         style: TextStyle(
-                          color: showLoading ? Colors.white54 : Colors.white,
+                          color: showLoading ? secondaryTextColor : textColor,
                         ),
                         enabled: !showLoading,
                         decoration: InputDecoration(
                           hintText: "Email address",
-                          hintStyle: const TextStyle(color: Colors.white54),
+                          hintStyle: TextStyle(
+                            color: isDark ? Colors.white54 : Colors.grey.shade600,
+                          ),
                           filled: true,
-                          fillColor: Colors.white.withValues(alpha: 0.05),
+                          fillColor: isDark
+                              ? Colors.white.withValues(alpha: 0.05)
+                              : Colors.grey.shade50,
                           enabledBorder: OutlineInputBorder(
                             borderSide: BorderSide(
                               color: _emailError != null
-                                  ? Colors.redAccent
-                                  : Colors.white24,
+                                  ? errorColor
+                                  : (isDark
+                                      ? Colors.white24
+                                      : Colors.grey.shade300),
                             ),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           focusedBorder: OutlineInputBorder(
                             borderSide: BorderSide(
                               color: _emailError != null
-                                  ? Colors.redAccent
-                                  : const Color(0xFF1877F3),
+                                  ? errorColor
+                                  : primaryColor,
                             ),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           disabledBorder: OutlineInputBorder(
-                            borderSide: BorderSide(color: Colors.white10),
+                            borderSide: BorderSide(
+                              color: isDark
+                                  ? Colors.white10
+                                  : Colors.grey.shade200,
+                            ),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           errorText: _emailError,
-                          errorStyle: const TextStyle(
-                            color: Colors.redAccent,
+                          errorStyle: TextStyle(
+                            color: errorColor,
                             fontSize: 13,
                           ),
                         ),
@@ -291,32 +327,42 @@ class _EmailPasswordScreenState extends State<EmailPasswordScreen>
                         controller: _passwordController,
                         obscureText: _obscurePassword,
                         style: TextStyle(
-                          color: showLoading ? Colors.white54 : Colors.white,
+                          color: showLoading ? secondaryTextColor : textColor,
                         ),
                         enabled: !showLoading,
                         decoration: InputDecoration(
                           hintText: "Create a password",
-                          hintStyle: const TextStyle(color: Colors.white54),
+                          hintStyle: TextStyle(
+                            color: isDark ? Colors.white54 : Colors.grey.shade600,
+                          ),
                           filled: true,
-                          fillColor: Colors.white.withValues(alpha: 0.05),
+                          fillColor: isDark
+                              ? Colors.white.withValues(alpha: 0.05)
+                              : Colors.grey.shade50,
                           enabledBorder: OutlineInputBorder(
                             borderSide: BorderSide(
                               color: _passwordError != null
-                                  ? Colors.redAccent
-                                  : Colors.white24,
+                                  ? errorColor
+                                  : (isDark
+                                      ? Colors.white24
+                                      : Colors.grey.shade300),
                             ),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           focusedBorder: OutlineInputBorder(
                             borderSide: BorderSide(
                               color: _passwordError != null
-                                  ? Colors.redAccent
-                                  : const Color(0xFF1877F3),
+                                  ? errorColor
+                                  : primaryColor,
                             ),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           disabledBorder: OutlineInputBorder(
-                            borderSide: BorderSide(color: Colors.white10),
+                            borderSide: BorderSide(
+                              color: isDark
+                                  ? Colors.white10
+                                  : Colors.grey.shade200,
+                            ),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           suffixIcon: showLoading
@@ -326,7 +372,9 @@ class _EmailPasswordScreenState extends State<EmailPasswordScreen>
                                     _obscurePassword
                                         ? Icons.visibility_off
                                         : Icons.visibility,
-                                    color: Colors.white70,
+                                    color: isDark
+                                        ? Colors.white70
+                                        : Colors.grey.shade600,
                                   ),
                                   onPressed: () {
                                     setState(() {
@@ -335,8 +383,8 @@ class _EmailPasswordScreenState extends State<EmailPasswordScreen>
                                   },
                                 ),
                           errorText: _passwordError,
-                          errorStyle: const TextStyle(
-                            color: Colors.redAccent,
+                          errorStyle: TextStyle(
+                            color: errorColor,
                             fontSize: 13,
                           ),
                         ),
@@ -345,11 +393,14 @@ class _EmailPasswordScreenState extends State<EmailPasswordScreen>
                       const SizedBox(height: 8),
 
                       // Password requirements
-                      const Padding(
-                        padding: EdgeInsets.only(left: 8.0),
+                      Padding(
+                        padding: const EdgeInsets.only(left: 8.0),
                         child: Text(
                           "• At least 6 characters",
-                          style: TextStyle(fontSize: 13, color: Colors.white70),
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: secondaryTextColor,
+                          ),
                         ),
                       ),
 
@@ -361,7 +412,7 @@ class _EmailPasswordScreenState extends State<EmailPasswordScreen>
                           width: double.infinity,
                           height: 52,
                           decoration: BoxDecoration(
-                            color: Colors.blue.withValues(alpha: 0.1),
+                            color: primaryColor.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(25),
                           ),
                           child: const Center(
@@ -398,8 +449,10 @@ class _EmailPasswordScreenState extends State<EmailPasswordScreen>
                             onPressed: _isValid ? _handleNextPressed : null,
                             style: ElevatedButton.styleFrom(
                               backgroundColor: _isValid
-                                  ? const Color(0xFF1877F3)
-                                  : Colors.white12,
+                                  ? primaryColor
+                                  : (isDark
+                                      ? Colors.white12
+                                      : Colors.grey.shade300),
                               foregroundColor: Colors.white,
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(25),
@@ -410,7 +463,7 @@ class _EmailPasswordScreenState extends State<EmailPasswordScreen>
                               children: [
                                 Text(
                                   "Continue",
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontSize: 18,
                                     fontWeight: FontWeight.bold,
                                   ),
@@ -434,23 +487,23 @@ class _EmailPasswordScreenState extends State<EmailPasswordScreen>
                       AnimatedOpacity(
                         duration: const Duration(milliseconds: 300),
                         opacity: showLoading ? 0.5 : 1.0,
-                        child: const Column(
+                        child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
                               "We'll use this email for:",
                               style: TextStyle(
                                 fontSize: 14,
-                                color: Colors.white,
+                                color: textColor,
                                 fontWeight: FontWeight.w500,
                               ),
                             ),
-                            SizedBox(height: 8),
+                            const SizedBox(height: 8),
                             Text(
                               "• Account verification\n• Password recovery\n• Important updates",
                               style: TextStyle(
                                 fontSize: 14,
-                                color: Colors.white70,
+                                color: secondaryTextColor,
                                 height: 1.6,
                               ),
                             ),

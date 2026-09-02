@@ -4,7 +4,19 @@ class PolicyContent {
   static const String privacyPolicyTitle = 'Privacy Policy';
   static const String termsTitle = 'Terms of Service';
   
-  static const String lastUpdated = 'Last Updated: February 2024';
+  // ✅ Dynamic last updated
+  static String get lastUpdated {
+    return 'Last Updated: ${_getFormattedDate()}';
+  }
+
+  static String _getFormattedDate() {
+    final now = DateTime.now();
+    final months = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'
+    ];
+    return '${months[now.month - 1]} ${now.year}';
+  }
   
   // ==================== PRIVACY POLICY ====================
   static const String privacyContent = '''
@@ -264,8 +276,8 @@ By using our app, you consent to this privacy policy. For EU users, we obtain ex
 **© 2024 Your App. All rights reserved.**
 ''';
 
- // ==================== TERMS OF SERVICE ====================
-static const String termsContent = r'''
+  // ==================== TERMS OF SERVICE ====================
+  static const String termsContent = r'''
 **YOUR APP TERMS OF SERVICE**
 
 **Last Updated: February 2024**
@@ -500,7 +512,7 @@ TO THE MAXIMUM EXTENT PERMITTED BY LAW, WE ARE NOT LIABLE FOR:
 ### 11.2 Cap on Liability
 OUR TOTAL LIABILITY SHALL NOT EXCEED THE GREATER OF:
 - The amount you paid us in the last 12 months
-- $100 USD  ✅ (Now fixed - no error)
+- $100 USD
 
 ### 11.3 Applicability
 Some jurisdictions don't allow limitations, so these may not apply to you.

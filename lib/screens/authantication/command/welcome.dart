@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/main.dart';
-// import 'package:flutter_application_1/alertBox/show_logout_conf.dart';
+import 'package:flutter_application_1/extensions/context_extensions.dart';
 import 'package:go_router/go_router.dart';
 
 class WelcomeScreen extends StatefulWidget {
@@ -22,17 +22,19 @@ class _WelcomeScreenState extends State<WelcomeScreen>
   late Animation<double> _fadeAnimation;
   late Animation<Offset> _slideAnimation;
 
-  // Pre-cached colors for better performance
-  static const Color _primaryBg = Color(0xFF0F1820);
+  // ✅ Role colors - using theme colors
   static const Color _customerGreen = Color(0xFF43A047);
   static const Color _businessBlue = Color(0xFF1E88E5);
   static const Color _employeeOrange = Color(0xFFFF9800);
+
+  // ✅ API 36: Responsive variables
+  bool _isTablet = false;
+  bool _isWeb = false;
 
   @override
   void initState() {
     super.initState();
 
-    // Optimized animation duration
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 600),
@@ -49,6 +51,29 @@ class _WelcomeScreenState extends State<WelcomeScreen>
     ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic));
 
     _controller.forward();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkScreenSize();
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _checkScreenSize();
+  }
+
+  void _checkScreenSize() {
+    final size = MediaQuery.of(context).size;
+    final isTablet = size.shortestSide >= 600;
+    final isWeb = size.width > 800;
+
+    if (_isTablet != isTablet || _isWeb != isWeb) {
+      setState(() {
+        _isTablet = isTablet;
+        _isWeb = isWeb;
+      });
+    }
   }
 
   @override
@@ -57,33 +82,45 @@ class _WelcomeScreenState extends State<WelcomeScreen>
     super.dispose();
   }
 
-  /// Logout function
   Future<void> _handleLogout() async {
     debugPrint('📍 Logout button pressed');
 
     if (!mounted) return;
 
-    // Show confirmation dialog
+    final isDark = context.isDarkMode;
+
     final shouldLogout = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        backgroundColor: const Color(0xFF1C1F26),
-        title: const Text('Logout', style: TextStyle(color: Colors.white)),
-        content: const Text(
+        backgroundColor: isDark ? const Color(0xFF1E1E1E) : const Color(0xFF1C1F26),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          'Logout',
+          style: TextStyle(
+            color: isDark ? Colors.white : Colors.black87,
+          ),
+        ),
+        content: Text(
           'Are you sure you want to logout?',
-          style: TextStyle(color: Colors.white70),
+          style: TextStyle(
+            color: isDark ? Colors.white70 : Colors.black54,
+          ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text(
+            child: Text(
               'Cancel',
-              style: TextStyle(color: Colors.white70),
+              style: TextStyle(
+                color: isDark ? Colors.white70 : Colors.black54,
+              ),
             ),
           ),
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.red,
+            ),
             child: const Text('Logout', style: TextStyle(color: Colors.red)),
           ),
         ],
@@ -99,7 +136,6 @@ class _WelcomeScreenState extends State<WelcomeScreen>
 
     if (!mounted) return;
 
-    // Show loading indicator
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -111,25 +147,21 @@ class _WelcomeScreenState extends State<WelcomeScreen>
     );
 
     try {
-      // Perform logout
-    await appState.logoutForContinue();
+      await appState.logoutForContinue();
 
       if (!mounted) return;
 
-      // Navigate directly to login - DON'T use pop
       debugPrint('📍 Navigating to /login');
-      context.go('/'); // Use go() instead of pushReplacement
+      context.go('/');
     } catch (e) {
       debugPrint('❌ Logout error: $e');
 
       if (!mounted) return;
 
-      // Close loading dialog using Navigator.of(context, rootNavigator: true)
       Navigator.of(context, rootNavigator: true).pop();
 
       if (!mounted) return;
 
-      // Show error
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Logout failed: ${e.toString()}'),
@@ -140,13 +172,14 @@ class _WelcomeScreenState extends State<WelcomeScreen>
     }
   }
 
-  /// Optimized role card with better image handling
   Widget _roleCard({
     required String image,
     required String title,
     required Color accentColor,
     required VoidCallback onTap,
   }) {
+    final isDark = context.isDarkMode;
+
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -177,20 +210,19 @@ class _WelcomeScreenState extends State<WelcomeScreen>
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  // Optimized image loading
                   Image.asset(
                     image,
                     fit: BoxFit.cover,
-                    cacheWidth: 300, // Optimize image size
+                    cacheWidth: 300,
                     cacheHeight: 400,
                     filterQuality: FilterQuality.medium,
                     errorBuilder: (context, error, stackTrace) {
                       return Container(
-                        color: Colors.grey[900],
+                        color: isDark ? Colors.grey[800] : Colors.grey[300],
                         child: Icon(
                           title == 'Customer'
                               ? Icons.person
-                              : title == 'Business'
+                              : title == 'Owner'
                               ? Icons.business
                               : Icons.work,
                           color: accentColor.withValues(alpha: 0.3),
@@ -200,7 +232,6 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                     },
                   ),
 
-                  // Semi-transparent overlay with gradient
                   Positioned.fill(
                     child: Container(
                       decoration: BoxDecoration(
@@ -218,7 +249,6 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                     ),
                   ),
 
-                  // Title with better visibility
                   Positioned(
                     bottom: 8,
                     left: 8,
@@ -249,13 +279,13 @@ class _WelcomeScreenState extends State<WelcomeScreen>
     );
   }
 
-  /// Optimized action button with better tap area
   Widget _actionButton({
     required String label,
     required Color color,
     required VoidCallback onPressed,
     IconData? icon,
   }) {
+
     return SizedBox(
       width: double.infinity,
       child: ElevatedButton(
@@ -294,6 +324,12 @@ class _WelcomeScreenState extends State<WelcomeScreen>
 
   @override
   Widget build(BuildContext context) {
+    final isDark = context.isDarkMode;
+    final backgroundColor = context.backgroundColor;
+    final primaryColor = context.primaryColor;
+    final textColor = context.textColor;
+    final secondaryTextColor = context.secondaryTextColor;
+
     final size = MediaQuery.sizeOf(context);
     final bool isWeb = size.width > 700;
     final bool isTablet = size.width > 600 && size.width <= 700;
@@ -301,7 +337,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
     final double horizontalPadding = isWeb ? 32.0 : 20.0;
 
     return Scaffold(
-      backgroundColor: _primaryBg,
+      backgroundColor: backgroundColor,
       body: SafeArea(
         child: FadeTransition(
           opacity: _fadeAnimation,
@@ -320,7 +356,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // ✅ NEW HEADER - Matches ContinueScreen style
+                      // Header with Logo
                       Stack(
                         children: [
                           Container(
@@ -334,22 +370,24 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                                     decoration: BoxDecoration(
                                       shape: BoxShape.circle,
                                       border: Border.all(
-                                        color: Colors.white24,
+                                        color: isDark
+                                            ? Colors.white24
+                                            : Colors.grey.shade300,
                                         width: 2,
                                       ),
-                                      gradient: const LinearGradient(
+                                      gradient: LinearGradient(
                                         colors: [
-                                          Color(0xFF1877F2),
-                                          Color(0xFF0A58CA),
+                                          primaryColor,
+                                          primaryColor.withValues(alpha: 0.7),
                                         ],
                                         begin: Alignment.topCenter,
                                         end: Alignment.bottomCenter,
                                       ),
                                       boxShadow: [
                                         BoxShadow(
-                                          color: const Color(
-                                            0xFF1877F2,
-                                          ).withValues(alpha: 0.4),
+                                          color: primaryColor.withValues(
+                                            alpha: 0.4,
+                                          ),
                                           blurRadius: 20,
                                           spreadRadius: 5,
                                         ),
@@ -374,10 +412,10 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                                     ),
                                   ),
                                   const SizedBox(height: 15),
-                                  const Text(
+                                  Text(
                                     'Welcome to MySaloon',
                                     style: TextStyle(
-                                      color: Colors.white,
+                                      color: textColor,
                                       fontSize: 24,
                                       fontWeight: FontWeight.bold,
                                     ),
@@ -386,9 +424,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                                   Text(
                                     'Choose your role to continue',
                                     style: TextStyle(
-                                      color: Colors.white.withValues(
-                                        alpha: 0.7,
-                                      ),
+                                      color: secondaryTextColor,
                                       fontSize: 16,
                                     ),
                                   ),
@@ -425,7 +461,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                           const SizedBox(width: 12),
                           Expanded(
                             child: _roleCard(
-                              image: 'barber.png', // Change to barber image
+                              image: 'barber.png',
                               title: 'Barber',
                               accentColor: _employeeOrange,
                               onTap: () => widget.onNext('barber'),
@@ -440,16 +476,20 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                       Container(
                         padding: const EdgeInsets.all(20),
                         decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.02),
+                          color: isDark
+                              ? Colors.white.withValues(alpha: 0.02)
+                              : Colors.grey.shade50,
                           borderRadius: BorderRadius.circular(16),
                           border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.05),
+                            color: isDark
+                                ? Colors.white.withValues(alpha: 0.05)
+                                : Colors.grey.shade200,
                           ),
                         ),
-                        child: const Text(
+                        child: Text(
                           'Create an account to connect with trusted salons, discover new styles, and grow your business — all in one place.',
                           style: TextStyle(
-                            color: Colors.white70,
+                            color: secondaryTextColor,
                             fontSize: 15,
                             height: 1.5,
                           ),
@@ -469,7 +509,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                       const SizedBox(height: 12),
 
                       _actionButton(
-                        label: ' Create owner account',
+                        label: 'Create owner account',
                         color: _businessBlue,
                         icon: Icons.storefront,
                         onPressed: () => widget.onNext('owner'),
@@ -478,7 +518,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                       const SizedBox(height: 12),
 
                       _actionButton(
-                        label: 'Create Barber account',
+                        label: 'Create barber account',
                         color: _employeeOrange,
                         icon: Icons.person_add,
                         onPressed: () => widget.onNext('barber'),
@@ -486,12 +526,12 @@ class _WelcomeScreenState extends State<WelcomeScreen>
 
                       const SizedBox(height: 16),
 
-                      // Logout link (replaced Login text)
+                      // Logout link
                       Center(
                         child: TextButton(
                           onPressed: _handleLogout,
                           style: TextButton.styleFrom(
-                            foregroundColor: Colors.white54,
+                            foregroundColor: secondaryTextColor,
                           ),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
@@ -499,14 +539,15 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                               Icon(
                                 Icons.logout,
                                 size: 18,
-                                color: Colors.white.withValues(alpha: 0.5),
+                                color: secondaryTextColor,
                               ),
                               const SizedBox(width: 8),
-                              const Text(
-                                'Sign Out', // Changed to "Sign Out" for better UX
+                              Text(
+                                'Sign Out',
                                 style: TextStyle(
                                   fontSize: 15,
                                   fontWeight: FontWeight.w500,
+                                  color: secondaryTextColor,
                                 ),
                               ),
                             ],

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_application_1/services/session_manager.dart';
 import 'package:flutter_application_1/main.dart';
+import 'package:flutter_application_1/extensions/context_extensions.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class ClearDataScreen extends StatefulWidget {
@@ -18,6 +19,10 @@ class _ClearDataScreenState extends State<ClearDataScreen>
   late Animation<double> _scaleAnimation;
   bool _isLoading = false;
 
+  // ✅ API 36: Responsive variables
+  bool _isTablet = false;
+  bool _isWeb = false;
+
   @override
   void initState() {
     super.initState();
@@ -32,6 +37,30 @@ class _ClearDataScreenState extends State<ClearDataScreen>
       CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
     );
     _animationController.forward();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkScreenSize();
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _checkScreenSize();
+  }
+
+  // ✅ API 36: Check screen size for responsive layout
+  void _checkScreenSize() {
+    final size = MediaQuery.of(context).size;
+    final isTablet = size.shortestSide >= 600;
+    final isWeb = size.width > 800;
+
+    if (_isTablet != isTablet || _isWeb != isWeb) {
+      setState(() {
+        _isTablet = isTablet;
+        _isWeb = isWeb;
+      });
+    }
   }
 
   @override
@@ -56,34 +85,27 @@ class _ClearDataScreenState extends State<ClearDataScreen>
     setState(() => _isLoading = true);
 
     try {
-   
-      // 1. Clear SessionManager (local profiles)
       await SessionManager.clearAll();
-  
 
-      // 2. Sign out from Supabase
       final supabase = Supabase.instance.client;
       await supabase.auth.signOut();
-  
-      // 3. Refresh app state
-      await appState.refreshState();
- 
-      // 4. Navigate directly to login (not splash)
-      if (mounted) {
-        // Close any open dialogs
-        Navigator.popUntil(context, (route) => route.isFirst);
 
-        // Go directly to login
+      await appState.refreshState();
+
+      if (mounted) {
+        Navigator.popUntil(context, (route) => route.isFirst);
         context.go('/login');
       }
     } catch (e) {
       debugPrint('❌ Error clearing data: $e');
 
       if (mounted) {
+        final errorColor = context.errorColor;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Error clearing data: $e'),
-            backgroundColor: Colors.red,
+            backgroundColor: errorColor,
+            behavior: SnackBarBehavior.floating,
           ),
         );
       }
@@ -92,15 +114,78 @@ class _ClearDataScreenState extends State<ClearDataScreen>
     }
   }
 
+  void _showConfirmDialog() {
+    final isDark = context.isDarkMode;
+    final textColor = context.textColor;
+    final secondaryTextColor = context.secondaryTextColor;
+    final errorColor = context.errorColor;
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        title: Text(
+          'Confirm Clear Data',
+          style: TextStyle(
+            color: textColor,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        content: Text(
+          'This will remove all saved accounts, preferences, and login information from this device. This action cannot be undone.',
+          style: TextStyle(
+            color: secondaryTextColor,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(
+              'Cancel',
+              style: TextStyle(
+                color: secondaryTextColor,
+              ),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _clearAllData();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: errorColor,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            child: const Text('Clear All'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final isDark = context.isDarkMode;
+    final backgroundColor = context.backgroundColor;
+    final primaryColor = context.primaryColor;
+    final textColor = context.textColor;
+    final secondaryTextColor = context.secondaryTextColor;
+    final cardColor = context.cardColor;
+    final errorColor = context.errorColor;
+
     final size = MediaQuery.of(context).size;
     final bool isWeb = size.width > 700;
     final double maxWidth = isWeb ? 480 : double.infinity;
     final bool isMobile = size.width < 600;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0F1820),
+      backgroundColor: backgroundColor,
       body: SafeArea(
         child: Center(
           child: FadeTransition(
@@ -116,11 +201,22 @@ class _ClearDataScreenState extends State<ClearDataScreen>
                     vertical: 20,
                   ),
                   padding: const EdgeInsets.all(20),
-                  // ✅ FIXED: Use withOpacity instead of withValues
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.03),
+                    color: cardColor,
                     borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Colors.white12),
+                    border: Border.all(
+                      color: isDark ? Colors.white12 : Colors.grey.shade200,
+                    ),
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        cardColor,
+                        isDark
+                            ? Colors.white.withValues(alpha: 0.03)
+                            : Colors.grey.shade50,
+                      ],
+                    ),
                   ),
                   child: Column(
                     children: [
@@ -128,9 +224,9 @@ class _ClearDataScreenState extends State<ClearDataScreen>
                       Align(
                         alignment: Alignment.centerLeft,
                         child: IconButton(
-                          icon: const Icon(
+                          icon: Icon(
                             Icons.arrow_back_ios_new_rounded,
-                            color: Colors.white,
+                            color: textColor,
                             size: 22,
                           ),
                           onPressed: _isLoading ? null : _handleBackButton,
@@ -142,20 +238,21 @@ class _ClearDataScreenState extends State<ClearDataScreen>
                       // Main Content
                       Expanded(
                         child: SingleChildScrollView(
+                          physics: const BouncingScrollPhysics(),
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              // ✅ FIXED: Changed from Icons.salon to Icons.security
+                              // Icon
                               Icon(
                                 Icons.security,
                                 size: isMobile ? 50.0 : 60.0,
-                                color: Colors.blue.withValues(alpha: 0.8),
+                                color: primaryColor.withValues(alpha: 0.8),
                               ),
                               SizedBox(height: isMobile ? 16.0 : 20.0),
-                              const Text(
+                              Text(
                                 'Data Management',
                                 style: TextStyle(
-                                  color: Colors.white,
+                                  color: textColor,
                                   fontSize: 22.0,
                                   fontWeight: FontWeight.bold,
                                 ),
@@ -165,51 +262,50 @@ class _ClearDataScreenState extends State<ClearDataScreen>
                               // Data Collection Info
                               Container(
                                 padding: const EdgeInsets.all(16),
-                                // ✅ FIXED: Use withOpacity
                                 decoration: BoxDecoration(
-                                  color: Colors.blue.withValues(alpha: 0.1),
+                                  color: primaryColor.withValues(alpha: 0.1),
                                   borderRadius: BorderRadius.circular(12),
                                   border: Border.all(
-                                    color: Colors.blue.withValues(alpha: 0.3),
+                                    color: primaryColor.withValues(alpha: 0.3),
                                   ),
                                 ),
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    const Text(
+                                    Text(
                                       'What Data We Store:',
                                       style: TextStyle(
-                                        color: Colors.white,
+                                        color: textColor,
                                         fontWeight: FontWeight.bold,
                                       ),
                                     ),
                                     const SizedBox(height: 8),
-                                    const Text(
+                                    Text(
                                       '• Email address (for account login)',
                                       style: TextStyle(
-                                        color: Colors.white70,
+                                        color: secondaryTextColor,
                                         fontSize: 13,
                                       ),
                                     ),
-                                    const Text(
+                                    Text(
                                       '• App preferences and settings',
                                       style: TextStyle(
-                                        color: Colors.white70,
+                                        color: secondaryTextColor,
                                         fontSize: 13,
                                       ),
                                     ),
-                                    const Text(
+                                    Text(
                                       '• Login session information',
                                       style: TextStyle(
-                                        color: Colors.white70,
+                                        color: secondaryTextColor,
                                         fontSize: 13,
                                       ),
                                     ),
                                     const SizedBox(height: 12),
-                                    const Text(
+                                    Text(
                                       'This data is stored locally on your device and can be cleared at any time.',
                                       style: TextStyle(
-                                        color: Colors.white70,
+                                        color: secondaryTextColor,
                                         fontSize: 13,
                                       ),
                                     ),
@@ -225,15 +321,19 @@ class _ClearDataScreenState extends State<ClearDataScreen>
                                 child: ElevatedButton(
                                   onPressed: _isLoading
                                       ? null
-                                      : () {
-                                          _showConfirmDialog();
-                                        },
+                                      : _showConfirmDialog,
                                   style: ElevatedButton.styleFrom(
                                     padding: const EdgeInsets.symmetric(
                                       vertical: 16.0,
                                     ),
-                                    backgroundColor: Colors.red,
-                                    disabledBackgroundColor: Colors.grey,
+                                    backgroundColor: errorColor,
+                                    disabledBackgroundColor: isDark
+                                        ? Colors.grey[700]
+                                        : Colors.grey[300],
+                                    foregroundColor: Colors.white,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
                                   ),
                                   child: _isLoading
                                       ? const CircularProgressIndicator(
@@ -265,14 +365,20 @@ class _ClearDataScreenState extends State<ClearDataScreen>
                                     padding: const EdgeInsets.symmetric(
                                       vertical: 16.0,
                                     ),
-                                    side: const BorderSide(
-                                      color: Colors.white24,
+                                    side: BorderSide(
+                                      color: isDark
+                                          ? Colors.white24
+                                          : Colors.grey.shade300,
+                                    ),
+                                    foregroundColor: textColor,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
                                     ),
                                   ),
                                   child: Text(
                                     'Manage Preferences',
                                     style: TextStyle(
-                                      color: Colors.white,
+                                      color: textColor,
                                       fontSize: isMobile ? 15.0 : 16.0,
                                     ),
                                   ),
@@ -290,10 +396,10 @@ class _ClearDataScreenState extends State<ClearDataScreen>
                                           '/privacy?from=${Uri.encodeComponent('/clear-data')}',
                                         );
                                       },
-                                child: const Text(
+                                child: Text(
                                   'View Privacy Policy',
                                   style: TextStyle(
-                                    color: Colors.blue,
+                                    color: primaryColor,
                                     fontSize: 14,
                                   ),
                                 ),
@@ -309,43 +415,6 @@ class _ClearDataScreenState extends State<ClearDataScreen>
             ),
           ),
         ),
-      ),
-    );
-  }
-
-  void _showConfirmDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1E293B),
-        title: const Text(
-          'Confirm Clear Data',
-          style: TextStyle(color: Colors.white),
-        ),
-        content: const Text(
-          'This will remove all saved accounts, preferences, and login information from this device. This action cannot be undone.',
-          style: TextStyle(color: Colors.white70),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text(
-              'Cancel',
-              style: TextStyle(color: Colors.white70),
-            ),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context); // Close dialog
-              _clearAllData(); // Call clear function
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text(
-              'Clear All',
-              style: TextStyle(color: Colors.white),
-            ),
-          ),
-        ],
       ),
     );
   }

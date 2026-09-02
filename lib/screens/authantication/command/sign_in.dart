@@ -11,6 +11,7 @@ import 'package:flutter_application_1/config/environment_manager.dart';
 import 'package:flutter_application_1/main.dart';
 import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
 import 'package:flutter_application_1/utils/app_version.dart';
+import 'package:flutter_application_1/extensions/context_extensions.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_application_1/services/session_manager.dart';
@@ -83,7 +84,7 @@ class _SignInScreenState extends State<SignInScreen>
 
   // Services
   final supabase = Supabase.instance.client;
-  final EnvironmentManager _env = EnvironmentManager();  
+  final EnvironmentManager _env = EnvironmentManager();
   DateTime? _termsAcceptedAt;
   DateTime? _privacyAcceptedAt;
 
@@ -93,27 +94,24 @@ class _SignInScreenState extends State<SignInScreen>
 
   StreamSubscription<AuthState>? _authSubscription;
 
+  // ✅ API 36: Responsive variables
+  bool _isTablet = false;
+  bool _isWeb = false;
+
   @override
   void initState() {
     super.initState();
 
-    // Initialize GoogleSignInService
     _googleSignInService = GoogleSignInService();
-
-    // ✅ SIMPLE: unconditionally call - service එකම duplicate
-    // calls/race conditions handle කරගන්නවා internally.
     _googleSignInService.initialize();
     debugPrint('✅ Google Sign-In SDK initialize() called from SignInScreen');
 
-    // Initialize controllers
     _emailController = TextEditingController(text: widget.prefilledEmail ?? '');
 
-    // Load data
     _loadConsentStatus();
     _checkSavedProfile();
     _loadRememberMeSetting();
 
-    // Setup animations
     _animationController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 700),
@@ -127,11 +125,9 @@ class _SignInScreenState extends State<SignInScreen>
     );
     _animationController.forward();
 
-    // Add listeners
     _emailController.addListener(_onEmailChanged);
     _passwordController.addListener(_onPasswordChanged);
 
-    // Post frame callback
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (widget.showMessage && widget.message != null) {
         _showCustomMessage(widget.message!);
@@ -139,7 +135,25 @@ class _SignInScreenState extends State<SignInScreen>
     });
   }
 
-  // Load remember me setting with smart default
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _checkScreenSize();
+  }
+
+  void _checkScreenSize() {
+    final size = MediaQuery.of(context).size;
+    final isTablet = size.shortestSide >= 600;
+    final isWeb = size.width > 800;
+
+    if (_isTablet != isTablet || _isWeb != isWeb) {
+      setState(() {
+        _isTablet = isTablet;
+        _isWeb = isWeb;
+      });
+    }
+  }
+
   Future<void> _loadRememberMeSetting() async {
     try {
       final profiles = await SessionManager.getProfiles();
@@ -242,7 +256,6 @@ class _SignInScreenState extends State<SignInScreen>
     SimpleToast.info(context, message);
   }
 
-
   Future<void> _loadConsentStatus() async {
     try {
       final profiles = await SessionManager.getProfiles();
@@ -325,17 +338,6 @@ class _SignInScreenState extends State<SignInScreen>
     } catch (e) {
       debugPrint('❌ Error checking saved profiles: $e');
     }
-  }
-
-  String _getRedirectUrl() {
-    if (kReleaseMode) {
-      return 'com.yourcompany.mysalon://auth-callback';
-    } else if (kDebugMode) {
-      return kIsWeb
-          ? 'http://localhost:5000/auth/callback'
-          : 'com.yourcompany.mysalon.dev://auth-callback';
-    }
-    return 'com.yourcompany.mysalon.staging://auth-callback';
   }
 
   Future<void> _saveOAuthProfile({
@@ -610,7 +612,6 @@ class _SignInScreenState extends State<SignInScreen>
         : error.toString();
   }
 
-  // FIXED: COMBINED OAuth DIALOG with proper overflow handling
   Future<Map<String, dynamic>?> _showCombinedOAuthDialog({
     required String provider,
     required List<String> scopes,
@@ -619,6 +620,11 @@ class _SignInScreenState extends State<SignInScreen>
   }) async {
     bool rememberMe = defaultAutoLogin;
     bool marketingConsent = false;
+    final isDark = context.isDarkMode;
+    final primaryColor = context.primaryColor;
+    final backgroundColor = context.backgroundColor;
+    final textColor = context.textColor;
+    final secondaryTextColor = context.secondaryTextColor;
 
     if (_hasSavedProfile) {
       final savedRememberMe = await SessionManager.isRememberMeEnabled();
@@ -641,6 +647,7 @@ class _SignInScreenState extends State<SignInScreen>
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(20),
             ),
+            backgroundColor: backgroundColor,
             title: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -649,9 +656,10 @@ class _SignInScreenState extends State<SignInScreen>
                 Flexible(
                   child: Text(
                     "Sign in with $provider",
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
+                      color: textColor,
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -664,15 +672,16 @@ class _SignInScreenState extends State<SignInScreen>
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Existing roles info (if any)
                   if (existingRoles != null && existingRoles.isNotEmpty)
                     Container(
                       margin: const EdgeInsets.only(bottom: 12),
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: Colors.blue.shade50,
+                        color: primaryColor.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.blue.shade200),
+                        border: Border.all(
+                          color: primaryColor.withValues(alpha: 0.2),
+                        ),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -680,18 +689,14 @@ class _SignInScreenState extends State<SignInScreen>
                           Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(
-                                Icons.info,
-                                size: 16,
-                                color: Colors.blue.shade700,
-                              ),
+                              Icon(Icons.info, size: 16, color: primaryColor),
                               const SizedBox(width: 8),
                               Flexible(
                                 child: Text(
                                   "You have existing profiles",
                                   style: TextStyle(
                                     fontWeight: FontWeight.w600,
-                                    color: Colors.blue.shade700,
+                                    color: primaryColor,
                                     fontSize: 13,
                                   ),
                                 ),
@@ -729,11 +734,10 @@ class _SignInScreenState extends State<SignInScreen>
                       ),
                     ),
 
-                  // OAuth Permissions Section
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: Colors.grey.shade100,
+                      color: isDark ? Colors.grey[800] : Colors.grey.shade100,
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Column(
@@ -745,15 +749,16 @@ class _SignInScreenState extends State<SignInScreen>
                             Icon(
                               Icons.shield,
                               size: 16,
-                              color: Colors.grey.shade700,
+                              color: secondaryTextColor,
                             ),
                             const SizedBox(width: 8),
                             Flexible(
                               child: Text(
                                 "$provider will share:",
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontWeight: FontWeight.w600,
                                   fontSize: 13,
+                                  color: textColor,
                                 ),
                               ),
                             ),
@@ -775,7 +780,10 @@ class _SignInScreenState extends State<SignInScreen>
                                 Flexible(
                                   child: Text(
                                     "• $scope",
-                                    style: const TextStyle(fontSize: 13),
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: secondaryTextColor,
+                                    ),
                                     overflow: TextOverflow.ellipsis,
                                   ),
                                 ),
@@ -788,11 +796,10 @@ class _SignInScreenState extends State<SignInScreen>
 
                   const SizedBox(height: 16),
 
-                  // Terms & Privacy Section
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: Colors.blue.shade50,
+                      color: primaryColor.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Column(
@@ -804,7 +811,7 @@ class _SignInScreenState extends State<SignInScreen>
                             Icon(
                               Icons.description,
                               size: 16,
-                              color: Colors.blue.shade700,
+                              color: primaryColor,
                             ),
                             const SizedBox(width: 8),
                             Flexible(
@@ -813,7 +820,7 @@ class _SignInScreenState extends State<SignInScreen>
                                 style: TextStyle(
                                   fontWeight: FontWeight.w600,
                                   fontSize: 13,
-                                  color: Colors.blue.shade700,
+                                  color: primaryColor,
                                 ),
                               ),
                             ),
@@ -832,10 +839,17 @@ class _SignInScreenState extends State<SignInScreen>
                                   context.push('/terms');
                                 }
                               },
-                              icon: const Icon(Icons.open_in_new, size: 16),
-                              label: const Text("Terms of Service"),
+                              icon: Icon(
+                                Icons.open_in_new,
+                                size: 16,
+                                color: primaryColor,
+                              ),
+                              label: Text(
+                                "Terms of Service",
+                                style: TextStyle(color: primaryColor),
+                              ),
                               style: TextButton.styleFrom(
-                                foregroundColor: Colors.blue.shade700,
+                                foregroundColor: primaryColor,
                                 textStyle: const TextStyle(fontSize: 12),
                                 minimumSize: const Size(0, 30),
                               ),
@@ -847,10 +861,17 @@ class _SignInScreenState extends State<SignInScreen>
                                   context.push('/privacy');
                                 }
                               },
-                              icon: const Icon(Icons.open_in_new, size: 16),
-                              label: const Text("Privacy Policy"),
+                              icon: Icon(
+                                Icons.open_in_new,
+                                size: 16,
+                                color: primaryColor,
+                              ),
+                              label: Text(
+                                "Privacy Policy",
+                                style: TextStyle(color: primaryColor),
+                              ),
                               style: TextButton.styleFrom(
-                                foregroundColor: Colors.blue.shade700,
+                                foregroundColor: primaryColor,
                                 textStyle: const TextStyle(fontSize: 12),
                                 minimumSize: const Size(0, 30),
                               ),
@@ -858,9 +879,12 @@ class _SignInScreenState extends State<SignInScreen>
                           ],
                         ),
                         const SizedBox(height: 4),
-                        const Text(
+                        Text(
                           "By continuing, you agree to our Terms and Privacy Policy",
-                          style: TextStyle(fontSize: 11, color: Colors.grey),
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: secondaryTextColor,
+                          ),
                           textAlign: TextAlign.center,
                         ),
                       ],
@@ -869,18 +893,19 @@ class _SignInScreenState extends State<SignInScreen>
 
                   const SizedBox(height: 16),
 
-                  // Auto-login Section with Remember Me
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
                       color: rememberMe
                           ? Colors.green.shade50
-                          : Colors.grey.shade50,
+                          : (isDark ? Colors.grey[800] : Colors.grey.shade50),
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
                         color: rememberMe
                             ? Colors.green.shade200
-                            : Colors.grey.shade200,
+                            : (isDark
+                                  ? Colors.grey[700]!
+                                  : Colors.grey.shade200),
                       ),
                     ),
                     child: Column(
@@ -894,7 +919,7 @@ class _SignInScreenState extends State<SignInScreen>
                               size: 16,
                               color: rememberMe
                                   ? Colors.green.shade700
-                                  : Colors.grey.shade700,
+                                  : secondaryTextColor,
                             ),
                             const SizedBox(width: 8),
                             Flexible(
@@ -905,7 +930,7 @@ class _SignInScreenState extends State<SignInScreen>
                                   fontSize: 13,
                                   color: rememberMe
                                       ? Colors.green.shade700
-                                      : Colors.grey.shade700,
+                                      : secondaryTextColor,
                                 ),
                               ),
                             ),
@@ -926,15 +951,18 @@ class _SignInScreenState extends State<SignInScreen>
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const Text(
+                                  Text(
                                     "Stay signed in on this device",
-                                    style: TextStyle(fontSize: 13),
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: textColor,
+                                    ),
                                   ),
                                   Text(
                                     "✓ Faster login next time\n✓ Disable anytime in Settings",
                                     style: TextStyle(
                                       fontSize: 11,
-                                      color: Colors.grey.shade600,
+                                      color: secondaryTextColor,
                                       height: 1.3,
                                     ),
                                   ),
@@ -974,7 +1002,6 @@ class _SignInScreenState extends State<SignInScreen>
 
                   const SizedBox(height: 12),
 
-                  // Marketing Consent (Optional)
                   Container(
                     padding: const EdgeInsets.all(8),
                     child: Row(
@@ -992,7 +1019,7 @@ class _SignInScreenState extends State<SignInScreen>
                             "Send me occasional offers and updates (optional)",
                             style: TextStyle(
                               fontSize: 12,
-                              color: Colors.grey.shade700,
+                              color: secondaryTextColor,
                             ),
                           ),
                         ),
@@ -1002,11 +1029,13 @@ class _SignInScreenState extends State<SignInScreen>
 
                   const SizedBox(height: 8),
 
-                  // App version
                   Center(
                     child: Text(
                       "App v${AppVersion.version}",
-                      style: const TextStyle(fontSize: 10, color: Colors.grey),
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: secondaryTextColor,
+                      ),
                     ),
                   ),
                 ],
@@ -1015,7 +1044,12 @@ class _SignInScreenState extends State<SignInScreen>
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context, null),
-                child: const Text("Cancel"),
+                child: Text(
+                  "Cancel",
+                  style: TextStyle(
+                    color: secondaryTextColor,
+                  ),
+                ),
               ),
               ElevatedButton(
                 onPressed: () {
@@ -1026,7 +1060,7 @@ class _SignInScreenState extends State<SignInScreen>
                   });
                 },
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: _getProviderColor(provider),
+                  backgroundColor: primaryColor,
                   foregroundColor: Colors.white,
                   minimumSize: const Size(0, 40),
                   shape: RoundedRectangleBorder(
@@ -1114,22 +1148,12 @@ class _SignInScreenState extends State<SignInScreen>
 
       final returningUserCheck = await _checkIfReturningUser('google');
 
-      debugPrint('Returning User Check - Google:');
-      debugPrint('   Email: ${returningUserCheck.email}');
-      debugPrint('   Has Consent: ${returningUserCheck.hasConsent}');
-      debugPrint(
-        '   Auto Login Setting: ${returningUserCheck.hasAutoLoginSetting}',
-      );
-      debugPrint('   Existing Roles: ${returningUserCheck.existingRoles}');
-
       final result = await _showCombinedOAuthDialog(
         provider: 'Google',
         scopes: ['email', 'profile'],
         defaultAutoLogin: returningUserCheck.hasAutoLoginSetting,
         existingRoles: returningUserCheck.existingRoles,
       );
-
-      debugPrint('Dialog result: $result');
 
       if (result == null) {
         debugPrint('User cancelled dialog');
@@ -1139,9 +1163,6 @@ class _SignInScreenState extends State<SignInScreen>
 
       final bool userWantsAutoLogin = result['rememberMe'] ?? true;
       final bool marketingConsent = result['marketingConsent'] ?? false;
-
-      debugPrint('User wants auto login: $userWantsAutoLogin');
-      debugPrint('Marketing consent: $marketingConsent');
 
       setState(() => _rememberMe = userWantsAutoLogin);
       await SessionManager.setRememberMe(userWantsAutoLogin);
@@ -1204,12 +1225,6 @@ class _SignInScreenState extends State<SignInScreen>
 
         final authData = await _googleSignInService.authenticateAndGetDetails();
 
-        // ═══════════════════════════════════════════════════════════
-        // 🔥 FIX: authData null වීම (user native account picker එකෙන්
-        // Cancel කිරීම ඇතුළුව) කියන්නේ browser fallback එකට යන්න
-        // ඕන කියන එක නෙවෙයි. Cancel කළොත් ඒක respect කරන්න ඕන -
-        // කෙළින්ම browser popup එකක් force කරන්න එපා.
-        // ═══════════════════════════════════════════════════════════
         if (authData != null && authData['idToken'] != null) {
           debugPrint('Got auth data from Google');
 
@@ -1234,7 +1249,6 @@ class _SignInScreenState extends State<SignInScreen>
             }
           } catch (e) {
             debugPrint('Supabase sign-in failed: $e');
-            // ✅ Fallback යන්නවත් තියලා, user ට error එකක් පෙන්නලා stop කරන්න
             if (mounted) {
               await showCustomAlert(
                 context: context,
@@ -1245,23 +1259,15 @@ class _SignInScreenState extends State<SignInScreen>
               );
             }
           }
-          // ✅ authData තිබ්බොත් (Google auth එකෙන් ID token එකක්
-          // ලැබුනොත්), success උනත් fail උනත් - browser fallback
-          // එකට කිසිසේත් යන්නේ නෑ. මේ path එකෙන්ම return.
           return;
         }
 
-        // ✅ authData null - user Cancel කළා හෝ native sign-in fail
-        // උනා. Browser popup එකක් force කරන්නේ නෑ - silently stop
-        // කරනවා, user ට යළිත් try කරන්න ඉඩ දෙනවා.
         debugPrint(
           'Google authentication cancelled or failed - stopping (no browser fallback)',
         );
         return;
       }
 
-      // මෙතනට එන්නේ platform එක Android/iOS/Web නොවන විටයි (e.g.
-      // desktop) - එතනදී විතරයි browser-based OAuth එකට යන්නේ.
       debugPrint('Non-mobile/web platform - using Supabase OAuth');
       _authSubscription?.cancel();
 
@@ -1310,16 +1316,6 @@ class _SignInScreenState extends State<SignInScreen>
     }
   }
 
-  // ✅ SIMPLIFIED: no more manual role fetch / status checks / direct
-  // navigation here. Save the profile locally, then hand off entirely
-  // to _handlePostLogin() -> appState.refreshState() -> the central
-  // GoRouter redirect logic in main.dart, which owns:
-  //   - blocked/inactive/scheduled-for-deletion handling
-  //   - the restore/reactivate confirmation dialogs
-  //   - role-selector vs single-role vs no-active-roles routing
-  //   - the "recoverable roles" smart redirect
-  // Duplicating any of that logic here would let it get out of sync
-  // with main.dart and silently re-introduce the auto-restore bug.
   Future<void> _completeGoogleSignIn({
     required User user,
     required Session? session,
@@ -1411,13 +1407,6 @@ class _SignInScreenState extends State<SignInScreen>
             permissions: ['email', 'public_profile'],
           );
 
-          // ═══════════════════════════════════════════════════════════
-          // 🔥 FIX: LoginResult.status එකේ possible values 4ක් තියෙනවා
-          // - success, cancelled, failed, operationInProgress.
-          // Cancel කළොත් ඒක browser fallback එකකට යන්න හේතුවක්
-          // නෙවෙයි - user කැමැත්තෙන්ම නවත්තුවා. Failed/other cases
-          // වලට විතරයි web fallback එකට යන්නේ.
-          // ═══════════════════════════════════════════════════════════
           if (fbResult.status == LoginStatus.success) {
             final AccessToken accessToken = fbResult.accessToken!;
             final response = await supabase.auth.signInWithIdToken(
@@ -1439,20 +1428,15 @@ class _SignInScreenState extends State<SignInScreen>
             }
             return;
           } else if (fbResult.status == LoginStatus.cancelled) {
-            // ✅ User native dialog එකෙන් Cancel කළා - silently
-            // stop කරනවා, browser popup එකක් force කරන්නේ නෑ.
             debugPrint('User cancelled Facebook native login');
             return;
           }
 
-          // status == failed හෝ operationInProgress - genuine
-          // failure එකක් නිසා විතරයි web fallback එකට යන්නේ.
           debugPrint(
             'Native Facebook login failed (status: ${fbResult.status}), falling back to web',
           );
         } catch (e) {
           debugPrint('Native Facebook login threw exception: $e');
-          // Exception එකක් - genuine error, web fallback එකට යනවා
         }
       }
 
@@ -1512,7 +1496,6 @@ class _SignInScreenState extends State<SignInScreen>
     );
   }
 
-  // ✅ SIMPLIFIED - see note on _completeGoogleSignIn above.
   Future<void> _completeFacebookSignIn({
     required User user,
     required Session? session,
@@ -1605,13 +1588,6 @@ class _SignInScreenState extends State<SignInScreen>
       if (defaultTargetPlatform == TargetPlatform.iOS) {
         debugPrint('iOS platform - trying native Apple Sign-In');
 
-        // ═══════════════════════════════════════════════════════════
-        // 🔥 FIX: SignInWithApple.getAppleIDCredential() user Cancel
-        // කළොත් SignInWithAppleAuthorizationException (code:
-        // AuthorizationErrorCode.canceled) එකක් throw කරනවා. මේක
-        // catch කරලා, cancel නම් silently stop කරනවා - genuine
-        // errors වලට විතරයි web fallback එකට යන්නේ.
-        // ═══════════════════════════════════════════════════════════
         try {
           final credential = await SignInWithApple.getAppleIDCredential(
             scopes: [
@@ -1632,12 +1608,6 @@ class _SignInScreenState extends State<SignInScreen>
             final session = response.session;
 
             if (user != null && mounted) {
-              // ✅ Capture and store Apple's one-time authorization
-              // code. This is the ONLY moment it's available -
-              // required later so DeleteAccountScreen can revoke
-              // the Apple credential (App Store Guideline 5.1.1(v)).
-              // Non-fatal if this fails; we still complete sign-in
-              // either way.
               if (credential.authorizationCode.isNotEmpty) {
                 try {
                   await supabase.functions.invoke(
@@ -1661,26 +1631,16 @@ class _SignInScreenState extends State<SignInScreen>
               );
             }
           }
-          // credential.identityToken null උනත් (edge case), මේ
-          // path එකෙන්ම stop කරනවා - web fallback එකට යන්නේ නෑ.
           return;
         } on SignInWithAppleAuthorizationException catch (e) {
           if (e.code == AuthorizationErrorCode.canceled) {
-            // ✅ User native Apple dialog එකෙන් Cancel කළා -
-            // silently stop කරනවා, browser popup එකක් force
-            // කරන්නේ නෑ.
             debugPrint('User cancelled native Apple Sign-In');
             return;
           }
-          // වෙනත් authorization error එකක් (e.g. unknown, failed,
-          // invalidResponse) - genuine failure නිසා web fallback
-          // එකට යනවා.
           debugPrint(
             'Native Apple Sign-In authorization error: ${e.code} - ${e.message}',
           );
         } catch (e) {
-          // Unexpected error (e.g. platform not supported) -
-          // web fallback එකට යනවා.
           debugPrint('Native Apple Sign-In failed: $e');
         }
       }
@@ -1738,7 +1698,7 @@ class _SignInScreenState extends State<SignInScreen>
       }
     });
 
-    final redirectUrl = _getRedirectUrl();
+    final redirectUrl = _env.getRedirectUrl();
     debugPrint('Starting Apple OAuth with redirect: $redirectUrl');
 
     await supabase.auth.signInWithOAuth(
@@ -1748,7 +1708,6 @@ class _SignInScreenState extends State<SignInScreen>
     );
   }
 
-  // ✅ SIMPLIFIED - see note on _completeGoogleSignIn above.
   Future<void> _completeAppleSignIn({
     required User user,
     required Session? session,
@@ -1781,17 +1740,6 @@ class _SignInScreenState extends State<SignInScreen>
     await _handlePostLogin(user.id);
   }
 
-  // ============================================================
-  // ✅ SIMPLIFIED: _handlePostLogin() no longer does manual
-  // is_active/is_blocked checks or role-based navigation. All of
-  // that now lives in ONE place - AppState._updateUserProfile()
-  // (blocked/inactive/scheduled-for-deletion handling, surfaced
-  // via pendingDeletionRestore/pendingReactivation) and the
-  // GoRouter redirect() in main.dart (dashboard/role-selector/
-  // registration/recoverable-roles routing). Duplicating that
-  // logic here previously caused the confirmation dialogs to be
-  // silently bypassed - this keeps a single source of truth.
-  // ============================================================
   Future<void> _handlePostLogin(String userId) async {
     if (!mounted) return;
 
@@ -1829,7 +1777,7 @@ $provider OAuth Configuration Required:
 
 1. Go to $provider Developers Console
 2. Add this redirect URL:
-   ${_getRedirectUrl()}
+   ${_env.getRedirectUrl()}
 3. Save changes and wait a few minutes
 ''';
       case 'user_cancelled':
@@ -1841,9 +1789,11 @@ $provider OAuth Configuration Required:
     }
   }
 
-  // ✅ FIXED: _buildOAuthButtons with proper overflow handling
   Widget _buildOAuthButtons() {
     final enabledProviders = _env.enabledOAuthProviders;
+    final isDark = context.isDarkMode;
+    final primaryColor = context.primaryColor;
+    final secondaryTextColor = context.secondaryTextColor;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -1853,17 +1803,28 @@ $provider OAuth Configuration Required:
           child: Row(
             children: [
               Expanded(
-                child: Divider(color: Colors.white.withValues(alpha: 0.2)),
+                child: Divider(
+                  color: isDark
+                      ? primaryColor.withValues(alpha: 0.3)
+                      : primaryColor.withValues(alpha: 0.2),
+                ),
               ),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Text(
                   'or',
-                  style: TextStyle(color: Colors.white54, fontSize: 12),
+                  style: TextStyle(
+                    color: secondaryTextColor,
+                    fontSize: 12,
+                  ),
                 ),
               ),
               Expanded(
-                child: Divider(color: Colors.white.withValues(alpha: 0.2)),
+                child: Divider(
+                  color: isDark
+                      ? primaryColor.withValues(alpha: 0.3)
+                      : primaryColor.withValues(alpha: 0.2),
+                ),
               ),
             ],
           ),
@@ -1926,15 +1887,34 @@ $provider OAuth Configuration Required:
     _updateFormValidity();
   }
 
+  // ============================================================
+  // ✅ BUILD METHOD - COMPLETE WITH ALL VARIABLES USED
+  // ============================================================
+
   @override
   Widget build(BuildContext context) {
-    final bg = const Color(0xFF0F1820);
+    final isDark = context.isDarkMode;
+    final primaryColor = context.primaryColor;
+    final textColor = context.textColor;
+    final secondaryTextColor = context.secondaryTextColor;
+    final backgroundColor = context.backgroundColor;
+    final surfaceColor = context.surfaceColor;
+    final cardColor = context.cardColor;
+    final dividerColor = context.dividerColor;
+
+    final hintColor = isDark ? Colors.white54 : Colors.grey.shade600;
+    final borderColor = isDark ? Colors.white12 : Colors.grey.shade200;
+    final inputFillColor = isDark
+        ? Colors.white.withValues(alpha: 0.05)
+        : Colors.grey.shade50;
+    final inputBorderColor = isDark ? Colors.white24 : Colors.grey.shade300;
+
     final size = MediaQuery.of(context).size;
     final bool isWeb = size.width > 700;
     final double maxWidth = isWeb ? 480 : double.infinity;
 
     return Scaffold(
-      backgroundColor: bg,
+      backgroundColor: backgroundColor,
       body: SafeArea(
         child: Center(
           child: FadeTransition(
@@ -1951,9 +1931,14 @@ $provider OAuth Configuration Required:
                   ),
                   padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.03),
+                    color: cardColor,
                     borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Colors.white12),
+                    border: Border.all(color: borderColor),
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [cardColor, surfaceColor.withValues(alpha: 0.3)],
+                    ),
                   ),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
@@ -1967,9 +1952,9 @@ $provider OAuth Configuration Required:
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               IconButton(
-                                icon: const Icon(
+                                icon: Icon(
                                   Icons.arrow_back_ios_new_rounded,
-                                  color: Colors.white,
+                                  color: textColor,
                                   size: 22,
                                 ),
                                 onPressed: _handleBackButton,
@@ -1977,10 +1962,10 @@ $provider OAuth Configuration Required:
                               if (_hasSavedProfile)
                                 GestureDetector(
                                   onTap: () => context.push('/continue'),
-                                  child: const Text(
+                                  child: Text(
                                     'Use another account',
                                     style: TextStyle(
-                                      color: Colors.white70,
+                                      color: hintColor,
                                       fontSize: 14,
                                     ),
                                   ),
@@ -1997,7 +1982,7 @@ $provider OAuth Configuration Required:
                             mainAxisSize: MainAxisSize.min,
                             crossAxisAlignment: CrossAxisAlignment.center,
                             children: [
-                              // Logo
+                              // Logo Container
                               Container(
                                 margin: const EdgeInsets.only(
                                   top: 10,
@@ -2010,22 +1995,22 @@ $provider OAuth Configuration Required:
                                     decoration: BoxDecoration(
                                       shape: BoxShape.circle,
                                       border: Border.all(
-                                        color: Colors.white24,
+                                        color: borderColor,
                                         width: 2,
                                       ),
-                                      gradient: const LinearGradient(
+                                      gradient: LinearGradient(
                                         colors: [
-                                          Color(0xFF1877F2),
-                                          Color(0xFF0A58CA),
+                                          primaryColor,
+                                          primaryColor.withValues(alpha: 0.7),
                                         ],
                                         begin: Alignment.topCenter,
                                         end: Alignment.bottomCenter,
                                       ),
                                       boxShadow: [
                                         BoxShadow(
-                                          color: const Color(
-                                            0xFF1877F2,
-                                          ).withValues(alpha: 0.4),
+                                          color: primaryColor.withValues(
+                                            alpha: 0.4,
+                                          ),
                                           blurRadius: 20,
                                           spreadRadius: 5,
                                         ),
@@ -2053,142 +2038,148 @@ $provider OAuth Configuration Required:
                               ),
 
                               // Email Field
-                              TextField(
-                                controller: _emailController,
-                                style: const TextStyle(color: Colors.white),
-                                decoration: InputDecoration(
-                                  hintText: 'Email address',
-                                  hintStyle: const TextStyle(
-                                    color: Colors.white54,
-                                  ),
-                                  filled: true,
-                                  fillColor: Colors.white.withValues(
-                                    alpha: 0.05,
-                                  ),
-                                  contentPadding: const EdgeInsets.symmetric(
-                                    vertical: 16,
-                                    horizontal: 16,
-                                  ),
-                                  enabledBorder: OutlineInputBorder(
-                                    borderSide: const BorderSide(
-                                      color: Colors.white24,
-                                      width: 1.0,
+                              Container(
+                                decoration: BoxDecoration(
+                                  color: surfaceColor.withValues(alpha: 0.3),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: TextField(
+                                  controller: _emailController,
+                                  style: TextStyle(color: textColor),
+                                  decoration: InputDecoration(
+                                    hintText: 'Email address',
+                                    hintStyle: TextStyle(color: hintColor),
+                                    filled: true,
+                                    fillColor: inputFillColor,
+                                    contentPadding: const EdgeInsets.symmetric(
+                                      vertical: 16,
+                                      horizontal: 16,
                                     ),
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  focusedBorder: OutlineInputBorder(
-                                    borderSide: const BorderSide(
-                                      color: Color(0xFF1877F3),
-                                      width: 1.0,
+                                    enabledBorder: OutlineInputBorder(
+                                      borderSide: BorderSide(
+                                        color: inputBorderColor,
+                                        width: 1.0,
+                                      ),
+                                      borderRadius: BorderRadius.circular(8),
                                     ),
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  errorBorder: OutlineInputBorder(
-                                    borderSide: const BorderSide(
-                                      color: Colors.redAccent,
-                                      width: 1.0,
+                                    focusedBorder: OutlineInputBorder(
+                                      borderSide: BorderSide(
+                                        color: primaryColor,
+                                        width: 1.0,
+                                      ),
+                                      borderRadius: BorderRadius.circular(8),
                                     ),
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  focusedErrorBorder: OutlineInputBorder(
-                                    borderSide: const BorderSide(
-                                      color: Colors.redAccent,
-                                      width: 1.0,
+                                    errorBorder: OutlineInputBorder(
+                                      borderSide: const BorderSide(
+                                        color: Colors.redAccent,
+                                        width: 1.0,
+                                      ),
+                                      borderRadius: BorderRadius.circular(8),
                                     ),
-                                    borderRadius: BorderRadius.circular(8),
+                                    focusedErrorBorder: OutlineInputBorder(
+                                      borderSide: const BorderSide(
+                                        color: Colors.redAccent,
+                                        width: 1.0,
+                                      ),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    prefixIcon: Icon(
+                                      Icons.email_outlined,
+                                      color: hintColor,
+                                      size: 20,
+                                    ),
+                                    suffixIcon: _emailController.text.isEmpty
+                                        ? null
+                                        : _isValidEmail
+                                        ? const Icon(
+                                            Icons.check_circle,
+                                            color: Color(0xFF4CAF50),
+                                            size: 22,
+                                          )
+                                        : const Icon(
+                                            Icons.error_outline,
+                                            color: Colors.redAccent,
+                                            size: 22,
+                                          ),
+                                    errorText: _emailError,
                                   ),
-                                  prefixIcon: const Icon(
-                                    Icons.email_outlined,
-                                    color: Colors.white54,
-                                    size: 20,
-                                  ),
-                                  suffixIcon: _emailController.text.isEmpty
-                                      ? null
-                                      : _isValidEmail
-                                      ? const Icon(
-                                          Icons.check_circle,
-                                          color: Color(0xFF4CAF50),
-                                          size: 22,
-                                        )
-                                      : const Icon(
-                                          Icons.error_outline,
-                                          color: Colors.redAccent,
-                                          size: 22,
-                                        ),
-                                  errorText: _emailError,
                                 ),
                               ),
                               const SizedBox(height: 16),
 
                               // Password Field
-                              TextField(
-                                controller: _passwordController,
-                                obscureText: _obscurePassword,
-                                style: const TextStyle(color: Colors.white),
-                                decoration: InputDecoration(
-                                  hintText: 'Password',
-                                  hintStyle: const TextStyle(
-                                    color: Colors.white54,
-                                  ),
-                                  filled: true,
-                                  fillColor: Colors.white.withValues(
-                                    alpha: 0.05,
-                                  ),
-                                  contentPadding: const EdgeInsets.symmetric(
-                                    vertical: 16,
-                                    horizontal: 16,
-                                  ),
-                                  enabledBorder: OutlineInputBorder(
-                                    borderSide: const BorderSide(
-                                      color: Colors.white24,
-                                      width: 1.0,
+                              Container(
+                                decoration: BoxDecoration(
+                                  color: surfaceColor.withValues(alpha: 0.3),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: TextField(
+                                  controller: _passwordController,
+                                  obscureText: _obscurePassword,
+                                  style: TextStyle(color: textColor),
+                                  decoration: InputDecoration(
+                                    hintText: 'Password',
+                                    hintStyle: TextStyle(color: hintColor),
+                                    filled: true,
+                                    fillColor: inputFillColor,
+                                    contentPadding: const EdgeInsets.symmetric(
+                                      vertical: 16,
+                                      horizontal: 16,
                                     ),
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  focusedBorder: OutlineInputBorder(
-                                    borderSide: const BorderSide(
-                                      color: Color(0xFF1877F3),
-                                      width: 1.0,
+                                    enabledBorder: OutlineInputBorder(
+                                      borderSide: BorderSide(
+                                        color: inputBorderColor,
+                                        width: 1.0,
+                                      ),
+                                      borderRadius: BorderRadius.circular(8),
                                     ),
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  errorBorder: OutlineInputBorder(
-                                    borderSide: const BorderSide(
-                                      color: Colors.redAccent,
-                                      width: 1.0,
+                                    focusedBorder: OutlineInputBorder(
+                                      borderSide: BorderSide(
+                                        color: primaryColor,
+                                        width: 1.0,
+                                      ),
+                                      borderRadius: BorderRadius.circular(8),
                                     ),
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  focusedErrorBorder: OutlineInputBorder(
-                                    borderSide: const BorderSide(
-                                      color: Colors.redAccent,
-                                      width: 1.0,
+                                    errorBorder: OutlineInputBorder(
+                                      borderSide: const BorderSide(
+                                        color: Colors.redAccent,
+                                        width: 1.0,
+                                      ),
+                                      borderRadius: BorderRadius.circular(8),
                                     ),
-                                    borderRadius: BorderRadius.circular(8),
+                                    focusedErrorBorder: OutlineInputBorder(
+                                      borderSide: const BorderSide(
+                                        color: Colors.redAccent,
+                                        width: 1.0,
+                                      ),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    prefixIcon: Icon(
+                                      Icons.lock_outline_rounded,
+                                      color: hintColor,
+                                      size: 20,
+                                    ),
+                                    suffixIcon:
+                                        _passwordController.text.isNotEmpty
+                                        ? IconButton(
+                                            icon: Icon(
+                                              _obscurePassword
+                                                  ? Icons.visibility_off_rounded
+                                                  : Icons.visibility_rounded,
+                                              color: isDark
+                                                  ? Colors.white70
+                                                  : Colors.grey.shade600,
+                                              size: 22,
+                                            ),
+                                            onPressed: () => setState(
+                                              () => _obscurePassword =
+                                                  !_obscurePassword,
+                                            ),
+                                            splashRadius: 20,
+                                          )
+                                        : null,
+                                    errorText: _passwordError,
                                   ),
-                                  prefixIcon: const Icon(
-                                    Icons.lock_outline_rounded,
-                                    color: Colors.white54,
-                                    size: 20,
-                                  ),
-                                  suffixIcon:
-                                      _passwordController.text.isNotEmpty
-                                      ? IconButton(
-                                          icon: Icon(
-                                            _obscurePassword
-                                                ? Icons.visibility_off_rounded
-                                                : Icons.visibility_rounded,
-                                            color: Colors.white70,
-                                            size: 22,
-                                          ),
-                                          onPressed: () => setState(
-                                            () => _obscurePassword =
-                                                !_obscurePassword,
-                                          ),
-                                          splashRadius: 20,
-                                        )
-                                      : null,
-                                  errorText: _passwordError,
                                 ),
                               ),
                               const SizedBox(height: 16),
@@ -2198,17 +2189,13 @@ $provider OAuth Configuration Required:
                                 padding: const EdgeInsets.all(12),
                                 decoration: BoxDecoration(
                                   color: _rememberMe
-                                      ? const Color(
-                                          0xFF1877F3,
-                                        ).withValues(alpha: 0.1)
-                                      : Colors.transparent,
+                                      ? primaryColor.withValues(alpha: 0.1)
+                                      : surfaceColor.withValues(alpha: 0.5),
                                   borderRadius: BorderRadius.circular(8),
                                   border: Border.all(
                                     color: _rememberMe
-                                        ? const Color(
-                                            0xFF1877F3,
-                                          ).withValues(alpha: 0.3)
-                                        : Colors.white12,
+                                        ? primaryColor.withValues(alpha: 0.3)
+                                        : inputBorderColor,
                                   ),
                                 ),
                                 child: Row(
@@ -2221,7 +2208,7 @@ $provider OAuth Configuration Required:
                                           _userChangedRememberMe = true;
                                         });
                                       },
-                                      activeColor: const Color(0xFF1877F3),
+                                      activeColor: primaryColor,
                                       checkColor: Colors.white,
                                     ),
                                     Expanded(
@@ -2232,10 +2219,10 @@ $provider OAuth Configuration Required:
                                           Row(
                                             mainAxisSize: MainAxisSize.min,
                                             children: [
-                                              const Text(
+                                              Text(
                                                 'Remember Me',
                                                 style: TextStyle(
-                                                  color: Colors.white,
+                                                  color: textColor,
                                                   fontWeight: FontWeight.w500,
                                                 ),
                                               ),
@@ -2300,8 +2287,10 @@ $provider OAuth Configuration Required:
                                       ? loginUser
                                       : null,
                                   style: ElevatedButton.styleFrom(
-                                    backgroundColor: const Color(0xFF1877F3),
-                                    disabledBackgroundColor: Colors.white12,
+                                    backgroundColor: primaryColor,
+                                    disabledBackgroundColor: isDark
+                                        ? Colors.white12
+                                        : Colors.grey.shade300,
                                     foregroundColor: Colors.white,
                                     minimumSize: const Size(0, 50),
                                     padding: const EdgeInsets.symmetric(
@@ -2337,10 +2326,10 @@ $provider OAuth Configuration Required:
                               // Forgot Password
                               GestureDetector(
                                 onTap: () => context.push('/reset-password'),
-                                child: const Text(
+                                child: Text(
                                   'Forgotten password?',
                                   style: TextStyle(
-                                    color: Colors.white70,
+                                    color: hintColor,
                                     fontSize: 12,
                                     fontWeight: FontWeight.w500,
                                     decoration: TextDecoration.none,
@@ -2351,6 +2340,10 @@ $provider OAuth Configuration Required:
                               // OAuth Buttons
                               _buildOAuthButtons(),
                               const SizedBox(height: 24),
+
+                              // Divider
+                              Divider(color: dividerColor, thickness: 1),
+                              const SizedBox(height: 16),
 
                               // Privacy Links
                               Padding(
@@ -2363,7 +2356,7 @@ $provider OAuth Configuration Required:
                                     Text(
                                       'By continuing, you agree to our',
                                       style: TextStyle(
-                                        color: Colors.white60,
+                                        color: secondaryTextColor,
                                         fontSize: 11,
                                       ),
                                     ),
@@ -2374,7 +2367,7 @@ $provider OAuth Configuration Required:
                                       child: Text(
                                         'Terms of Service',
                                         style: TextStyle(
-                                          color: const Color(0xFF1877F3),
+                                          color: primaryColor,
                                           fontSize: 11,
                                           fontWeight: FontWeight.w500,
                                         ),
@@ -2383,7 +2376,7 @@ $provider OAuth Configuration Required:
                                     Text(
                                       'and',
                                       style: TextStyle(
-                                        color: Colors.white60,
+                                        color: secondaryTextColor,
                                         fontSize: 11,
                                       ),
                                     ),
@@ -2394,7 +2387,7 @@ $provider OAuth Configuration Required:
                                       child: Text(
                                         'Privacy Policy',
                                         style: TextStyle(
-                                          color: const Color(0xFF1877F3),
+                                          color: primaryColor,
                                           fontSize: 11,
                                           fontWeight: FontWeight.w500,
                                         ),
@@ -2419,7 +2412,10 @@ $provider OAuth Configuration Required:
   }
 }
 
-// ✅ FIXED: Social Login Button with proper overflow handling
+// ============================================================
+// ✅ SOCIAL LOGIN BUTTON - Using AppTheme
+// ============================================================
+
 class _SocialLoginButton extends StatelessWidget {
   final String provider;
   final VoidCallback onPressed;
@@ -2494,6 +2490,8 @@ class _SocialLoginButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = context.isDarkMode;
+    final primaryColor = context.primaryColor;
     final buttonColor = _getButtonColor();
 
     return SizedBox(
@@ -2501,13 +2499,19 @@ class _SocialLoginButton extends StatelessWidget {
       child: OutlinedButton(
         onPressed: isLoading ? null : onPressed,
         style: OutlinedButton.styleFrom(
-          side: BorderSide(color: buttonColor.withValues(alpha: 0.5)),
+          side: BorderSide(
+            color: isDark
+                ? primaryColor.withValues(alpha: 0.5)
+                : buttonColor.withValues(alpha: 0.5),
+          ),
           padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
           minimumSize: const Size(0, 48),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
           ),
-          backgroundColor: buttonColor.withValues(alpha: 0.1),
+          backgroundColor: isDark
+              ? primaryColor.withValues(alpha: 0.1)
+              : buttonColor.withValues(alpha: 0.1),
         ),
         child: isLoading
             ? SizedBox(
@@ -2515,7 +2519,9 @@ class _SocialLoginButton extends StatelessWidget {
                 width: 20,
                 child: CircularProgressIndicator(
                   strokeWidth: 2,
-                  valueColor: AlwaysStoppedAnimation<Color>(buttonColor),
+                  valueColor: AlwaysStoppedAnimation<Color>(
+                    isDark ? primaryColor : buttonColor,
+                  ),
                 ),
               )
             : Row(
@@ -2528,7 +2534,7 @@ class _SocialLoginButton extends StatelessWidget {
                     child: Text(
                       _getButtonText(),
                       style: TextStyle(
-                        color: buttonColor,
+                        color: isDark ? primaryColor : buttonColor,
                         fontWeight: FontWeight.w600,
                         fontSize: 14,
                       ),
