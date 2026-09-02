@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_application_1/extensions/context_extensions.dart';
 
 class NetworkBanner extends StatelessWidget {
   final bool offline;
@@ -12,13 +13,20 @@ class NetworkBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     if (!offline) return const SizedBox.shrink();
 
+    final isDark = context.isDarkMode;
+    final textColor = context.textColor;
+    final errorColor = context.errorColor;
+
     return Material(
       color: Colors.transparent,
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
-          color: Colors.red.shade700,
+          // ✅ Use error color from theme
+          color: isDark 
+              ? errorColor.withValues(alpha: 0.85)
+              : errorColor,
           boxShadow: [
             BoxShadow(
               color: Colors.black.withValues(alpha: 0.3),
@@ -28,13 +36,17 @@ class NetworkBanner extends StatelessWidget {
           ],
         ),
         child: Row(
-          children: const [
-            Icon(Icons.wifi_off, color: Colors.white, size: 20),
-            SizedBox(width: 10),
+          children: [
+            Icon(
+              Icons.wifi_off,
+              color: textColor,
+              size: 20,
+            ),
+            const SizedBox(width: 10),
             Text(
               "No Internet Connection",
               style: TextStyle(
-                color: Colors.white,
+                color: textColor,
                 fontSize: 14,
                 fontWeight: FontWeight.w600,
               ),
