@@ -161,6 +161,17 @@ class EnvironmentManager {
     }
   }
 
+    // String _getRedirectUrl() {
+  //   if (kReleaseMode) {
+  //     return 'com.yourcompany.mysalon://auth-callback';
+  //   } else if (kDebugMode) {
+  //     return kIsWeb
+  //         ? 'http://localhost:5000/auth/callback'
+  //         : 'com.yourcompany.mysalon.dev://auth-callback';
+  //   }
+  //   return 'com.yourcompany.mysalon.staging://auth-callback';
+  // }
+
   // Get all required redirect URLs for OAuth providers
   List<String> getRequiredRedirectUrls() {
     final urls = <String>{

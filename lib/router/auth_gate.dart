@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_application_1/screens/authantication/command/common_screen.dart';
+import 'package:flutter_application_1/screens/authantication/command/help_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class AuthGate {

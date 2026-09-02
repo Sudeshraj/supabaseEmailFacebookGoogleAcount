@@ -7,7 +7,7 @@ import 'package:app_links/app_links.dart';
 import 'package:flutter_application_1/firebase_options.dart';
 import 'package:flutter_application_1/screens/authantication/command/auth_callback_handler.dart';
 import 'package:flutter_application_1/screens/authantication/command/clear_data_screen.dart';
-import 'package:flutter_application_1/screens/authantication/command/common_screen.dart';
+import 'package:flutter_application_1/screens/authantication/command/help_screen.dart';
 import 'package:flutter_application_1/screens/authantication/command/data_consent_screen.dart';
 import 'package:flutter_application_1/screens/authantication/command/email_verify_checker.dart';
 import 'package:flutter_application_1/screens/authantication/command/policy_screen.dart';
