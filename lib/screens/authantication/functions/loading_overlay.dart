@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_application_1/extensions/context_extensions.dart';
 
 class LoadingOverlay {
   static bool _isDialogOpen = false;
@@ -18,6 +19,9 @@ class LoadingOverlay {
     if (_isDialogOpen) return; // Prevent multiple dialogs
     _isDialogOpen = true;
 
+    final isDark = context.isDarkMode;
+    final primaryColor = context.primaryColor;
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -32,19 +36,35 @@ class LoadingOverlay {
                 padding: const EdgeInsets.all(20),
                 margin: const EdgeInsets.symmetric(horizontal: 40),
                 decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.85),
+                  // ✅ Theme aware background
+                  color: isDark
+                      ? const Color(0xFF1E1E1E).withValues(alpha: 0.95)
+                      : Colors.black.withValues(alpha: 0.85),
                   borderRadius: BorderRadius.circular(16),
+                  // ✅ Subtle border for dark mode
+                  border: isDark
+                      ? Border.all(
+                          color: Colors.white.withValues(alpha: 0.1),
+                          width: 1,
+                        )
+                      : null,
                 ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const CircularProgressIndicator(color: Colors.white),
+                    // ✅ Primary color for progress indicator
+                    CircularProgressIndicator(
+                      color: isDark ? primaryColor : Colors.white,
+                    ),
                     const SizedBox(height: 20),
                     Text(
                       message,
                       textAlign: TextAlign.center,
-                      style: const TextStyle(
-                          color: Colors.white, fontSize: 16),
+                      style: TextStyle(
+                        // ✅ Theme aware text color
+                        color: isDark ? Colors.white : Colors.white,
+                        fontSize: 16,
+                      ),
                     ),
                   ],
                 ),
