@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:universal_platform/universal_platform.dart';
+import 'package:flutter_application_1/extensions/context_extensions.dart';
 
 class PermissionDialog extends StatelessWidget {
   final VoidCallback onAllow;
   final VoidCallback onDeny;
   final String? customTitle;
   final String? customMessage;
-  final bool showNotNow; // Option to hide "Not Now" button
+  final bool showNotNow;
 
   const PermissionDialog({
     super.key,
@@ -20,31 +21,38 @@ class PermissionDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Web platform එකට simple dialog එකක්
     if (UniversalPlatform.isWeb) {
       return _buildWebDialog(context);
     }
-
-    // Mobile platform එකට beautiful dialog එකක්
     return _buildMobileDialog(context);
   }
 
-  // ===============================================================
+  // ================================================================
   // WEB DIALOG
-  // ===============================================================
+  // ================================================================
   Widget _buildWebDialog(BuildContext context) {
+    final isDark = context.isDarkMode;
+    final primaryColor = context.primaryColor;
+    final textColor = context.textColor;
+    final secondaryTextColor = context.secondaryTextColor;
+    final backgroundColor = context.backgroundColor;
+
     return AlertDialog(
+      backgroundColor: isDark ? backgroundColor : Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
       title: Row(
         children: [
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
+              color: primaryColor.withValues(alpha: 0.1),
               shape: BoxShape.circle,
             ),
-            child: const Icon(
+            child: Icon(
               Icons.notifications_active,
-              color: Color(0xFFFF6B8B),
+              color: primaryColor,
               size: 24,
             ),
           ),
@@ -52,24 +60,38 @@ class PermissionDialog extends StatelessWidget {
           Expanded(
             child: Text(
               customTitle ?? 'Enable Notifications?',
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: textColor,
+              ),
             ),
           ),
         ],
       ),
       content: Text(
-        customMessage ?? 
+        customMessage ??
         'Get notified about new bookings, appointment reminders, and special offers!',
-        style: const TextStyle(fontSize: 14, height: 1.5),
+        style: TextStyle(
+          fontSize: 14,
+          height: 1.5,
+          color: secondaryTextColor,
+        ),
       ),
       actions: _buildActions(context),
     );
   }
 
-  // ===============================================================
+  // ================================================================
   // MOBILE DIALOG (Full)
-  // ===============================================================
+  // ================================================================
   Widget _buildMobileDialog(BuildContext context) {
+    final isDark = context.isDarkMode;
+    final primaryColor = context.primaryColor;
+    final textColor = context.textColor;
+    final secondaryTextColor = context.secondaryTextColor;
+    final cardColor = context.cardColor;
+
     return Dialog(
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(24),
@@ -79,7 +101,7 @@ class PermissionDialog extends StatelessWidget {
         padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(24),
-          color: Colors.white,
+          color: isDark ? cardColor : Colors.white,
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -88,15 +110,15 @@ class PermissionDialog extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFFFF6B8B), Color(0xFFFF8A9F)],
+                gradient: LinearGradient(
+                  colors: [primaryColor, primaryColor.withValues(alpha: 0.7)],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
                 shape: BoxShape.circle,
                 boxShadow: [
                   BoxShadow(
-                    color: const Color(0xFFFF6B8B).withValues(alpha: 0.3),
+                    color: primaryColor.withValues(alpha: 0.3),
                     blurRadius: 12,
                     offset: const Offset(0, 4),
                   ),
@@ -109,18 +131,18 @@ class PermissionDialog extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 20),
-            
+
             // Title
             Text(
               customTitle ?? '🔔 Stay Updated!',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 22,
                 fontWeight: FontWeight.bold,
-                color: Color(0xFF333333),
+                color: textColor,
               ),
             ),
             const SizedBox(height: 12),
-            
+
             // Message
             Text(
               customMessage ??
@@ -129,33 +151,38 @@ class PermissionDialog extends StatelessWidget {
               '• Appointment reminders\n'
               '• Special offers & promotions',
               textAlign: TextAlign.center,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 14,
-                color: Color(0xFF666666),
+                color: secondaryTextColor,
                 height: 1.5,
               ),
             ),
             const SizedBox(height: 24),
-            
+
             // Buttons
             Row(
               children: [
-                // Not Now button (if enabled)
                 if (showNotNow) ...[
                   Expanded(
                     child: OutlinedButton(
                       onPressed: onDeny,
                       style: OutlinedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 14),
-                        side: const BorderSide(color: Color(0xFFDDDDDD)),
+                        side: BorderSide(
+                          color: isDark
+                              ? Colors.grey[700]!
+                              : const Color(0xFFDDDDDD),
+                        ),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(30),
                         ),
+                        foregroundColor: isDark
+                            ? Colors.grey[400]
+                            : const Color(0xFF999999),
                       ),
                       child: const Text(
                         'Not Now',
                         style: TextStyle(
-                          color: Color(0xFF999999),
                           fontSize: 15,
                           fontWeight: FontWeight.w500,
                         ),
@@ -164,17 +191,16 @@ class PermissionDialog extends StatelessWidget {
                   ),
                   const SizedBox(width: 12),
                 ],
-                
-                // Allow button
+
                 Expanded(
                   child: ElevatedButton(
                     onPressed: onAllow,
                     style: ElevatedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 14),
-                      backgroundColor: const Color(0xFFFF6B8B),
+                      backgroundColor: primaryColor,
                       foregroundColor: Colors.white,
                       elevation: 2,
-                      shadowColor: const Color(0xFFFF6B8B).withValues(alpha: 0.3),
+                      shadowColor: primaryColor.withValues(alpha: 0.3),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(30),
                       ),
@@ -190,7 +216,7 @@ class PermissionDialog extends StatelessWidget {
                 ),
               ],
             ),
-            
+
             // iOS Settings note
             if (UniversalPlatform.isIOS)
               Padding(
@@ -201,14 +227,14 @@ class PermissionDialog extends StatelessWidget {
                     Icon(
                       Icons.info_outline,
                       size: 14,
-                      color: Colors.grey[400],
+                      color: isDark ? Colors.grey[500] : Colors.grey[400],
                     ),
                     const SizedBox(width: 4),
                     Text(
                       'You can change this later in Settings',
                       style: TextStyle(
                         fontSize: 11,
-                        color: Colors.grey[500],
+                        color: isDark ? Colors.grey[400] : Colors.grey[500],
                       ),
                     ),
                   ],
@@ -220,10 +246,13 @@ class PermissionDialog extends StatelessWidget {
     );
   }
 
-  // ===============================================================
+  // ================================================================
   // BUILD ACTIONS (for web)
-  // ===============================================================
+  // ================================================================
   List<Widget> _buildActions(BuildContext context) {
+    final isDark = context.isDarkMode;
+    final primaryColor = context.primaryColor;
+
     final List<Widget> actions = [];
 
     if (showNotNow) {
@@ -231,7 +260,7 @@ class PermissionDialog extends StatelessWidget {
         TextButton(
           onPressed: onDeny,
           style: TextButton.styleFrom(
-            foregroundColor: Colors.grey[600],
+            foregroundColor: isDark ? Colors.grey[400] : Colors.grey[600],
           ),
           child: const Text('Not Now'),
         ),
@@ -242,7 +271,7 @@ class PermissionDialog extends StatelessWidget {
       ElevatedButton(
         onPressed: onAllow,
         style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFFFF6B8B),
+          backgroundColor: primaryColor,
           foregroundColor: Colors.white,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(30),
@@ -256,9 +285,9 @@ class PermissionDialog extends StatelessWidget {
   }
 }
 
-// ===============================================================
+// ================================================================
 // EXTENSION METHODS FOR EASY USE
-// ===============================================================
+// ================================================================
 extension PermissionDialogExtension on BuildContext {
   Future<bool?> showPermissionDialog({
     String? title,

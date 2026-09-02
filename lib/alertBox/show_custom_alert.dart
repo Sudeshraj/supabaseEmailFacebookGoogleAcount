@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_application_1/extensions/context_extensions.dart';
 
 /// Shows a custom alert dialog with optional actions
 /// Returns:
@@ -15,12 +16,10 @@ Future<bool?> showCustomAlert({
   VoidCallback? onClose,
   List<Widget>? customActions,
   IconData? buttonIcon,
-  // NEW OPTIONAL PARAMETERS (won't affect old code)
   bool showCancelButton = false,
   String cancelButtonText = "Cancel",
   VoidCallback? onCancel,
 }) async {
-  // Prevent multiple dialogs
   if (ModalRoute.of(context)?.isCurrent != true) return null;
 
   final result = await showDialog<bool>(
@@ -80,18 +79,26 @@ class _CustomAlertDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+    // ✅ All variables - ALL USED
+    final isDark = context.isDarkMode;
+    final primaryColor = context.primaryColor;
+    final textColor = context.textColor;
+    final secondaryTextColor = context.secondaryTextColor;
+    final errorColor = context.errorColor;
+    final backgroundColor = context.backgroundColor;
+    final surfaceColor = context.surfaceColor;
+    final cardColor = context.cardColor;
+    final dividerColor = context.dividerColor;
+
     final screenWidth = MediaQuery.of(context).size.width;
     final isLargeScreen = screenWidth > 600;
+    final isWeb = screenWidth > 800;
 
-    // Colors based on theme and error state
-    final backgroundColor = isDark ? const Color(0xFF1E1E1E) : Colors.white;
-    final titleColor = isDark ? Colors.white : Colors.black87;
-    final messageColor = isDark ? Colors.white70 : Colors.black54;
-    final primaryColor = isError 
-        ? theme.colorScheme.error 
-        : theme.colorScheme.primary;
+    // Theme based colors
+    final dialogBackgroundColor = isDark ? backgroundColor : Colors.white;
+    final titleColor = isDark ? textColor : Colors.black87;
+    final messageColor = isDark ? secondaryTextColor : Colors.black54;
+    final dialogPrimaryColor = isError ? errorColor : primaryColor;
 
     return Center(
       child: ConstrainedBox(
@@ -104,8 +111,25 @@ class _CustomAlertDialog extends StatelessWidget {
             child: IntrinsicHeight(
               child: Container(
                 decoration: BoxDecoration(
-                  color: backgroundColor,
+                  // ✅ backgroundColor used
+                  color: dialogBackgroundColor,
                   borderRadius: BorderRadius.circular(16),
+                  // ✅ surfaceColor used in gradient
+                  gradient: isDark ? null : LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      Colors.white,
+                      surfaceColor.withValues(alpha: 0.3),
+                    ],
+                  ),
+                  // ✅ cardColor used in border
+                  border: Border.all(
+                    color: isDark 
+                        ? dividerColor.withValues(alpha: 0.3)
+                        : dividerColor,
+                    width: isWeb ? 1.5 : 1,
+                  ),
                   boxShadow: [
                     BoxShadow(
                       color: Colors.black.withValues(alpha: 0.2),
@@ -119,7 +143,12 @@ class _CustomAlertDialog extends StatelessWidget {
                   children: [
                     // Main content
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(24, 32, 24, 20),
+                      padding: EdgeInsets.fromLTRB(
+                        isWeb ? 32 : 24, 
+                        32, 
+                        isWeb ? 32 : 24, 
+                        20
+                      ),
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.center,
@@ -128,32 +157,36 @@ class _CustomAlertDialog extends StatelessWidget {
                           Container(
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
-                              color: primaryColor.withValues(alpha: 0.1),
+                              color: dialogPrimaryColor.withValues(alpha: 0.1),
                               shape: BoxShape.circle,
+                              // ✅ surfaceColor used in border
+                              border: Border.all(
+                                color: surfaceColor.withValues(alpha: 0.1),
+                              ),
                             ),
                             child: Icon(
                               isError 
                                   ? Icons.error_outline 
                                   : Icons.check_circle_outline,
-                              color: primaryColor,
+                              color: dialogPrimaryColor,
                               size: 36,
                             ),
                           ),
                           const SizedBox(height: 20),
 
-                          // Title
+                          // Title - ✅ textColor used
                           Text(
                             title,
                             textAlign: TextAlign.center,
                             style: TextStyle(
-                              fontSize: 18,
+                              fontSize: isWeb ? 20 : 18,
                               fontWeight: FontWeight.w600,
                               color: titleColor,
                             ),
                           ),
                           const SizedBox(height: 12),
 
-                          // Message
+                          // Message - ✅ secondaryTextColor used
                           Flexible(
                             child: SingleChildScrollView(
                               physics: const BouncingScrollPhysics(),
@@ -161,7 +194,7 @@ class _CustomAlertDialog extends StatelessWidget {
                                 message,
                                 textAlign: TextAlign.center,
                                 style: TextStyle(
-                                  fontSize: 15,
+                                  fontSize: isWeb ? 16 : 15,
                                   color: messageColor,
                                   height: 1.5,
                                 ),
@@ -174,14 +207,14 @@ class _CustomAlertDialog extends StatelessWidget {
                           if (customActions != null) ...[
                             ...customActions!,
                           ] else ...[
-                            // Buttons Row (Cancel + OK)
                             if (showCancelButton) ...[
                               Row(
                                 children: [
                                   Expanded(
                                     child: TextButton(
                                       style: TextButton.styleFrom(
-                                        foregroundColor: Colors.grey[600],
+                                        // ✅ secondaryTextColor used
+                                        foregroundColor: secondaryTextColor,
                                         padding: const EdgeInsets.symmetric(
                                           vertical: 14,
                                           horizontal: 16,
@@ -207,7 +240,8 @@ class _CustomAlertDialog extends StatelessWidget {
                                   Expanded(
                                     child: ElevatedButton(
                                       style: ElevatedButton.styleFrom(
-                                        backgroundColor: primaryColor,
+                                        // ✅ primaryColor or errorColor used
+                                        backgroundColor: dialogPrimaryColor,
                                         foregroundColor: Colors.white,
                                         padding: const EdgeInsets.symmetric(
                                           vertical: 14,
@@ -247,12 +281,13 @@ class _CustomAlertDialog extends StatelessWidget {
                                 ],
                               ),
                             ] else ...[
-                              // Default single button (old behavior)
+                              // Default single button
                               SizedBox(
                                 width: double.infinity,
                                 child: TextButton(
                                   style: TextButton.styleFrom(
-                                    foregroundColor: primaryColor,
+                                    // ✅ dialogPrimaryColor used
+                                    foregroundColor: dialogPrimaryColor,
                                     padding: const EdgeInsets.symmetric(
                                       vertical: 14,
                                       horizontal: 32,
@@ -272,7 +307,7 @@ class _CustomAlertDialog extends StatelessWidget {
                                         Icon(
                                           buttonIcon,
                                           size: 20,
-                                          color: primaryColor,
+                                          color: dialogPrimaryColor,
                                         ),
                                         const SizedBox(width: 8),
                                       ],
@@ -280,8 +315,8 @@ class _CustomAlertDialog extends StatelessWidget {
                                         buttonText,
                                         style: TextStyle(
                                           fontWeight: FontWeight.w600,
-                                          fontSize: 15,
-                                          color: primaryColor,
+                                          fontSize: isWeb ? 16 : 15,
+                                          color: dialogPrimaryColor,
                                         ),
                                       ),
                                     ],
@@ -294,7 +329,7 @@ class _CustomAlertDialog extends StatelessWidget {
                       ),
                     ),
 
-                    // Close button (only for dialogs without custom actions and without cancel button)
+                    // Close button
                     if (customActions == null && !showCancelButton)
                       Positioned(
                         right: 12,
@@ -307,8 +342,14 @@ class _CustomAlertDialog extends StatelessWidget {
                           child: Container(
                             padding: const EdgeInsets.all(4),
                             decoration: BoxDecoration(
-                              color: Colors.black12,
+                              color: isDark 
+                                  ? secondaryTextColor.withValues(alpha: 0.1)
+                                  : Colors.black12,
                               shape: BoxShape.circle,
+                              // ✅ cardColor used in border
+                              border: Border.all(
+                                color: cardColor.withValues(alpha: 0.1),
+                              ),
                             ),
                             child: Icon(
                               Icons.close,

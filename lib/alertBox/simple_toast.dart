@@ -1,19 +1,29 @@
 // utils/simple_toast.dart
 import 'package:flutter/material.dart';
+import 'package:flutter_application_1/extensions/context_extensions.dart';
 
 class SimpleToast {
   static void show({
     required BuildContext context,
     required String message,
     Duration duration = const Duration(seconds: 3),
-    Color backgroundColor = Colors.black87,
+    Color? backgroundColor,
     double borderRadius = 8.0,
     EdgeInsetsGeometry padding = const EdgeInsets.symmetric(
       horizontal: 16.0,
       vertical: 12.0,
     ),
-    TextStyle textStyle = const TextStyle(color: Colors.white, fontSize: 14.0),
+    TextStyle? textStyle,
   }) {
+    // ✅ Theme based colors
+    final isDark = context.isDarkMode;
+    final bgColor = backgroundColor ?? (isDark ? Colors.grey[800] : Colors.black87);
+    final textColor = isDark ? Colors.white : Colors.white;
+    final textStyleToUse = textStyle ?? TextStyle(
+      color: textColor,
+      fontSize: 14.0,
+    );
+
     // Remove any existing toast first
     _removeExistingToast(context);
 
@@ -31,7 +41,7 @@ class SimpleToast {
             child: Container(
               padding: padding,
               decoration: BoxDecoration(
-                color: backgroundColor,
+                color: bgColor,
                 borderRadius: BorderRadius.circular(borderRadius),
                 boxShadow: [
                   BoxShadow(
@@ -44,7 +54,7 @@ class SimpleToast {
               child: Center(
                 child: Text(
                   message,
-                  style: textStyle,
+                  style: textStyleToUse,
                   textAlign: TextAlign.center,
                 ),
               ),
@@ -61,7 +71,6 @@ class SimpleToast {
     overlay.insert(overlayEntry);
 
     // Auto remove after duration
-
     Future.delayed(duration, () {
       if (context.mounted) {
         _removeExistingToast(context);
@@ -78,51 +87,58 @@ class SimpleToast {
     }
   }
 
-  // ✅ Fix helper methods
+  // ✅ Info Toast - Theme aware
   static void info(BuildContext context, String message, {Duration? duration}) {
+    final isDark = context.isDarkMode;
     show(
       context: context,
       message: message,
-      backgroundColor: Colors.blue,
+      backgroundColor: isDark ? Colors.blue[700] : Colors.blue,
       duration: duration ?? const Duration(seconds: 4),
     );
   }
 
+  // ✅ Success Toast - Theme aware
   static void success(
     BuildContext context,
     String message, {
     Duration? duration,
   }) {
+    final isDark = context.isDarkMode;
     show(
       context: context,
       message: message,
-      backgroundColor: Colors.green,
+      backgroundColor: isDark ? Colors.green[700] : Colors.green,
       duration: duration ?? const Duration(seconds: 3),
     );
   }
 
+  // ✅ Error Toast - Theme aware
   static void error(
     BuildContext context,
     String message, {
     Duration? duration,
   }) {
+    final isDark = context.isDarkMode;
     show(
       context: context,
       message: message,
-      backgroundColor: Colors.red,
+      backgroundColor: isDark ? Colors.red[700] : Colors.red,
       duration: duration ?? const Duration(seconds: 5),
     );
   }
 
+  // ✅ Warning Toast - Theme aware
   static void warning(
     BuildContext context,
     String message, {
     Duration? duration,
   }) {
+    final isDark = context.isDarkMode;
     show(
       context: context,
       message: message,
-      backgroundColor: Colors.orange,
+      backgroundColor: isDark ? Colors.orange[700] : Colors.orange,
       duration: duration ?? const Duration(seconds: 4),
     );
   }
