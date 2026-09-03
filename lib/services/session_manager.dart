@@ -4,7 +4,7 @@ import 'package:flutter_application_1/utils/app_version.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:flutter/foundation.dart' show kDebugMode, debugPrint, kIsWeb;
+import 'package:flutter/foundation.dart' show kDebugMode, debugPrint;
 
 class SessionManager {
   // Keys
