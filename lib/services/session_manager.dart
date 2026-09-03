@@ -168,7 +168,7 @@ class SessionManager {
   // ============================================================
   // THEME PREFERENCES
   // ============================================================
-  
+
   static const String _keyThemeMode = 'theme_mode';
 
   static Future<void> saveThemeMode(String mode) async {
@@ -179,8 +179,8 @@ class SessionManager {
   static Future<String> getThemeMode() async {
     return _prefs.getString(_keyThemeMode) ?? 'system';
   }
- // ============================================================
- 
+  // ============================================================
+
   static const String _keySalonId = 'salon_id';
   static const String _keySalonName = 'salon_name';
 
@@ -1658,20 +1658,22 @@ class SessionManager {
 
   /// ✅ Quick-switch logout (side-menu "Logout" button).
   ///
-  /// Web: uses Supabase's local-scope signOut() as intended - this
-  /// works correctly on web (verified no token invalidation issue).
+  /// Deliberately does NOT call Supabase's signOut() at all - on THIS
+  /// project, even scope: SignOutScope.local was empirically found to
+  /// invalidate the refresh token server-side, on BOTH web and mobile
+  /// (confirmed via testing - the initial assumption that web's local
+  /// scope was safe turned out to be wrong for this Supabase setup).
+  /// Calling signOut() here broke the "tap your profile to sign back
+  /// in" flow entirely.
   ///
-  /// Mobile: deliberately skips signOut() entirely. Testing confirmed
-  /// that even scope: SignOutScope.local invalidates the refresh
-  /// token on Android/iOS in this environment (likely a token-rotation
-  /// race triggered through the native secure-storage/platform-channel
-  /// path), which broke the "tap your profile to sign back in" flow.
   /// Supabase's own client-side session is simply left untouched;
-  /// AppState clears its own in-memory "logged in" state instead.
+  /// AppState clears its own in-memory "logged in" state instead (see
+  /// AppState.logoutForContinue(), which does NOT call refreshState()
+  /// for the same reason).
   ///
-  /// Either way, no password is ever stored (only a revocable refresh
-  /// token in encrypted secure storage), and a full, permanent,
-  /// token-revoking logout is always available via logoutUser().
+  /// No password is ever stored (only a revocable refresh token in
+  /// encrypted secure storage), and a full, permanent, token-revoking
+  /// logout is always available via logoutUser() (Settings screen).
   static Future<void> logoutForContinue() async {
     try {
       final supabase = Supabase.instance.client;
@@ -1696,21 +1698,12 @@ class SessionManager {
       }
 
       // ═══════════════════════════════════════════════════════════
-      // 🔥 PLATFORM-CONDITIONAL: Web එකේ local-scope signOut() එක
-      // safely වැඩ කරනවා (verified), ඒ නිසා token එකම properly
-      // revoke කරනවා - වඩා secure. Mobile එකේදී විතරයි skip
-      // කරන්නේ (empirically confirmed token-invalidation bug එකක්
-      // නිසා).
+      // 🔥 FIX: signOut() කිසිසේත් call කරන්නේ නෑ - web/mobile
+      // දෙකෙටම. (කලින් තිබ්බ kIsWeb-based platform check එකම
+      // අයින් කළා - web එකෙත් local scope එකෙන්ම token invalidate
+      // වෙනවා කියලා testing එකෙන්ම confirm උනා.)
       // ═══════════════════════════════════════════════════════════
-      if (kIsWeb) {
-        await supabase.auth.signOut();
-        debugPrint('✅ Web: local-scope signOut() completed');
-      } else {
-        debugPrint(
-          '⏭️ Mobile: skipping signOut() to avoid token-invalidation bug '
-          '(Supabase client session left intact for later restore)',
-        );
-      }
+      // await supabase.auth.signOut(scope: SignOutScope.local);  ← REMOVED (all platforms)
 
       await _prefs.remove(_keyCurrentRole);
 
