@@ -169,112 +169,127 @@ class _DataConsentScreenState extends State<DataConsentScreen>
 
     return Scaffold(
       backgroundColor: backgroundColor,
+      // ✅ FIX: LayoutBuilder + SingleChildScrollView so the whole card can
+      // scroll and never overflow, regardless of screen height or content size.
       body: SafeArea(
-        child: Center(
-          child: FadeTransition(
-            opacity: _fadeAnimation,
-            child: ScaleTransition(
-              scale: _scaleAnimation,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return SingleChildScrollView(
+              physics: const BouncingScrollPhysics(),
               child: ConstrainedBox(
-                constraints: BoxConstraints(maxWidth: maxWidth),
-                child: Container(
-                  height: size.height - 40,
-                  margin: const EdgeInsets.symmetric(
-                    horizontal: 24,
-                    vertical: 20,
-                  ),
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: isDark
-                        ? Colors.white.withValues(alpha: 0.03)
-                        : Colors.grey.shade50,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                      color: isDark ? Colors.white12 : Colors.grey.shade200,
-                    ),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Header with Back Button
-                      Row(
-                        children: [
-                          IconButton(
-                            icon: Icon(
-                              Icons.arrow_back_ios_new_rounded,
-                              color: textColor,
-                              size: 22,
-                            ),
-                            onPressed: _isLoading ? null : _handleBackButton,
+                // keeps the card vertically centered when content is shorter
+                // than the screen, but allows it to grow + scroll when taller.
+                constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                child: Center(
+                  child: FadeTransition(
+                    opacity: _fadeAnimation,
+                    child: ScaleTransition(
+                      scale: _scaleAnimation,
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(maxWidth: maxWidth),
+                        child: Container(
+                          // ❌ REMOVED: fixed `height: size.height - 40`
+                          // That forced an exact height, and once padding +
+                          // header + banner + buttons were added, there
+                          // wasn't enough room left → overflow.
+                          margin: const EdgeInsets.symmetric(
+                            horizontal: 24,
+                            vertical: 20,
                           ),
-                          const SizedBox(width: 8),
-                          Text(
-                            'Complete Registration',
-                            style: TextStyle(
-                              color: textColor,
-                              fontSize: 18,
-                              fontWeight: FontWeight.w500,
+                          padding: const EdgeInsets.all(20),
+                          decoration: BoxDecoration(
+                            color: isDark
+                                ? Colors.white.withValues(alpha: 0.03)
+                                : Colors.grey.shade50,
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(
+                              color: isDark
+                                  ? Colors.white12
+                                  : Colors.grey.shade200,
                             ),
                           ),
-                        ],
-                      ),
-
-                      const SizedBox(height: 20),
-
-                      // Account Info Banner
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: primaryColor.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                            color: primaryColor.withValues(alpha: 0.3),
-                          ),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.email_outlined,
-                              color: primaryColor,
-                              size: 18,
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // Header with Back Button
+                              Row(
                                 children: [
-                                  Text(
-                                    'Registering email:',
-                                    style: TextStyle(
-                                      color: secondaryTextColor,
-                                      fontSize: 12,
+                                  IconButton(
+                                    icon: Icon(
+                                      Icons.arrow_back_ios_new_rounded,
+                                      color: textColor,
+                                      size: 22,
                                     ),
+                                    onPressed:
+                                        _isLoading ? null : _handleBackButton,
                                   ),
+                                  const SizedBox(width: 8),
                                   Text(
-                                    widget.email,
+                                    'Complete Registration',
                                     style: TextStyle(
                                       color: textColor,
-                                      fontSize: 14,
+                                      fontSize: 18,
                                       fontWeight: FontWeight.w500,
                                     ),
-                                    overflow: TextOverflow.ellipsis,
                                   ),
                                 ],
                               ),
-                            ),
-                          ],
-                        ),
-                      ),
 
-                      const SizedBox(height: 20),
+                              const SizedBox(height: 20),
 
-                      // Scrollable Content
-                      Expanded(
-                        child: SingleChildScrollView(
-                          physics: const BouncingScrollPhysics(),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
+                              // Account Info Banner
+                              Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: primaryColor.withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color:
+                                        primaryColor.withValues(alpha: 0.3),
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.email_outlined,
+                                      color: primaryColor,
+                                      size: 18,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            'Registering email:',
+                                            style: TextStyle(
+                                              color: secondaryTextColor,
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                          Text(
+                                            widget.email,
+                                            style: TextStyle(
+                                              color: textColor,
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+
+                              const SizedBox(height: 20),
+
+                              // Main scrollable content
+                              // ❌ REMOVED: Expanded(SingleChildScrollView(...))
+                              // Not needed anymore since the whole card scrolls.
                               Text(
                                 'Final Step: Review & Accept',
                                 style: TextStyle(
@@ -481,7 +496,8 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                                   color: successColor.withValues(alpha: 0.1),
                                   borderRadius: BorderRadius.circular(12),
                                   border: Border.all(
-                                    color: successColor.withValues(alpha: 0.3),
+                                    color:
+                                        successColor.withValues(alpha: 0.3),
                                   ),
                                 ),
                                 child: Column(
@@ -547,7 +563,8 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                                   color: Colors.orange.withValues(alpha: 0.1),
                                   borderRadius: BorderRadius.circular(12),
                                   border: Border.all(
-                                    color: Colors.orange.withValues(alpha: 0.3),
+                                    color:
+                                        Colors.orange.withValues(alpha: 0.3),
                                   ),
                                 ),
                                 child: Column(
@@ -583,114 +600,119 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                                 ),
                               ),
 
-                              const SizedBox(height: 40),
-                            ],
-                          ),
-                        ),
-                      ),
+                              const SizedBox(height: 32),
 
-                      // Error Message (if any)
-                      if (_errorMessage != null) ...[
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: errorColor.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                              color: errorColor.withValues(alpha: 0.3),
-                            ),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(
-                                Icons.error_outline,
-                                color: errorColor,
-                                size: 16,
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  _errorMessage!,
-                                  style: TextStyle(
-                                    color: errorColor,
-                                    fontSize: 13,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                      ],
-
-                      // Continue Button
-                      SizedBox(
-                        width: double.infinity,
-                        height: 52,
-                        child: ElevatedButton(
-                          onPressed: _isContinueEnabled
-                              ? _handleContinue
-                              : null,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: _isContinueEnabled
-                                ? primaryColor
-                                : (isDark
-                                    ? Colors.white12
-                                    : Colors.grey.shade300),
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                          ),
-                          child: _isLoading
-                              ? SizedBox(
-                                  width: 22,
-                                  height: 22,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: Colors.white,
-                                  ),
-                                )
-                              : Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    const Icon(Icons.check_circle, size: 20),
-                                    const SizedBox(width: 8),
-                                    Text(
-                                      'Create Account',
-                                      style: TextStyle(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w600,
-                                      ),
+                              // Error Message (if any)
+                              if (_errorMessage != null) ...[
+                                Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: errorColor.withValues(alpha: 0.1),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                      color:
+                                          errorColor.withValues(alpha: 0.3),
                                     ),
-                                  ],
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.error_outline,
+                                        color: errorColor,
+                                        size: 16,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          _errorMessage!,
+                                          style: TextStyle(
+                                            color: errorColor,
+                                            fontSize: 13,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                        ),
-                      ),
+                                const SizedBox(height: 16),
+                              ],
 
-                      const SizedBox(height: 16),
+                              // Continue Button
+                              SizedBox(
+                                width: double.infinity,
+                                height: 52,
+                                child: ElevatedButton(
+                                  onPressed: _isContinueEnabled
+                                      ? _handleContinue
+                                      : null,
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: _isContinueEnabled
+                                        ? primaryColor
+                                        : (isDark
+                                            ? Colors.white12
+                                            : Colors.grey.shade300),
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 16),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                  ),
+                                  child: _isLoading
+                                      ? const SizedBox(
+                                          width: 22,
+                                          height: 22,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            color: Colors.white,
+                                          ),
+                                        )
+                                      : Row(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.center,
+                                          children: [
+                                            const Icon(Icons.check_circle,
+                                                size: 20),
+                                            const SizedBox(width: 8),
+                                            const Text(
+                                              'Create Account',
+                                              style: TextStyle(
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                ),
+                              ),
 
-                      // Cancel Button
-                      Center(
-                        child: TextButton(
-                          onPressed: _isLoading ? null : _handleBackButton,
-                          child: Text(
-                            'Cancel Registration',
-                            style: TextStyle(
-                              color: secondaryTextColor,
-                              fontSize: 14,
-                            ),
+                              const SizedBox(height: 16),
+
+                              // Cancel Button
+                              Center(
+                                child: TextButton(
+                                  onPressed:
+                                      _isLoading ? null : _handleBackButton,
+                                  child: Text(
+                                    'Cancel Registration',
+                                    style: TextStyle(
+                                      color: secondaryTextColor,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ),
-                    ],
+                    ),
                   ),
                 ),
               ),
-            ),
-          ),
+            );
+          },
         ),
       ),
     );

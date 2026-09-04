@@ -22,9 +22,10 @@ class HelpScreen extends StatefulWidget {
 class _HelpScreenState extends State<HelpScreen> {
   String _selectedLanguage = 'en';
 
-  // ✅ API 36: Responsive variables
+  // ✅ Responsive breakpoints
   bool _isTablet = false;
   bool _isWeb = false;
+  bool _isSmallPhone = false; // < 360 logical px wide
 
   // ============== TRANSLATIONS ==============
   final Map<String, Map<String, String>> _strings = {
@@ -223,11 +224,15 @@ class _HelpScreenState extends State<HelpScreen> {
     final size = MediaQuery.of(context).size;
     final isTablet = size.shortestSide >= 600;
     final isWeb = size.width > 800;
+    final isSmallPhone = size.width < 360;
 
-    if (_isTablet != isTablet || _isWeb != isWeb) {
+    if (_isTablet != isTablet ||
+        _isWeb != isWeb ||
+        _isSmallPhone != isSmallPhone) {
       setState(() {
         _isTablet = isTablet;
         _isWeb = isWeb;
+        _isSmallPhone = isSmallPhone;
       });
     }
   }
@@ -262,7 +267,7 @@ class _HelpScreenState extends State<HelpScreen> {
     String subject = '',
     String body = '',
   }) async {
-    debugPrint(' Sending email...');
+    debugPrint('Sending email...');
 
     if (kIsWeb) {
       try {
@@ -301,7 +306,7 @@ class _HelpScreenState extends State<HelpScreen> {
 
   // ============== PHONE CALL ==============
   Future<void> _makePhoneCall(String phoneNumber) async {
-    debugPrint('📞 Calling...');
+    debugPrint('Calling...');
 
     if (kIsWeb) {
       _showWebCallDialog(phoneNumber);
@@ -354,6 +359,19 @@ class _HelpScreenState extends State<HelpScreen> {
     }
   }
 
+  // ============== DIALOG SHELL (fixes bottom overflow) ==============
+  // Every dialog's content now goes through this helper so it scrolls
+  // instead of overflowing on short / landscape screens, and gets a
+  // max-height clamp so it never tries to be taller than the viewport.
+  Widget _scrollableDialogContent(Widget child) {
+    return ConstrainedBox(
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.7,
+      ),
+      child: SingleChildScrollView(child: child),
+    );
+  }
+
   // ============== DIALOGS ==============
   void _showEmailCopyDialog(String email) {
     showDialog(
@@ -368,49 +386,49 @@ class _HelpScreenState extends State<HelpScreen> {
             fontWeight: FontWeight.bold,
           ),
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              kIsWeb
-                  ? 'Cannot open email from web. Copy and send manually:'
-                  : 'Cannot open email app. Copy and send manually:',
-              style: TextStyle(
-                color: context.secondaryTextColor,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 20),
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: context.isDarkMode
-                    ? Colors.white.withValues(alpha: 0.05)
-                    : Colors.grey.shade50,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: Colors.blueAccent.withValues(alpha: 0.3),
-                ),
-              ),
-              child: SelectableText(
-                email,
-                style: TextStyle(
-                  color: Colors.blueAccent,
-                  fontSize: 16,
-                ),
+        content: _scrollableDialogContent(
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                kIsWeb
+                    ? 'Cannot open email from web. Copy and send manually:'
+                    : 'Cannot open email app. Copy and send manually:',
+                style: TextStyle(color: context.secondaryTextColor),
                 textAlign: TextAlign.center,
               ),
-            ),
-          ],
+              const SizedBox(height: 20),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: context.isDarkMode
+                      ? Colors.white.withValues(alpha: 0.05)
+                      : Colors.grey.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: Colors.blueAccent.withValues(alpha: 0.3),
+                  ),
+                ),
+                child: SelectableText(
+                  email,
+                  style: const TextStyle(
+                    color: Colors.blueAccent,
+                    fontSize: 16,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ],
+          ),
         ),
+        actionsPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         actions: [
           TextButton(
             onPressed: () => context.pop(),
             child: Text(
               t('close'),
-              style: TextStyle(
-                color: context.secondaryTextColor,
-              ),
+              style: TextStyle(color: context.secondaryTextColor),
             ),
           ),
           ElevatedButton.icon(
@@ -419,7 +437,7 @@ class _HelpScreenState extends State<HelpScreen> {
               _showSnackBar(t('success'), 'Email copied', Colors.green);
             },
             icon: const Icon(Icons.copy, size: 18),
-            label: Text('Copy Email'),
+            label: const Text('Copy Email'),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.blueAccent,
               foregroundColor: Colors.white,
@@ -448,45 +466,48 @@ class _HelpScreenState extends State<HelpScreen> {
             fontWeight: FontWeight.bold,
           ),
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              message,
-              style: TextStyle(
-                color: context.secondaryTextColor,
+        content: _scrollableDialogContent(
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                message,
+                style: TextStyle(color: context.secondaryTextColor),
+                textAlign: TextAlign.center,
               ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 20),
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: context.isDarkMode
-                    ? Colors.white.withValues(alpha: 0.05)
-                    : Colors.grey.shade50,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.green.withValues(alpha: 0.3)),
-              ),
-              child: SelectableText(
-                phoneNumber,
-                style: TextStyle(
-                  color: Colors.green,
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
+              const SizedBox(height: 20),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: context.isDarkMode
+                      ? Colors.white.withValues(alpha: 0.05)
+                      : Colors.grey.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: Colors.green.withValues(alpha: 0.3),
+                  ),
+                ),
+                child: SelectableText(
+                  phoneNumber,
+                  style: const TextStyle(
+                    color: Colors.green,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  textAlign: TextAlign.center,
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
+        actionsPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         actions: [
           TextButton(
             onPressed: () => context.pop(),
             child: Text(
               t('close'),
-              style: TextStyle(
-                color: context.secondaryTextColor,
-              ),
+              style: TextStyle(color: context.secondaryTextColor),
             ),
           ),
           ElevatedButton.icon(
@@ -495,7 +516,7 @@ class _HelpScreenState extends State<HelpScreen> {
               _showSnackBar(t('success'), 'Number copied', Colors.green);
             },
             icon: const Icon(Icons.copy, size: 18),
-            label: Text('Copy Number'),
+            label: const Text('Copy Number'),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.green,
               foregroundColor: Colors.white,
@@ -518,125 +539,157 @@ class _HelpScreenState extends State<HelpScreen> {
             fontWeight: FontWeight.bold,
           ),
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.green.withValues(alpha: 0.1),
-                  shape: BoxShape.circle,
+        content: _scrollableDialogContent(
+          // ✅ Explicit opaque color (not MaterialType.transparency) gives the
+          // ListTile ink splash a real surface to paint on.
+          Material(
+            color: context.backgroundColor,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.green.withValues(alpha: 0.1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.call,
+                      color: Colors.green,
+                      size: 24,
+                    ),
+                  ),
+                  title: Text(
+                    'Call Now',
+                    style: TextStyle(color: context.textColor),
+                  ),
+                  subtitle: Text(
+                    phoneNumber,
+                    style: TextStyle(color: context.secondaryTextColor),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  onTap: () {
+                    context.pop();
+                    _makePhoneCall(phoneNumber);
+                  },
                 ),
-                child: const Icon(Icons.call, color: Colors.green, size: 24),
-              ),
-              title: Text(
-                'Call Now',
-                style: TextStyle(
-                  color: context.textColor,
+                const Divider(color: Colors.white24),
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.withValues(alpha: 0.1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.copy, color: Colors.blue, size: 24),
+                  ),
+                  title: Text(
+                    'Copy Number',
+                    style: TextStyle(color: context.textColor),
+                  ),
+                  subtitle: Text(
+                    phoneNumber,
+                    style: TextStyle(color: context.secondaryTextColor),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  onTap: () {
+                    context.pop();
+                    _showSnackBar(t('success'), 'Number copied', Colors.green);
+                  },
                 ),
-              ),
-              subtitle: Text(
-                phoneNumber,
-                style: TextStyle(
-                  color: context.secondaryTextColor,
-                ),
-              ),
-              onTap: () {
-                context.pop();
-                _makePhoneCall(phoneNumber);
-              },
+              ],
             ),
-            const Divider(color: Colors.white24),
-            ListTile(
-              leading: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.blue.withValues(alpha: 0.1),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.copy, color: Colors.blue, size: 24),
-              ),
-              title: Text(
-                'Copy Number',
-                style: TextStyle(
-                  color: context.textColor,
-                ),
-              ),
-              subtitle: Text(
-                phoneNumber,
-                style: TextStyle(
-                  color: context.secondaryTextColor,
-                ),
-              ),
-              onTap: () {
-                context.pop();
-                _showSnackBar(t('success'), 'Number copied', Colors.green);
-              },
-            ),
-          ],
+          ),
         ),
       ),
     );
   }
 
   void _showChatDialog() {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isWeb = screenWidth > 700;
+    final dialogWidth = isWeb ? 420.0 : screenWidth * 0.9;
+
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => Dialog(
         backgroundColor: context.backgroundColor,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(
-          'Contact Support',
-          style: TextStyle(
-            color: context.textColor,
-            fontWeight: FontWeight.bold,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: dialogWidth,
+            maxHeight: MediaQuery.of(context).size.height * 0.8,
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Contact Support',
+                  style: TextStyle(
+                    color: context.textColor,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 18,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Flexible(
+                  child: SingleChildScrollView(
+                    child: Material(
+                      color: context.backgroundColor,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _buildChatOption(
+                            Icons.message,
+                            Colors.green,
+                            'WhatsApp',
+                            'Quick response',
+                            _openWhatsApp,
+                          ),
+                          _buildChatOption(
+                            Icons.facebook,
+                            Colors.blue,
+                            'Messenger',
+                            'Facebook',
+                            _openMessenger,
+                          ),
+                          _buildChatOption(
+                            Icons.telegram,
+                            Colors.lightBlue,
+                            'Telegram',
+                            'Secure chat',
+                            _openTelegram,
+                          ),
+                          _buildChatOption(
+                            Icons.email,
+                            Colors.orange,
+                            t('email'),
+                            'support@mysalon.com',
+                            () => _sendEmail(),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: () => context.pop(),
+                    child: Text(
+                      t('close'),
+                      style: TextStyle(color: context.secondaryTextColor),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _buildChatOption(
-              Icons.message,
-              Colors.green,
-              'WhatsApp',
-              'Quick response',
-              _openWhatsApp,
-            ),
-            _buildChatOption(
-              Icons.facebook,
-              Colors.blue,
-              'Messenger',
-              'Facebook',
-              _openMessenger,
-            ),
-            _buildChatOption(
-              Icons.telegram,
-              Colors.lightBlue,
-              'Telegram',
-              'Secure chat',
-              _openTelegram,
-            ),
-            _buildChatOption(
-              Icons.email,
-              Colors.orange,
-              t('email'),
-              'support@mysalon.com',
-              () => _sendEmail(),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => context.pop(),
-            child: Text(
-              t('close'),
-              style: TextStyle(
-                color: context.secondaryTextColor,
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -659,17 +712,13 @@ class _HelpScreenState extends State<HelpScreen> {
       ),
       title: Text(
         title,
-        style: TextStyle(
-          color: context.textColor,
-          fontWeight: FontWeight.w500,
-        ),
+        style: TextStyle(color: context.textColor, fontWeight: FontWeight.w500),
+        overflow: TextOverflow.ellipsis,
       ),
       subtitle: Text(
         subtitle,
-        style: TextStyle(
-          color: context.secondaryTextColor,
-          fontSize: 12,
-        ),
+        style: TextStyle(color: context.secondaryTextColor, fontSize: 12),
+        overflow: TextOverflow.ellipsis,
       ),
       onTap: () {
         context.pop();
@@ -694,57 +743,54 @@ class _HelpScreenState extends State<HelpScreen> {
             fontWeight: FontWeight.bold,
           ),
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: titleController,
-              style: TextStyle(color: context.textColor),
-              decoration: InputDecoration(
-                hintText: t('enter_title'),
-                hintStyle: TextStyle(
-                  color: context.secondaryTextColor,
-                ),
-                filled: true,
-                fillColor: context.isDarkMode
-                    ? Colors.white.withValues(alpha: 0.08)
-                    : Colors.grey.shade50,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide.none,
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: descController,
-              style: TextStyle(color: context.textColor),
-              maxLines: 3,
-              decoration: InputDecoration(
-                hintText: t('enter_description'),
-                hintStyle: TextStyle(
-                  color: context.secondaryTextColor,
-                ),
-                filled: true,
-                fillColor: context.isDarkMode
-                    ? Colors.white.withValues(alpha: 0.08)
-                    : Colors.grey.shade50,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide.none,
+        content: _scrollableDialogContent(
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: titleController,
+                style: TextStyle(color: context.textColor),
+                decoration: InputDecoration(
+                  hintText: t('enter_title'),
+                  hintStyle: TextStyle(color: context.secondaryTextColor),
+                  filled: true,
+                  fillColor: context.isDarkMode
+                      ? Colors.white.withValues(alpha: 0.08)
+                      : Colors.grey.shade50,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide.none,
+                  ),
                 ),
               ),
-            ),
-          ],
+              const SizedBox(height: 16),
+              TextField(
+                controller: descController,
+                style: TextStyle(color: context.textColor),
+                maxLines: 3,
+                decoration: InputDecoration(
+                  hintText: t('enter_description'),
+                  hintStyle: TextStyle(color: context.secondaryTextColor),
+                  filled: true,
+                  fillColor: context.isDarkMode
+                      ? Colors.white.withValues(alpha: 0.08)
+                      : Colors.grey.shade50,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
+        actionsPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         actions: [
           TextButton(
             onPressed: () => context.pop(),
             child: Text(
               t('cancel'),
-              style: TextStyle(
-                color: context.secondaryTextColor,
-              ),
+              style: TextStyle(color: context.secondaryTextColor),
             ),
           ),
           ElevatedButton(
@@ -784,7 +830,7 @@ class _HelpScreenState extends State<HelpScreen> {
       });
       debugPrint('Report saved');
     } catch (e) {
-      debugPrint(' Error: $e');
+      debugPrint('Error: $e');
     }
   }
 
@@ -800,7 +846,26 @@ class _HelpScreenState extends State<HelpScreen> {
   }
 
   // ============== LANGUAGE SELECTOR ==============
+  // ✅ FIX for "RenderFlex overflowed on the right":
+  // The 3-way pill (EN / සිං / த) is only shown on tablet/web where there's
+  // room. On phones it collapses to a single compact icon button with a
+  // popup menu, so the AppBar row never runs out of horizontal space.
   Widget _buildLanguageSelector() {
+    final bool useCompact = !_isWeb && !_isTablet;
+
+    if (useCompact) {
+      return PopupMenuButton<String>(
+        tooltip: 'Language',
+        onSelected: (lang) => setState(() => _selectedLanguage = lang),
+        icon: Icon(Icons.language, color: context.textColor),
+        itemBuilder: (context) => const [
+          PopupMenuItem(value: 'en', child: Text('EN — English')),
+          PopupMenuItem(value: 'si', child: Text('සිං — සිංහල')),
+          PopupMenuItem(value: 'ta', child: Text('த — தமிழ்')),
+        ],
+      );
+    }
+
     return Container(
       decoration: BoxDecoration(
         color: context.isDarkMode
@@ -866,15 +931,13 @@ class _HelpScreenState extends State<HelpScreen> {
   }
 
   // ============================================================
-  // ✅ BUILD METHOD - FIXED (No unused variables)
+  // ✅ BUILD METHOD
   // ============================================================
 
   @override
   Widget build(BuildContext context) {
-    // ✅ Only variables that are actually used
     final backgroundColor = context.backgroundColor;
     final textColor = context.textColor;
-    // ❌ isDark, secondaryTextColor, primaryColor - not needed here
 
     Color screenColor = Colors.blue;
     IconData screenIcon = Icons.help_outline;
@@ -890,11 +953,16 @@ class _HelpScreenState extends State<HelpScreen> {
 
     _checkScreenSize();
 
+    // ✅ Responsive content width: cap the reading width on web/tablet so
+    // things don't stretch awkwardly, keep full width on phones.
+    final double maxContentWidth = _isWeb ? 720 : double.infinity;
+
     return Scaffold(
       backgroundColor: backgroundColor,
       appBar: AppBar(
         backgroundColor: backgroundColor,
         elevation: 0,
+        titleSpacing: 0,
         leading: IconButton(
           icon: Icon(Icons.arrow_back, color: textColor),
           onPressed: () {
@@ -907,47 +975,55 @@ class _HelpScreenState extends State<HelpScreen> {
         ),
         title: Text(
           screenTitle,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
           style: TextStyle(
             color: textColor,
             fontWeight: FontWeight.bold,
+            fontSize: _isSmallPhone ? 16 : 18,
           ),
         ),
         actions: [
           Padding(
-            padding: const EdgeInsets.only(right: 16),
+            padding: const EdgeInsets.only(right: 12),
             child: _buildLanguageSelector(),
           ),
         ],
       ),
       body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(20),
-          children: [
-            _buildHeader(screenColor, screenIcon),
-            const SizedBox(height: 24),
-            _buildQuickActions(screenColor),
-            const SizedBox(height: 24),
-            if (widget.screenType == 'help') ...[
-              _buildFaqSection(),
-              const SizedBox(height: 24),
-              _buildContactCard(),
-            ] else if (widget.screenType == 'contact') ...[
-              _buildOfficeHours(),
-              const SizedBox(height: 24),
-              _buildAddressCard(),
-              const SizedBox(height: 24),
-              _buildSocialMedia(),
-              const SizedBox(height: 24),
-              _buildContactForm(),
-            ] else if (widget.screenType == 'about') ...[
-              const SizedBox(height: 24),
-              _buildMissionCard(),
-              const SizedBox(height: 24),
-              _buildFeaturesCard(),
-            ],
-            const SizedBox(height: 24),
-            _buildFooter(),
-          ],
+        child: Center(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: maxContentWidth),
+            child: ListView(
+              padding: const EdgeInsets.all(20),
+              children: [
+                _buildHeader(screenColor, screenIcon),
+                const SizedBox(height: 24),
+                _buildQuickActions(screenColor),
+                const SizedBox(height: 24),
+                if (widget.screenType == 'help') ...[
+                  _buildFaqSection(),
+                  const SizedBox(height: 24),
+                  _buildContactCard(),
+                ] else if (widget.screenType == 'contact') ...[
+                  _buildOfficeHours(),
+                  const SizedBox(height: 24),
+                  _buildAddressCard(),
+                  const SizedBox(height: 24),
+                  _buildSocialMedia(),
+                  const SizedBox(height: 24),
+                  _buildContactForm(),
+                ] else if (widget.screenType == 'about') ...[
+                  const SizedBox(height: 24),
+                  _buildMissionCard(),
+                  const SizedBox(height: 24),
+                  _buildFeaturesCard(),
+                ],
+                const SizedBox(height: 24),
+                _buildFooter(),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -962,6 +1038,7 @@ class _HelpScreenState extends State<HelpScreen> {
         borderRadius: BorderRadius.circular(16),
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Container(
             padding: const EdgeInsets.all(12),
@@ -978,6 +1055,8 @@ class _HelpScreenState extends State<HelpScreen> {
               children: [
                 Text(
                   t('how_can_we_help'),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 20,
@@ -987,6 +1066,8 @@ class _HelpScreenState extends State<HelpScreen> {
                 const SizedBox(height: 4),
                 Text(
                   t('select_topic'),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(color: Colors.white70, fontSize: 14),
                 ),
               ],
@@ -998,82 +1079,87 @@ class _HelpScreenState extends State<HelpScreen> {
   }
 
   // ============== QUICK ACTIONS ==============
+  // ✅ FIX for right/bottom overflow: on narrow phones, 3 cards squeezed
+  // into one Row don't have enough width for icon + 2-line label, which
+  // is exactly what produced the RenderFlex overflows. We now use a
+  // LayoutBuilder + Wrap so cards flow onto a second line instead of
+  // being crushed or clipped.
   Widget _buildQuickActions(Color color) {
-    List<Widget> actions = [];
+    List<Map<String, dynamic>> actionData = [];
 
     if (widget.screenType == 'help') {
-      actions = [
-        _buildActionCard(
-          Icons.lock_reset,
-          t('reset_password'),
-          Colors.orange,
-          () => context.push('/reset-password'),
-        ),
-        _buildActionCard(
-          Icons.report_problem,
-          t('report_issue'),
-          Colors.redAccent,
-          _showReportDialog,
-        ),
-        _buildActionCard(
-          Icons.chat,
-          t('live_chat'),
-          Colors.green,
-          _showChatDialog,
-        ),
+      actionData = [
+        {
+          'icon': Icons.lock_reset,
+          'label': t('reset_password'),
+          'color': Colors.orange,
+          'onTap': () => context.push('/reset-password'),
+        },
+        {
+          'icon': Icons.report_problem,
+          'label': t('report_issue'),
+          'color': Colors.redAccent,
+          'onTap': _showReportDialog,
+        },
+        {
+          'icon': Icons.chat,
+          'label': t('live_chat'),
+          'color': Colors.green,
+          'onTap': _showChatDialog,
+        },
       ];
     } else if (widget.screenType == 'contact') {
-      actions = [
-        _buildActionCard(
-          Icons.phone,
-          t('call_us'),
-          Colors.green,
-          () => _makePhoneCall('+94112345678'),
-        ),
-        _buildActionCard(
-          Icons.email,
-          t('email_us'),
-          Colors.blue,
-          () => _sendEmail(),
-        ),
-        _buildActionCard(
-          Icons.chat,
-          t('chat_with_us'),
-          Colors.orange,
-          _showChatDialog,
-        ),
+      actionData = [
+        {
+          'icon': Icons.phone,
+          'label': t('call_us'),
+          'color': Colors.green,
+          'onTap': () => _makePhoneCall('+94112345678'),
+        },
+        {
+          'icon': Icons.email,
+          'label': t('email_us'),
+          'color': Colors.blue,
+          'onTap': () => _sendEmail(),
+        },
+        {
+          'icon': Icons.chat,
+          'label': t('chat_with_us'),
+          'color': Colors.orange,
+          'onTap': _showChatDialog,
+        },
       ];
     } else if (widget.screenType == 'about') {
-      actions = [
-        _buildActionCard(
-          Icons.privacy_tip,
-          t('privacy'),
-          Colors.blue,
-          () => launchUrl(
+      actionData = [
+        {
+          'icon': Icons.privacy_tip,
+          'label': t('privacy'),
+          'color': Colors.blue,
+          'onTap': () => launchUrl(
             Uri.parse('https://mysalon.com/privacy'),
             mode: LaunchMode.externalApplication,
           ),
-        ),
-        _buildActionCard(
-          Icons.description,
-          t('terms'),
-          Colors.orange,
-          () => launchUrl(
+        },
+        {
+          'icon': Icons.description,
+          'label': t('terms'),
+          'color': Colors.orange,
+          'onTap': () => launchUrl(
             Uri.parse('https://mysalon.com/terms'),
             mode: LaunchMode.externalApplication,
           ),
-        ),
-        _buildActionCard(
-          Icons.star,
-          t('rate_us'),
-          Colors.amber,
-          () => launchUrl(
+        },
+        {
+          'icon': Icons.star,
+          'label': t('rate_us'),
+          'color': Colors.amber,
+          'onTap': () => launchUrl(
             Uri.parse(
               'https://play.google.com/store/apps/details?id=com.mysalon.app',
             ),
             mode: LaunchMode.externalApplication,
           ),
-        ),
+        },
       ];
     }
 
@@ -1089,17 +1175,32 @@ class _HelpScreenState extends State<HelpScreen> {
           ),
         ),
         const SizedBox(height: 16),
-        Row(
-          children: actions
-              .map(
-                (e) => Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.only(right: 12),
-                    child: e,
+        LayoutBuilder(
+          builder: (context, constraints) {
+            // 3 columns on tablet/web/normal phones, 2 columns on small phones.
+            final int columns = _isWeb || _isTablet
+                ? 3
+                : (_isSmallPhone ? 2 : 3);
+            const double spacing = 12;
+            final double cardWidth =
+                (constraints.maxWidth - spacing * (columns - 1)) / columns;
+
+            return Wrap(
+              spacing: spacing,
+              runSpacing: spacing,
+              children: actionData.map((data) {
+                return SizedBox(
+                  width: cardWidth,
+                  child: _buildActionCard(
+                    data['icon'] as IconData,
+                    data['label'] as String,
+                    data['color'] as Color,
+                    data['onTap'] as VoidCallback,
                   ),
-                ),
-              )
-              .toList(),
+                );
+              }).toList(),
+            );
+          },
         ),
       ],
     );
@@ -1114,7 +1215,7 @@ class _HelpScreenState extends State<HelpScreen> {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 16),
+        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
         decoration: BoxDecoration(
           color: context.isDarkMode
               ? color.withValues(alpha: 0.15)
@@ -1123,6 +1224,7 @@ class _HelpScreenState extends State<HelpScreen> {
           border: Border.all(color: color.withValues(alpha: 0.3)),
         ),
         child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
             Icon(icon, color: color, size: 28),
             const SizedBox(height: 8),
@@ -1135,6 +1237,7 @@ class _HelpScreenState extends State<HelpScreen> {
               ),
               textAlign: TextAlign.center,
               maxLines: 2,
+              overflow: TextOverflow.ellipsis,
             ),
           ],
         ),
@@ -1170,37 +1273,52 @@ class _HelpScreenState extends State<HelpScreen> {
   }
 
   Widget _buildFaqItem(String question, String answer) {
+    // ✅ FIX: ExpansionTile renders its own internal ListTile. Giving it to
+    // a plain Container with a color decoration is what produced the
+    // "ListTile background color or ink splashes may be invisible" warning
+    // (Flutter couldn't resolve an opaque Material surface to splash on).
+    // Wrapping in an explicit, opaque Material — and using ClipRRect so the
+    // splash respects the rounded corners — fixes it properly.
+    final Color tileColor = context.isDarkMode
+        ? Colors.white.withValues(alpha: 0.05)
+        : Colors.grey.shade50;
+
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
-        color: context.isDarkMode
-            ? Colors.white.withValues(alpha: 0.05)
-            : Colors.grey.shade50,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: ExpansionTile(
-        title: Text(
-          question,
-          style: TextStyle(color: context.textColor, fontSize: 15),
-        ),
-        collapsedIconColor: Colors.blueAccent,
-        iconColor: Colors.blueAccent,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-            child: Text(
-              answer,
-              style: TextStyle(
-                color: context.secondaryTextColor,
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(borderRadius: BorderRadius.circular(12)),
+      child: Material(
+        color: tileColor,
+        child: ExpansionTile(
+          // ✅ Prevents right-edge overflow from long localized FAQ questions.
+          title: Text(
+            question,
+            style: TextStyle(color: context.textColor, fontSize: 15),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+          collapsedIconColor: Colors.blueAccent,
+          iconColor: Colors.blueAccent,
+          backgroundColor: tileColor,
+          collapsedBackgroundColor: tileColor,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              child: Text(
+                answer,
+                style: TextStyle(color: context.secondaryTextColor),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
   // ============== CONTACT CARD ==============
+  // ✅ FIX: 3 buttons in a fixed Row overflow on very narrow phones once
+  // labels grow beyond ~1-2 chars. Wrapping in a LayoutBuilder + Wrap lets
+  // them drop to 2-per-row instead of overflowing.
   Widget _buildContactCard() {
     return Container(
       padding: const EdgeInsets.all(20),
@@ -1225,56 +1343,89 @@ class _HelpScreenState extends State<HelpScreen> {
               fontSize: 18,
               fontWeight: FontWeight.bold,
             ),
+            textAlign: TextAlign.center,
           ),
           const SizedBox(height: 8),
           Text(
             t('support_247'),
-            style: TextStyle(
-              color: context.secondaryTextColor,
-            ),
+            style: TextStyle(color: context.secondaryTextColor),
+            textAlign: TextAlign.center,
           ),
           const SizedBox(height: 20),
-          Row(
-            children: [
-              Expanded(
-                child: _buildOutlinedButton(
-                  Icons.email,
-                  t('email'),
-                  () => _sendEmail(),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _buildOutlinedButton(
-                  Icons.phone,
-                  t('call'),
-                  () => _makePhoneCall('+94112345678'),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _buildFilledButton(
-                  Icons.chat,
-                  t('chat'),
-                  _showChatDialog,
-                ),
-              ),
-            ],
+          LayoutBuilder(
+            builder: (context, constraints) {
+              if (_isSmallPhone) {
+                // Stack vertically on very narrow phones.
+                return Column(
+                  children: [
+                    SizedBox(
+                      width: double.infinity,
+                      child: _buildOutlinedButton(
+                        Icons.email,
+                        t('email'),
+                        () => _sendEmail(),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      child: _buildOutlinedButton(
+                        Icons.phone,
+                        t('call'),
+                        () => _makePhoneCall('+94112345678'),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      child: _buildFilledButton(
+                        Icons.chat,
+                        t('chat'),
+                        _showChatDialog,
+                      ),
+                    ),
+                  ],
+                );
+              }
+              return Row(
+                children: [
+                  Expanded(
+                    child: _buildOutlinedButton(
+                      Icons.email,
+                      t('email'),
+                      () => _sendEmail(),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _buildOutlinedButton(
+                      Icons.phone,
+                      t('call'),
+                      () => _makePhoneCall('+94112345678'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _buildFilledButton(
+                      Icons.chat,
+                      t('chat'),
+                      _showChatDialog,
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
         ],
       ),
     );
   }
 
-  Widget _buildOutlinedButton(
-    IconData icon,
-    String label,
-    VoidCallback onTap,
-  ) {
+  Widget _buildOutlinedButton(IconData icon, String label, VoidCallback onTap) {
     return OutlinedButton.icon(
       onPressed: onTap,
       icon: Icon(icon, size: 18),
-      label: Text(label),
+      label: Text(label, overflow: TextOverflow.ellipsis),
       style: OutlinedButton.styleFrom(
         foregroundColor: context.isDarkMode ? Colors.white : Colors.black87,
         side: BorderSide(
@@ -1287,22 +1438,16 @@ class _HelpScreenState extends State<HelpScreen> {
     );
   }
 
-  Widget _buildFilledButton(
-    IconData icon,
-    String label,
-    VoidCallback onTap,
-  ) {
+  Widget _buildFilledButton(IconData icon, String label, VoidCallback onTap) {
     return ElevatedButton.icon(
       onPressed: onTap,
       icon: Icon(icon, size: 18),
-      label: Text(label),
+      label: Text(label, overflow: TextOverflow.ellipsis),
       style: ElevatedButton.styleFrom(
         backgroundColor: Colors.blueAccent,
         foregroundColor: Colors.white,
         padding: const EdgeInsets.symmetric(vertical: 12),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
     );
   }
@@ -1324,9 +1469,7 @@ class _HelpScreenState extends State<HelpScreen> {
             children: [
               Text(
                 'Monday - Friday',
-                style: TextStyle(
-                  color: context.secondaryTextColor,
-                ),
+                style: TextStyle(color: context.secondaryTextColor),
               ),
               Text(
                 '9:00 AM - 6:00 PM',
@@ -1340,9 +1483,7 @@ class _HelpScreenState extends State<HelpScreen> {
             children: [
               Text(
                 'Saturday - Sunday',
-                style: TextStyle(
-                  color: context.secondaryTextColor,
-                ),
+                style: TextStyle(color: context.secondaryTextColor),
               ),
               const Text('Closed', style: TextStyle(color: Colors.redAccent)),
             ],
@@ -1363,6 +1504,7 @@ class _HelpScreenState extends State<HelpScreen> {
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
             padding: const EdgeInsets.all(10),
@@ -1421,15 +1563,16 @@ class _HelpScreenState extends State<HelpScreen> {
             ),
           ),
           const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
+          // ✅ Wrap instead of a fixed Row so icons reflow on very narrow screens
+          // instead of overflowing.
+          Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 20,
+            runSpacing: 12,
             children: [
               _buildSocialIcon(Icons.facebook, Colors.blue, _openMessenger),
-              const SizedBox(width: 20),
               _buildSocialIcon(Icons.photo_camera, Colors.pink, () {}),
-              const SizedBox(width: 20),
               _buildSocialIcon(Icons.message, Colors.green, _openWhatsApp),
-              const SizedBox(width: 20),
               _buildSocialIcon(Icons.telegram, Colors.lightBlue, _openTelegram),
             ],
           ),
@@ -1438,11 +1581,7 @@ class _HelpScreenState extends State<HelpScreen> {
     );
   }
 
-  Widget _buildSocialIcon(
-    IconData icon,
-    Color color,
-    VoidCallback onTap,
-  ) {
+  Widget _buildSocialIcon(IconData icon, Color color, VoidCallback onTap) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -1489,9 +1628,7 @@ class _HelpScreenState extends State<HelpScreen> {
             style: TextStyle(color: context.textColor),
             decoration: InputDecoration(
               hintText: t('your_name'),
-              hintStyle: TextStyle(
-                color: context.secondaryTextColor,
-              ),
+              hintStyle: TextStyle(color: context.secondaryTextColor),
               filled: true,
               fillColor: context.isDarkMode
                   ? Colors.white.withValues(alpha: 0.05)
@@ -1508,9 +1645,7 @@ class _HelpScreenState extends State<HelpScreen> {
             style: TextStyle(color: context.textColor),
             decoration: InputDecoration(
               hintText: t('your_email'),
-              hintStyle: TextStyle(
-                color: context.secondaryTextColor,
-              ),
+              hintStyle: TextStyle(color: context.secondaryTextColor),
               filled: true,
               fillColor: context.isDarkMode
                   ? Colors.white.withValues(alpha: 0.05)
@@ -1528,9 +1663,7 @@ class _HelpScreenState extends State<HelpScreen> {
             maxLines: 3,
             decoration: InputDecoration(
               hintText: t('your_message'),
-              hintStyle: TextStyle(
-                color: context.secondaryTextColor,
-              ),
+              hintStyle: TextStyle(color: context.secondaryTextColor),
               filled: true,
               fillColor: context.isDarkMode
                   ? Colors.white.withValues(alpha: 0.05)
@@ -1605,9 +1738,7 @@ class _HelpScreenState extends State<HelpScreen> {
           const SizedBox(height: 8),
           Text(
             t('mission_text'),
-            style: TextStyle(
-              color: context.secondaryTextColor,
-            ),
+            style: TextStyle(color: context.secondaryTextColor),
             textAlign: TextAlign.center,
           ),
         ],
@@ -1673,10 +1804,7 @@ class _HelpScreenState extends State<HelpScreen> {
           const SizedBox(width: 6),
           Text(
             label,
-            style: TextStyle(
-              color: Colors.green,
-              fontSize: 12,
-            ),
+            style: const TextStyle(color: Colors.green, fontSize: 12),
           ),
         ],
       ),
