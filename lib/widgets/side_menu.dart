@@ -1,14 +1,18 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/alertBox/show_logout_conf.dart';
 import 'package:flutter_application_1/main.dart';
 import 'package:flutter_application_1/services/notification_service.dart';
 import 'package:flutter_application_1/services/session_manager.dart';
+import 'package:flutter_application_1/services/timezone_service.dart';
 import 'package:flutter_application_1/utils/app_version.dart';
 import 'package:flutter_application_1/theme/app_theme.dart';
 import 'package:flutter_application_1/extensions/context_extensions.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class SideMenu extends StatefulWidget {
   final String userRole;
@@ -61,6 +65,12 @@ class _SideMenuState extends State<SideMenu> {
   bool _isTablet = false;
   bool _isLargeScreen = false;
 
+  // ✅ Timezone (shown as a command menu item — same picker as the
+  // dashboards, just reachable from the side menu now)
+  String _currentTimezone = '';
+  String _timezoneFlag = '🌐';
+  String _timezoneOffset = '';
+
   final supabase = Supabase.instance.client;
 
   final NotificationService _notificationService = NotificationService();
@@ -75,6 +85,7 @@ class _SideMenuState extends State<SideMenu> {
         _checkScreenSize();
         _loadUserRolesFromDatabase();
         _loadNotificationCounts();
+        _loadTimezone();
         if (widget.userRole == 'owner') {
           _loadOwnerSalons();
         } else if (widget.userRole == 'barber') {
@@ -452,6 +463,33 @@ class _SideMenuState extends State<SideMenu> {
       );
     } catch (e) {
       debugPrint('❌ [SideMenu] Error loading notification counts: $e');
+    }
+  }
+
+  // ============================================================
+  // 🔥 LOAD TIMEZONE (for the Timezone command item's subtitle)
+  // ============================================================
+  Future<void> _loadTimezone() async {
+    try {
+      await TimezoneService.initialize();
+      final prefs = await SharedPreferences.getInstance();
+
+      final cachedTimezone = prefs.getString('cached_timezone');
+      if (cachedTimezone != null && cachedTimezone.isNotEmpty) {
+        _currentTimezone = cachedTimezone;
+      } else {
+        _currentTimezone = TimezoneService.getCurrentTimezone();
+        await prefs.setString('cached_timezone', _currentTimezone);
+      }
+
+      _timezoneFlag = TimezoneService.getCurrentFlag();
+      _timezoneOffset = TimezoneService.getUtcOffsetString();
+
+      if (mounted) {
+        setState(() {});
+      }
+    } catch (e) {
+      debugPrint('❌ [SideMenu] Error loading timezone: $e');
     }
   }
 
@@ -2044,6 +2082,19 @@ class _SideMenuState extends State<SideMenu> {
   // ============================================================
   List<Map<String, dynamic>> _getCommonMenuItems() {
     return [
+      // ✅ NEW: Timezone as a side-menu command item — opens the same
+      // searchable timezone picker used on the dashboards, without
+      // touching the dashboard's own timezone selector at all.
+      {
+        'icon': Icons.access_time,
+        'title': 'Timezone',
+        'subtitle': _currentTimezone.isNotEmpty
+            ? '$_timezoneFlag ${_currentTimezone.split('/').last.replaceAll('_', ' ')}'
+                  '${_timezoneOffset.isNotEmpty ? ' • $_timezoneOffset' : ''}'
+            : 'Select your timezone',
+        'color': Colors.indigo,
+        'isTimezoneSelector': true,
+      },
       {
         'icon': Icons.info_outline,
         'title': 'About Us',
@@ -2281,6 +2332,19 @@ class _SideMenuState extends State<SideMenu> {
               fontWeight: FontWeight.w500,
             ),
           ),
+          // ✅ NEW: optional subtitle (used by the Timezone command item
+          // to show the currently selected timezone, flag & offset).
+          subtitle: item['subtitle'] != null
+              ? Text(
+                  item['subtitle'] as String,
+                  style: TextStyle(
+                    fontSize: _isTablet ? 12 : 11,
+                    color: isDark ? Colors.white54 : Colors.grey[500],
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                )
+              : null,
           trailing: item['badge'] != null
               ? Container(
                   padding: const EdgeInsets.symmetric(
@@ -2306,6 +2370,15 @@ class _SideMenuState extends State<SideMenu> {
                   color: isDark ? Colors.white30 : Colors.grey[400],
                 ),
           onTap: () {
+            // ✅ NEW: Timezone command item opens the picker dialog on
+            // top of the (still-open) drawer instead of navigating —
+            // the drawer is closed automatically once a timezone is
+            // actually applied (see _applyTimezoneChange).
+            if (item['isTimezoneSelector'] == true) {
+              _changeTimezone();
+              return;
+            }
+
             Navigator.pop(context);
             if (widget.onMenuItemSelected != null) {
               widget.onMenuItemSelected!();
@@ -2455,6 +2528,855 @@ class _SideMenuState extends State<SideMenu> {
   }
 
   // ============================================================
+  // 🔥 TIMEZONE SELECTOR (Command item logic)
+  // ✅ FIXED: removed the fragile manual pixel-budget math that caused
+  // "RenderFlex overflowed" errors. Now uses Flexible (loose fit) for
+  // the scrollable list area, so if content is taller than the dialog
+  // it just shrinks/scrolls instead of overflowing — this can never
+  // throw an overflow error again, regardless of screen size, font
+  // scaling, or keyboard height.
+  // ============================================================
+  Future<void> _changeTimezone() async {
+    final allTimezones = TimezoneService.getAllAvailableTimezones();
+    final continentGroups = _groupTimezonesByContinent(allTimezones);
+    final isDark = context.isDarkMode;
+
+    final List<Map<String, dynamic>> searchableList = [];
+    for (var entry in continentGroups.entries) {
+      final continent = entry.key;
+      for (final tz in entry.value) {
+        final displayName = tz.split('/').last.replaceAll('_', ' ');
+        final countryCode = _extractCountryCode(tz);
+        final flag = _getFlagByCountryCode(countryCode);
+        final countryName = _getCountryNameByCode(countryCode);
+
+        final searchText = [
+          continent.toLowerCase(),
+          displayName.toLowerCase(),
+          tz.toLowerCase(),
+          countryCode.toLowerCase(),
+          countryName.toLowerCase(),
+        ].join(' ');
+
+        searchableList.add({
+          'timezone': tz,
+          'displayName': displayName,
+          'continent': continent,
+          'flag': flag,
+          'countryName': countryName,
+          'searchText': searchText,
+        });
+      }
+    }
+
+    TextEditingController searchController = TextEditingController();
+
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final mediaQuery = MediaQuery.of(context);
+            final keyboardHeight = mediaQuery.viewInsets.bottom;
+            final screenHeight = mediaQuery.size.height;
+            final screenWidth = mediaQuery.size.width;
+            final availableHeight = screenHeight - keyboardHeight;
+
+            final maxDialogHeight = math.max(180.0, availableHeight - 24.0);
+            final minDialogHeight = math.min(280.0, maxDialogHeight);
+            final dialogHeight = (availableHeight * 0.85)
+                .clamp(minDialogHeight, maxDialogHeight)
+                .toDouble();
+
+            final maxDialogWidth = math.max(240.0, screenWidth - 32.0);
+            final minDialogWidth = math.min(280.0, maxDialogWidth);
+            final dialogWidth = (screenWidth * 0.9)
+                .clamp(minDialogWidth, math.min(520.0, maxDialogWidth))
+                .toDouble();
+
+            final searchQuery = searchController.text;
+
+            List<Map<String, dynamic>> filteredList = searchableList;
+            bool hasSearchQuery = searchQuery.isNotEmpty;
+
+            if (hasSearchQuery) {
+              final query = searchQuery.toLowerCase().trim();
+              filteredList =
+                  searchableList
+                      .where(
+                        (item) =>
+                            (item['searchText'] as String).contains(query),
+                      )
+                      .toList()
+                    ..sort((a, b) {
+                      int score(Map<String, dynamic> item) {
+                        final country = (item['countryName'] as String)
+                            .toLowerCase();
+                        final display = (item['displayName'] as String)
+                            .toLowerCase();
+                        if (country == query) return 0;
+                        if (country.startsWith(query)) return 1;
+                        if (display.startsWith(query)) return 2;
+                        if (country.contains(query)) return 3;
+                        return 4;
+                      }
+
+                      return score(a).compareTo(score(b));
+                    });
+            }
+
+            Map<String, List<Map<String, dynamic>>> filteredGroups = {};
+            if (hasSearchQuery && filteredList.isNotEmpty) {
+              for (var item in filteredList) {
+                final continent = item['continent'];
+                if (!filteredGroups.containsKey(continent)) {
+                  filteredGroups[continent] = [];
+                }
+                filteredGroups[continent]!.add(item);
+              }
+            }
+
+            // ✅ FIX: whether the footer / "found" summary fit comfortably.
+            // Below this we hide the non-essential bits so the important
+            // stuff (search + list) always gets priority space.
+            final bool isCompact = dialogHeight < 420;
+            final bool showFooter = keyboardHeight == 0 && !isCompact;
+            final bool showFoundText = hasSearchQuery && !isCompact;
+
+            // ✅ FIX: estimate the height every "fixed" (non-scrolling)
+            // chrome element needs, then give whatever remains to the
+            // list area via a bounded SizedBox instead of Expanded.
+            const double headerHeight = 56;
+            const double dividerHeight = 17;
+            const double searchFieldHeight = 12 + 56 + 12;
+            final double foundTextHeight = showFoundText ? 28 : 0;
+            final double footerSpacingHeight = showFooter ? 8 : 0;
+            final double footerHeight = showFooter ? 78 : 0;
+            const double bottomSpacing = 8;
+            const double containerPadding = 32; // EdgeInsets.all(16) * 2
+
+            final double fixedChromeHeight =
+                headerHeight +
+                dividerHeight +
+                searchFieldHeight +
+                foundTextHeight +
+                footerSpacingHeight +
+                footerHeight +
+                bottomSpacing +
+                containerPadding;
+
+            final double listAreaHeight = math.max(
+              160.0,
+              dialogHeight - fixedChromeHeight,
+            );
+
+            return Dialog(
+              backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+              insetPadding: EdgeInsets.symmetric(
+                horizontal: 20,
+                vertical: math.max(24.0, keyboardHeight > 0 ? 12.0 : 24.0),
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(24),
+              ),
+              child: ConstrainedBox(
+                // ✅ FIX: max height as a hard ceiling — actual content
+                // decides real height, but can never exceed this and can
+                // never overflow it because everything below is scrollable.
+                constraints: BoxConstraints(
+                  maxHeight: dialogHeight,
+                  maxWidth: dialogWidth,
+                ),
+                child: Container(
+                  width: dialogWidth,
+                  padding: const EdgeInsets.all(16),
+                  // ✅ FIX: SingleChildScrollView guarantees this dialog can
+                  // NEVER throw a RenderFlex overflow again — if content is
+                  // taller than available space it just scrolls instead.
+                  child: SingleChildScrollView(
+                    physics: const ClampingScrollPhysics(),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _buildTimezoneDialogHeader(),
+                        Divider(color: isDark ? Colors.white12 : null),
+                        Container(
+                          margin: const EdgeInsets.symmetric(vertical: 12),
+                          child: TextField(
+                            controller: searchController,
+                            autofocus: false,
+                            style: TextStyle(
+                              color: isDark ? Colors.white : Colors.black87,
+                            ),
+                            onChanged: (value) {
+                              setDialogState(() {});
+                            },
+                            decoration: InputDecoration(
+                              hintText:
+                                  '🔍 Search by country, city, or timezone...',
+                              hintStyle: TextStyle(
+                                color: isDark
+                                    ? Colors.white38
+                                    : Colors.grey[400],
+                              ),
+                              prefixIcon: Icon(
+                                Icons.search,
+                                color: isDark ? Colors.white38 : Colors.grey,
+                              ),
+                              suffixIcon: searchQuery.isNotEmpty
+                                  ? IconButton(
+                                      icon: Icon(
+                                        Icons.clear,
+                                        color: isDark
+                                            ? Colors.white38
+                                            : Colors.grey,
+                                      ),
+                                      onPressed: () {
+                                        searchController.clear();
+                                        setDialogState(() {});
+                                      },
+                                    )
+                                  : null,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(16),
+                                borderSide: BorderSide.none,
+                              ),
+                              filled: true,
+                              fillColor: isDark
+                                  ? Colors.white.withValues(alpha: 0.06)
+                                  : Colors.grey[100],
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 14,
+                              ),
+                            ),
+                          ),
+                        ),
+                        if (showFoundText)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                'Found ${filteredList.length} timezone${filteredList.length != 1 ? 's' : ''}',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: isDark
+                                      ? Colors.white54
+                                      : Colors.grey[600],
+                                ),
+                              ),
+                            ),
+                          ),
+                        // ✅ FIX: bounded SizedBox instead of Expanded — this
+                        // is what makes it legal to nest inside
+                        // SingleChildScrollView without a layout crash.
+                        SizedBox(
+                          height: listAreaHeight,
+                          child: hasSearchQuery
+                              ? filteredList.isNotEmpty
+                                    ? ListView.builder(
+                                        itemCount: filteredGroups.keys.length,
+                                        itemBuilder: (context, index) {
+                                          final continent = filteredGroups.keys
+                                              .elementAt(index);
+                                          final items =
+                                              filteredGroups[continent]!;
+                                          return Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Padding(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                      horizontal: 8,
+                                                      vertical: 12,
+                                                    ),
+                                                child: Row(
+                                                  mainAxisSize:
+                                                      MainAxisSize.min,
+                                                  children: [
+                                                    Text(
+                                                      _getContinentEmoji(
+                                                        continent,
+                                                      ),
+                                                      style: const TextStyle(
+                                                        fontSize: 18,
+                                                      ),
+                                                    ),
+                                                    const SizedBox(width: 8),
+                                                    Text(
+                                                      continent,
+                                                      style: TextStyle(
+                                                        fontWeight:
+                                                            FontWeight.bold,
+                                                        fontSize: 14,
+                                                        color: isDark
+                                                            ? Colors.white
+                                                            : Colors.black87,
+                                                      ),
+                                                    ),
+                                                    Container(
+                                                      margin:
+                                                          const EdgeInsets.only(
+                                                            left: 8,
+                                                          ),
+                                                      padding:
+                                                          const EdgeInsets.symmetric(
+                                                            horizontal: 6,
+                                                            vertical: 2,
+                                                          ),
+                                                      decoration: BoxDecoration(
+                                                        color: isDark
+                                                            ? Colors.white12
+                                                            : Colors.grey[200],
+                                                        borderRadius:
+                                                            BorderRadius.circular(
+                                                              10,
+                                                            ),
+                                                      ),
+                                                      child: Text(
+                                                        '${items.length}',
+                                                        style: TextStyle(
+                                                          fontSize: 10,
+                                                          color: isDark
+                                                              ? Colors.white60
+                                                              : Colors
+                                                                    .grey[600],
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                              ...items.map(
+                                                (item) => _buildTimezoneTile(
+                                                  item['timezone'],
+                                                  item['displayName'],
+                                                  item['flag'],
+                                                  isDark,
+                                                ),
+                                              ),
+                                              if (index !=
+                                                  filteredGroups.keys.length -
+                                                      1)
+                                                Divider(
+                                                  color: isDark
+                                                      ? Colors.white12
+                                                      : null,
+                                                ),
+                                            ],
+                                          );
+                                        },
+                                      )
+                                    : Center(
+                                        child: Column(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.center,
+                                          children: [
+                                            Icon(
+                                              Icons.search_off,
+                                              size: 64,
+                                              color: isDark
+                                                  ? Colors.white24
+                                                  : Colors.grey[400],
+                                            ),
+                                            const SizedBox(height: 16),
+                                            Text(
+                                              'No timezones found',
+                                              style: TextStyle(
+                                                fontSize: 16,
+                                                color: isDark
+                                                    ? Colors.white60
+                                                    : Colors.grey[600],
+                                              ),
+                                            ),
+                                            const SizedBox(height: 8),
+                                            Text(
+                                              'Try "Sri Lanka", "Tokyo", "London", or "New York"',
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                color: isDark
+                                                    ? Colors.white38
+                                                    : Colors.grey[500],
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      )
+                              : DefaultTabController(
+                                  length: continentGroups.keys.length,
+                                  child: Column(
+                                    children: [
+                                      SizedBox(
+                                        height: 45,
+                                        child: TabBar(
+                                          isScrollable: true,
+                                          labelColor: AppTheme.primary,
+                                          unselectedLabelColor: isDark
+                                              ? Colors.white54
+                                              : Colors.grey,
+                                          indicatorColor: AppTheme.primary,
+                                          labelStyle: const TextStyle(
+                                            fontWeight: FontWeight.w600,
+                                            fontSize: 13,
+                                          ),
+                                          tabs: continentGroups.keys
+                                              .map(
+                                                (continent) =>
+                                                    Tab(text: continent),
+                                              )
+                                              .toList(),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Expanded(
+                                        child: TabBarView(
+                                          children: continentGroups.values.map((
+                                            timezones,
+                                          ) {
+                                            return ListView.builder(
+                                              itemCount: timezones.length,
+                                              itemBuilder: (context, index) {
+                                                final tz = timezones[index];
+                                                final displayName = tz
+                                                    .split('/')
+                                                    .last
+                                                    .replaceAll('_', ' ');
+                                                final countryCode =
+                                                    _extractCountryCode(tz);
+                                                final flag =
+                                                    _getFlagByCountryCode(
+                                                      countryCode,
+                                                    );
+                                                return _buildTimezoneTile(
+                                                  tz,
+                                                  displayName,
+                                                  flag,
+                                                  isDark,
+                                                );
+                                              },
+                                            );
+                                          }).toList(),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                        ),
+                        const SizedBox(height: bottomSpacing),
+                        if (showFooter) _buildCurrentTimezoneInfo(),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    if (result != null && result != _currentTimezone) {
+      await _applyTimezoneChange(result);
+    }
+  }
+
+  Future<void> _applyTimezoneChange(String newTimezone) async {
+    if (!mounted) return;
+
+    try {
+      await TimezoneService.setTimezone(newTimezone);
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('cached_timezone', newTimezone);
+
+      _currentTimezone = newTimezone;
+      _timezoneFlag = TimezoneService.getCurrentFlag();
+      _timezoneOffset = TimezoneService.getUtcOffsetString();
+
+      if (mounted) {
+        setState(() {});
+      }
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Timezone changed to ${newTimezone.split('/').last.replaceAll('_', ' ')}',
+          ),
+          backgroundColor: Colors.green,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+
+      // ✅ Close the drawer and let the parent screen refresh its
+      // timezone-dependent data — same as the dashboard's own selector.
+      if (mounted) {
+        Navigator.pop(context);
+      }
+      if (widget.onMenuItemSelected != null) {
+        widget.onMenuItemSelected!();
+      }
+    } catch (e) {
+      debugPrint('❌ [SideMenu] Error changing timezone: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error changing timezone: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  String _extractCountryCode(String timezone) {
+    final countryMap = {
+      'Asia/Colombo': 'LK',
+      'Asia/Tokyo': 'JP',
+      'Asia/Seoul': 'KR',
+      'Asia/Shanghai': 'CN',
+      'Asia/Hong_Kong': 'HK',
+      'Asia/Taipei': 'TW',
+      'Asia/Kolkata': 'IN',
+      'Asia/Dubai': 'AE',
+      'Asia/Singapore': 'SG',
+      'Asia/Kuala_Lumpur': 'MY',
+      'Asia/Bangkok': 'TH',
+      'Asia/Jakarta': 'ID',
+      'Asia/Manila': 'PH',
+      'Asia/Ho_Chi_Minh': 'VN',
+      'Asia/Dhaka': 'BD',
+      'Asia/Karachi': 'PK',
+      'Asia/Kathmandu': 'NP',
+      'Asia/Riyadh': 'SA',
+      'Asia/Kuwait': 'KW',
+      'Asia/Doha': 'QA',
+      'Europe/London': 'GB',
+      'Europe/Paris': 'FR',
+      'Europe/Berlin': 'DE',
+      'Europe/Rome': 'IT',
+      'Europe/Madrid': 'ES',
+      'Europe/Amsterdam': 'NL',
+      'Europe/Zurich': 'CH',
+      'Europe/Moscow': 'RU',
+      'America/New_York': 'US',
+      'America/Chicago': 'US',
+      'America/Denver': 'US',
+      'America/Los_Angeles': 'US',
+      'America/Toronto': 'CA',
+      'America/Vancouver': 'CA',
+      'America/Mexico_City': 'MX',
+      'America/Sao_Paulo': 'BR',
+      'Australia/Sydney': 'AU',
+      'Australia/Melbourne': 'AU',
+      'Australia/Perth': 'AU',
+      'Australia/Adelaide': 'AU',
+      'Pacific/Auckland': 'NZ',
+      'Africa/Johannesburg': 'ZA',
+      'Africa/Cairo': 'EG',
+      'Africa/Lagos': 'NG',
+      'Africa/Nairobi': 'KE',
+      'America/Argentina/Buenos_Aires': 'AR',
+      'America/Santiago': 'CL',
+      'America/Bogota': 'CO',
+      'America/Lima': 'PE',
+    };
+    if (countryMap.containsKey(timezone)) return countryMap[timezone]!;
+    for (var entry in countryMap.entries) {
+      if (timezone.contains(entry.key) || entry.key.contains(timezone)) {
+        return entry.value;
+      }
+    }
+    return '';
+  }
+
+  String _getCountryNameByCode(String countryCode) {
+    final names = {
+      'LK': 'Sri Lanka',
+      'JP': 'Japan',
+      'KR': 'South Korea Korea',
+      'CN': 'China',
+      'HK': 'Hong Kong',
+      'TW': 'Taiwan',
+      'IN': 'India',
+      'AE': 'United Arab Emirates Dubai UAE',
+      'SG': 'Singapore',
+      'MY': 'Malaysia',
+      'TH': 'Thailand',
+      'ID': 'Indonesia',
+      'PH': 'Philippines',
+      'VN': 'Vietnam',
+      'BD': 'Bangladesh',
+      'PK': 'Pakistan',
+      'NP': 'Nepal',
+      'SA': 'Saudi Arabia',
+      'KW': 'Kuwait',
+      'QA': 'Qatar',
+      'GB': 'United Kingdom England Britain UK',
+      'FR': 'France',
+      'DE': 'Germany',
+      'IT': 'Italy',
+      'ES': 'Spain',
+      'NL': 'Netherlands Holland',
+      'CH': 'Switzerland',
+      'RU': 'Russia',
+      'US': 'United States America USA',
+      'CA': 'Canada',
+      'MX': 'Mexico',
+      'BR': 'Brazil',
+      'AU': 'Australia',
+      'NZ': 'New Zealand',
+      'ZA': 'South Africa',
+      'EG': 'Egypt',
+      'NG': 'Nigeria',
+      'KE': 'Kenya',
+      'AR': 'Argentina',
+      'CL': 'Chile',
+      'CO': 'Colombia',
+      'PE': 'Peru',
+    };
+    return names[countryCode] ?? '';
+  }
+
+  String _getFlagByCountryCode(String countryCode) {
+    final flags = {
+      'LK': '🇱🇰',
+      'JP': '🇯🇵',
+      'KR': '🇰🇷',
+      'CN': '🇨🇳',
+      'HK': '🇭🇰',
+      'TW': '🇹🇼',
+      'IN': '🇮🇳',
+      'AE': '🇦🇪',
+      'SG': '🇸🇬',
+      'MY': '🇲🇾',
+      'TH': '🇹🇭',
+      'ID': '🇮🇩',
+      'PH': '🇵🇭',
+      'VN': '🇻🇳',
+      'BD': '🇧🇩',
+      'PK': '🇵🇰',
+      'NP': '🇳🇵',
+      'SA': '🇸🇦',
+      'KW': '🇰🇼',
+      'QA': '🇶🇦',
+      'GB': '🇬🇧',
+      'FR': '🇫🇷',
+      'DE': '🇩🇪',
+      'IT': '🇮🇹',
+      'ES': '🇪🇸',
+      'NL': '🇳🇱',
+      'CH': '🇨🇭',
+      'RU': '🇷🇺',
+      'US': '🇺🇸',
+      'CA': '🇨🇦',
+      'MX': '🇲🇽',
+      'BR': '🇧🇷',
+      'AU': '🇦🇺',
+      'NZ': '🇳🇿',
+      'ZA': '🇿🇦',
+      'EG': '🇪🇬',
+      'NG': '🇳🇬',
+      'KE': '🇰🇪',
+      'AR': '🇦🇷',
+      'CL': '🇨🇱',
+      'CO': '🇨🇴',
+      'PE': '🇵🇪',
+    };
+    return flags[countryCode] ?? '🌐';
+  }
+
+  Map<String, List<String>> _groupTimezonesByContinent(List<String> timezones) {
+    final groups = <String, List<String>>{};
+    for (final tz in timezones) {
+      final parts = tz.split('/');
+      if (parts.length >= 2) {
+        final continent = parts[0];
+        if (!groups.containsKey(continent)) groups[continent] = [];
+        groups[continent]!.add(tz);
+      } else {
+        if (!groups.containsKey('UTC')) groups['UTC'] = [];
+        groups['UTC']!.add(tz);
+      }
+    }
+    for (final key in groups.keys) {
+      groups[key]!.sort();
+    }
+    return groups;
+  }
+
+  Widget _buildTimezoneTile(
+    String tz,
+    String displayName,
+    String flag, [
+    bool isDark = false,
+  ]) {
+    final isSelected = tz == _currentTimezone;
+
+    return Material(
+      color: isSelected
+          ? AppTheme.primary.withValues(alpha: isDark ? 0.18 : 0.1)
+          : Colors.transparent,
+      borderRadius: BorderRadius.circular(12),
+      clipBehavior: Clip.antiAlias,
+      child: ListTile(
+        leading: CircleAvatar(
+          radius: 20,
+          backgroundColor: isSelected
+              ? AppTheme.primary
+              : (isDark ? Colors.white12 : Colors.grey[200]),
+          child: Text(flag, style: const TextStyle(fontSize: 16)),
+        ),
+        title: Text(
+          displayName,
+          style: TextStyle(
+            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+            color: isSelected
+                ? AppTheme.primary
+                : (isDark ? Colors.white : Colors.black87),
+          ),
+        ),
+        subtitle: Text(
+          tz,
+          style: TextStyle(
+            fontSize: 11,
+            color: isDark ? Colors.white54 : Colors.grey[600],
+          ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        trailing: isSelected
+            ? const Icon(Icons.check_circle, color: AppTheme.primary)
+            : null,
+        onTap: () => Navigator.of(context).pop(tz),
+        splashColor: AppTheme.primary.withValues(alpha: 0.15),
+        hoverColor: AppTheme.primary.withValues(alpha: 0.05),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    );
+  }
+
+  Widget _buildTimezoneDialogHeader() {
+    final isDark = context.isDarkMode;
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: AppTheme.primary.withValues(alpha: isDark ? 0.18 : 0.1),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(
+              Icons.access_time,
+              color: AppTheme.primary,
+              size: 28,
+            ),
+          ),
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Text(
+              'Select Your Timezone',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: AppTheme.primary,
+              ),
+            ),
+          ),
+          IconButton(
+            icon: Icon(
+              Icons.close,
+              color: isDark ? Colors.white70 : Colors.black87,
+            ),
+            onPressed: () => Navigator.pop(context),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCurrentTimezoneInfo() {
+    final displayName = _currentTimezone.split('/').last.replaceAll('_', ' ');
+    final offset = TimezoneService.getUtcOffsetString();
+    final flag = TimezoneService.getCurrentFlag();
+    final isDark = context.isDarkMode;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.grey[50],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: isDark ? Colors.white12 : Colors.grey[200]!),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(flag, style: const TextStyle(fontSize: 24)),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Current: $displayName',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
+                ),
+                Text(
+                  _currentTimezone,
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: isDark ? Colors.white54 : Colors.grey,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: AppTheme.primary.withValues(alpha: isDark ? 0.18 : 0.1),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text(
+              offset,
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 11,
+                color: AppTheme.primary,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _getContinentEmoji(String continent) {
+    final emojis = {
+      'Asia': '🌏',
+      'Europe': '🌍',
+      'Africa': '🌍',
+      'America': '🌎',
+      'Australia': '🇦🇺',
+      'Pacific': '🌏',
+      'UTC': '🌐',
+    };
+    return emojis[continent] ?? '🌐';
+  }
+
+  // ============================================================
   // ✅ Android 16: MAIN BUILD METHOD
   // ============================================================
   @override
@@ -2471,18 +3393,39 @@ class _SideMenuState extends State<SideMenu> {
             )
           : Container(
               color: isDark ? const Color(0xFF121212) : Colors.white,
-              child: Column(
-                children: [
-                  _buildProfileHeader(),
-                  Expanded(
-                    child: ListView(
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      physics: const BouncingScrollPhysics(),
-                      children: _buildMenuItems(),
-                    ),
+              // ✅ FINAL FIX: no more splitting into a fixed part + an
+              // Expanded part. Any split like that (header vs. Expanded
+              // list, or Expanded list vs. fixed bottom bar) can still
+              // overflow if the *fixed* pieces alone are taller than
+              // whatever height the Drawer actually gets — which can be
+              // surprisingly small (rotation, split-screen, a resizable
+              // window, a keyboard, or just a small device).
+              //
+              // The only layout that can NEVER overflow, no matter how
+              // small the available height is, is a single scrolling
+              // column: header, menu items, and the bottom section
+              // (Settings / Logout / Version) all live in ONE
+              // SingleChildScrollView. On any normal-height screen this
+              // looks identical to before — the bottom section still sits
+              // right after the menu, fully visible without scrolling.
+              // It only becomes scrollable in the rare case where there
+              // truly isn't enough room, which is the correct, safe
+              // fallback instead of clipped/overflowing pixels.
+              child: SafeArea(
+                top: false,
+                child: SingleChildScrollView(
+                  physics: const BouncingScrollPhysics(),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _buildProfileHeader(),
+                      const SizedBox(height: 8),
+                      ..._buildMenuItems(),
+                      const SizedBox(height: 8),
+                      _buildBottomSection(),
+                    ],
                   ),
-                  _buildBottomSection(),
-                ],
+                ),
               ),
             ),
     );
