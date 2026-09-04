@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_application_1/main.dart';
 import 'package:flutter_application_1/extensions/context_extensions.dart';
 import 'package:go_router/go_router.dart';
+// ✅ අලුතෙන් import කරන්න
+import 'package:flutter_application_1/alertBox/show_logout_conf.dart';
 
 class WelcomeScreen extends StatefulWidget {
   final void Function(String) onNext;
@@ -82,94 +84,59 @@ class _WelcomeScreenState extends State<WelcomeScreen>
     super.dispose();
   }
 
+  // ✅ වෙනස් කළ logout method එක - SideMenu එකේ dialog එක use කරනවා
   Future<void> _handleLogout() async {
     debugPrint('📍 Logout button pressed');
 
     if (!mounted) return;
 
-    final isDark = context.isDarkMode;
+    // ✅ SideMenu එකේ තියෙන showLogoutConfirmation use කරන්න
+    showLogoutConfirmation(
+      context,
+      onLogoutConfirmed: () async {
+        debugPrint('✅ Logout confirmed');
 
-    final shouldLogout = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        backgroundColor: isDark ? const Color(0xFF1E1E1E) : const Color(0xFF1C1F26),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(
-          'Logout',
-          style: TextStyle(
-            color: isDark ? Colors.white : Colors.black87,
+        if (!mounted) return;
+
+        // Loading dialog එක පෙන්වන්න
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (dialogContext) => const Dialog(
+            backgroundColor: Colors.transparent,
+            insetPadding: EdgeInsets.all(0),
+            child: Center(child: CircularProgressIndicator(color: Colors.white)),
           ),
-        ),
-        content: Text(
-          'Are you sure you want to logout?',
-          style: TextStyle(
-            color: isDark ? Colors.white70 : Colors.black54,
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: Text(
-              'Cancel',
-              style: TextStyle(
-                color: isDark ? Colors.white70 : Colors.black54,
-              ),
+        );
+
+        try {
+          await appState.logoutForContinue();
+
+          if (!mounted) return;
+
+          debugPrint('📍 Navigating to /login');
+          context.go('/');
+        } catch (e) {
+          debugPrint('❌ Logout error: $e');
+
+          if (!mounted) return;
+
+          // Loading dialog එක close කරන්න
+          Navigator.of(context, rootNavigator: true).pop();
+
+          if (!mounted) return;
+
+          // Error message එක පෙන්වන්න
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Logout failed: ${e.toString()}'),
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 3),
             ),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            style: TextButton.styleFrom(
-              foregroundColor: Colors.red,
-            ),
-            child: const Text('Logout', style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
+          );
+        }
+      },
     );
-
-    if (shouldLogout != true) {
-      debugPrint('❌ Logout cancelled');
-      return;
-    }
-
-    debugPrint('✅ Logout confirmed');
-
-    if (!mounted) return;
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) => const Dialog(
-        backgroundColor: Colors.transparent,
-        insetPadding: EdgeInsets.all(0),
-        child: Center(child: CircularProgressIndicator(color: Colors.white)),
-      ),
-    );
-
-    try {
-      await appState.logoutForContinue();
-
-      if (!mounted) return;
-
-      debugPrint('📍 Navigating to /login');
-      context.go('/');
-    } catch (e) {
-      debugPrint('❌ Logout error: $e');
-
-      if (!mounted) return;
-
-      Navigator.of(context, rootNavigator: true).pop();
-
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Logout failed: ${e.toString()}'),
-          backgroundColor: Colors.red,
-          duration: const Duration(seconds: 3),
-        ),
-      );
-    }
   }
 
   Widget _roleCard({
@@ -231,7 +198,6 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                       );
                     },
                   ),
-
                   Positioned.fill(
                     child: Container(
                       decoration: BoxDecoration(
@@ -248,7 +214,6 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                       ),
                     ),
                   ),
-
                   Positioned(
                     bottom: 8,
                     left: 8,
@@ -285,7 +250,6 @@ class _WelcomeScreenState extends State<WelcomeScreen>
     required VoidCallback onPressed,
     IconData? icon,
   }) {
-
     return SizedBox(
       width: double.infinity,
       child: ElevatedButton(
@@ -400,14 +364,14 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                                         fit: BoxFit.cover,
                                         errorBuilder:
                                             (context, error, stackTrace) {
-                                              return Center(
-                                                child: Icon(
-                                                  Icons.account_circle,
-                                                  color: Colors.white,
-                                                  size: 40,
-                                                ),
-                                              );
-                                            },
+                                          return Center(
+                                            child: Icon(
+                                              Icons.account_circle,
+                                              color: Colors.white,
+                                              size: 40,
+                                            ),
+                                          );
+                                        },
                                       ),
                                     ),
                                   ),
@@ -434,9 +398,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                           ),
                         ],
                       ),
-
                       const SizedBox(height: 32),
-
                       // Role Cards
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -469,9 +431,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                           ),
                         ],
                       ),
-
                       const SizedBox(height: 32),
-
                       // Description
                       Container(
                         padding: const EdgeInsets.all(20),
@@ -495,9 +455,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                           ),
                         ),
                       ),
-
                       const SizedBox(height: 32),
-
                       // Action Buttons
                       _actionButton(
                         label: 'Create customer account',
@@ -505,28 +463,22 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                         icon: Icons.person_add_alt_1,
                         onPressed: () => widget.onNext('customer'),
                       ),
-
                       const SizedBox(height: 12),
-
                       _actionButton(
                         label: 'Create owner account',
                         color: _businessBlue,
                         icon: Icons.storefront,
                         onPressed: () => widget.onNext('owner'),
                       ),
-
                       const SizedBox(height: 12),
-
                       _actionButton(
                         label: 'Create barber account',
                         color: _employeeOrange,
                         icon: Icons.person_add,
                         onPressed: () => widget.onNext('barber'),
                       ),
-
                       const SizedBox(height: 16),
-
-                      // Logout link
+                      // ✅ Logout button - දැන් SideMenu එකේ dialog එකම use කරනවා
                       Center(
                         child: TextButton(
                           onPressed: _handleLogout,
